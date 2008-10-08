@@ -1,0 +1,68 @@
+<category name="MENUSELECT_MODULES" displayname="Kernel Modules">
+	<member name="pciradio" displayname="PCI Radio" remove_on_change="pciradio.o pciradio.ko">
+	</member>
+	<member name="tor2" displayname="Tormenta 2" remove_on_change="tor2.o tor2.ko">
+	</member>
+	<member name="torisa" displayname="Tormenta ISA" remove_on_change="torisa.o torisa.ko">
+	</member>
+	<member name="wcfxo" displayname="Digium Wildcard X100P" remove_on_change="wcfxo.o wcfxo.ko">
+	</member>
+	<member name="wct1xxp" displayname="Digium Wildcard T100P / E100P" remove_on_change="wct1xxp.o wct1xxp.ko">
+	</member>
+	<member name="wct4xxp" displayname="Digium Wildcard TE4XXP / TE2XXP" remove_on_change="wct4xxp/wct4xxp.o wct4xxp/wct4xxp.ko">
+	</member>
+	<member name="wctc4xxp" displayname="Digium Wildcard TC400B" remove_on_change="wctc4xxp/wctc4xxp.o wctc4xxp/wctc4xxp.ko">
+		<depend>zttranscode</depend>
+	</member>
+	<member name="wctdm" displayname="Digium Wildcard TDM400P" remove_on_change="wctdm.o wctdm.ko">
+	</member>
+	<member name="wctdm24xxp" displayname="Digium Wildcard TDM2400P / TDM800P" remove_on_change="wctdm24xxp.o wctdm24xxp.ko">
+	</member>
+	<member name="wcte11xp" displayname="Digium Wildcard TE110P" remove_on_change="wcte11xp.o wcte11xp.ko">
+	</member>
+	<member name="wcte12xp" displayname="Digium Wildcard TE120P" remove_on_change="wcte12xp.o wcte12xp.ko">
+	</member>
+	<member name="wcusb" displayname="Digium S100U" remove_on_change="wcusb.o wcusb.ko">
+	</member>
+	<member name="xpp" displayname="Xorcom Astribank">
+	</member>
+	<member name="ztd-eth" displayname="TDM-over-Ethernet Virtual Span" remove_on_change="ztd-eth.o ztd-eth.ko">
+		<depend>ztdynamic</depend>
+	</member>
+	<member name="ztd-loc" displayname="Local Virtual Span" remove_on_change="ztd-loc.o ztd-loc.ko">
+		<depend>ztdynamic</depend>
+	</member>
+	<member name="ztdummy" displayname="Dummy Timing Interface" remove_on_change="ztdummy.o ztdummy.ko">
+	</member>
+	<member name="ztdynamic" displayname="Dynamic Span Support" remove_on_change="ztdynamic.o ztdynamic.ko">
+	</member>
+	<member name="zttranscode" displayname="Transcoder Support" remove_on_change="zttranscode.o zttranscode.ko">
+	</member>
+</category>
+
+<category name="MENUSELECT_UTILS" displayname="Utilities">
+	<member name="fxotune" remove_on_change="fxotune fxotune.o">
+	</member>
+	<member name="fxstest" remove_on_change="fxstest fxstest.o">
+		<defaultenabled>no</defaultenabled>
+	</member>
+	<member name="sethdlc-new" remove_on_change="sethdlc-new sethdlc-new.o">
+		<defaultenabled>no</defaultenabled>
+	</member>
+	<member name="ztcfg" remove_on_change="ztcfg ztcfg.o">
+	</member>
+	<member name="ztdiag" remove_on_change="ztdiag ztdiag.o">
+		<defaultenabled>no</defaultenabled>
+	</member>
+	<member name="ztmonitor" remove_on_change="ztmonitor ztmonitor.o">
+	</member>
+	<member name="ztscan" remove_on_change="ztscan ztscan.o">
+	</member>
+	<member name="ztspeed" remove_on_change="ztspeed ztspeed.o">
+	</member>
+	<member name="zttest" remove_on_change="zttest zttest.o">
+	</member>
+	<member name="zttool" remove_on_change="zttool zttool.o">
+		<depend>libnewt</depend>
+	</member>
+</category>

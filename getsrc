@@ -1,0 +1,19 @@
+#!/bin/bash
+. /etc/sysinfo
+ASTSRC=astsrc-vers-${LLVERS}.tar.gz
+
+umount /mnt/cf 2>/dev/null >/dev/null 
+mount /mnt/cf
+if [ -f /mnt/cf/astsrc.tgz ] # if local copy exists, use it.
+then
+	echo Unpacking local copy /mnt/cf/astsrc.tgz...
+        tar xzf /mnt/cf/astsrc.tgz || exit 1
+else
+	echo Fetching a copy of ${ASTSRC}...
+	wget http://limeylinux.org/downloads/${ASTSRC} || exit 1
+	echo Unpacking ${ASTSRC}...
+        tar xzf ${ASTSRC} || exit 1
+        rm ${ASTSRC}
+fi
+umount /mnt/cf
+                                

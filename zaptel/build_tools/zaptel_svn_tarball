@@ -1,0 +1,90 @@
+#!/bin/sh
+
+# upload_zaptel: upload a zaptel tarball to updates.xorcom.com
+#
+
+set -e
+
+BRANCH_NAME=1.4
+REV=HEAD
+ZAPTEL_BASE=http://svn.digium.com/svn/zaptel
+TARBALLS_DIR=$PWD
+
+me=`basename $0`
+
+say() {
+  echo "$me: $@"
+}
+
+usage() {
+  echo >&2 "$0: Generate snapshot from Zaptel SVN"
+  echo >&2 '    ($Id: zaptel_svn_tarball 4166 2008-04-10 18:11:51Z tzafrir $)'
+  echo >&2 ""
+  echo >&2 "$0 [-r REV] [-2] [-s]"
+  echo >&2 "$0 <-h | --help>: This message"
+  echo >&2 ""
+  echo >&2 "Options:"
+  echo >&2 "   -2 --zap12:         Use Asterisk 1.2. Implies -u."
+  echo >&2 "   -r --rev REV:       extract xpp-zaptel from this revision ($REV)."
+  echo >&2 "   -s --show:          Just show  versions. Do nothing"
+
+}
+
+opt_showonly=no
+
+options=`getopt -o 2hr:s --long zap12,help,rev:,revision:,show -- "$@"`
+if [ $? != 0 ] ; then echo >&2 "Terminating..." ; exit 1 ; fi
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$options"
+
+while true ; do
+	case "$1" in
+		-2|--zap12) BRANCH_NAME=1.2;;
+		-s|--show) opt_showonly=yes ;;
+		-r|--rev|--revision) REV="$2"; shift ;;
+		-h|--help) usage; exit 0;; 
+		--) shift ; break ;;
+	esac
+	shift;
+done
+
+BRANCH=branches/$BRANCH_NAME
+ZAPTEL_URL=$ZAPTEL_BASE/$BRANCH
+
+set -e
+
+# Get the name of the "previous version" for this release.
+# The idea is to look at the latest tag for that branhch. Tags are
+# global, and hence we filter tag names by branch name.
+#
+# Note: this strips any minor version number. 
+# e.g: if last releast was 1.4.5.1, this will still return 1.4.5 . Here
+# we rely on the fact that the revision number will be added.
+zap_ver=`svn ls -r $REV $ZAPTEL_BASE/tags | grep "^$BRANCH_NAME" \
+  | sed -e "s/\($BRANCH_NAME\.[0-9]\+\)[/.-].*/\1/" \
+  | sort -nu -t . -k 3 | tail -n 1`
+
+real_rev=`svn info -r $REV $ZAPTEL_URL \
+  | awk '/^Last Changed Rev: /{print $4}'`
+
+ver_full="$zap_ver.9.svn.$real_rev"
+tar_name="zaptel-$ver_full"
+tar_ball_full="$TARBALLS_DIR/$tar_name.tar.gz"
+
+say "Version: $ver_full (ver: $zap_ver, rev: $real_rev)"
+say "Tarball:  $tar_ball_full"
+
+if [ "$opt_showonly" = 'yes' ]; then
+	exit 0;
+fi
+
+ZAP_CHECKOUT_DIR=`mktemp -d zaptel_checkout_dir_XXXXXX` 
+
+# Package a tarball from the subversion, using 'make dist':
+svn export -q -r $REV $ZAPTEL_URL $ZAP_CHECKOUT_DIR/$tar_name
+echo "$ver_full" >$ZAP_CHECKOUT_DIR/$tar_name/.version
+tar cz -C $ZAP_CHECKOUT_DIR -f $tar_ball_full $tar_name
+
+rm -rf $ZAP_CHECKOUT_DIR
+

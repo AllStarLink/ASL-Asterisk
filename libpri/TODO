@@ -1,0 +1,8 @@
+General: 
+
+Q.921:
+-- Support unnumbered information frames
+-- Get TEI codes working for BRI interfaces
+
+Q.931:
+-- Implement the 11 missing Q.931 timers

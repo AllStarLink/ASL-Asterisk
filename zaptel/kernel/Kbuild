@@ -1,0 +1,71 @@
+ifdef ECHO_CAN_NAME
+	ECHO_CAN_CFLAGS	:= -DECHO_CAN_FROMENV -DECHO_CAN_$(ECHO_CAN_NAME)
+endif
+
+obj-m	:= $(KBUILD_OBJ_M)
+
+EXTRA_CFLAGS := -I$(src) -DSTANDALONE_ZAPATA
+EXTRA_CFLAGS += $(ECHO_CAN_CFLAGS)
+
+# fix typo present in CentOS and RHEL 2.6.9 kernels
+BAD_KERNELS_VERS := 22 34 34.0.1 34.0.2
+BAD_KERNELS := $(foreach ver,$(BAD_KERNELS_VERS),2.6.9-$(ver).EL 2.6.9-$(ver).ELsmp)
+ifneq (,$(filter $(KVERS),$(BAD_KERNELS)))
+EXTRA_CFLAGS+=-Drw_lock_t=rwlock_t
+endif
+
+zaptel-objs := zaptel-base.o
+
+ifeq ($(ARCH),i386)
+ifneq ($(wildcard $(src)/hpec/hpec_x86_32.o_shipped),)
+HPEC_PRESENT=yes
+zaptel-objs += hpec/hpec_x86_32.o
+endif
+endif
+
+ifeq ($(ARCH),x86_64)
+ifneq ($(wildcard $(src)/hpec/hpec_x86_64.o_shipped),)
+HPEC_PRESENT=yes
+zaptel-objs += hpec/hpec_x86_64.o
+endif
+endif
+
+ifeq ($(HPEC_PRESENT),yes)
+EXTRA_CFLAGS += -DECHO_CAN_HPEC -I$(src)/hpec
+$(obj)/zaptel-base.o: $(src)/hpec/hpec_zaptel.h $(src)/hpec/hpec_user.h
+endif
+
+$(obj)/pciradio.o: $(obj)/radfw.h
+$(obj)/tor2.o: $(obj)/tor2fw.h
+
+hostprogs-y := $(obj)/makefw
+
+$(obj)/tor2fw.h: $(src)/tormenta2.rbt $(obj)/makefw 
+	$(obj)/makefw $< tor2fw > $@
+
+$(obj)/radfw.h: $(src)/pciradio.rbt $(obj)/makefw
+	$(obj)/makefw $< radfw > $@
+
+$(obj)/makefw: $(src)/makefw.c
+	$(HOSTCC) -o $@ $^
+
+
+# set CONFIG_ZAPTEL_MMX for a number of CPU types.
+# Right now this part is not enabled, unless you build with
+# ZAPTEL_MMX_AUTO=something .
+ZAPMMX_WHITELIST_i386 = M586MMX M686 MPENTIUMII MPENTIUMIII MPENTIUMM \
+			    MPENTIUM4 MVIAC3_2
+
+ZAPMMX_WHITELIST_x86_64 = 
+
+# A list of configuration variables to test: CONFIG_M686 , etc.
+ZAPMMX_CONFIG_VARS := $(ZAPMMX_WHITELIST_$(ARCH):%=CONFIG_%)
+
+# expand them:
+ZAPMMX_CONFIG_VALS := $(strip  $(foreach var,$(ZAPMMX_CONFIG_VARS),$(var))  )
+ifneq (,$(ZAPTEL_MMX_AUTO))
+  ifneq (,$(ZAPMMX_CONFIG_VALS))
+    # TODO: make that 
+    CFLAGS_zaptel-base.o += -DCONFIG_ZAPTEL_MMX
+  endif
+endif

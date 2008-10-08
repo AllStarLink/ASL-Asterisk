@@ -1,0 +1,20 @@
+obj-m += wctc4xxp.o
+
+FIRM_DIR	:= ../../firmware
+
+EXTRA_CFLAGS := -I$(src)/.. -Wno-undef
+
+ifeq ($(HOTPLUG_FIRMWARE),yes)
+  EXTRA_CFLAGS+=-DHOTPLUG_FIRMWARE
+endif
+
+wctc4xxp-objs := base.o
+
+ifneq ($(HOTPLUG_FIRMWARE),yes)
+wctc4xxp-objs += $(FIRM_DIR)/zaptel-fw-tc400m.o
+endif
+
+$(obj)/base.o: $(src)/../zaptel.h
+
+$(obj)/$(FIRM_DIR)/zaptel-fw-tc400m.o: $(obj)/base.o
+	$(MAKE) -C $(obj)/$(FIRM_DIR) zaptel-fw-tc400m.o

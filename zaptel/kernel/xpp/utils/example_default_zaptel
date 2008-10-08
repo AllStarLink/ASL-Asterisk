@@ -1,0 +1,31 @@
+# Disables hotplug firmware loading
+#XPP_HOTPLUG_DISABLED=yes
+#
+# Disables udev hook called when an astribank is added and ready
+# or removed.
+#ASTRIBANK_HOOK_DISABLED=yes
+
+# Setup for XPP PRI. This allows to have fixed settings:
+#   1. The variable XPP_PRI_SETUP contains a whitespace separated list of
+#      port specifications.
+#   2. Each port specification contains a match expression, a '=' and
+#      a setting string.
+#   2. Match expressions may be:
+#      - CONNECTOR/usb..../XPD-nn	To identify by physical connector
+#      - NUM/XBUS-mm/XPD-nn		To identify by bus number
+#   4. Match expressions may contain "wildcards" (which are translated
+#      internally to regular expressions):
+#        * matches zero or more characters.
+#        ? matches one charater
+#   5. The list of matches is scanned from beginning to end. First match wins.
+#   6. The list implicitly contains an 'NUM/*=TE,E1' catch all default, appended
+#      to its end.
+#   7. The setting string is composed of comma separated settings. Valid
+#      settings are:
+#      - NT or TE
+#      - E1 or T1 or J1
+#
+XPP_PRI_SETUP='
+	CONNECTOR/usb-0000:00:1d.7-1/XPD-01=NT,E1
+	NUM/*/XPD-03=NT,E1
+	'

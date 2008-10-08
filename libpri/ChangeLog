@@ -1,0 +1,347 @@
+2008-08-05 Kevin P. Fleming <kpfleming@digium.com>
+
+	* libpri 1.4.7 released.
+
+2008-08-05 22:18 +0000 [r611]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* pritest.c, pri.c, pri_internal.h, q921.c, q931.c, copy_string.c,
+	  prisched.c, pri_q921.h, pri_q931.h, pri_facility.c, /,
+	  compiler.h, pridump.c, testprilib.c, pri_timers.h,
+	  pri_facility.h, libpri.h: Merged revisions 610 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r610
+	  | kpfleming | 2008-08-05 17:16:58 -0500 (Tue, 05 Aug 2008) | 2
+	  lines clean up license headers, and explicitly grant additional
+	  permissions when used with Asterisk ........
+
+2008-07-30 15:43 +0000 [r606-607]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* /: update ignore list
+
+	* Makefile, mkdep (removed): use better version.c creation process,
+	  and better dependency tracking process too
+
+2008-07-29 22:47 +0000 [r598-602]  Jason Parker <jparker@digium.com>
+
+	* build_tools/make_version: I believe this is what was meant. (it
+	  matches how Asterisk does it)
+
+	* build_tools/make_version: libpri is not libss7 :D
+
+2008-07-22 22:36 +0000 [r594]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* pri_internal.h, libpri.h: correct comments to match code
+
+2008-07-22 Kevin P. Fleming <kpfleming@digium.com>
+
+	* Libpri 1.4.6 released.
+
+2008-07-22 19:43 +0000 [r589]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* pri.c, pri_internal.h, q931.c, libpri.h: rename API call and
+	  option (nothing has been released to use it yet so this should be
+	  safe) to be more accurate in describing what it does (closes
+	  issue #13042)
+
+2008-07-11 Jason Parker <jparker@digium.com>
+
+	* Libpri 1.4.5 released.
+
+2008-07-11 16:44 +0000 [r574-579]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* /: ignore generated files
+
+	* pri.c, pri_internal.h, q931.c, libpri.h: modify work done for
+	  issue #10552, making the support of inband audio after RELEASE a
+	  configurable option, since it is causing problems for a number of
+	  users (closes issue #13042)
+
+2008-06-04 17:02 +0000 [r562]  Dwayne M. Hubbard <dhubbard@digium.com>
+
+	* q931.c: While working on issue 3450 I noticed that the
+	  information channel selection field in the channel identification
+	  IE was displayed incorrectly when using 'pri intense debug'. I
+	  wanted another pair of eyes to look at the code because
+	  everything looked correct until Shaun Ruffell noticed the missing
+	  comma in the msg_chan_sel array.
+
+2008-05-07 19:51 +0000 [r557]  Matthew Fredrickson <creslin@digium.com>
+
+	* pri.c, pritest.c, pri_internal.h, pri_q921.h, Makefile, q921.c,
+	  q931.c, pri_facility.c, prisched.c, testprilib.c, pri_timers.h,
+	  pri_facility.h, libpri.h: Moving trunk changes back into 1.4
+
+2008-05-07 Matthew Fredrickson <creslin@digium.com>
+
+	* Libpri 1.4.4 released.
+
+2008-05-06 16:43 +0000 [r553-555]  Matthew Fredrickson <creslin@digium.com>
+
+	* q921.c, pri.c: Remove some unnecessary debug messages
+
+	* q931.c: We passed TBR3 layer 2 and layer 3 testing with this
+	  commit in for BRI-TE PTMP.
+
+	* q931.c: Final patch to pass certification
+
+2008-04-22 15:30 +0000 [r546]  Russell Bryant <russell@digium.com>
+
+	* Makefile: All versions of libpri have been installed as
+	  libpri.so.1.0, even though the API and ABI have changed over
+	  time. This patch changes the Makefile to install the library as
+	  libpri.so.1.4 to indicate that this is not compatible with
+	  previous versions. In the future, this should be changed as we
+	  make ABI changes. (closes issue #10376) Reported by: tzafrir
+	  Patches: libpri-soname.diff uploaded by tzafrir (license 46) --
+	  with very minor changes by me
+
+2008-03-15 19:57 +0000 [r541-543]  Matthew Fredrickson <creslin@digium.com>
+
+	* libpri.h, pri.c: Remove some useless event items
+
+	* q921.c, pri_internal.h: Make sure if we're a bri and in PTMP mode
+	  that we release the TEI and try to get a new one with the other
+	  end when we lose activity in multiframe mode
+
+	* q921.c, pri.c, pri_q921.h: When we recieve a UA in any TEI
+	  established state other than awaiting establishement make sure we
+	  drop the TEI and get a new one. For passing tests PC37.2 - PC41.2
+	  in Q.921
+
+2008-03-06 23:43 +0000 [r538-539]  Matthew Fredrickson <creslin@digium.com>
+
+	* q921.c: Make sure we are sending as command not as response
+
+	* q921.c: Make sure C/R bit is correct
+
+2008-03-01 23:30 +0000 [r531-535]  Matthew Fredrickson <creslin@digium.com>
+
+	* q921.c: Remove some (currently) useless code
+
+	* q921.c, pri.c, pri_internal.h: Some more updates to add code for
+	  passing PC 27.1 in Q.921
+
+	* q921.c, pri.c: Various coding style cleanups as well as a bug fix
+	  for TEI removal
+
+	* q921.c, q931.c, pri.c, pri_internal.h: Initial checkin of code to
+	  pass Q.921 PC25 and PC26
+
+	* q921.c: Add support for responding to TEI requests (Q.921 PC23.x)
+
+2008-02-18 20:31 +0000 [r525]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, libpri.h: Improve transmission, receiving, and dumping of
+	  bearer capability IE (#11593)
+
+2008-01-16 18:06 +0000 [r518]  Jason Parker <jparker@digium.com>
+
+	* Makefile, /: Add logging for 'make update' command (also fixes
+	  updates in some places). Issue #11766, initial patch by jmls.
+
+2007-12-26 17:35 +0000 [r505]  Russell Bryant <russell@digium.com>
+
+	* libpri.h: Remove unnecessary usage of the extern keyword.
+
+2007-12-06 22:16 +0000 [r494-496]  Russell Bryant <russell@digium.com>
+
+	* q921.c, q931.c, pri_facility.c, pri.c: Change malloc+memset to
+	  calloc. Also, handle allocation failures early to reduce
+	  indentation. (closes issue #11469) Reported by: eliel Patches:
+	  pri.c.patch uploaded by eliel (license 64) q931.c.patch uploaded
+	  by eliel (license 64) q921.c.patch uploaded by eliel (license 64)
+	  pri_facility.c.patch uploaded by eliel (license 64)
+
+	* pri.c: Change a use of malloc+memset to calloc. Also, reduce
+	  indentation of a function by doing the check for memory
+	  allocation failure at the beginning.
+
+	* pri.c: Change the table used to hold the default timers to be
+	  global and const, instead of allocating it on the stack each time
+	  the function is called.
+
+2007-12-05 00:20 +0000 [r491-493]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c: Improve the parameter name to better reflect its use
+
+	* q921.c, q931.c: More PTMP fixes. Stand by, more changes to come
+
+	* q921.c, q931.c, testprilib.c: More magic to make BRI CPE PTMP
+	  work
+
+2007-11-21 22:30 +0000 [r486-487]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c: Make sure we loop BRI call references for one byte CREFs
+	  instead of two
+
+	* q921.c, q931.c, libpri.h, pri.c, pritest.c, pri_internal.h: Add
+	  BRI support to libpri
+
+2007-10-13 16:00 +0000 [r473]  Matthew Fredrickson <creslin@digium.com>
+
+	* q921.c: Make sure that we only output the message handling debug
+	  when we're actually debugging
+
+2007-09-25 21:56 +0000 [r469]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c: Fix user-user IE order in setup message (#10705)
+
+2007-06-20 15:18 +0000 [r428-430]  Matthew Fredrickson <creslin@digium.com>
+
+	* Makefile: Revert that back to how it was
+
+	* Makefile, q921.c, q931.c, prisched.c, testprilib.c, pri_timers.h,
+	  libpri.h, pri.c, pri_internal.h, pri_q921.h: Patch to add PTMP
+	  mode (BRI support)
+
+2007-06-06 21:59 +0000 [r417-425]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, pri_facility.c, pri_facility.h, pri.c, pri_internal.h:
+	  Preliminary patch plus mods for Q.SIG Path Replacement (Q.SIG
+	  version of 2BCT) #7778
+
+2007-05-25 17:36 +0000 [r413]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, pri_facility.c, pri_facility.h, libpri.h: Commit path for
+	  ROSE-12 and ROSE-13 support (#9076)
+
+2006-11-03 18:16 +0000 [r382]  Matthew Fredrickson <creslin@digium.com>
+
+	* q921.c: Remove pointless recursion. (#8281)
+
+2008-05-07 19:51 +0000 [r557]  Matthew Fredrickson <creslin@digium.com>
+
+	* pri.c, pritest.c, pri_internal.h, pri_q921.h, Makefile, q921.c,
+	  q931.c, pri_facility.c, prisched.c, testprilib.c, pri_timers.h,
+	  pri_facility.h, libpri.h: Moving trunk changes back into 1.4
+
+2008-05-02 20:21 +0000 [r552]  Brett Bryant <bbryant@digium.com>
+
+	* Makefile, build_tools (added), build_tools/make_version (added),
+	  build_tools/make_version_c (added), libpri.h: Add new API call
+	  (pri_get_version) to show the current version of the branch for
+	  support purposes.
+
+2008-04-16 00:21 +0000 [r544]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* q921.c: fix the indentation in this function so that it is
+	  actually possible to read it and understand the logic and flow
+
+2008-02-21 16:38 +0000 [r528]  Joshua Colp <jcolp@digium.com>
+
+	* q931.c: If inband audio is being provided with a disconnect
+	  message let the audio be heard before releasing the channel.
+	  (closes issue #10552) Reported by: paravoid Patches:
+	  disconnect-audio.diff uploaded by paravoid (license 200)
+
+2008-02-18 20:31 +0000 [r524]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, libpri.h: Improve transmission, receiving, and dumping of
+	  bearer capability IE (#11593)
+
+2008-01-11 16:34 +0000 [r514]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, /: Merged revisions 513 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r513
+	  | mattf | 2008-01-11 10:33:52 -0600 (Fri, 11 Jan 2008) | 1 line
+	  We should not be parsing further into the bearer capability IE if
+	  the length does not confirm that there actually is data present
+	  ........
+
+2007-12-13  Russell Bryant  <russell@digium.com>
+
+	* libpri 1.4.3 released.
+
+2007-10-22 15:10 +0000 [r479]  Kevin P. Fleming <kpfleming@digium.com>
+
+	* pri_internal.h, /: Merged revisions 478 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r478
+	  | kpfleming | 2007-10-22 10:09:27 -0500 (Mon, 22 Oct 2007) | 3
+	  lines we need to include stddef.h for 'size_t' ........
+
+2007-10-16  Matthew Fredrickson  <creslin@digium.com>
+
+	* libpri 1.4.2 released.
+
+2007-10-05 16:45 +0000 [r470]  Jason Parker <jparker@digium.com>
+
+	* libpri.h: Fix an incorrect pri_event structure definition. Issue
+	  10832, patch by flefoll
+
+2007-09-25 21:37 +0000 [r468]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c: Fix user-user IE order in setup message (#10705)
+
+2007-09-14 21:32 +0000 [r465]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, libpri.h: Fix for #10189. Make sure we properly report
+	  the user layer 1 for H.223 and H.245
+
+2007-09-06 15:11 +0000 [r462]  Matthew Fredrickson <creslin@digium.com>
+
+	* pri.c, pri_facility.c, /: Merged revisions 460 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r460
+	  | mattf | 2007-09-06 10:06:42 -0500 (Thu, 06 Sep 2007) | 1 line
+	  TBCT now works. It should work for NI2, 4E, and 5E. This code was
+	  tested on NI2. ........
+
+2007-08-27 19:21 +0000 [r446]  Jason Parker <jparker@digium.com>
+
+	* Makefile, /: Merged revisions 445 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r445
+	  | qwell | 2007-08-27 14:20:23 -0500 (Mon, 27 Aug 2007) | 2 lines
+	  Make sure we build both the static and shared modules with -fPIC.
+	  ........
+
+2007-08-06 19:58 +0000 [r441]  Jason Parker <jparker@digium.com>
+
+	* Makefile: Allow setting CC to something with a space, such as
+	  `make CC="gcc -m32"` Issue 10253.
+
+2007-07-09  Russell Bryant  <russell@digium.com>
+
+	* libpri 1.4.1 released.
+
+2007-06-19 18:23 +0000 [r427]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, /: Merged revisions 426 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r426
+	  | mattf | 2007-06-19 13:22:33 -0500 (Tue, 19 Jun 2007) | 1 line
+	  Try to send pending facility messages if we receive alerting (for
+	  when we don't get proceeding) (#9651) ........
+
+2007-06-06 21:58 +0000 [r416-424]  Matthew Fredrickson <creslin@digium.com>
+
+	* pri_facility.c, /: Merged revisions 423 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r423
+	  | mattf | 2007-06-06 16:57:15 -0500 (Wed, 06 Jun 2007) | 1 line
+	  Oops, that should not be on one line ........
+
+	* pri_facility.c, /: Merged revisions 415 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r415
+	  | mattf | 2007-06-06 08:20:05 -0500 (Wed, 06 Jun 2007) | 2 lines
+	  Make sure we only send the NFE when we are talking QSIG ........
+
+2007-01-22 22:29 +0000 [r390]  Matthew Fredrickson <creslin@digium.com>
+
+	* q931.c, /: Merged revisions 389 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r389
+	  | mattf | 2007-01-22 16:20:59 -0600 (Mon, 22 Jan 2007) | 2 lines
+	  Make sure we send DISCONNECT if we reached the active state and a
+	  call is disconnected, regardless of cause code. ........
+
+2006-12-30 19:17 +0000 [r386]  Joshua Colp <jcolp@digium.com>
+
+	* Makefile, /: Merged revisions 385 via svnmerge from
+	  https://origsvn.digium.com/svn/libpri/branches/1.2 ........ r385
+	  | file | 2006-12-30 14:16:17 -0500 (Sat, 30 Dec 2006) | 2 lines
+	  Specify full path to restorecon instead of assuming it will be
+	  available from what is in $PATH. (issue #8670 reported by djflux)
+	  ........
+
+2006-12-23  Kevin P. Fleming  <kpfleming@digium.com>
+
+	* libpri 1.4.0 released.
+	
+2006-09-20  Kevin P. Fleming  <kpfleming@digium.com>
+
+	* libpri 1.4.0-beta1 released.

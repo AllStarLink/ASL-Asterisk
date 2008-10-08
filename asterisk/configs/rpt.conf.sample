@@ -1,0 +1,537 @@
+; Radio Repeater / Remote Base configuration file (for use with app_rpt)
+; As of app_rpt version 0.109, 3/22/2008
+;
+
+;[000]					; Node ID of first repeater
+
+;rxchannel = Zap/1			; Rx audio/signalling channel
+; Note: if you use a unified interface (tx/rx on one channel), only
+; specify the rxchannel and the txchannel will be assumed from the rxchannel
+;txchannel = Zap/2			; Tx audio/signalling channel
+;rxnotch=1065,40                        ; (Optional) Notch a particular frequency for a specified
+                                        ; b/w. app_rpt must have been compiled with
+                                        ; the notch option
+;duplex = 2				; (Optional) set duplex operating mode
+;; 0 = half duplex (telemetry and courtesy tones do not transmit)
+;; 1 = semi-half duplex (telemetry and courtesy tones transmit, but not
+;;    repeated audio
+;; 2 = normal full-duplex mode (Default)
+;; 3 = full-duplex mode, without repeated audio from main input source
+;; 4 - Normal except no main repeat audio during autopatch only
+;controlstates=controlstates		; control state list (see controlstates stanza below)
+;scheduler=scheduler			; scheduler entries (see scheduler stanza below)
+;functions = functions-repeater		; DTMF function list 
+;; specify this for a different function list then local when on link
+;;link_functions = functions-different	; DTMF function list for link
+;;phone_functions = functions-phone	; (optional) different functions for 'P' mode
+;;dphone_functions = functions-dphone	; (optional) different functions for 'D' mode
+;;nodes = nodes-different		; (optional) different node list
+;telemetry=telemetry			; point to telemetry stanza for this node (see below)
+;tonezone = us				; use US tones (default)
+;context = default			; dialing context for phone
+;callerid = "WB6NIL Repeater" <(213) 555-0123>  ; Callerid for phone calls
+;idrecording = wb6nil			; id recording
+;accountcode=RADIO			; account code (optional)
+;funcchar = *				; function lead-in character (defaults to '*')
+;endchar = #				; command mode end character (defaults to '#')
+;;nobusyout=yes				; (optional) Do not busy-out reverse-patch when
+					; normal patch in use
+;notelemtx = yes			; telemetry output does not make main
+					; system transmit (optional)
+;propagate_dtmf	= yes			; DTMF sent to system from link gets
+					; repeated onto main system output (optional)
+;propagate_phonedtmf = yes		; DTMF sent to system from phone gets
+					; repeated into main system output and
+					; link outputs (optional)
+;linktolink = yes			; disables forcing physical half-duplex
+					; operation of main repeater while
+					; still keeping half-duplex semantics
+					; (optional)
+;inxlat = #456,#457,0123456789ABCD 	; translate digit strings inbound,
+					; in this case intrepret #456 as star,
+					; #457 as pound, and pass all the other
+					; chars listed in arg3 (optional)
+;outxlat = *7,*0,0123456789#ABCD	; translate digit string outbound,
+					; in this case *7 generates star, *0
+					; generates pound, and all the other
+					; digits pass along
+;macro = macro-different		; section containing macros (optional)
+;extnodes = extnodes-different		; section in extnodefile containing
+					; dynamic node information (optional)
+;extnodefile = different-file		; file containing dynamic node info (optional)
+;archivedir = some-directory		; defines and enables activity recording
+					; into specified directory (optional)
+;monminblocks = 2048 			; Min 1K blocks to be left on partition
+					; (will not save monitor output if disk
+					; too full)
+;startup_macro = *7			; Macro to run at startup (optional)
+;hangtime=1000				; squelch tail hang time (in ms) (optional)
+;althangtime=4000			; alternate squelch tail hang time (in ms) (optional)
+;totime=100000				; transmit time-out time (in ms) (optional)
+;idtime=30000				; id interval time (in ms) (optional)
+;politeid=30000				; time in milliseconds before ID timer
+					; expires to try and ID in the tail.
+					; (optional, default is 30000).
+;idtalkover=|iwb6nil/rpt		; Talkover ID (optional) default is none
+;unlinkedct=ct2				; unlinked courtesy tone (optional) default is none
+;remotect=ct3  				; additional courtesy tone to transmit when a remote
+					; base is connected in transceive mode
+
+;linkunkeyct=ct8			; telemetry output when a link un-keys
+                                        ; (optional)
+;; The tailmessagetime,tailsquashedtime, and tailmessages need to be set
+;; to support tail messages. They can be omitted otherwise.
+;tailmessagetime=300000			; Play a tail message every 5 mins
+;tailsquashedtime=30000			; If squashed by another user,
+;;					  try again after 30 seconds
+;tailmessagelist=msg1,msg2,msg3		;list of messages to be played for tail message
+
+; The default values for hangtime, time-out time, and id interval time are
+; 5 seconds (5000 ms),  3 minutes (180000 ms), and 5 minutes (300000 ms)
+; respectively
+;parrot=0                               ; Parrot mode 0 = on command only, 1 = forced (always)
+;parrottime=1000                        ; Parrot audio sample time in MS.
+					; This is the amount ot time to record past an unkey
+					; so that a reply can be captured.
+
+;;The following 2 parameters are for a repeater node that is connected to a
+;;frequency-agile radio
+;radiotype=kenwood			; specify the radio type
+					; see remote command in remote
+;radiofreq=146.460,100.0,sht		; speficy the frequency, modes, etc.
+					; see memory section
+
+;;The following parameters are for vox operation(s)
+;voxtimeout=5000			; time to let vox talk in ms
+;voxrecover=500				; time to take from vox one timed out in ms
+;simplexpatchdelay=25			; # of 20 ms frames to delay audio
+;simplexphonedelay=25			; # of 20 ms frames to delay audio
+;
+					; The next 2 lines permit 
+					; status posts to stats.allstarlink.org
+					; (Registered Allstar link nodes only)
+					; This updates stats.allstarlink.org with the latest
+					; connections on your node, and lets users see if your
+					; node is up and able to be connected to.
+;statpost_program=/usr/bin/wget,-q,--output-document=/dev/null ; Program and options to send stats
+;statpost_url=http://stats.allstarlink.org/uhandler.php ; URL for status updates      
+
+;[001]					; Node ID of first repeater
+
+;rxchannel = Zap/3			; Rx audio/signalling channel
+; Note: if you use a unified interface (tx/rx on one channel), only
+; specify the rxchannel and the txchannel will be assumed from the rxchannel
+;txchannel = Zap/4			; Tx audio/signalling channel
+;rxnotch=1065,40                        ; (Optional) Notch a particular frequency for a specified
+                                        ; b/w. app_rpt must have been compiled with
+                                        ; the notch option
+;duplex = 2				; (Optional) set duplex operating mode
+;; 0 = half duplex (telemetry and courtesy tones do not transmit)
+;; 1 = semi-half duplex (telemetry and courtesy tones transmit, but not
+;;    repeated audio
+;; 2 = normal full-duplex mode (Default)
+;; 3 = full-duplex mode, without repeated audio from main input source
+;; 4 - Normal except no main repeat audio during autopatch only
+;controlstates=controlstates		; control state list
+;scheduler=scheduler			; scheduler entries
+;functions = functions-repeater		; DTMF function list 
+;; specify this for a different function list then local when on link
+;;link_functions = functions-different	; DTMF function list for link
+;;phone_functions = functions-phone	; (optional) different functions for 'P' mode
+;;dphone_functions = functions-dphone	; (optional) different functions for 'D' mode
+;;nodes = nodes-different		; (optional) different node list
+;telemetry=telemetry			; point to telemetry stanza for this node (see below)
+;tonezone = us				; use US tones (default)
+;context = default			; dialing context for phone
+;callerid = "WB6NIL Repeater" <(213) 555-0123>  ; Callerid for phone calls
+;idrecording = wb6nil			; id recording
+;accountcode=RADIO			; account code (optional)
+;funcchar = *				; function lead-in character (defaults to '*')
+;endchar = #				; command mode end character (defaults to '#')
+;;nobusyout=yes				; (optional) Do not busy-out reverse-patch when
+					; normal patch in use
+;notelemtx = yes			; telemetry output does not make main
+					; system transmit (optional)
+;propagate_dtmf	= yes			; DTMF sent to system from link gets
+					; repeated onto main system output (optional)
+;propagate_phonedtmf = yes		; DTMF sent to system from phone gets
+					; repeated into main system output and
+					; link outputs (optional)
+;linktolink = yes			; disables forcing physical half-duplex
+					; operation of main repeater while
+					; still keeping half-duplex semantics
+					; (optional)
+;inxlat = #456,#457,0123456789ABCD 	; translate digit strings inbound,
+					; in this case intrepret #456 as star,
+					; #457 as pound, and pass all the other
+					; chars listed in arg3 (optional)
+;outxlat = *7,*0,0123456789#ABCD	; translate digit string outbound,
+					; in this case *7 generates star, *0
+					; generates pound, and all the other
+					; digits pass along
+;macro = macro-different		; section containing macros (optional)
+;extnodes = extnodes-different		; section in extnodefile containing
+					; dynamic node information (optional)
+;extnodefile = different-file		; file containing dynamic node info (optional)
+;archivedir = some-directory		; defines and enables activity recording
+					; into specified directory (optional)
+;monminblocks = 2048 			; Min 1K blocks to be left on partition
+					; (will not save monitor output if disk
+					; too full) (optional)
+;startup_macro = *7			; Macro to run at startup (optional)
+;hangtime=1000				; squelch tail hang time (in ms) (optional)
+;althangtime=4000			; alternate squelch tail hang time (in ms) (optional)
+;totime=100000				; transmit time-out time (in ms) (optional)
+;idtime=30000				; id interval time (in ms) (optional)
+;politeid=30000				; time in milliseconds before ID timer
+					; expires to try and ID in the tail.
+					; (optional, default is 30000).
+;idtalkover=|iwb6nil/rpt		; Talkover ID (optional) default is none
+;unlinkedct=ct2				; unlinked courtesy tone (optional) default is none
+
+;; The tailmessagetime,tailsquashedtime, and tailmessages need to be set
+;; to support tail messages. They can be omitted otherwise.
+;tailmessagetime=300000			; Play a tail message every 5 mins
+;tailsquashedtime=30000			; If squashed by another user,
+;					; try again after 30 seconds
+;tailmessagelist=msg1,msg2,msg3		;list of messages to be played for tail message
+
+; The default values for hangtime, time-out time, and id interval time are
+; 5 seconds (5000 ms),  3 minutes (180000 ms), and 5 minutes (300000 ms)
+; respectively
+;parrot=0                               ; Parrot mode 0 = on command only, 1 = forced (always)
+;parrottime=1000                        ; Parrot audio sample time in MS.
+                                        ; This is the amount ot time to record past an unkey
+                                        ; so that a reply can be captured.
+
+;;The following 2 parameters are for a repeater node that is connected to a
+;;frequency-agile radio
+;radiotype=kenwood			; specify the radio type
+					; see remote command in remote
+;radiofreq=146.460,100.0,sht		; speficy the frequency, modes, etc.
+					; see memory section
+
+;;The following parameters are for vox operation(s)
+;voxtimeout=5000			; time to let vox talk in ms
+;voxrecover=500				; time to take from vox one timed out in ms
+;simplexpatchdelay=25			; # of 20 ms frames to delay audio
+;simplexphonedelay=25			; # of 20 ms frames to delay audio
+
+
+;[002]
+
+;rxchannel = Zap/5			; Rx audio/signalling channel
+; Note: if you use a unified interface (tx/rx on one channel), only
+; specify the rxchannel and the txchannel will be assumed from the rxchannel
+;txchannel = Zap/6			; Tx audio/signalling channel
+;functions = functions-remote
+;remote = ft897				; Set remote=y for dumb remote or 
+					; remote=ft897 for Yaesu FT-897 or
+					; remote=rbi for Doug Hall RBI1
+					; remote=kenwood for Kenwood mobiles such as the TMG707A
+					; remote=ic706 for the Icom IC-706
+;iobase = 0x378				; Specify IO port for parallel port (optional)
+;ioport = /dev/ttyS0			; Specify port for serial port (optional)
+;civaddr = 88				; Specify CIV address for IC706 (optional, 88 is the default)
+;memory = memory-different		; Section to hold memory entries (optional)
+;authlevel = 0				; Remote base authentication level
+;; authlevel = 0 : Anyone can use it
+;; authlevel = 1 : Requires log in, Waits for Tx key to ask for it
+;; authlevel = 2 : Requires log in, asks for it automously
+;mars = 0                   ; set=1 for IC-706 w/MARS mods (optional)
+;rxnotch = freq,bw[,frew,bw...]		; (If rpt_notch option installed)
+					; specifies rx notch filter(s) at
+					; frequency and 3db bandwidth
+;archivedir = some-directory		; defines and enables activity recording
+					; into specified directory (optional)
+;monminblocks = 2048 			; Min 1K blocks to be left on partition
+					; (will not save monitor output if disk
+					; too full) (optional)
+;remote_inact_timeout = 0		; Inactivity time-out in secs (optional)
+;remote_timeout = 60			; Session time-out in secs (optional)
+;remote_timeout_warning = 50		; Warning time in secs before timeout (optional)
+;remote_timeout_warning_freq = 10	; Time between Warnings in secs (optional)
+
+;txlimits=txlimits			; Define txlimits stanza to enforce sub-band license
+					; class TX priveleges. See [txlimits] stanza below
+;rptnode=nodename			; If sharing hardware with a repeater, specify here
+
+
+;[functions-repeater]
+;1=ilink,1				; Specific link disconnect
+;2=ilink,2				; Specific Link connect -  monitor only
+;3=ilink,3				; Specific Link connect - transceive
+;4=ilink,4				; Enter command mode on a specific link
+;5=macro,1                              ; Command macros (Defined in the macro stanza below)
+;7=ilink,5				; Link status
+;984=ilink,7                            ; Last node to key us up
+;985=ilink,12				; Permanently connect specified link -- monitor only
+;986=ilink,13				; Permanently connect specified link -- transceive
+;987=ilink,6				; Disconnect all links
+;988=ilink,16				; Reconnect all links disconnected with 					; ilink,6
+
+;80=status,11				; System info (local only) for system-wide use: status,1
+;81=status,12				; Time (local only) for system-wide use: status,2
+;82=status,3				; app_rpt.c Version
+;831=cop,22                             ; parrot mode (store and forward repeat) enable                    
+;830=cop,21                             ; parrot mode disable                   
+;832=cop,32				; DTMF pad test: send command + test digits + #; test digits + # will
+					; be read back
+;839=cop,23                             ; parrot birdbath (kills audio in buffers)       
+;85=cop,25                              ; return last node which unkeyed from any
+;					; connected node (directly or indirectly)
+;86=cop,26                              ; Query all nodes which keyed or unkeyed from any
+;                                       ; connected node (directly or indirectly)
+;87=status,15                           ; global node query (reads back all nodes connected in the network
+;					; whether they are connected directly to this node or indirectly through
+;					; another connected node.
+;89=cop,24                              ; flush all pending telemetry in the buffer. Useful in macros.          
+;                                                                           
+;87=status,15				; global node query (reads back all nodes connected in the network)
+
+;6=autopatchup				; Autopatch up
+;
+; See the function list in rpt.conf (autopatchup, autopatchdn)
+; autopatchup can optionally take comma delimited setting=value pairs:
+;
+;
+; context=string               :       Override default context with "string"
+; dialtime=ms                  :       Specify the max number of milliseconds between phone number digits (1000 milliseconds = 1 second)
+; farenddisconnect=1           :       Automatically disconnect when called party hangs up
+; noct=1                       :       Don't send repeater courtesy tone during autopatch calls
+; quiet=1                      :       Don't send dial tone, or connect messages. Do not send patch down message when called party hangs up
+;
+;
+; Example: 123=autopatchup,dialtime=20000,noct=1,farenddisconnect=1
+
+;0=autopatchdn				; Autopatch down
+
+;;
+;; Control operator (cop) functions. Change these to something other than these codes listed below!
+;;
+
+;90=cop,1				; System warm boot 
+;91=cop,2				; System enable
+;92=cop,3				; System disable
+;910=cop,4				; Test tone on/off
+;912=cop,5				; Dump system variables on console (debug use only)
+;914=cop,7				; Time out timer enable
+;915=cop,8				; Time out timer disable
+;916=cop,9				; Autopatch enable
+;917=cop,10				; Autopatch disable
+;918=cop,11				; User linking functions enable
+;919=cop,12				; User linking functions disable
+;920=cop,13				; Query system control state
+;921=cop,14				; Set systemc control state
+;922=cop,15				; Scheduler enable
+;923=cop,16				; Scheduler disable
+;924=cop,17				; User functions enable (time, id, etc)
+;925=cop,18				; User functions disable
+;926=cop,19				; Select alternate hang time (althangtime)
+;927=cop,20				; Select standard hangtime (hangtime)
+
+
+; Functions for a remote base node
+;[functions-remote]
+
+;0=remote,1                             ; Retrieve Memory
+;1=remote,2                             ; Set freq.
+;2=remote,3                             ; Set tx PL tone
+;3=remote,4                             ; Set rx PL tone
+;40=remote,100                          ; Rx PL off
+;41=remote,101                          ; Rx PL on
+;42=remote,102                          ; Tx PL off
+;43=remote,103                          ; Tx PL on
+;44=remote,104                          ; Low Power
+;45=remote,105                          ; Medium Power
+;46=remote,106                          ; High Power
+;711=remote,107                         ; Bump -20
+;714=remote,108                         ; Bump -100
+;717=remote,109                         ; Bump -500
+;713=remote,110                         ; Bump +20
+;716=remote,111                         ; Bump +100
+;719=remote,112                         ; Bump +500
+;721=remote,113                         ; Scan - slow
+;724=remote,114                         ; Scan - quick
+;727=remote,115                         ; Scan - fast
+;723=remote,116                         ; Scan + slow
+;726=remote,117                         ; Scan + quick
+;729=remote,118                         ; Scan + fast
+;79=remote,119                          ; Tune (brief AM transmission for automatic antenna tuner)
+;51=remote,5                            ; Long status query
+;52=remote,140				; Short status query
+;67=remote,210				; Send a *
+;69=remote,211				; Send a #
+;91=remote,99,CALLSIGN,LICENSETAG       ; Remote base login.
+                                        ; Define a different dtmf sequence for each user which is
+                                        ; authorized to use the remote base to control access to it.
+                                        ; For examble 9139583=remote,99,WB6NIL,G would grant access to
+                                        ; the remote base and announce WB6NIL as being logged in.
+                                        ; Another entry, 9148351=remote,99,WA6ZFT,E would grant access to
+                                        ; the remote base and announce WA6ZFT as being logged in.
+                                        ; When the remote base is disconnected from the originating node, the
+                                        ; user will be logged out. The LICENSETAG argument is used to enforce
+					; tx frequency limits. See [txlimits] below.
+;98=cop,6                               ; Remote base telephone key
+
+;[telemetry]
+
+; Telemetry entries are shared across all repeaters
+; Can be a tone sequence, morse string, or a file
+;
+; |t - Tone escape sequence
+;
+; Tone sequences consist of 1 or more 4-tuple entries (freq1, freq2, duration, amplitude)
+; Single frequencies are created by setting freq1 or freq2 to zero.
+;
+; |m - Morse escape sequence
+; 
+; Sends Morse code at the telemetry amplitude and telemetry frequency as defined in the
+; [morse] section.
+;
+; Follow with an alphanumeric string
+;
+; |i - Morse ID escape sequence
+;
+; Sends Morse code at the ID amplitude and ID frequency as defined in the
+; [morse] section.
+;
+; Follow with an alphanumeric string
+
+
+;ct1=|t(350,0,100,2048)(500,0,100,2048)(660,0,100,2048)
+;ct2=|t(660,880,150,2048)  
+;ct3=|t(440,0,150,2048) 
+;ct4=|t(550,0,150,2048)
+;ct5=|t(660,0,150,2048)
+;ct6=|t(880,0,150,2048)
+;ct7=|t(660,440,150,2048)
+;ct8=|t(700,1100,150,2048)
+;remotetx=|t(2000,0,75,2048)(0,0,75,0)(1600,0,75,2048); 
+;remotemon=|t(1600,0,75,2048) 
+;cmdmode=|t(900,903,200,2048)
+;functcomplete=|t(1000,0,100,2048)(0,0,100,0)(1000,0,100,2048)
+;patchup=rpt/callproceeding     ; Override default patch up message
+;patchdown=rpt/callterminated    ' Override default patch down message
+
+
+;[morse]
+
+;speed=20		; Approximate speed in WPM
+;frequency=800		; Morse Telemetry Frequency
+;amplitude=4096		; Morse Telemetry Amplitude
+;idfrequency=330		; Morse ID Frequency	
+;idamplitude=2048	; Morse ID Amplitude
+
+;                                                                               
+; This section allows wait times for telemetry events to be adjusted            
+; A section for wait times can be defined for every repeater                    
+;                                                                               
+                                                                                
+;[wait-times]                                                                    
+;telemwait=2000                          ; Time to wait before sending most telem
+;idwait=500                              ; Time to wait before starting ID       
+;unkeywait=2000                          ; Time to wait after unkey before sendin
+;calltermwait=2000                       ; Time to wait before announcing "call t
+;parrotwait=1000                         ; Time to wait before playing back
+                                         ; captured audio while in parrot mode
+
+;
+; Extenal nodes are listed here. A listing serves to authorize ain incoming connection
+; as well as to define a route to an external node.
+;
+; Note: if you are using allstar link automatic node list update,
+; no allstar link nodes should be specified here.
+;
+
+;[nodes]
+;
+;form: context@addr/NODE,addr[,y]
+;
+;100 = radio@192.168.1.33/100,192.168.1.33
+;101 = radio@192.168.1.34/101,192.168.1.34
+;102 = radio@192.168.1.35/102,192.168.1.35,y  ; this is a remote
+;103 = radio@foo.baz.com/103,foo.baz.com
+
+;
+;; Define memory channels for the remote base. 
+;; 
+;; Note that the first two arguments are required (frequency and CTCSS tone, even if the CTCSS tone
+;; is not applicable). The third argument is an optional list of attributes.
+;; 
+;; The format for these entries is:  Receive-Freq,Receive-PL,Attrbutes
+;;     Attributes: a = AM, b = LSB, f = FM, l=low power, m=medium power, h=high power, -=minus offset,
+;;	s=simplex, +=plus offset, t=tx PL enable, r=rx PL enable, u = USB
+;;
+;; Not all attributes will apply to a given remote base radio. It will depend on the radio's capabilities.
+;;
+;[memory]
+;; this example sets the initial frequency to go to when the remote base is first used
+init = 14.250,100.0,u ; 14.250MHz upper sideband
+;; this example gives you 146.460, simplex, 100.0 HZ PL, hi-power, transmit PL
+;00 = 146.460,100.0,sht
+;; this example gives you 146.940, minus offset, 100.0 HZ PL, low-power, no PL
+;01 = 146.940,100.0,-l
+
+;[macro]
+;
+; User definable command macros. 
+;
+; Format:Macronumber = commandstring#
+; 
+;1 = *32011#
+;2 = *12001*12011*12043*12040*12050*12060*12009*12002*12003*12004*1113*12030#
+;3 = *32001*32011*32050*32030*32060#
+
+;[scheduler]        
+;; Schedule the execution of a macro at a given time.                                                            
+;;mc =   mi  h  md mn  dow                                                    
+;;                                                                            
+;; mc = macro : a macro number defined in the [macro] stanza                                                                
+;; mi = minute :  0-59                                                              
+;; h = hour : 0-23                                                                  
+;; md = day of month : 1-31                                                                                            
+;; mn = month : 1-12                                                                           
+;; dow = day of week : 0 = sunday, 6 = saturday                                                          
+;;                                                                            
+;1 = 26 11 31 3 6 ; At 11:26am on Saturday, March 31                                                            
+;2 = 00 00 * * *  ; At midnight every day                                                                                     
+                                                                
+;[controlstates]                                                   
+;;                                                                
+;; controlstates allow several control operator functions to be grouped together so that one command may be used
+;; to select one of 10 groups of control operator functions.                                                               
+;;                                                                                                              
+;; These are the valid control operator function pairs                                                          
+;;                                                                                                              
+;; rptena,rptdis         -       Repeater Enable/Disable                                                        
+;; lnkena,lnkdis         -       Linking functions Enable/Disable                                               
+;; apena,apdis           -       Autopatch functions Enable/Disable                                             
+;; totena,totdis         -       Timeout timer Enable/Disable                                                   
+;; skena,skdis           -       Scheduler Enable/Disable                                                       
+;; ufena,ufdis		 -	 User functions enable/disable
+;; atena,atdis		 -	 Alternate hang time enable/disable
+;;                                                                                                              
+;; up to 10 control state combinations can be defined                                                           
+;;                                                                                                              
+;; Upon startup, state 0 will be loaded.                                                                        
+;; If no control states are defined, all control states will default to being enabled.                          
+;;                                                                                    
+;;                                                                                    
+;0 = rptena,lnkena,totena,apena                                                                           
+;1 = rptena,lnkena,totdis,apdis                                                            
+;2 = rptena,lnkdis,totena,apdis        
+
+;[txlimits]
+;
+;; TX limits allow TX priveleges to be assigned to a particular license class.
+;; In the example below, voice priveleges are assigned for US ham licensees for 40 meters through 10 meters.
+;; Each line contains a LICENSETAG  defined in a user log in command,
+;; an =, then a set of band limit ranges. Up to 40 ranges per entry may be defined.
+;;
+;T = 28.300-28.500                                                 
+;G = 7.175-7.300,14.225-14.300,18.110-18.168,21.275-21.450,24.930-24.990,28.300-29.700
+;A = 7.125-7.300,14.175-14.300,18.110-18.168,21.225-21.450,24.930-24.990,28.300-29.700
+;E = 7.125-7.300,14.150-14.300,18.110-18.168,21.200-21.450,24.930-24.990,28.300-29.700 
+
+

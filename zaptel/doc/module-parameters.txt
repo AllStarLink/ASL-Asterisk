@@ -1,0 +1,57 @@
+ === Parameters for Zaptel modules ===
+
+(Note: this list is woefully incomplete, but is a starting point and
+will be improved as time permits.)
+
+
+ --- VPMADT032 Parameters ---
+
+The wctdm24xxp and wcte12xp drivers support cards which can have an
+optional VPMADT032 hardware echo canceler module. If that module is
+present, the following module parameters are available for these
+drivers:
+
+vpmsupport - 0 or 1, defaults to 1
+
+	Enables or disables use of the VPM.
+
+vpmdtmfsupport - 0 or 1, defaults to 0
+
+	Enables or disables DTMF tone detection on the VPM
+	(currently defaults to 'disabled' due to performance issues
+	when this functionality is enabled).
+
+vpmnlptype - 0 through 4, defaults to 1
+
+	Selects the type of non-linear processor that should be
+	applied when echo is detected and removed by the VPM. There
+	are five choices:
+
+		0 - None (not recommended)
+		1 - Mute (mutes the echo)
+		2 - Random Noise (replaces the echo with random noise)
+		3 - Hoth Noise (replaces the echo with Hoth noise)
+		4 - Suppress (suppresses the echo to a specified level)
+
+vpmnlpthresh - 0 through 40, in decibels (dB), defaults to 24
+
+	Relative signal level of echo to transmitted audio at which
+	NLP will be used to remove echo.
+
+vpmnlpmaxsupp - 0 through 90, in decibels (dB), defaults to 0
+
+	When vpmnlptype is 'Suppress', this value indicates the
+	relative energy level decrease that should be applied to the
+	echo signal).
+
+ --- General Module Parameters ---
+
+latency - 3 to 32, defaults to 3
+
+	For the wctdm24xxp and wcte12xp drivers.  Specifies the amount of
+	latency the driver inserts into the voice conversation.  On systems
+	that are unable to service the interrupt in a timely manner,
+	increasing the latency can decrease module init time since the driver
+	will not need to dynamically grow the latency during initialization.
+	However, the latency in the driver does add to the overall latency of
+	any voice conversation.

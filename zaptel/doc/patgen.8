@@ -1,0 +1,42 @@
+.TH patgen 8 "2008-01-08" 
+.SH NAME 
+patgen \(em Generates a Pattern for a Zaptel Clear Channel Test
+.SH SYNOPSIS 
+.B patgen 
+.I zap-device
+
+.SH DESCRIPTION 
+.B patgen
+Sends test data to a Zaptel channel. The channel should be of CLEAR
+signalling (e.g: B channel of a PRI line). pattest(8) is used to test
+the data at the other side.  See its manual for more information.
+
+.B patgen
+Must be able to write to the channel. Hence this cannot be used for a
+channel used by Asterisk.
+
+.SH OPTIONS
+.I zap-device
+.RS
+A Zaptel device file.
+.RE
+
+.SH EXAMPLE
+  patgen /dev/zap/5
+
+.SH BUGS
+Will not work with channels whose number > 249 as they don't have device
+files. For a simple workaround, see ztdiag.c .
+
+.SH SEE ALSO 
+pattest(8), ztcfg(8), asterisk(8). 
+
+.SH AUTHOR 
+
+This manual page was written by Tzafrir Cohen <tzafrir.cohen@xorcom.com> 
+Permission is granted to copy, distribute and/or modify this document under 
+the terms of the GNU General Public License, Version 2 any  
+later version published by the Free Software Foundation. 
+ 
+On Debian systems, the complete text of the GNU General Public 
+License can be found in /usr/share/common-licenses/GPL. 

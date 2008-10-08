@@ -1,0 +1,8 @@
+#!/bin/sh
+
+echo "<?xml version=\"1.0\"?>"
+echo
+echo "<menu name=\"Zaptel Module Selection\">"
+cat zaptel.xml
+cat firmware/firmware.xml
+echo "</menu>"

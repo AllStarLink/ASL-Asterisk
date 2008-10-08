@@ -1,0 +1,326 @@
+.TH GENZAPTELCONF 8 "July 18th, 2005" "Xorcom Rapid Asterisk" "Linux Programmer's Manual"
+.SH "NAME" 
+.B genzaptelconf 
+-- generates zaptel configuration (TDM adaptors)
+.SH SYNOPSIS
+.PP 
+.B genzaptelconf 
+[-sRdvzF] [-c <country_code>] [-e <base_exten>]
+
+.B genzaptelconf 
+[-sRdv] -l -- only list to standard output
+   
+.B genzaptelconf 
+-su -- only unload zaptel modules
+
+.B genzaptelconf 
+-h -- Help screen
+    
+.SH DESCRIPTION
+.B genzaptelconf 
+is a script to detect zaptel devices (currently mostly TDM cards are 
+supported). It generates both 
+.I /etc/zaptel.conf
+and 
+.I /etc/asterisk/zapata-channels.conf
+
+.I PRI
+and 
+.I BRI
+(with ZapBRI) cards are basically identified as well. However the span
+configiration is a default that I only hope is sane. Looking for feedback
+
+.SH OPTIONS
+.B -c
+.I country_code
+.RS
+A two-letter country code. Sets the country-code for the zonezone 
+entries in 
+.I zaptel.conf
+, The default is the value of
+.I lc_country
+from 
+.I /etc/default/zaptel
+and failing that, "us".
+.RE
+
+.B -d
+.RS
+Also try to detect modules. Unloads all zaptel modules and loads them
+one by one. Considers a module useful if it loaded successfully and if 
+loading it has generated at least one zapata channel.
+
+The list of detected modules is written as the value of 
+.I ZAPTEL_MODS
+in 
+.I /etc/default/zaptel
+.RE
+
+.B -e
+.I base_exten_num
+.RS
+Configure channel 
+.I i 
+as extension 
+.I exten_num
++
+.I i 
+ . This is mostly for the caller-id values. Crude, but may be good enough. 
+See also
+.I -r
+.RE
+
+.B -F
+.RS
+Disable writing FXS extensions in zapata.conf
+.RE
+
+.B -l
+.RS
+Only list deceted channels and their signalling. Don't write 
+configuration files. Note, however that 
+.I -ld
+will still rewrite the modules line in 
+.I /etc/default/zaptel
+(see 
+.I -d
+above).
+.RE
+
+.B -M
+.RS
+Update
+.I /etc/modules
+with a list of our modules, thereby
+triggers their loading via modprobe on the next boot.
+
+This triggers the
+.I -d
+option as well.
+.RE
+
+.B -R
+.RS
+Don't restart asterisk even if it was stopped using
+.I -s
+ .
+.RE
+
+.B -s
+.RS
+Stop asterisk for the duration of the test. The detection will only
+work if nobody uses the zaptel channels: 
+
+* To allow unloading of modules
+
+* to allow reading configuration files.
+
+This option tells the script to stop asterisk (if it was running) and to 
+try to start it after the end of the test.
+.RE
+
+.B -v
+.RS
+Be verbose. lists the detected modules if 
+.I -d
+is used. Lists detected channls. In the end tries to connect to asterisk
+to get a list of configured zaptel channels.
+.RE
+
+.B -z
+.RS
+emulate the operation of zapscan.bin: generate 
+.I /etc/asterisk/zapscan.conf
+with the results of the scan.
+.RE
+
+.SH CONFIGURATION
+Look at the beginning of the script for a number of variables that can 
+be overriden through the configuraion file. Some variables can also be 
+overriden through the environment. The configuration file is sourced by
+bash but for compatibility expected to have only 'var=VALUE' lines and
+comments or empty lines.
+
+The configuration will first be read from 
+.I /etc/default/zaptel
+if it exists, and 
+.I /etc/sysconfig/zaptel
+otherwise (But those file names may be overriden, see 
+.I ZAPTEL_BOOT_DEBIAN
+and 
+.I ZAPTEL_BOOT_FEDORA
+below). Variables set in those files will override the default settings
+and setting rom the environment.
+
+The following variables may be set from the environment:
+ZAPCONF_FILE, ZAPATA_FILE, ZAPTEL_BOOT_DEBIAN, ZAPTEL_BOOT_FEDORA,
+DEVZAP_TIMEOUT, ZTCFG
+
+.RS
+.I lc_country
+.RS
+The default country. Can be also overriden by the option -c
+.RE
+
+.I base_exten
+.RS
+The base number used for automatic numbering
+.RE
+
+.I context_manual
+.RS
+If set to 'yes', no context changes are made in zapata-channels.conf
+.RE
+
+.I context_lines
+.RS
+The context into which calls will go from zaptel trunks.
+.RE
+
+.I context_phones
+.RS
+The context into which calls will go from zaptel phones.
+.RE
+
+.I context_manual
+.RS
+If set to 'yes', no group settings are made in zapata-channels.conf
+.RE
+
+.I group_lines
+.RS
+The group number for zaptel trunks.
+.RE
+
+.I group_phones
+.RS
+The group number for zaptel phones.
+.RE
+
+.I ALL_MODULES
+.RS
+modules list. Used for unloading and modules detection. The order of modules
+is the same for both.
+.RE
+
+.I ZAPCONF_FILE
+.RS
+ztcfg's configuration file. The sane default is /etc/zaptel.conf .
+.RE
+
+.I ZAPATA_FILE
+.RS
+The generated partial zapata.conf snippet. Default:
+/etc/asterisk/zapata-channels.conf .
+.RE
+
+.I ZAPTEL_BOOT_DEBIAN
+.RS
+The Debian Zaptel defaults file. Normally
+.I /etc/default/zaptel
+.
+.RE
+
+
+.I ZAPTEL_BOOT_FEDORA
+.RS
+The Zaptel defaults file on various other distributions. Normally
+.I /etc/sysconfig/zaptel
+ .
+.RE
+
+.I DEVZAP_TIMEOUT
+.RS
+Maximal number of seconds to wait for /dev/zap to be initializaed by
+udev.
+.RE
+
+.I ZTCFG
+.RS
+The full path to the ztcfg tool. Default: 
+.I /sbin/ztcfg
+genzaptelconf will also explicitly test for
+.I /usr/sbin/ztcfg 
+as a last resort.
+.RE
+.RE
+
+.SH FILES
+.I /etc/zaptel.conf
+.RS
+The configuration file used by 
+.I ztcfg
+to configure zaptel devices. re-written by 
+.I genzaptelconf
+ . A backup copy is saved to
+.I /etc/zaptel.conf.bak
+ .
+.RE
+
+.I /etc/asterisk/zapata.conf
+.RS
+The configuration file of Asterisk's 
+.I chan_zap.
+Not modified directly by 
+.I genzaptelconf.
+If you want genzaptelconf's setting to take effect, add the following 
+line at the end of 
+.I zapata.conf:
+.RS
+#include "zapata-channels.conf"
+.RE
+.RE
+
+.I /etc/asterisk/zapata-channels.conf
+.RS
+This is the snippet of 
+.I chan_zap
+configuration file that 
+.I genzaptelconf generates.
+ . A backup copy is saved to
+.I /etc/asterisk/zapata-channels.conf.bak
+ .
+.RE
+
+.I /etc/default/zaptel
+.RS
+This file holds configuration for both 
+.I genzaptelconf
+and
+.I /etc/init.d/zaptel .
+It is sourced by both scripts and can thus be used to override settings 
+of variables from those scripts.
+.RE
+
+.I /etc/modules
+.RS
+A debian-specific list of kernel modules to be loaded by modprobe at 
+boot time. When the option 
+.I -d
+(detect) is used, genzaptelconf will write in this file zaptel modules
+to be loaded. If you want to use a different file, set 
+.I MOD_FILELIST
+ . If it is rewritten, a backup copy is saved to
+.I /etc/modules.bak
+ .
+.RS
+The backup copy of 
+.I /etc/modules
+.RE
+
+.SH "SEE ALSO" 
+ztcfg(8) asterisk(8). 
+
+.SH BUGS
+If you override a configuration variable both through the environment 
+and through the configuration file, the value from the configuration 
+file wins.
+
+.SH "AUTHOR" 
+This manual page was written by Tzafrir Cohen <tzafrir.cohen@xorcom.com> 
+Permission is granted to copy, distribute and/or modify this document under 
+the terms of the GNU General Public License, Version 2 any  
+later version published by the Free Software Foundation. 
+
+On Debian systems, the complete text of the GNU General Public 
+License can be found in /usr/share/common-licenses/GPL. 

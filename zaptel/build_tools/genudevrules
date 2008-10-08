@@ -1,0 +1,35 @@
+#!/bin/sh
+
+ver=`udevinfo -V | cut -f3 -d" "`
+
+if [ -z "${ver}" ]; then
+   # nobody has that old version, anyway.
+   ver=54
+fi
+
+# udev versions prior to 055 use a single '=' for matching key values
+# udev versions 055 and later support '==' for that purpose, and versions
+# beyond 092 will probably make it mandatory
+#
+# very old versions of udev required naming rules and permissions rules to be
+# in separate files, but it's not clear at what version number that changed
+
+if [ ${ver} -gt 54 ]; then
+    match="=="
+else
+    match="="
+fi
+
+cat <<EOF
+# udev rules to generate the /dev/zap device files (if not yet provided 
+# by your distribution):
+KERNEL${match}"zapctl", NAME="zap/ctl"
+KERNEL${match}"zaptranscode", NAME="zap/transcode"
+KERNEL${match}"zaptimer", NAME="zap/timer"
+KERNEL${match}"zapchannel", NAME="zap/channel"
+KERNEL${match}"zappseudo", NAME="zap/pseudo"
+KERNEL${match}"zap[0-9]*", NAME="zap/%n"
+
+# zaptel devices with ownership/permissions for running as non-root
+SUBSYSTEM${match}"zaptel",  OWNER="asterisk", GROUP="asterisk", MODE="0660"
+EOF

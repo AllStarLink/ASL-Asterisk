@@ -1,0 +1,29 @@
+In order to install the b410p drivers one simply needs to type:
+
+`make b410p`
+
+The mISDN drivers will be downloaded and installed automatically.  Then
+you will need to run
+
+`/etc/init.d/misdn-init config`
+
+and then configure the /etc/misdn-init.conf in accordance with your desired
+port configuration.  You will then need to load the modules:
+
+`/etc/init.d/misdn-init start`
+
+For the Asterisk portion of the installation, you must use either the -trunk
+branch or the crichter branch (for a 1.2 based version of asterisk), which can
+be checked out as follows:
+
+`svn co http://svn.digium.com/svn/asterisk/team/crichter/0.3.0`
+
+The preferred and working branch right now is above is crichter.  Trunk is not
+guaranteed to work.
+
+The remainder of the configuration is just setup of /etc/asterisk/misdn.conf.
+
+For additional information and questions, refer to http://www.misdn.org/
+
+---
+Matthew Fredrickson

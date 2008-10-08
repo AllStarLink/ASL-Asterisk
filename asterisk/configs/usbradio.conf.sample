@@ -1,0 +1,102 @@
+;
+; chan_usbradio.c configuration file
+;
+; 20071025 1000 Steven Henke, sphenke@xelatec.com
+;
+; This sample configuration file is for repeater operation using a pair of
+; GM300, M1225 or CDM1550 mobile radios or a single R1225 repeater 
+; or some other equivalent.
+
+[general]
+
+[usb]               ; USB Channel Name e.g. usb or usb1, usb2, ...
+                    ; this starts the definition block for a device
+
+hwtype=0		    ; USB Sound Adapter Hardware Type
+			        ; Set to 0 for USB sound adapaters modified using
+			        ; the instructions from usbfob.pdf. 
+			        ; Set to 1 for DingTel/W9SH modified usb adapters.
+ 
+rxboost=0		    ; Rx Audio Boost
+			        ; 0 = 20db attenuator inserted, 
+			        ; 1= 20db attenuator removed
+			        ; Set to 1 for additonal gain if using a low-level
+			        ; receiver output.
+
+rxctcssrelax=1		; Rx CTCSS Decoder Criteria Relax
+			        ; reduce CTCSS talkoff from radios w/o CTCSS Tx HPF
+			        ; Set to 1 for Amateur and FRS radios.
+
+txctcssdefault=88.5 ; Tx CTCSS Default Encode
+                    ; Encodes this tone if no other tone in use.
+
+rxctcssfreqs=88.5	; rx ctcss frequency. this must be in the tone table.
+txctcssfreqs=88.5	; tx ctcss frequency. any frequency is permitted.
+
+carrierfrom=dsp		; Carrier Detect Source
+			        ; Options - no,usb,usbinvert,dsp,vox 
+			        ; no - no carrier detection at all
+			        ; usb - via USB radio adapter COR connection
+			        ; usbinvert - same as above but inverted polarity.
+			        ; dsp - from RX noise using dsp methods
+			        ; vox - voice activated via RX audio
+
+ctcssfrom=dsp		; CTCSS Decoder Source
+			        ; Options = no,usb,dsp
+			        ; no - CTCSS decoding, system will be carrier squelch
+			        ; usb - CTCSS decoding using input from USB adapter 
+			        ; (currently not supported)
+			        ; dsp - CTCSS decoding using RX audio in DSP.
+			        ; rxdemod option must be set to flat for this to work.
+
+rxdemod=flat        ; Rx Audio Source Type from Radio
+			        ; Options = no, flat, speaker
+			        ; no - RX audio input not used
+			        ; flat - source is un-filtered discriminator signal
+			        ; speaker - source is filtered, de-emphasized audio 
+
+txprelim=yes		; Tx Audio PreEmphasis and Limiting in software
+			        ; no - Audio is not pre-emphasized and limited. 
+			        ; for application to radio microphone input
+			        ; yes - Audio is pre-emphasized, limited and filtered
+			        ; for direct connection to an FM modulator
+
+txtoctype=notone	; Transmit Tone Turn Off Code method: 
+			        ; Options = no,phase,notone
+			        ; no     - CTCSS tone encodes up to tx carrier drop
+			        ; phase  - encode reverse phase before tx carrier drop 
+			        ;          AKA ("reverse burst") before unkeying TX
+			        ; notone - drop tone, wait and then drop carrier
+			        ;          AKA ("chicken burst")
+
+txmixa=composite   	; Tx Mix Output Channel A (Left) Output Type
+			        ; Options = no,voice,tone,composite,auxvoice
+			        ; no - Do not output anything
+			        ; voice - output voice only
+			        ; tone - CTCSS tone only
+			        ; composite - voice and tone
+			        ; auxvoice - voice output for monitoring
+
+txmixb=no           ; Tx Mix Output Channel B (Right) Output Type  
+			        ; See txmixa above.
+
+invertptt=0         ; Invert PTT 
+			        ; 0 = ground to transmit, 1 = open to transmit
+			        ; This is the collector lead of the 2N4401 transistor
+			        ; on the modified usb sound adapter.
+
+duplex=0            ; Connected Radio Device Duplex Capability
+                                ; 0 = Simplex (PTT / Release to Listen)
+                                ; 1 = Duplex (simultaneous Tx and Rx)
+
+eeprom=1            ; 1 = Indicates that an EEPROM internal to the radio
+                    ;     adapter and cable is expected. 
+                    ; 0 = no warning message if no EEPROM found.
+
+; the following settings are for systems built with an
+; integral synthesized radio only.
+
+rxfreq=146520000    ; Rx Frequency in Hz - must match xcvr capabilities
+txfreq=146520000    ; Tx Frequency in Hz - must match xcvr capabilities
+
+; end of file

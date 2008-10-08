@@ -1,0 +1,129 @@
+#! /bin/sh
+
+# install_prereq: a script to install distribution-specific
+# prerequirements
+
+set -e
+
+usage() {
+  echo "$0: a script to install distribution-specific prerequirement"
+  echo 'Revision: $Id: install_prereq 3852 2008-02-19 01:01:01Z tzafrir $'
+  echo ""
+  echo "Usage: $0:         Shows this message."
+  echo "Usage: $0 test     Prints commands it is about to run."
+  echo "Usage: $0 install  Really install."
+}
+
+PACKAGES_DEBIAN="build-essential libnewt-dev libusb-dev modemp3d"
+PACKAGES_RH="gcc newt-devel libusb-devel"
+KVERS=`uname -r`
+
+case "$1" in
+test)    testcmd=test_cmd ;;
+install) testcmd='' ;;
+'') usage; exit 0 ;;
+*) usage; exit 1 ;;
+esac
+
+NOTHING_TO_INSTALL=true
+test_cmd() {
+	NOTHING_TO_INSTALL=false
+	echo "$@"
+}
+
+# Fixme: should be done by apt and not by dpkg?
+check_installed_debs() {
+	 dpkg-query -W --showformat '${Status} ${Package}\n' "$@" 2>/dev/null \
+	 | awk '/ not-installed/{print $4}'
+}
+
+# parsing the output of yum is close to impossible.
+# We'll use rpm and hope for the best:
+check_installed_rpms() {
+	for pack in "$@"
+	do
+		if ! rpm -q $pack >/dev/null 2>/dev/null
+		then echo $pack
+		fi
+	done
+}
+
+
+has_kernel_source() {
+	test -r /lib/modules/$KVERS/build/.config
+}
+
+in_test_mode() {
+  test "$testcmd" != ''
+}
+
+handle_debian() {
+	# echo "# Distribution is Debian or compatible"
+	kernel_package=''
+	extra_packs=`check_installed_debs $PACKAGES_DEBIAN`
+	if ! has_kernel_source; then
+		kernel_package="linux-headers-$KVERS"
+		debian_release=`cat /etc/debian_version`
+		case "$debian_release" in
+		3.1) kernel_package="kernel-headers-$KVERS";;
+		esac
+		echo "# Kernel source not found. Installing $kernel_package"
+	fi
+	if [ "$extra_packs$kernel_package" = '' ]; then
+		return
+	fi
+	$testcmd apt-get install -y $extra_packs $kernel_package
+}
+
+handle_rh() {
+	# echo "# Distribution is RedHat or similar."
+	kernel_package=''
+	extra_packs=`check_installed_rpms $PACKAGES_RH`
+	if ! has_kernel_source; then
+		kern_str='' # extra "kernel version"
+		case "$KVERS" in
+		*smp*) kern_str='-smp';;
+		*PAE*) kern_str='-PAE';;
+		*xen*) kern_str='-xen';;
+		esac
+		kernel_package="kernel$kern_str-devel-$KVERS"
+		echo "# Kernel source not found. Installing $kernel_package"
+
+		echo "# if you get an error for the following command, consider"
+		echo "#"
+		echo "#yum install -y kernel$kern_str kernel$kern_str-devel"
+		echo "#"
+		echo "# and then reboot to upgrade to the newly installed kernel."
+	fi
+	if [ "$extra_packs$kernel_package" = '' ]; then
+		return
+	fi
+	$testcmd yum install -y $extra_packs $kernel_package
+}
+
+if in_test_mode; then
+	echo "#############################################"
+	echo "## $1: test mode."
+	echo "## Use the commands here to install your system."
+	echo "#############################################"
+fi
+
+# handle the easy case of Debians first
+if [ -r /etc/debian_version ]; then
+  handle_debian
+elif [ -r /etc/redhat-release ]; then
+  handle_rh
+fi
+
+echo "#############################################"
+if in_test_mode; then
+  if $NOTHING_TO_INSTALL; then
+    echo "## $1 completed successfully ((In test mode) "
+  else
+    echo "## $1: some extra packages are needed to build zaptel"
+    exit 1
+  fi
+else
+  echo "## $1 completed successfully"
+fi
+echo "#############################################"

@@ -1,0 +1,14 @@
+BUS!="usb", ACTION!="add", GOTO="xpp_usb_add_end"
+KERNEL=="*_ep*", GOTO="xpp_usb_add_end"
+KERNEL=="[0-9]*", GOTO="xpp_usb_add_end"
+
+# Load firmware into the Xorcom Astribank device:
+SYSFS{idVendor}=="e4e4", SYSFS{idProduct}=="11[345][01]", \
+	RUN+="/usr/share/zaptel/xpp_fxloader udev $sysfs{idVendor}/$sysfs{idProduct}/$sysfs{bcdDevice}"
+
+LABEL="xpp_usb_add_end"
+
+# Hotplug hook for Astribank up/down
+# By default XPP_INIT_DIR="/usr/share/zaptel"
+KERNEL=="xbus*" RUN+="%E{XPP_INIT_DIR}/astribank_hook udev $kernel $sysfs{status} $sysfs{connector}"
+

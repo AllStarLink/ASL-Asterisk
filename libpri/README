@@ -1,0 +1,45 @@
+libpri: An implementation of Primary Rate ISDN
+
+Written by Mark Spencer <markster@digium.com>
+
+What is libpri?
+===============
+
+libpri is a C implementation of the Primary Rate ISDN specification.  It was
+based on the Bellcore specification SR-NWT-002343 for National ISDN.  As of
+May 12, 2001, it has been tested work with NI-2, Nortel DMS-100, and 
+Lucent 5E Custom protocols on switches from Nortel and Lucent.
+
+What is the license for libpri?
+===============================
+libpri is distributed under the terms of the GNU General Public License, 
+which permit its use and linking with other GPL'd software only.  
+The GNU GPL is included in the file LICENSE in this directory.
+
+As a special exception, libpri may also be linked to the OpenH323
+library, so long as the entirity of the derivative work (as defined
+within the GPL) is licensed either under the MPL of the OpenH323 license
+or the GPL of libpri.
+
+If you wish to use libpri in an application for which the GPL is not 
+appropriate (e.g. a proprietary embedded system), licenses for libpri 
+under more flexible terms can be readily obtained through Digium, Inc. 
+at reasonable cost.
+
+
+How do I report bugs or contribute?
+===================================
+For now, contact the author directly.  In the future if there is 
+sufficient interest, we will setup a mailing list.
+
+Does anything use this library so far?
+======================================
+Yes, the Asterisk Open Source PBX does.  http://www.asterisk.org
+
+Also, the Zapata library has hooks for it.  http://www.zapatatelephony.org
+
+Special thanks
+==============
+Special thanks to Jim Dixon <jim@lambdatel.com> for his help in 
+testing and fixing the implementation.
+

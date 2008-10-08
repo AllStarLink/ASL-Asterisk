@@ -1,0 +1,31 @@
+#! /bin/sh
+
+TOPDOMAIN=allstarlink.org
+SUBDOMAINS="nodes1"
+FILEPATH=/var/lib/asterisk
+WGET=`which wget` 
+
+while [ 1 ] 
+do
+  for i in $SUBDOMAINS
+  do
+    res=0
+    while [ $res -eq 0 ]
+    do
+      $WGET -q -O $FILEPATH/rpt_extnodes-temp http://$i.$TOPDOMAIN/cgi-bin/nodes.pl
+      res=$?
+      if [ $res -eq 0 ]
+      then
+        /bin/chmod 700 $FILEPATH/rpt_extnodes-temp
+        /bin/mv -f $FILEPATH/rpt_extnodes-temp $FILEPATH/rpt_extnodes
+	#echo "Retrieved node list from $i.$TOPDOMAIN"
+	#date
+        sleep 600
+      else
+        #echo "Problem retrieving node list from $i.$TOPDOMAIN, trying another server";
+	sleep 30
+      fi
+    done
+ done
+done
+

@@ -1,0 +1,58 @@
+ifdef SUBDIRS
+  ZAP_KERNEL	= $(SUBDIRS)
+else
+  ZAP_KERNEL	= $(M)
+endif
+
+EXTRA_CFLAGS	=	$(XPP_LOCAL_CFLAGS)	\
+			-I$(ZAP_KERNEL)	\
+			-DDEBUG			\
+			-DPOLL_DIGITAL_INPUTS	\
+			-DWITH_ECHO_SUPPRESSION	\
+			-DDEBUG_PCMTX		\
+			-DPROTOCOL_DEBUG	\
+			-g
+			#
+
+ifneq	(,$(shell grep -w echo_can_state_t $(ZAP_KERNEL)/zaptel.h))
+EXTRA_CFLAGS	+= -DZAPTEL_EC_TYPEDEF
+endif
+
+obj-m		+= xpp.o xpd_fxs.o xpd_fxo.o xpd_pri.o
+
+HAS_BRISTUFF	:= $(shell grep -c '^[[:space:]]*\#[[:space:]]*define[[:space:]]\+CONFIG_ZAPATA_BRI_DCHANS\>' $(ZAP_KERNEL)/zconfig.h)
+
+# Build only supported modules
+ifneq	(,$(filter y m,$(CONFIG_USB)))
+obj-m		+= xpp_usb.o
+endif
+ifneq	(0,$(HAS_BRISTUFF))
+obj-m		+= xpd_bri.o
+endif
+
+xpp-y		+= xbus-core.o xbus-sysfs.o xbus-pcm.o xframe_queue.o xpp_zap.o xproto.o card_global.o zap_debug.o
+xpd_fxs-y	+= card_fxs.o
+xpd_fxo-y	+= card_fxo.o
+xpd_bri-y	+= card_bri.o
+xpd_pri-y	+= card_pri.o
+
+ifeq	(y,$(PARPORT_DEBUG))
+EXTRA_CFLAGS	+= -DDEBUG_SYNC_PARPORT
+obj-m		+= parport_debug.o
+endif
+
+# Handle versioning
+XPP_VERSION_STR	?= $(shell if [ -r $(obj)/.version ]; then echo "\"`cat $(obj)/.version`\""; else echo '"Unknown"'; fi)
+clean-files	:= xpp_version.h
+
+$(obj)/card_fxs.o $(obj)/card_fxo.o $(obj)/card_bri.o $(obj)/card_pri.o $(obj)/xpp_usb.o $(obj)/xpp.o: $(obj)/xpp_version.h
+
+$(obj)/xpp_version.h: FORCE
+	$(Q)echo '#define	XPP_VERSION	$(XPP_VERSION_STR)' > $@.tmp
+	$(Q)if cmp -s $@.tmp $@ ; then echo; else \
+		mv $@.tmp $@ ; \
+	fi
+	$(Q)rm -f $@.tmp
+
+.PHONY: FORCE
+FORCE:

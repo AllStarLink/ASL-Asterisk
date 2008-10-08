@@ -1,0 +1,6 @@
+These config files show how to configure a multi-node Allstar link system using 2
+USB fobs. Both nodes are configured as repeaters, (i.e. full duplex) in rpt.conf.
+4 files are supplied: extensions.conf, iax.conf, rpt.conf, and usbradio.conf
+The node number of the first node is 1234, and the second node 5678. rpt.conf,
+extensions.conf, and iax.conf will need to be modified with a text editor to change
+these to real assigned node numbers. 

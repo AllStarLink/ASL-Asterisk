@@ -1,0 +1,57 @@
+#! /bin/sh
+
+# This is an example of an Astribank device hook. The xpp.rules file
+# calls /usr/share/zaptel/astribank_hook after a new Astribank is ready 
+# and after and old Astribank device has been destroyed.
+#
+
+set -e
+
+me=`basename $0`
+INIT_DIR=`dirname $0`
+XPP_BASE=/proc/xpp
+export XPP_BASE
+LOGGER="logger -s -t $me"
+
+ZAPTEL_BOOT_DEBIAN=${ZAPTEL_BOOT_DEBIAN:-/etc/default/zaptel}
+ZAPTEL_BOOT_FEDORA=${ZAPTEL_BOOT_FEDORA:-/etc/sysconfig/zaptel}
+
+# read default configuration from /etc/default/zaptel
+if [ -r $ZAPTEL_BOOT_DEBIAN ]; then . $ZAPTEL_BOOT_DEBIAN; fi
+if [ -r $ZAPTEL_BOOT_FEDORA ]; then . $ZAPTEL_BOOT_FEDORA; fi
+
+if [ "$ASTRIBANK_HOOK_DISABLED" != '' ]; then
+	$LOGGER -p kern.info "Exiting... ASTRIBANK_HOOK_DISABLED"
+	exit 0
+fi
+
+# Always redirect stderr somewhere, otherwise the shell script will die
+# when it tries to do I/O related stuff on closed file descriptor.
+# Our default is to throw it down the bit-bucket.
+#exec 2> /dev/console
+## If you wish to trace this script:
+#exec 2> "/tmp/astribank_hook_$XBUS_NAME"
+
+# Maybe add some logging
+#$LOGGER -p kern.info "$0: $ACTION: $*."
+
+case "$ACTION" in
+add)
+	# An Astribank was added and is initialized and ready.
+	# Put your shell commands bellow
+	:
+	;;
+remove)
+	# An Astribank was Removed.
+	# Put your shell commands bellow
+	# You should not access /proc/xpp/... or run related utilities
+	# like xpp_sync, since this is likely to cause very bad race
+	# conditions during driver removal.
+	:
+	;;
+*)
+	;;
+esac
+
+# Maybe add some logging
+#$LOGGER -p kern.info "$0: Done: $ACTION: $*."
