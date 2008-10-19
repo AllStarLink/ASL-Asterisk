@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 150888 $")
 
 #include <ctype.h>
 #include <string.h>
@@ -925,9 +925,10 @@ int ast_pthread_create_stack(pthread_t *thread, pthread_attr_t *attr, void *(*st
 #if !defined(LOW_MEMORY)
 	struct thr_arg *a;
 #endif
+char	__mystorage[sizeof(*attr)];
 
 	if (!attr) {
-		attr = alloca(sizeof(*attr));
+		attr = (pthread_attr_t *)__mystorage;
 		pthread_attr_init(attr);
 	}
 

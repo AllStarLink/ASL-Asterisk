@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 150888 $")
 
 #include <sys/types.h>
 #include <string.h>
@@ -2629,7 +2629,7 @@ static void *pbx_thread(void *data)
 enum ast_pbx_result ast_pbx_start(struct ast_channel *c)
 {
 	pthread_t t;
-	pthread_attr_t attr;
+	pthread_attr_t *attr;
 
 	if (!c) {
 		ast_log(LOG_WARNING, "Asked to start thread on NULL channel?\n");
@@ -2639,15 +2639,24 @@ enum ast_pbx_result ast_pbx_start(struct ast_channel *c)
 	if (increase_call_count(c))
 		return AST_PBX_CALL_LIMIT;
 
+        attr = malloc(sizeof(pthread_attr_t));
+        if (!attr)
+        {
+                ast_log(LOG_ERROR,"Cant malloc");
+                return AST_PBX_FAILED;
+        }
+
 	/* Start a new thread, and get something handling this channel. */
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (ast_pthread_create(&t, &attr, pbx_thread, c)) {
+	pthread_attr_init(attr);
+	pthread_attr_setdetachstate(attr, PTHREAD_CREATE_DETACHED);
+	if (ast_pthread_create(&t, attr, pbx_thread, c)) {
 		ast_log(LOG_WARNING, "Failed to create new channel thread\n");
-		pthread_attr_destroy(&attr);
+		pthread_attr_destroy(attr);
+		ast_free(attr);
 		return AST_PBX_FAILED;
 	}
-	pthread_attr_destroy(&attr);
+	pthread_attr_destroy(attr);
+	ast_free(attr);
 
 	return AST_PBX_SUCCESS;
 }

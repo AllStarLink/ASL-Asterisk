@@ -1,7 +1,7 @@
 Xorcom Astribank Documentation
 ==============================
 Xorcom Team <support@xorcom.com>
-$Revision: 4272 $, $Date: 2008-05-14 10:53:13 -0500 (Wed, 14 May 2008) $
+$Revision: 4272 $, $Date: 2008-05-14 08:53:13 -0700 (Wed, 14 May 2008) $
 
 This file documents the Zaptel drivers for the Xorcom Channel Bank.
 The drivers reside in a separate subdirectory, kernel/xpp/ .

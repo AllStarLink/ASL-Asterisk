@@ -36,12 +36,12 @@ PROCESSOR?=i586
 
 build-only: .zaptel-installed .libpri-installed
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux; make menuconfig)
-	make -C asterisk
+	make -C asterisk DEBUG=
 	
 .asterisk-installed:
 	-rm -rf /usr/lib/asterisk/modules/*
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
-	make -C asterisk install
+	make -C asterisk install DEBUG=
 	#make -C asterisk clean
 	touch .asterisk-installed
 	

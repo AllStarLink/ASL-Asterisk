@@ -22,7 +22,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.152 10/6/08 
+ *  version 0.153 10/18/08 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -176,7 +176,6 @@
 #define ast_strdup strdup
 #endif
 
-
 #define	MAXDTMF 32
 #define	MAXMACRO 2048
 #define	MAXLINKLIST 512
@@ -285,6 +284,8 @@
 #define	SIMPLEX_PATCH_DELAY 25
 #define	SIMPLEX_PHONE_DELAY 25
 
+#define	RX_LINGER_TIME 50
+
 #define	STATPOST_PROGRAM "/usr/bin/wget,-q,--output-document=/dev/null,--no-check-certificate"
 
 #define	ALLOW_LOCAL_CHANNELS
@@ -320,7 +321,7 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 146804 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 151012 $")
 
 #include <signal.h>
 #include <stdio.h>
@@ -382,7 +383,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.152  10/6/2008";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.153  10/18/2008";
 
 static char *app = "Rpt";
 
@@ -466,6 +467,7 @@ struct rpt_chan_stat
 
 char *discstr = "!!DISCONNECT!!";
 char *newkeystr = "!NEWKEY!";
+char *newkey1str = "!NEWKEY1!";
 static char *remote_rig_ft897="ft897";
 static char *remote_rig_rbi="rbi";
 static char *remote_rig_kenwood="kenwood";
@@ -483,7 +485,7 @@ STANDARD_LOCAL_USER;
 LOCAL_USER_DECL;
 #endif
 
-#define	MSWAIT 200
+#define	MSWAIT 20
 #define	HANGTIME 5000
 #define	TOTIME 180000
 #define	IDTIME 300000
@@ -560,6 +562,7 @@ struct rpt_link
 	long 	retrytimer;
 	long	retxtimer;
 	long	rerxtimer;
+	long	rxlingertimer;
 	int	retries;
 	int	max_retries;
 	int	reconnects;
@@ -846,10 +849,16 @@ static struct rpt
 	int keyposttimer;			
 	char newkey;
 	char inpadtest;
+	long rxlingertimer;
 #ifdef OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
 	AST_LIST_HEAD_NOLOCK(, ast_frame) txq;
+#endif
+#ifdef OLD_ASTERISK
+	AST_LIST_HEAD(, ast_frame) rxq;
+#else
+	AST_LIST_HEAD_NOLOCK(, ast_frame) rxq;
 #endif
 	char txrealkeyed;
 #ifdef	__RPT_NOTCH
@@ -1171,6 +1180,9 @@ static int dovox(struct vox *v,short *buf,int bs)
 		}
 	} else v->enacount = 0;
 	return(v->lastvox);
+
+
+
 }
 
 
@@ -5779,10 +5791,15 @@ struct	rpt_link *l;
 static void send_newkey(struct ast_channel *chan)
 {
 
-	ast_sendtext(chan,newkeystr);
+	ast_sendtext(chan,newkey1str);
 	return;
 }
 
+static void send_old_newkey(struct ast_channel *chan)
+{
+	ast_sendtext(chan,newkeystr);
+	return;
+}
 
 /* 
  * Connect a link 
@@ -6190,12 +6207,14 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 		case 4: /* Enter Command Mode */
 		
 			/* if doesnt allow link cmd, or no links active, return */
- 			if (((command_source != SOURCE_RPT) && 
+			if (myrpt->links.next == &myrpt->links) return DC_COMPLETE;
+ 			if ((command_source != SOURCE_RPT) && 
 				(command_source != SOURCE_PHONE) &&
 				(command_source != SOURCE_ALT) &&
-				(command_source != SOURCE_DPHONE)) ||
-				 (myrpt->links.next == &myrpt->links))
-				return DC_COMPLETE;
+				(command_source != SOURCE_DPHONE) && mylink &&
+				strncasecmp(mylink->chan->name,"echolink",8) &&
+				strncasecmp(mylink->chan->name,"irlp",4))
+					return DC_COMPLETE;
 			
 			/* if already in cmd mode, or selected self, fughetabahtit */
 			if ((myrpt->cmdnode[0]) || (!strcmp(myrpt->name, digitbuf))){
@@ -6936,7 +6955,16 @@ struct	ast_frame wf;
         }
         if (!strcmp(tmp,newkeystr))
         {
-		mylink->newkey = 1;
+		if (!mylink->newkey)
+		{
+			send_old_newkey(mylink->chan);
+			mylink->newkey = 1;
+		}
+                return;
+        }
+        if (!strcmp(tmp,newkey1str))
+        {
+		mylink->newkey = 2;
                 return;
         }
 	if (tmp[0] == 'L')
@@ -7288,8 +7316,8 @@ int	res;
 		if (c == myrpt->p.endchar)
 		{
 			if (mylink->lastrx && 
-			    ((strncmp(mylink->chan->name,"echolink",8)) ||
-				strncmp(mylink->chan->name,"irlp",4)))
+			    strncasecmp(mylink->chan->name,"echolink",8) &&
+				strncasecmp(mylink->chan->name,"irlp",4))
 			{
 				mylink->lastrealrx = 0;
 				rpt_mutex_unlock(&myrpt->lock);
@@ -7381,17 +7409,8 @@ int	res;
 					SOURCE_ALT,mylink);
 				break;
 			    default:
-				if ((!strncasecmp(mylink->chan->name,"echolink",8)) ||
-				    (!strncasecmp(mylink->chan->name,"irlp",4)))
-				{
-					res = collect_function_digits(myrpt, cmd, 
-						SOURCE_RPT, mylink);
-				}
-				else
-				{
-					res = collect_function_digits(myrpt, cmd, 
-						SOURCE_LNK, mylink);
-				}
+				res = collect_function_digits(myrpt, cmd, 
+					SOURCE_LNK, mylink);
 				break;
 			}
 
@@ -10640,7 +10659,16 @@ int	seq,res;
 	if (!strcmp(tmp,discstr)) return 0;
         if (!strcmp(tmp,newkeystr))
         {
-		myrpt->newkey = 1;
+		if (!myrpt->newkey) 
+		{
+			send_old_newkey(myrpt->rxchannel);
+			myrpt->newkey = 1;
+		}
+                return 0;
+        }
+        if (!strcmp(tmp,newkey1str))
+        {
+		myrpt->newkey = 2;
                 return 0;
         }
 
@@ -12064,6 +12092,27 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		while(l != &myrpt->links)
 		{
 			int myrx,mymaxct;
+			
+			if (l->rxlingertimer) l->rxlingertimer -= elap;
+			if (l->rxlingertimer < 0) l->rxlingertimer = 0;
+
+			if ((l->newkey == 2) && l->lastrealrx && (!l->rxlingertimer))
+			{
+				l->lastrealrx = 0;
+				l->rerxtimer = 0;
+				if (l->lastrx1)
+				{
+					if (myrpt->p.archivedir)
+					{
+						char str[100];
+							sprintf(str,"RXUNKEY,%s",l->name);
+						donodelog(myrpt,str);
+					}
+					l->lastrx1 = 0;
+					if(myrpt->p.duplex) 
+						rpt_telemetry(myrpt,LINKUNKEY,l);
+				}
+			}				
 
 			if (l->voxtotimer) l->voxtotimer -= elap;
 			if (l->voxtotimer < 0) l->voxtotimer = 0;
@@ -12122,7 +12171,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 							myrpt->name,lstr,l->name);
 				}
 			}
-			if (l->newkey)
+			if (l->newkey == 1)
 			{
 				if ((l->retxtimer += elap) >= REDUNDANT_TX_TIME)
 				{
@@ -12805,7 +12854,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				{
 					if (totx)
 					{
-						ast_indicate(l->chan,AST_CONTROL_RADIO_KEY);
+						if (l->newkey < 2) ast_indicate(l->chan,AST_CONTROL_RADIO_KEY);
 					}
 					else
 					{
@@ -12904,6 +12953,23 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				{
 					int ismuted,n1;
 
+					l->rxlingertimer = RX_LINGER_TIME;
+					if ((l->newkey == 2) && (!l->lastrealrx))
+					{
+						l->lastrealrx = 1;
+						l->rerxtimer = 0;
+						if (!l->lastrx1)
+						{
+							if (myrpt->p.archivedir)
+							{
+								char str[100];
+
+								sprintf(str,"RXKEY,%s",l->name);
+								donodelog(myrpt,str);
+							}
+							l->lastrx1 = 1;
+						}
+					}
 					if (((l->phonemode) && (l->phonevox)) || 
 					    (!strncasecmp(l->chan->name,"echolink",8)) ||
 						(!strncasecmp(l->chan->name,"irlp",4)))
@@ -13049,7 +13115,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 							l->reconnects++;
 					}
 					/* if RX key */
-					if (f->subclass == AST_CONTROL_RADIO_KEY)
+					if ((f->subclass == AST_CONTROL_RADIO_KEY) && (l->newkey < 2))
 					{
 						if (debug == 7 ) printf("@@@@ rx key\n");
 						l->lastrealrx = 1;
@@ -13069,6 +13135,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					/* if RX un-key */
 					if (f->subclass == AST_CONTROL_RADIO_UNKEY)
 					{
+
 						if (debug == 7) printf("@@@@ rx un-key\n");
 						l->lastrealrx = 0;
 						l->rerxtimer = 0;
@@ -13175,7 +13242,9 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				}
 				if (f->frametype == AST_FRAME_VOICE)
 				{
-					if (l->chan) ast_write(l->chan,f);
+					if (l->chan && ((l->newkey < 2) || l->lasttx ||
+					    strncasecmp(l->chan->name,"IAX",3)))
+						ast_write(l->chan,f);
 				}
 				if (f->frametype == AST_FRAME_CONTROL)
 				{
@@ -13552,7 +13621,7 @@ char *this,*val;
 
 static int rpt_exec(struct ast_channel *chan, void *data)
 {
-	int res=-1,i,rem_totx,rem_rx,remkeyed,n,phone_mode = 0;
+	int res=-1,i,x,rem_totx,rem_rx,remkeyed,n,phone_mode = 0;
 	int iskenwood_pci4,authtold,authreq,setting,notremming,reming;
 	int ismuted,dtmfed,phone_vox = 0, phone_monitor = 0;
 #ifdef	OLD_ASTERISK
@@ -13560,7 +13629,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #endif
 	char tmp[256], keyed = 0,keyed1 = 0;
 	char *options,*stringp,*tele,c,*altp,*memp;
-	char sx[320],*sy;
+	char sx[320],*sy,myfirst;
 	struct	rpt *myrpt;
 	struct ast_frame *f,*f1,*f2;
 	struct ast_channel *who;
@@ -13568,7 +13637,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	struct	rpt_link *l;
 	ZT_CONFINFO ci;  /* conference info */
 	ZT_PARAMS par;
-	int ms,elap,nullfd;
+	int ms,elap,nullfd,n1,myrx;
 	time_t t,last_timeout_warning;
 	struct	zt_radio_param z;
 	struct rpt_tele *telem;
@@ -14190,6 +14259,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #ifdef	OLD_ASTERISK
 	LOCAL_USER_ADD(u);
 #endif
+	voxinit_rpt(myrpt,1);
 	rpt_mutex_unlock(&myrpt->lock);
 	/* find our index, and load the vars initially */
 	for(i = 0; i < nrpts; i++)
@@ -14500,6 +14570,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	if (myrpt->rxchannel != myrpt->txchannel)
 		cs[n++] = myrpt->txchannel;
 	if (!phone_mode) send_newkey(chan);
+	myfirst = 0;
 	/* start un-locked */
 	for(;;) 
 	{
@@ -14618,6 +14689,37 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			if (myrpt->dtmf_local_timer > 1) myrpt->dtmf_local_timer -= elap;
 			if (myrpt->dtmf_local_timer < 1) myrpt->dtmf_local_timer = 1;
 		}
+		if (myrpt->voxtotimer) myrpt->voxtotimer -= elap;
+		if (myrpt->voxtotimer < 0) myrpt->voxtotimer = 0;
+		myrx = keyed;
+		if (phone_mode && phone_vox)
+		{
+			myrx = (!AST_LIST_EMPTY(&myrpt->rxq));
+			if (myrpt->voxtotimer <= 0)
+			{
+				if (myrpt->voxtostate)
+				{
+					myrpt->voxtotimer = myrpt->p.voxtimeout_ms;
+					myrpt->voxtostate = 0;
+				}				
+				else
+				{
+					myrpt->voxtotimer = myrpt->p.voxrecover_ms;
+					myrpt->voxtostate = 1;
+				}
+			}
+			if (!myrpt->voxtostate)
+				myrx = myrx || myrpt->wasvox ;
+		}
+		keyed = myrx;
+		if (myrpt->rxlingertimer) myrpt->rxlingertimer -= elap;
+		if (myrpt->rxlingertimer < 0) myrpt->rxlingertimer = 0;
+
+		if ((myrpt->newkey == 2) && keyed && (!myrpt->rxlingertimer))
+		{
+			myrpt->rerxtimer = 0;
+			keyed = 0;
+		}
 		rpt_mutex_lock(&myrpt->lock);
 		do_dtmf_local(myrpt,0);
 		rpt_mutex_unlock(&myrpt->lock);
@@ -14656,7 +14758,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if (rem_rx && (!myrpt->remoterx))
 		{
 			myrpt->remoterx = 1;
-			ast_indicate(chan,AST_CONTROL_RADIO_KEY);
+			if (myrpt->newkey < 2) ast_indicate(chan,AST_CONTROL_RADIO_KEY);
 		}
 		if ((!rem_rx) && (myrpt->remoterx))
 		{
@@ -14677,7 +14779,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				break; /* if not logged in, hang up after a time */
 			}
 		}
-		if (myrpt->newkey)
+		if (myrpt->newkey == 1)
 		{
 			if ((myrpt->retxtimer += elap) >= REDUNDANT_TX_TIME)
 			{
@@ -14784,6 +14886,58 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 			if (f->frametype == AST_FRAME_VOICE)
 			{
+				if (myrpt->newkey == 2)
+				{
+					myrpt->rxlingertimer = RX_LINGER_TIME;
+					if (!keyed)
+					{
+						keyed = 1;
+						myrpt->rerxtimer = 0;
+					}
+				}
+				if (phone_mode && phone_vox)
+				{
+					n1 = dovox(&myrpt->vox,
+						f->data,f->datalen / 2);
+					if (n1 != myrpt->wasvox)
+					{
+						if (debug) ast_log(LOG_DEBUG,"Remote  vox %d\n",n1);
+						myrpt->wasvox = n1;
+						myrpt->voxtostate = 0;
+						if (n1) myrpt->voxtotimer = myrpt->p.voxtimeout_ms;
+						else myrpt->voxtotimer = 0;
+					}
+					if (n1)
+					{
+						if (!myfirst)
+						{
+						    x = 0;
+						    AST_LIST_TRAVERSE(&myrpt->rxq, f1,
+							frame_list) x++;
+						    for(;x < myrpt->p.simplexphonedelay; x++)
+						    {
+							f1 = ast_frdup(f);
+							memset(f1->data,0,f1->datalen);
+								AST_LIST_INSERT_TAIL(&myrpt->rxq,
+									f1,frame_list);
+						    }
+						    myfirst = 1;
+						}
+						f1 = ast_frdup(f);
+						AST_LIST_INSERT_TAIL(&myrpt->rxq,f1,frame_list);
+					} else myfirst = 0; 
+					x = 0;
+					AST_LIST_TRAVERSE(&myrpt->rxq, f1,frame_list) x++;
+					if (!x)
+					{
+						memset(f->data,0,f->datalen);
+					}
+					else
+					{
+						ast_frfree(f);
+						f = AST_LIST_REMOVE_HEAD(&myrpt->rxq,frame_list);
+					}
+				}
 				if (ioctl(chan->fds[0], ZT_GETCONFMUTE, &ismuted) == -1)
 				{
 					ismuted = 0;
@@ -14863,7 +15017,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 					break;
 				}
 				/* if RX key */
-				if (f->subclass == AST_CONTROL_RADIO_KEY)
+				if ((f->subclass == AST_CONTROL_RADIO_KEY) && (myrpt->newkey < 2))
 				{
 					if (debug == 7) printf("@@@@ rx key\n");
 					keyed = 1;
@@ -14942,7 +15096,9 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 			if (f->frametype == AST_FRAME_VOICE)
 			{
-				ast_write(chan,f);
+				if ((myrpt->newkey < 2) || myrpt->remoterx ||
+				    strncasecmp(chan->name,"IAX",3))
+					ast_write(chan,f);
 			}
 			if (f->frametype == AST_FRAME_CONTROL)
 			{
