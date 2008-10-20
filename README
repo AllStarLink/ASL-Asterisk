@@ -2,7 +2,7 @@ This is the Asterisk source package for ACID and LIMEY LINUX
 
 asterisk-1.4.23pre
 libpri-1.4.7
-zaptel 1.4,12,1
+zaptel 1.4.12.1
 
 This a patched version of Asterisk to run with uClibc on an embedded mini-itx system and on an ACID automatic install disk.
 
