@@ -7535,6 +7535,8 @@ static struct dahdi_pvt *mkintf(int channel, const struct dahdi_chan_conf *conf,
 			break;
 		}
 
+		/* steve, this is the one line to add to make it work */
+		tmp->radio = conf->chan.radio;
 		if (tmp->radio) {
 			/* XXX Waiting to hear back from Jim if these should be adjustable XXX */
 			p.channo = channel;
@@ -8052,6 +8054,7 @@ static struct ast_channel *dahdi_request(const char *type, int format, void *dat
 			channelmatch = x;
 		}
 	}
+
 	/* Search for an unowned channel */
 	ast_mutex_lock(lock);
 	exit = p;
@@ -8061,8 +8064,8 @@ static struct ast_channel *dahdi_request(const char *type, int format, void *dat
 #if 0
 		ast_verbose("name = %s, %d, %d, %d\n",p->owner ? p->owner->name : "<none>", p->channel, channelmatch, groupmatch);
 #endif
-
 		if (p && available(p, channelmatch, groupmatch, &busy, &channelmatched, &groupmatched)) {
+
 			if (option_debug)
 				ast_log(LOG_DEBUG, "Using channel %d\n", p->channel);
 				if (p->inalarm) 
