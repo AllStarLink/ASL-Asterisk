@@ -14,6 +14,12 @@ PROCESSOR?=i586
 	rm -f /usr/include/linux
 	ln -s /lib/modules/$(KVERS)/build/include/linux /usr/include/linux 
 	touch .kernel-dev-installed
+	
+.zaptel-genconfig:	.kernel-dev-installed
+	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
+	-(MAKELEVEL=0; make -C zaptel menuselect)
+	(MAKELEVEL=0; make -C zaptel); # Why does MAKELEVEL need to be 0 for zaptel to build correctly?
+	touch .zaptel-built
 
 .zaptel-built:	.kernel-dev-installed
 	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
@@ -38,11 +44,17 @@ build-only: .zaptel-installed .libpri-installed
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux; make menuconfig)
 	make -C asterisk DEBUG=
 	
+.asterisk-genconfig:
+	-rm -rf /usr/lib/asterisk/modules/*
+	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
+	-make -C asterisk menuselect
+	make -C asterisk install DEBUG=
+	touch .asterisk-installed
+	
 .asterisk-installed:
 	-rm -rf /usr/lib/asterisk/modules/*
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
 	make -C asterisk install DEBUG=
-	#make -C asterisk clean
 	touch .asterisk-installed
 	
 .rpt-sounds-installed:
