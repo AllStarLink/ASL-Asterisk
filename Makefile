@@ -1,4 +1,4 @@
-# Makefile for Asterisk, Zaptel and Libpri
+# Limey Linux Makefile for Asterisk, Zaptel and Libpri
 
 -include /etc/sysinfo #include if it exists, else use defaults
 
@@ -15,46 +15,32 @@ PROCESSOR?=i586
 	ln -s /lib/modules/$(KVERS)/build/include/linux /usr/include/linux 
 	touch .kernel-dev-installed
 	
-.zaptel-genconfig:	.kernel-dev-installed
-	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
-	-(MAKELEVEL=0; make -C zaptel menuselect)
-	(MAKELEVEL=0; make -C zaptel); # Why does MAKELEVEL need to be 0 for zaptel to build correctly?
-	touch .zaptel-built
-
 .zaptel-built:	.kernel-dev-installed
 	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
-	(MAKELEVEL=0; make -C zaptel); # Why does MAKELEVEL need to be 0 for zaptel to build correctly?
+	(MAKELEVEL=0; $(MAKE) -C zaptel); # Why does MAKELEVEL need to be 0 for zaptel to build correctly?
 	touch .zaptel-built
 
 .zaptel-installed:	.zaptel-built
-	(MAKELEVEL=0; make -C zaptel install)
-	#make -C zaptel clean
+	(MAKELEVEL=0; $(MAKE) -C zaptel install)
 	touch .zaptel-installed
 
 .libpri-built:
-	make -C libpri
+	$(MAKE) -C libpri
 	touch .libpri-built
 	
 .libpri-installed:	.libpri-built
-	make -C libpri install
-	#make -C libpri clean
+	$(MAKE) -C libpri install
 	touch .libpri-installed
 
 build-only: .zaptel-installed .libpri-installed
-	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux; make menuconfig)
-	make -C asterisk DEBUG=
+	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux; $(MAKE)  menuconfig)
+	$(MAKE) -C asterisk DEBUG=
 	
-.asterisk-genconfig:
-	-rm -rf /usr/lib/asterisk/modules/*
-	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
-	-make -C asterisk menuselect
-	make -C asterisk install DEBUG=
-	touch .asterisk-installed
 	
 .asterisk-installed:
 	-rm -rf /usr/lib/asterisk/modules/*
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
-	make -C asterisk install DEBUG=
+	$(MAKE) -C asterisk install DEBUG=
 	touch .asterisk-installed
 	
 .rpt-sounds-installed:
@@ -66,7 +52,11 @@ build-only: .zaptel-installed .libpri-installed
 	-cp id.gsm /etc/asterisk
 	touch .id_file
 
-.PHONY:	help archive svsrc
+.PHONY:	help upgrade install_pciradio install_usbradio install_wcte11xp clean release svsrc genconfig 
+
+#
+# Default goal: Print Help
+#
 
 help:
 	@echo "make upgrade           - build and install sources only"
@@ -74,10 +64,13 @@ help:
 	@echo "make install_usbradio  - build and install sources plus usbradio config files"
 	@echo "make install_wcte11xp  - build and install sources plus single span wcte11xp config files"
 	@echo "make install_wct1xxp   - build and install sources plus single span t100p config files"
-	@echo "make install_wctdm     - build and install sources plus tdm400 config files"
 	@echo "make svsrc             - save the sources on the CF as astsrc.tgz"
 	@echo "make build_only        - build only, do not install"
 	@echo "make clean             - delete all object files, intermediate files, and executables"
+
+#
+# Upgrade Asterisk Zaptel, and LIBPRI only, do not install configs!
+#
 
 upgrade:	.kernel-dev-installed .zaptel-installed .libpri-installed .asterisk-installed .rpt-sounds-installed
 	-umount /mnt/cf
@@ -85,6 +78,10 @@ upgrade:	.kernel-dev-installed .zaptel-installed .libpri-installed .asterisk-ins
 	mount /mnt/cf
 	mv -f /root/astbin.tgz /mnt/cf
 	umount /mnt/cf
+#
+# Build and install for Quad Radio PCI card
+#
+
 
 install_pciradio: .id_file upgrade
 	-@mkdir -p /etc/asterisk
@@ -93,7 +90,11 @@ install_pciradio: .id_file upgrade
 	-@mv /etc/asterisk/zaptel.conf /etc
 	-@touch /etc/init.d/pciradio
 	-@svcfg
-	
+#
+# Build and install for USB fobs
+#
+
+
 install_usbradio: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -101,6 +102,10 @@ install_usbradio: .id_file upgrade
 	-@mv /etc/asterisk/zaptel.conf /etc
 	-@touch /etc/init.d/usbradio
 	-@svcfg
+
+#
+# Build and install for TE110P T1 card channel bank and ARIBS
+#
 
 install_wcte11xp: .id_file upgrade
 	-@mkdir -p /etc/asterisk
@@ -110,6 +115,10 @@ install_wcte11xp: .id_file upgrade
 	-@touch /etc/init.d/wcte11xp
 	-@svcfg
 
+#
+# Build and install for T100P T1 card channel bank and ARIBS
+#
+
 install_wct1xxp: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -118,33 +127,47 @@ install_wct1xxp: .id_file upgrade
 	-@touch /etc/init.d/wct1xxp
 	-@svcfg
 
-install_wctdm: .id_file upgrade
-	-@mkdir -p /etc/asterisk
-	-@cp configs/* /etc/asterisk
-	-@cp configs/tdm400p/* /etc/asterisk
-	-@mv /etc/asterisk/zaptel.conf /etc
-	-@touch /etc/init.d/wctdm
+#
+# Remove all object files on the target
+#
 
 clean:	.kernel-dev-installed
 	-rm .zaptel-installed \
 	 .libpri-installed .asterisk-installed \
 	 .rpt-sounds-installed .installed .zaptel-built \
-	 .libpri-built .asterisk-built .id_file
-	make -C libpri clean
-	make -C asterisk clean
-	(MAKELEVEL=0; make -C zaptel clean)
+         .libpri-built .asterisk-built .id_file
+	$(MAKE) -C libpri clean
+	$(MAKE) -C asterisk clean
+	(MAKELEVEL=0; $(MAKE) -C zaptel clean)
 
+#
+# Generate the release tarballs from the development host (not the target!)
+#
 release:
 	tar cvzf ../astsrc-vers-$(ASTSRC_VERS).tar.gz  --exclude='.svn' allstar asterisk libpri zaptel sounds configs Makefile id.gsm README LICENSE 
 	-@rm ../files.tar.gz
 	(cd ..; ln -s astsrc-vers-$(ASTSRC_VERS).tar.gz files.tar.gz)
 	(cd ..; sha256sum files.tar.gz | cut -d ' ' -f 1 >files.tar.gz.sha256sum)
-
-
-
+#
+# Save the source files on the compact flash on the target
+#
 svsrc:
 	-umount /mnt/cf
 	mount /mnt/cf
 	tar cvfz /mnt/cf/astsrc.tgz *
 	sync
 	umount /mnt/cf
+#
+# Used only to set the configuration for the asterisk distribution while compiling on the target
+#
+genconfig:	.kernel-dev-installed
+	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
+	-(MAKELEVEL=0; $(MAKE) -C zaptel menuselect)
+	(MAKELEVEL=0; $(MAKE) -C zaptel install); # Why does MAKELEVEL need to be 0 for zaptel to build correctly?
+	$(MAKE) -C libpri install
+	-rm -rf /usr/lib/asterisk/modules/*
+	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
+	-$(MAKE) -C asterisk menuselect
+	-$(MAKE) -C asterisk install DEBUG=
+
+
