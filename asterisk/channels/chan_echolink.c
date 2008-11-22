@@ -107,6 +107,7 @@ do not use 127.0.0.1
 #include <zlib.h>
 #include <pthread.h>
 #include <signal.h>
+#include <fnmatch.h>
 
 #include "asterisk/lock.h"
 #include "asterisk/channel.h"
@@ -144,6 +145,7 @@ do not use 127.0.0.1
 #define EL_MAX_SERVERS 3
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
+#define	EL_MAX_CALL_LIST 30
 
 #define	DELIMCHR ','
 #define	QUOTECHR 34
@@ -221,6 +223,10 @@ struct el_instance
 	char astnode[EL_NAME_SIZE + 1];
 	char context[EL_NAME_SIZE + 1];
 	int maxstns;
+	char *denylist[EL_MAX_CALL_LIST];
+	int ndenylist;
+	char *permitlist[EL_MAX_CALL_LIST];
+	int npermitlist;
 	/* missed 10 heartbeats, you're out */
 	short rtcptimeout;
 	unsigned int mynode;
@@ -2055,6 +2061,14 @@ int	sock;
 			close(sock);
 			return -1;
 		}
+		sprintf(dbstr,"%c/nodenum-call/%s",db_loading,nodenum);
+		usleep(2000); /* To get to dry land */
+		if (ast_db_put(EL_DB_ROOT,dbstr,call))
+		{
+ 			ast_log(LOG_ERROR,"Error in putting nodenum-call record %s (call %s)",nodenum,call);
+			close(sock);
+			return -1;
+		}
 		sprintf(dbstr,"%c/call/%s",db_loading,call);
 		sprintf(dbstr1,"%s:%s",nodenum,ipaddr);
 		usleep(2000); /* To get to dry land */
@@ -2340,13 +2354,44 @@ static void *el_reader(void *data)
 						}
 						else /* otherwise its a new request */
 						{
-							i = do_new_call(instp,NULL,call,name);
-							if (i < 0)
+							i = 0;  /* default authorized */
+							if (instp->ndenylist)
 							{
-								ast_mutex_unlock(&instp->lock);
-								mythread_exit(NULL);
+								for (x = 0; x < instp->ndenylist; x++)
+								{
+									if (!fnmatch(instp->denylist[x],call,FNM_CASEFOLD)) 
+									{
+										i = 1;
+										break;
+									}
+								}
 							}
-							if (i)
+							else
+							{
+								/* if permit list specified, default is not to authorize */
+								if (instp->npermitlist) i = 1;
+							}
+							if (instp->npermitlist)
+							{
+								for (x = 0; x < instp->npermitlist; x++)
+								{
+									if (!fnmatch(instp->permitlist[x],call,FNM_CASEFOLD)) 
+									{
+										i = 0;
+										break;
+									}
+								}
+							}
+							if (!i) /* if authorized */
+							{
+								i = do_new_call(instp,NULL,call,name);
+								if (i < 0)
+								{
+									ast_mutex_unlock(&instp->lock);
+									mythread_exit(NULL);
+								}
+							}
+							if (i) /* if not authorized */
 							{
 								if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",
 									instp->el_node_test.ip);
@@ -2613,6 +2658,12 @@ pthread_attr_t attr;
 	{
 	   instp->irlpnode = atoi(val);
 	}
+
+        val = (char *) ast_variable_retrieve(cfg,ctg,"deny"); 
+	if (val) instp->ndenylist = finddelim(strdup(val),instp->denylist,EL_MAX_CALL_LIST);
+
+        val = (char *) ast_variable_retrieve(cfg,ctg,"permit"); 
+	if (val) instp->npermitlist = finddelim(strdup(val),instp->permitlist,EL_MAX_CALL_LIST);
 
 	instp->audio_sock = -1;
 	instp->ctrl_sock = -1;
