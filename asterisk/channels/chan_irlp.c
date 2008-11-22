@@ -31,7 +31,10 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.13, 9/17/2008
+#define	rpt_free(p) __ast_free(p,__FILE__,__LINE__,__PRETTY_FUNCTION__)
+
+
+/* Version 0.16, 11/17/2008
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -49,7 +52,7 @@ Eric, KA6UAI for putting up with a few miserable days of
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 143467 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <string.h>
@@ -89,6 +92,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 143467 $")
 #define GSM_BLOCKING_FACTOR 10
 #define GSM_FRAME_SIZE 33
 
+#define ULAW_BLOCKING_FACTOR 1
+#define ULAW_FRAME_SIZE 256
+
 #define IRLP_IP_SIZE 15
 #define IRLP_CALL_SIZE 15
 #define IRLP_NODE_SIZE 7
@@ -112,7 +118,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 143467 $")
 	"chown repeater /home/irlp/astrun/dtmf_fifo) > /dev/null 2>&1"
 #define	IRLP_SEND_DTMF "su - repeater /tmp/irlpwrap \"/home/irlp/scripts/fifoecho stn%04d dtmfregen %s\""
 
-enum {IRLP_NOPROTO,IRLP_ISADPCM,IRLP_ISGSM} ;
+enum {IRLP_NOPROTO,IRLP_ISADPCM,IRLP_ISGSM,IRLP_ISULAW} ;
 
 struct irlp_audio
 {
@@ -211,6 +217,7 @@ static int radmode = 0;
 static int nodenum = 0;
 static int audio_sock = -1;
 static int ctrl_sock = -1;
+static int tx_buf_n = 0;
 static int tx_audio_port = 0;
 static int alt_audio_sock = -1;
 static int alt_ctrl_sock = -1;
@@ -226,7 +233,6 @@ static pthread_t irlp_reader_thread;
 static int run_forever = 1;
 static int proto = IRLP_NOPROTO;
 static int in_node = 0;
-static int txindex;
 static struct irlp_rxqast rxqast;
 static char *outbuf_old;
 static int rxlen;
@@ -241,6 +247,7 @@ static int playing = 0;
 static unsigned int xcount = 0;
 static char havedtmf = 0;
 static char irlp_dtmf_string[64];
+static char irlp_dtmf_special = 0;
 time_t keepalive = 0;
 
 #ifdef OLD_ASTERISK
@@ -288,7 +295,7 @@ void static reset_stuff(void)
 	keepalive = 0;
 	in_node = 0;
 	nodenum = 0;
-	txindex = 0;
+	tx_buf_n = 0;
 	ready = 0;
 	rxqast.qe_forw = &rxqast;
 	rxqast.qe_back = &rxqast;
@@ -298,6 +305,7 @@ void static reset_stuff(void)
 	ctrl_port = audio_port + 1;
 	havedtmf = 0;
 	memset(irlp_dtmf_string,0,sizeof(irlp_dtmf_string));
+	irlp_dtmf_special = 0;
 	if (curcall)
 	{
 	       curcall->nativeformats = AST_FORMAT_ADPCM;
@@ -512,7 +520,7 @@ struct sockaddr_in sin;
 		if (cp[strlen(cp) - 1] == '\n')
 			cp[strlen(cp) - 1] = 0;
 		strncpy(ipbuf,cp,sizeof(ipbuf) - 1);
-		free(cp);
+		ast_free(cp);
 	}
 	else
 	{
@@ -543,7 +551,7 @@ struct sockaddr_in sin;
 		if (cp[strlen(cp) - 1] == '\n')
 			cp[strlen(cp) - 1] = 0;
 		strncpy(buf,cp,sizeof(buf) - 1);
-		free(cp);
+		ast_free(cp);
 	}
 	else
 	{
@@ -595,7 +603,7 @@ static int irlp_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_safe_system(IRLP_END);
 		usleep(10000);
 	}
-	if (cp) free(cp);
+	if (cp) ast_free(cp);
 	if ((!radmode) && nodenum)
 	{
 		if (nodenum >= 9000)
@@ -626,27 +634,37 @@ static void process_codec_file(struct ast_channel *ast)
 	  cp = irlp_read_file(IRLP_ROOT,"codec");
 	  if (cp) 
 	  {
+		  if (cp[strlen(cp) - 1] == '\n') cp[strlen(cp) - 1] = 0;
 		  if (!strncasecmp(cp,"GSM",3))
 		  {
 			  if (proto == IRLP_NOPROTO)
-				  ast_log(LOG_NOTICE,"irlp channel format set to GSM\n");
+				  ast_log(LOG_NOTICE,"irlp channel format set to %s\n",cp);
 			  else if (proto != IRLP_ISGSM)
-				  ast_log(LOG_NOTICE,"irlp channel format changed to GSM\n");
+				  ast_log(LOG_NOTICE,"irlp channel format changed to %s\n",cp);
 			  proto = IRLP_ISGSM;
 		          ast->nativeformats = AST_FORMAT_GSM;
+		  }
+		  else if (!strncasecmp(cp,"UNCOMP",6))
+		  {
+			  if (proto == IRLP_NOPROTO)
+				  ast_log(LOG_NOTICE,"irlp channel format set to ULAW (%s)\n",cp);
+			  else if (proto != IRLP_ISULAW)
+				  ast_log(LOG_NOTICE,"irlp channel format changed to ULAW (%s)\n",cp);
+			  proto = IRLP_ISULAW;
+		          ast->nativeformats = AST_FORMAT_ULAW;
 		  }
 		  else 
 		  {
 			  if (proto == IRLP_NOPROTO)
-				  ast_log(LOG_NOTICE,"irlp channel format set to ADPCM\n");
+				  ast_log(LOG_NOTICE,"irlp channel format set to %s\n",cp);
 			  else if (proto != IRLP_ISADPCM)
-				  ast_log(LOG_NOTICE,"irlp channel format changed to GSM\n");
+				  ast_log(LOG_NOTICE,"irlp channel format changed to %s\n",cp);
 			  proto = IRLP_ISADPCM;
 		          ast->nativeformats = AST_FORMAT_ADPCM;
 		  }
 		  ast_set_read_format(ast,ast->readformat);
 		  ast_set_write_format(ast,ast->writeformat);
-		  free(cp);
+		  ast_free(cp);
 	  }
 	  return;
 }
@@ -703,7 +721,7 @@ static void *irlp_reader(void *nothing)
 		{
 			cp = irlp_read_file(IRLP_ROOT,"codec");
 			i = ((cp && *cp));
-			if (cp) free(cp);
+			if (cp) ast_free(cp);
 			if (i) send_keepalive();
 			keepalive = now;
 		}
@@ -779,7 +797,7 @@ static void *irlp_reader(void *nothing)
 					ready = 1;
 					if (curcall && (proto == IRLP_NOPROTO)) process_codec_file(curcall);
 				  } else ast_log(LOG_NOTICE,"irlp node attempted connect from %s with no node info\n", ip);
-				  if (cp) free(cp);
+				  if (cp) ast_free(cp);
 	                       }
 	                    }
 	                 } 
@@ -823,7 +841,7 @@ static void *irlp_reader(void *nothing)
 			      if (proto == IRLP_NOPROTO)
 				  ast_log(LOG_NOTICE,"irlp channel format set to ADPCM\n");
 			      else if (proto != IRLP_ISADPCM)
-				  ast_log(LOG_NOTICE,"irlp channel format changed to GSM\n");
+				  ast_log(LOG_NOTICE,"irlp channel format changed to ADPCM\n");
 			      proto = IRLP_ISADPCM;
 			      if (curcall)
 			      {
@@ -833,7 +851,7 @@ static void *irlp_reader(void *nothing)
 				      ast_set_write_format(curcall,curcall->writeformat);
 			      }
 		          }
-	                  if (((struct irlp_audio *)buf)->compression == htonl(0x20 | 0x40000000))
+	                  else if (((struct irlp_audio *)buf)->compression == htonl(0x20 | 0x40000000))
 		          {
 			      if (proto == IRLP_NOPROTO)
 				  ast_log(LOG_NOTICE,"irlp channel format set to GSM\n");
@@ -847,13 +865,27 @@ static void *irlp_reader(void *nothing)
 				      ast_set_write_format(curcall,curcall->writeformat);
 			      }
 		          }
+	                  else if (((struct irlp_audio *)buf)->compression == htonl(0x40000000))
+		          {
+			      if (proto == IRLP_NOPROTO)
+				  ast_log(LOG_NOTICE,"irlp channel format set to ULAW (UNCOMP)\n");
+			      else if (proto != IRLP_ISULAW)
+				  ast_log(LOG_NOTICE,"irlp channel format changed to ULAW (UNCOMP)\n");
+			      proto = IRLP_ISULAW;
+			      if (curcall)
+			      {
+		                      curcall->nativeformats = AST_FORMAT_ULAW;
+				      ast_set_read_format(curcall,curcall->readformat);
+				      ast_set_write_format(curcall,curcall->writeformat);
+			      }
+		          }
 	                 qpast = ast_malloc(sizeof(struct irlp_rxqast) + len);
 	                 if (!qpast) 
 			 {
 	                    ast_log(LOG_NOTICE,"Cannot malloc for qpast\n");
 			    break;
 	                 }
-			 if (proto == IRLP_ISADPCM)
+			 if (proto != IRLP_ISGSM)
 			 {
 		                 qpast->len = len;
 		                 memcpy(qpast->buf,((struct irlp_audio *)buf)->buffer.buffer_val,len);
@@ -1028,23 +1060,40 @@ static int irlp_indicate(struct ast_channel *ast, int cond, const void *data, si
 
 static int irlp_text(struct ast_channel *ast, const char *text)
 {
-int	destnode,hisnode,seqno,i;
+int	destnode,hisnode,seqno,i,j;
 char	c;
 
-	struct irlp_pvt *p = ast->tech_pvt;
+/*	struct irlp_pvt *p = ast->tech_pvt; */
 
-	if (!p->txkey) return(0);
+/*	if (!p->txkey) return(0); */
 	if (text[0] != 'D') return 0;
 	if (sscanf(text + 2,"%d %d %d %c",&destnode,&hisnode,&seqno,&c) != 4) return(0);
 	if (destnode != (in_node + 40000)) return(0);
 	if (c == '*') c = 'S';
 	if (c == '#') c = 'P';
+	if ((c == 'D') && (!irlp_dtmf_special))
+	{
+		irlp_dtmf_special = 1;
+		return 0;
+	}
 	i = strlen(irlp_dtmf_string);
-	if (i < (sizeof(irlp_dtmf_string) - 1))
+	j = 1;
+	if (irlp_dtmf_special && (c != 'D')) j = 2;
+	if (i < (sizeof(irlp_dtmf_string) - j))
 	{
 		irlp_dtmf_string[i + 1] = 0;
-		irlp_dtmf_string[i] = c;
+		if ((irlp_dtmf_special) && (c != 'D'))
+		{
+			irlp_dtmf_string[i + 2] = 0;
+			irlp_dtmf_string[i] = 'P';
+			irlp_dtmf_string[i + 1] = c;
+		}
+		else 
+		{
+			irlp_dtmf_string[i] = c;
+		}
 	}
+	irlp_dtmf_special = 0;
 	return 0;
 }
 
@@ -1081,8 +1130,8 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	struct irlp_pvt *p = ast->tech_pvt;
 	struct ast_frame fr;
 	struct irlp_rxqast *qpast;
-	int n,i,len,gotone,dosync,blocking_factor,frame_size,frame_samples,recvlen;
-        char outbuf[ADPCM_FRAME_SIZE + AST_FRIENDLY_OFFSET + 3]; /* turns out that ADPCM is larger */
+	int n,i,len,gotone,dosync,blocking_factor,frame_size,frame_samples,recvlen,flen;
+        char outbuf[ULAW_FRAME_SIZE + AST_FRIENDLY_OFFSET + 3]; /* turns out that ADPCM is larger */
         struct irlp_audio irlp_audio_packet;
         static char tx_buf[(ADPCM_BLOCKING_FACTOR * ADPCM_FRAME_SIZE) + 3]; /* turns out the ADPCM is larger */
 	char *outbuf_new,*cp,c,str[200];
@@ -1135,18 +1184,20 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			}
 		}
 	}
+        /* IRLP to Asterisk */
 	frame_samples = 160;
 	if (proto == IRLP_ISGSM)
 	{
-		blocking_factor = GSM_BLOCKING_FACTOR;
 		frame_size = GSM_FRAME_SIZE;
+	}
+	else if (proto == IRLP_ISULAW)
+	{
+		frame_size = frame_samples;
 	}
 	else
 	{
-		blocking_factor = ADPCM_BLOCKING_FACTOR;
 		frame_size = ADPCM_FRAME_SIZE;
 	}
-        /* IRLP to Asterisk */
 	if (rxqast.qe_forw != &rxqast) {
 		for(n = 0,qpast = rxqast.qe_forw; qpast != &rxqast; qpast = qpast->qe_forw) {
 			n++;
@@ -1227,7 +1278,7 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			memcpy(cp + i,outbuf_new,len);
 			rxlen = len + i;
 			rxidx = 0;
-			free(outbuf_new);
+			ast_free(outbuf_new);
 			outbuf_new = NULL;
 			free(outbuf_old);
 			outbuf_old = cp;
@@ -1256,6 +1307,10 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		{
 			fr.subclass = AST_FORMAT_ADPCM;
 		}
+		else if (proto == IRLP_ISULAW)
+		{
+			fr.subclass = AST_FORMAT_ULAW;
+		}
 		else
 		{
 			fr.subclass = AST_FORMAT_GSM;
@@ -1266,7 +1321,6 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		fr.mallocd=0;
 		fr.delivery.tv_sec = 0;
 		fr.delivery.tv_usec = 0;
-
 		ast_queue_frame(ast,&fr);
 	}
 	if (p->rxkey == 1) {
@@ -1293,43 +1347,78 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		lasttx = p->txkey;
 		if ((!p->txkey) && irlp_dtmf_string[0])
 		{
+			if (irlp_dtmf_special)
+			{
+				i = strlen(irlp_dtmf_string);
+				if (i < (sizeof(irlp_dtmf_string) - 1))
+				{
+					irlp_dtmf_string[i + 1] = 0;
+					irlp_dtmf_string[i] = 'P';
+				}
+			}
 			sprintf(str,IRLP_SEND_DTMF,in_node,irlp_dtmf_string);
 			ast_safe_system(str);
 			ast_log(LOG_NOTICE,"Sent DTMF %s to IRLP\n",irlp_dtmf_string);
 		}
 		irlp_dtmf_string[0] = 0;
+		irlp_dtmf_special = 0;
 	}
 
-	if (!p->txkey) return(0);
+	if (!p->txkey) 
+	{
+		tx_buf_n = 0;
+		return(0);
+	}
 
-	i = AST_FORMAT_ADPCM;
-	if (proto == IRLP_ISGSM) i = AST_FORMAT_GSM;
-
-        /* Asterisk to IRLP */
+	flen = frame->datalen;
+	/* Asterisk to IRLP */
+	if (proto == IRLP_ISGSM)
+	{
+		blocking_factor = GSM_BLOCKING_FACTOR;
+		frame_size = GSM_FRAME_SIZE;
+		i = AST_FORMAT_GSM;	
+	}
+	else if (proto == IRLP_ISULAW)
+	{
+		blocking_factor = ULAW_BLOCKING_FACTOR;
+		frame_size = ULAW_FRAME_SIZE;
+		i = AST_FORMAT_ULAW;
+	}
+	else
+	{
+		blocking_factor = ADPCM_BLOCKING_FACTOR;
+		frame_size = ADPCM_FRAME_SIZE;
+		i = AST_FORMAT_ADPCM;
+		flen = frame->datalen - 3;
+	}
+	
         if (!(frame->subclass & i)) {
              ast_log(LOG_WARNING, "Cannot handle frames in %d format\n", frame->subclass);
              return 0;
         }
 	cp = frame->data;
-        if (p->txkey || txindex)  {
-	     if ((proto == IRLP_ISADPCM) && (!txindex))
-		 memcpy(tx_buf + (frame_size * 
+	if ((proto == IRLP_ISADPCM) && (!tx_buf_n)) {
+	    memcpy(tx_buf + (frame_size * 
 		    blocking_factor),cp + frame_size,3);
-             memcpy(tx_buf + (frame_size * txindex++), 
-                    frame->data,frame_size);
-        }     
-
-        if (txindex >= blocking_factor) { 
+	}
+        memcpy(tx_buf + tx_buf_n,frame->data,flen);
+	tx_buf_n += flen;
+        if (tx_buf_n >= (blocking_factor * frame_size)) { 
 
            dp = (unsigned char *)irlp_audio_packet.buffer.buffer_val;
 	   if (proto == IRLP_ISADPCM)
 	   {
 	           irlp_audio_packet.compression = htonl(0x200 | 0x40000000);
 	   }
+	   else if (proto == IRLP_ISULAW)
+	   {
+	           irlp_audio_packet.compression = htonl(0x40000000);
+	   }
 	   else
 	   {
 	           irlp_audio_packet.compression = htonl(0x20 | 0x40000000);
 	   }
+
            snprintf(irlp_audio_packet.sendinghost,IRLP_IP_SIZE,
                      "stn%s-%s",mynode,mycall);
 
@@ -1338,6 +1427,12 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		memcpy((char *)dp,tx_buf,(blocking_factor * frame_size) + 3);
 	        irlp_audio_packet.buffer.buffer_len = htonl((blocking_factor * 
 			frame_size) + 3);
+	   }
+	   else if (proto == IRLP_ISULAW)
+	   {
+		memcpy((char *)dp,tx_buf,blocking_factor * frame_size);
+	        irlp_audio_packet.buffer.buffer_len = htonl(blocking_factor * 
+			frame_size);
 	   }
 	   else
 	   {
@@ -1357,6 +1452,11 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
                   sendto((alt_audio_sock != -1) ? alt_audio_sock : audio_sock,(char *)&irlp_audio_packet,507,
                       0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
 	      }
+	      else if (proto == IRLP_ISULAW)
+	      {
+                  sendto((alt_audio_sock != -1) ? alt_audio_sock : audio_sock,(char *)&irlp_audio_packet,280,
+                      0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
+	      }
 	      else
 	      {
                   sendto((alt_audio_sock != -1) ? alt_audio_sock : audio_sock,(char *)&irlp_audio_packet,356,
@@ -1372,12 +1472,22 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
                sendto(audio_sock,(char *)&irlp_audio_packet,507,
                   0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
 	   }
+	   else if (proto == IRLP_ISULAW)
+	   {
+               sendto(audio_sock,(char *)&irlp_audio_packet,280,
+                  0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
+	   }
 	   else
 	   {
                sendto(audio_sock,(char *)&irlp_audio_packet,356,
                   0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
 	   }
-           txindex = 0;
+           tx_buf_n -= (blocking_factor * frame_size);
+	   if (tx_buf_n)
+	   {
+		i = (blocking_factor * frame_size);
+		memmove(tx_buf,tx_buf + i,tx_buf_n);
+	   }
         }
 	return 0;
 }
