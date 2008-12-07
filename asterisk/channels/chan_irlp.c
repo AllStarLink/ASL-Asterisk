@@ -34,7 +34,7 @@
 #define	rpt_free(p) __ast_free(p,__FILE__,__LINE__,__PRETTY_FUNCTION__)
 
 
-/* Version 0.16, 11/17/2008
+/* Version 0.18, 12/1/2008
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -102,6 +102,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #define IRLP_ADPCM_STATE_INFO_SIZE 3
 
 #define	LARGEST_PACKET_SIZE 1024
+#define	DISC_LINGER_TIME 2
 #define	IRLP_ROOT "/home/irlp/local"
 #define	IRLP_RESET "su - repeater /tmp/irlpwrap /home/irlp/custom/irlp_fullreset"
 #define	IRLP_END "su - repeater /tmp/irlpwrap /home/irlp/scripts/end &"
@@ -213,6 +214,7 @@ static char astnode[20];
 static char astnode1[20];
 static short rtcptimeout = 10;
 static short localispeakerport = 2174;
+time_t lingertime = 0;
 static int radmode = 0;
 static int nodenum = 0;
 static int audio_sock = -1;
@@ -292,6 +294,7 @@ void static reset_stuff(void)
 	if (alt_ctrl_sock != -1) close(alt_ctrl_sock);
 	alt_ctrl_sock = -1;
 	proto = IRLP_NOPROTO;
+	time(&lingertime);
 	keepalive = 0;
 	in_node = 0;
 	nodenum = 0;
@@ -769,7 +772,8 @@ static void *irlp_reader(void *nothing)
 			       {
 	                          strncpy(remote_irlp_node_ip, ip, IRLP_IP_SIZE);
 				  cp = irlp_read_file(IRLP_ROOT,"active");
-				  if (cp && (strlen(cp) > 3))
+				  if ((cp && (strlen(cp) > 3)) && 
+				    (time(NULL) >= (lingertime + DISC_LINGER_TIME)))
 				  {
 					if (cp[strlen(cp) - 1] == '\n')
 						cp[strlen(cp) - 1] = 0;
