@@ -2,7 +2,7 @@
 
 -include /etc/sysinfo #include if it exists, else use defaults
 
-ASTSRC_VERS:=1.0.6
+ASTSRC_VERS:=1.0.7-test
 KVERS?=$(shell uname -r)
 PROCESSOR?=i586
 
@@ -32,14 +32,16 @@ PROCESSOR?=i586
 	$(MAKE) -C libpri install
 	touch .libpri-installed
 
-build-only: .zaptel-installed .libpri-installed
-	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux; $(MAKE)  menuconfig)
+build-only: .zaptel-installed .libpri-installed .asterisk-configured
+	$(MAKE)  menuconfig
 	$(MAKE) -C asterisk DEBUG=
+
 	
-	
-.asterisk-installed:
-	-rm -rf /usr/lib/asterisk/modules/*
+.asterisk-configured:
 	(cd asterisk; ./configure CXX=gcc --build=$(PROCESSOR)-pc-linux)
+
+.asterisk-installed: .asterisk-configured
+	-rm -rf /usr/lib/asterisk/modules/*
 	$(MAKE) -C asterisk install DEBUG=
 	touch .asterisk-installed
 	
@@ -52,7 +54,7 @@ build-only: .zaptel-installed .libpri-installed
 	-cp id.gsm /etc/asterisk
 	touch .id_file
 
-.PHONY:	help upgrade install_pciradio install_usbradio install_wcte11xp clean release svsrc genconfig 
+.PHONY:	help upgrade test-build install_pciradio install_usbradio install_wcte11xp clean release svsrc genconfig 
 
 #
 # Default goal: Print Help
@@ -79,10 +81,14 @@ upgrade:	.kernel-dev-installed .zaptel-installed .libpri-installed .asterisk-ins
 	mv -f /root/astbin.tgz /mnt/cf
 	umount /mnt/cf
 #
+# Asterisk test build without install
+#
+test-build: .zaptel-installed .libpri-installed .asterisk-configured
+	$(MAKE)  menuconfig
+	$(MAKE) -C asterisk DEBUG=
+#
 # Build and install for Quad Radio PCI card
 #
-
-
 install_pciradio: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -93,8 +99,6 @@ install_pciradio: .id_file upgrade
 #
 # Build and install for USB fobs
 #
-
-
 install_usbradio: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -106,7 +110,6 @@ install_usbradio: .id_file upgrade
 #
 # Build and install for TE110P T1 card channel bank and ARIBS
 #
-
 install_wcte11xp: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -118,7 +121,6 @@ install_wcte11xp: .id_file upgrade
 #
 # Build and install for T100P T1 card channel bank and ARIBS
 #
-
 install_wct1xxp: .id_file upgrade
 	-@mkdir -p /etc/asterisk
 	-@cp configs/* /etc/asterisk
@@ -130,7 +132,6 @@ install_wct1xxp: .id_file upgrade
 #
 # Remove all object files on the target
 #
-
 clean:	.kernel-dev-installed
 	-rm .zaptel-installed \
 	 .libpri-installed .asterisk-installed \
