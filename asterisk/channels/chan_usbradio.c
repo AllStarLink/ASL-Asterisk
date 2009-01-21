@@ -48,7 +48,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 135362 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -1628,7 +1628,8 @@ static int usbradio_digit_end(struct ast_channel *c, char digit, unsigned int du
 */
 static int usbradio_text(struct ast_channel *c, const char *text)
 {
-	struct chan_usbradio_pvt *o = find_desc(usbradio_active);
+	struct chan_usbradio_pvt *o = c->tech_pvt;
+
 	double tx,rx;
 	char cnt,rxs[16],txs[16],txpl[16],rxpl[16];
 	char pwr,*cmd;
@@ -1641,19 +1642,19 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 	cnt=sscanf(text,"%s %s %s %s %s %c",cmd,rxs,txs,rxpl,txpl,&pwr);
 
 	if (strcmp(cmd,"SETCHAN")==0)
-    { 
+	{ 
 		u8 chan;
 		chan=strtod(rxs,NULL);
 		ppbinout(chan);
-        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio SETCHAN cmd: %s chan: %i\n",text,chan);
-        return 0;
-    }
+	        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio SETCHAN cmd: %s chan: %i\n",text,chan);
+	        return 0;
+	}
 	
-    if (cnt < 6)
-    {
-	    ast_log(LOG_ERROR,"Cannot parse usbradio text: %s\n",text);
-	    return 0;
-    }
+	if (cnt < 6)
+	{
+		ast_log(LOG_ERROR,"Cannot parse usbradio text: %s\n",text);
+		return 0;
+	}
 	else
 	{
 		if(o->debuglevel)ast_verbose(" << %s %s %s %s %s %c >> \n", cmd,rxs,txs,rxpl,txpl,pwr);	
