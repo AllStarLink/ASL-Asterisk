@@ -48,7 +48,7 @@
 	IIR 	= Infinite Impulse Response (Filter)
 */
 
-// XPMR_FILE_VERSION(__FILE__, "$Revision: 116706 $")
+// XPMR_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -541,9 +541,22 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 
 		    y=((y/calcAdjust)*outputGain)/M_Q8;
 
+
+#if	XPMR_TRACE_OVFLW == 1
+			if(y>32767)
+			{
+				y=32767;
+				printf("pmr_rx_frontend() OVRFLW \n"  );
+			}
+			else if(y<-32767)
+			{
+				y=-32767;
+				printf("pmr_rx_frontend() UNDFLW \n"  );
+			}
+#else
 			if(y>32767)y=32767;
 			else if(y<-32767)y=-32767;
-
+#endif
 		    output[iOutput]=y;					// Rx Baseband decimated
 			noutput[iOutput++] = apeak;		  	// Rx Noise
 		}
@@ -702,6 +715,9 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 
 			y=((y/calcAdjust)*outputGain)/M_Q8;
 
+			if (y>32767)y=32767;		 			// overflow
+			else if(y<-32767)y=-32767;
+
 			if(mixOut){
 				if(monoOut){
 					output[(ii*2)]=output[(ii*2)+1]+=y;
@@ -858,8 +874,8 @@ i16 gp_diff(t_pmr_sps *mySps)
 		   y0 = (temp0 + temp1)/calcAdjust;
 		   y0 =(y0*outputGain)/M_Q8;
 		
-		if(y0>32766)y0=32766;
-		else if(y0<-32766)y0=-32766;
+		if(y0>32767)y0=32767;
+		else if(y0<-32767)y0=-32767;
         output[i]=y0;
     }
 
@@ -2239,7 +2255,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		 
 		pSps->calcAdjust=gain_int_hpf_4000_1_2;
 		pSps->inputGain=(1*M_Q8);
-		pSps->outputGain=(1*M_Q8);	 // to match flat at 1KHz
+		pSps->outputGain=(1*M_Q8);	 // to match flat at 1KHz 
 		inputTmp=pSps->sink;
 	}
 
@@ -2255,7 +2271,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps->nSamples=pChan->nSamplesTx;
 		pSps->inputGain=(1*M_Q8);
 		pSps->outputGain=(1*M_Q8);
-		pSps->setpt=12000;
+		pSps->setpt=12000;			// limiting point for 100 modulation		
 		inputTmp=pSps->sink;
 	}
 
