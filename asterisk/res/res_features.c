@@ -1725,6 +1725,8 @@ int ast_bridge_call(struct ast_channel *chan,struct ast_channel *peer,struct ast
 		/* swap the bridge cdr and the chan cdr for a moment, and let the endbridge
 		   dialplan code operate on it */
 		swapper = chan->cdr;
+		if(!bridge_cdr) /* Patch to stop autopatch from segfaulting when downed on a suped call */
+			return -1; 
 		ast_copy_string(savelastapp, bridge_cdr->lastapp, sizeof(bridge_cdr->lastapp));
 		ast_copy_string(savelastdata, bridge_cdr->lastdata, sizeof(bridge_cdr->lastdata));
 		ast_channel_lock(chan);
