@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.175 12/29/08 
+ *  version 0.174 12/22/08 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -97,7 +97,6 @@
  *  37 - Foreign Link Local Output Path Disable
  *  38 - Foreign Link Local Output Path Follows Local Telemetry
  *  39 - Foreign Link Local Output Path on Demand
- *  40 - Execute arbitrary program
  *
  * ilink cmds:
  *
@@ -408,7 +407,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.175  12/29/2008";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.174  12/22/2008";
 
 static char *app = "Rpt";
 
@@ -1418,26 +1417,6 @@ static struct function_table_tag function_table[] = {
 
 } ;
 
-/*
- * Do a system command
- */
-
-static void rpt_do_system(char *argv[], int usepath)
-{
-	int pid;
-        if (!(pid = fork()))
-        {
-		if(usepath)
-			execvp(argv[0],argv);
-		else
-                	execv(argv[0],argv);
-                ast_log(LOG_ERROR, "exec of %s failed.\n", argv[0]);
-                perror("asterisk");
-                exit(0);
-        }
-}
-
-
 static long diskavail(struct rpt *myrpt)
 {
 struct	statfs statfsbuf;
@@ -2026,53 +2005,6 @@ static char *eatwhite(char *s)
 }
 
 /*
- * Make an argv list from a list of args in a supplied string separated by spaces or tabs 
- * str - delimited string ( will be modified )
- * argv - list of pointers to substrings (this is built by this function), NULL will be placed at end of list
- * limit- maximum number of substrings to process including NULL placed at end of array.
- *
- */
-
-static int makeargv(char *str, char *argv[], int limit)
-{
-	int i,j,end;
-	for(i = 0, j = 0 ; j < limit - 1 && str[i] ; j++){
-		/* Skip whitespace at the beginning of an argument */
-		while(((str[i] == ' ') || (str[i] == 0x09)) && (str[i]))
-			i++;
-		end = i;
-		/* Find the end of an argument */
-		while((str[end] != ' ') && (str[end] != 0x09) && (str[end]))
-			end++;
-		/* If arg exists, add a pointer to the list, and zero the end then proceed to the next arg */
-		if(end-i){
-			argv[j] = str+i;
-			if(str[end]){
-				str[end++] = 0;
-				i = end;
-			}
-			else{
-				i = end;
-				continue;
-			}
-		}
-		else{
-			break;
-		}
-	}
-	argv[j] = NULL; /* Terminate the end of the list */
-	return j;
-}
-
-
-			
-				
-	
-
-	
-
-
-/*
 * Break up a delimited string into a table of substrings
 *
 * str - delimited string ( will be modified )
@@ -2080,6 +2012,7 @@ static int makeargv(char *str, char *argv[], int limit)
 * limit- maximum number of substrings to process
 */
 	
+
 
 static int finddelim(char *str, char *strp[], int limit)
 {
@@ -2207,7 +2140,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 {
 char *str,*astr;
 char *astrs[100];
-int	n;
+int	n,pid;
 time_t	now;
 unsigned int seq;
 
@@ -2226,7 +2159,13 @@ unsigned int seq;
 	sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
 		myrpt->name,(unsigned int) now,seq);
 	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
-	rpt_do_system(astrs,0);
+	if (!(pid = fork()))
+	{
+		execv(astrs[0],astrs);
+		ast_log(LOG_ERROR, "exec of %s failed.\n", astrs[0]);
+		perror("asterisk");
+		exit(0);
+	}
 	ast_free(astr);
 	ast_free(str);
 	return;
@@ -7321,50 +7260,26 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char string[16];
+
 	int i, r, src;
-	static char *argv[] = {"killall","-9","asterisk",NULL};
-	int res = DC_INDETERMINATE;
-        char *lparam;
-        char *paramlist[3];
-        int paramlength;
 
 	if(!param)
 		return DC_ERROR;
-	else{
-		/* Process parameter list */
-		lparam = ast_strdup(param);
-                if(!lparam){
-                	ast_log(LOG_ERROR,"App_rpt out of memory on line %d\n",__LINE__);
-                        return DC_ERROR;
-		}
-                paramlength = finddelim(lparam, paramlist, 3);
-                ast_log(LOG_NOTICE,"paramlength = %d, paramlist[0] = %s, paramlist[1] = %s\n",
-                	paramlength, paramlist[0], paramlist[1]);
-              
-	}
-	if(!paramlength){
-		ast_free(lparam);
-		return DC_ERROR;
-	}
-
 	
-	switch(myatoi(paramlist[0])){ /* Return statements inside this switch not allowed, memory allocated! */
+	switch(myatoi(param)){
 		case 1: /* System reset */
-			rpt_do_system(argv,1);
-			res = DC_COMPLETE;
-			break;
+			system("killall -9 asterisk");
+			return DC_COMPLETE;
 
 		case 2:
 			myrpt->p.s[myrpt->p.sysstate_cur].txdisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "RPTENA");
-			res =  DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 			
 		case 3:
 			myrpt->p.s[myrpt->p.sysstate_cur].txdisable = 1;
-			res =  DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 			
 		case 4: /* test tone on */
 			if (myrpt->stopgen < 0) 
@@ -7376,62 +7291,52 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->stopgen = 0;
 				rpt_telemetry(myrpt, TEST_TONE, NULL);
 			}
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 
 		case 5: /* Disgorge variables to log for debug purposes */
 			myrpt->disgorgetime = time(NULL) + 10; /* Do it 10 seconds later */
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 
 		case 6: /* Simulate COR being activated (phone only) */
-			if (command_source != SOURCE_PHONE)
-				res =  DC_INDETERMINATE;
-			else
-				res = DC_DOKEY;	
-			break;
+			if (command_source != SOURCE_PHONE) return DC_INDETERMINATE;
+			return DC_DOKEY;	
+
 
 		case 7: /* Time out timer enable */
 			myrpt->p.s[myrpt->p.sysstate_cur].totdisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "TOTENA");
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 			
 		case 8: /* Time out timer disable */
 			myrpt->p.s[myrpt->p.sysstate_cur].totdisable = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "TOTDIS");
-			res =  DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 
                 case 9: /* Autopatch enable */
                         myrpt->p.s[myrpt->p.sysstate_cur].autopatchdisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "APENA");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 10: /* Autopatch disable */
                         myrpt->p.s[myrpt->p.sysstate_cur].autopatchdisable = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "APDIS");
-                        res =  DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 11: /* Link Enable */
                         myrpt->p.s[myrpt->p.sysstate_cur].linkfundisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "LNKENA");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 12: /* Link Disable */
                         myrpt->p.s[myrpt->p.sysstate_cur].linkfundisable = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "LNKDIS");
-                        res= DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
 		case 13: /* Query System State */
 			string[0] = string[1] = 'S';
@@ -7439,67 +7344,56 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			string[3] = '\0';
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, ARB_ALPHA, (void *) string);
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 
 		case 14: /* Change System State */
 			if(strlen(digitbuf) == 0)
 				break;
-			if((digitbuf[0] < '0') || (digitbuf[0] > '9')){
-				res = DC_ERROR;
-				break;
-			}
+			if((digitbuf[0] < '0') || (digitbuf[0] > '9'))
+				return DC_ERROR;
 			myrpt->p.sysstate_cur = digitbuf[0] - '0';
                         string[0] = string[1] = 'S';
                         string[2] = myrpt->p.sysstate_cur + '0';
                         string[3] = '\0';
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) string);
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 15: /* Scheduler Enable */
                         myrpt->p.s[myrpt->p.sysstate_cur].schedulerdisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SKENA");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 16: /* Scheduler Disable */
                         myrpt->p.s[myrpt->p.sysstate_cur].schedulerdisable = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SKDIS");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 17: /* User functions Enable */
                         myrpt->p.s[myrpt->p.sysstate_cur].userfundisable = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "UFENA");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 18: /* User Functions Disable */
                         myrpt->p.s[myrpt->p.sysstate_cur].userfundisable = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "UFDIS");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 19: /* Alternate Tail Enable */
                         myrpt->p.s[myrpt->p.sysstate_cur].alternatetail = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "ATENA");
-                        res = DC_COMPLETE;
-			break;
+                        return DC_COMPLETE;
 
                 case 20: /* Alternate Tail Disable */
                         myrpt->p.s[myrpt->p.sysstate_cur].alternatetail = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "ATDIS");
-                        res = DC_COMPLETE;
-			break;
-
+                        return DC_COMPLETE;
 
                 case 21: /* Parrot Mode Enable */
 			birdbath(myrpt);
@@ -7508,7 +7402,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->p.parrotmode = 1;
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 22: /* Parrot Mode Disable */
@@ -7518,36 +7412,31 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->p.parrotmode = 0;
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
 		case 23: /* flush parrot in progress */
 			birdbath(myrpt);
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt,COMPLETE,NULL);
-			res = DC_COMPLETE;
-			break;
-
+			return DC_COMPLETE;
 		case 24: /* flush all telemetry */
 			flush_telem(myrpt);
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt,COMPLETE,NULL);
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 		case 25: /* request keying info (brief) */
 			send_link_keyquery(myrpt);
 			myrpt->topkeylong = 0;
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt,COMPLETE,NULL);
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 		case 26: /* request keying info (full) */
 			send_link_keyquery(myrpt);
 			myrpt->topkeylong = 1;
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt,COMPLETE,NULL);
-			res = DC_COMPLETE;
-			break;
+			return DC_COMPLETE;
 
 		case 30: /* recall memory location on programmable radio */
 
@@ -7555,25 +7444,20 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				break;
 			
 			for(i = 0 ; i < 2 ; i++){
-				if((digitbuf[i] < '0') || (digitbuf[i] > '9')){
-					res = DC_ERROR;
-					break;
-				}
+				if((digitbuf[i] < '0') || (digitbuf[i] > '9'))
+					return DC_ERROR;
 			}
 	    
 			r = retreive_memory(myrpt, digitbuf);
 			if (r < 0){
 				rpt_telemetry(myrpt,MEMNOTFOUND,NULL);
-				res = DC_COMPLETE;
-				break;
+				return DC_COMPLETE;
 			}
 			if (r > 0){
-				res = DC_ERROR;
-				break;
+				return DC_ERROR;
 			}
-			if (setrem(myrpt) == -1) res = DC_ERROR;
-			else res = DC_COMPLETE;	
-			break;
+			if (setrem(myrpt) == -1) return DC_ERROR;
+			return DC_COMPLETE;	
 
 		case 31: 
 		    /* set channel. note that it's going to change channel 
@@ -7582,14 +7466,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				break;
 			
 			for(i = 0 ; i < 2 ; i++){
-				if((digitbuf[i] < '0') || (digitbuf[i] > '9')){
-					res = DC_ERROR;
-					break;
-				}
+				if((digitbuf[i] < '0') || (digitbuf[i] > '9'))
+					return DC_ERROR;
 			}
 			channel_steer(myrpt,digitbuf);
-			res =  DC_COMPLETE;
-			break;	
+			return DC_COMPLETE;	
 
 		case 32: /* Touch Tone Pad Test */
 			i = strlen(digitbuf);
@@ -7607,15 +7488,14 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->inpadtest = 0;
 				if(debug > 3)
 					ast_log(LOG_NOTICE,"Padtest exited");
-				res = DC_COMPLETE;
-				break;
+				return DC_COMPLETE;
 			}
                 case 33: /* Local Telem mode Enable */
 			if (myrpt->p.telemdynamic)
 			{
 				myrpt->telemmode = 0x7fffffff;
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 34: /* Local Telem mode Disable */
@@ -7623,7 +7503,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			{
 				myrpt->telemmode = 0;
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 35: /* Local Telem mode Normal */
@@ -7632,14 +7512,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->telemmode = 1;
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 36: /* Link Output Enable */
-			if (!mylink){
-				res =  DC_ERROR;
-				break;
-			}
+			if (!mylink) return DC_ERROR;
 			src = 0;
 			if (mylink->name[0] == '0') src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
@@ -7650,14 +7527,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				set_linkmode(mylink,LINKMODE_ON);
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 37: /* Link Output Disable */
-			if (!mylink){
-				res = DC_ERROR;
-				break;
-			}
+			if (!mylink) return DC_ERROR;
 			src = 0;
 			if (mylink->name[0] == '0') src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
@@ -7668,14 +7542,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				set_linkmode(mylink,LINKMODE_OFF);
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 38: /* Gui Link Output Follow */
-			if (!mylink){
-				res = DC_ERROR;
-				break;
-			}
+			if (!mylink) return DC_ERROR;
 			src = 0;
 			if (mylink->name[0] == '0') src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
@@ -7686,14 +7557,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				set_linkmode(mylink,LINKMODE_FOLLOW);
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
                 case 39: /* Link Output Demand*/
-			if (!mylink){
-				res = DC_ERROR;
-				break;
-			}
+			if (!mylink) return DC_ERROR;
 			src = 0;
 			if (mylink->name[0] == '0') src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
@@ -7704,31 +7572,11 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				set_linkmode(mylink,LINKMODE_DEMAND);
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
-				res = DC_COMPLETE;
+				return DC_COMPLETE;
 			}
 			break;
-		case 40: /* Execute arbitrary program */
-			if(paramlength == 2){
-				char *argv[10];
-				int argc;
-				argc = makeargv(paramlist[1],argv,10);
-				if(debug > 3){
-					ast_log(LOG_NOTICE,"execa: argc = %d, argv[0] = %s, argv1[1] = %s\n",
-						argc, argv[0], argv[1]);
-				}
-				if(argc)
-					rpt_do_system(argv,0);
-				rpt_telemetry(myrpt, ARB_ALPHA, (void *) "EXECA");
-				res = DC_COMPLETE;
-			}
-			else
-				res = DC_ERROR;
-			break;
-
-	}
-	/* Clean up */
-	ast_free(lparam);
-	return res;
+	}	
+	return DC_INDETERMINATE;
 }
 /*
 * Collect digits one by one until something matches
