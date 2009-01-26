@@ -302,6 +302,10 @@
 
 #define EL_DB_ROOT "echolink"
 
+#define MAX_DAQ_ENTRIES 10 /* Max number of DAQ devices */
+#define MAX_DAQ_NAME 32 /* Max length of a device name */
+#define MAX_METER_FILES 10 /* Max number of sound files in a meter def. */
+
 enum {REM_OFF,REM_MONITOR,REM_TX};
 
 enum {LINKMODE_OFF,LINKMODE_ON,LINKMODE_FOLLOW,LINKMODE_DEMAND,
@@ -314,7 +318,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	MEMNOTFOUND, INVFREQ, REMMODE, REMLOGIN, REMXXX, REMSHORTSTATUS,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
-	STATS_TIME_LOCAL, VARCMD, LOCUNKEY};
+	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -331,6 +335,9 @@ enum {REM_MODE_FM,REM_MODE_USB,REM_MODE_LSB,REM_MODE_AM};
 
 enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
       HF_SCAN_DOWN_FAST,HF_SCAN_UP_SLOW,HF_SCAN_UP_QUICK,HF_SCAN_UP_FAST};
+
+enum{DAQ_PT_IN, DAQ_PT_INADC, DAQ_PT_INP, DAQ_PT_OUT};
+enum{DAQ_TYPE_UCHAMELEON};
 
 #define	DEFAULT_RPT_TELEMDEFAULT 2
 #define	DEFAULT_RPT_TELEMDYNAMIC 1
@@ -504,6 +511,7 @@ static char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 chan
 #define ISRIG_RTX(x) ((!strcmp(x,remote_rig_rtx150)) || (!strcmp(x,remote_rig_rtx450)))
 #define	IS_XPMR(x) (!strncasecmp(x->rxchanname,"rad",3))
 
+
 #ifdef	OLD_ASTERISK
 STANDARD_LOCAL_USER;
 LOCAL_USER_DECL;
@@ -654,6 +662,20 @@ struct function_table_tag
 	int (*function)(struct rpt *myrpt, char *param, char *digitbuf, 
 		int command_source, struct rpt_link *mylink);
 } ;
+
+/*
+ * Used in the DAQ code
+ */
+
+struct daq_desc{
+	int type;
+	int fd;
+};
+
+struct daq_entry{
+	char name[MAX_DAQ_NAME];
+	struct daq_desc *desc;
+};
 
 /* Used to store the morse code patterns */
 
@@ -1372,6 +1394,15 @@ static struct telem_defaults tele_defs[] = {
 	{"functcomplete","|t(1000,0,100,2048)(0,0,100,0)(1000,0,100,2048)"}
 } ;
 
+
+/*
+ * DAQ descriptor array
+ */
+
+static int ndaqs;
+static struct daq_entry daq_entries[MAX_DAQ_ENTRIES];
+
+
 /*
 * Forward decl's - these suppress compiler warnings when funcs coded further down the file than thier invokation
 */
@@ -1399,6 +1430,7 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 static int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 /*
 * Function table
@@ -1413,9 +1445,492 @@ static struct function_table_tag function_table[] = {
 	{"remote", function_remote},
 	{"macro", function_macro},
 	{"playback", function_playback},
-	{"localplay", function_localplay}
-
+	{"localplay", function_localplay},
+	{"meter", function_meter}
 } ;
+
+
+/*
+ * *****************************************
+ * Generic serial I/O routines             *
+ * *****************************************
+*/
+
+
+/*
+ * Generic serial port open command 
+ */
+
+static int serial_open(char *fname, int speed, int stop2)
+{
+	struct termios mode;
+	int fd;
+
+	fd = open(fname,O_RDWR);
+	if (fd == -1)
+	{
+		if(debug >= 1)
+			ast_log(LOG_WARNING,"Cannot open serial port %s\n",fname);
+		return -1;
+	}
+	
+	memset(&mode, 0, sizeof(mode));
+	if (tcgetattr(fd, &mode)) {
+		if(debug >= 1){
+			ast_log(LOG_WARNING, "Unable to get serial parameters on %s: %s\n", fname, strerror(errno));
+		}
+		return -1;
+	}
+#ifndef	SOLARIS
+	cfmakeraw(&mode);
+#else
+        mode.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP
+                        |INLCR|IGNCR|ICRNL|IXON);
+        mode.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+        mode.c_cflag &= ~(CSIZE|PARENB|CRTSCTS);
+        mode.c_cflag |= CS8;
+	if(stop2)
+		mode.c_cflag |= CSTOPB;
+	mode.c_cc[VTIME] = 3;
+	mode.c_cc[VMIN] = 1; 
+#endif
+
+	cfsetispeed(&mode, speed);
+	cfsetospeed(&mode, speed);
+	if (tcsetattr(fd, TCSANOW, &mode)){
+		if(debug >= 1) 
+			ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", fname, strerror(errno));
+		return -1;
+	}
+	usleep(100000);
+	if (debug >= 3)
+		ast_log(LOG_NOTICE,"Opened serial port %s\n",fname);
+	return(fd);	
+}
+
+/*
+ * Return receiver ready status
+ *
+ * Return 1 if an Rx byte is avalable
+ * Return 0 if none was avaialable after a time out period
+ * Return -1 if error
+ */
+
+
+static int serial_rxready(int fd, int timeoutusec)
+{
+	fd_set readyset;
+	struct timeval tv;
+
+	tv.tv_sec = 0;
+	tv.tv_usec = timeoutusec;
+        FD_ZERO(&readyset);
+        FD_SET(fd, &readyset);
+        return select(fd + 1, &readyset, NULL, NULL, &tv);
+}
+
+/*
+* Remove all RX characters in the receive buffer
+*
+* Return number of bytes flushed.
+* or  return -1 if error
+*
+*/
+
+static int serial_rxflush(int fd)
+{
+	int res, flushed = 0;
+	char c;
+	
+	while((res = serial_rxready(fd, 1000)) == 1){
+		if(read(fd, &c, 1) == -1){
+			res = -1;
+			break;
+		flushed++;
+		}
+	}		
+	return (res == -1)? res : flushed;
+}
+		
+/*
+ * Write some bytes to the serial port, then optionally expect a fixed response
+ */
+
+static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, int asciiflag)
+{
+	char c;
+	int i,j,res;
+
+	if(debug >= 7)
+		ast_log(LOG_NOTICE,"fd = %d\n",fd);
+
+	if ((rxmaxbytes) && (rxbuf != NULL)){ 
+		if((i = serial_rxflush(fd)) == -1)
+			return -1;
+		if(debug >= 7)
+			ast_log(LOG_NOTICE,"serial_io: %d bytes flushed prior to write\n", i);
+	}
+
+	if(write(fd, txbuf, txbytes) != txbytes){
+		ast_log(LOG_WARNING,"serial_io: write failed: %s\n", strerror(errno));
+		return -1;
+	}
+		
+	if ((!rxmaxbytes) || (rxbuf == NULL)){ 
+		return 0;
+	}
+	memset(rxbuf,0,rxmaxbytes);
+	for(i = 0; i < rxmaxbytes; i++){
+		if(timeoutms){
+			res = serial_rxready(fd, 1000 * timeoutms);
+			if(res < 0)
+				return -1;
+			if(!res){
+				break;
+			}
+		}
+		j = read(fd,&c,1);
+		if(j == -1){
+			ast_log(LOG_WARNING,"serial_io: read failed: %s\n", strerror(errno));
+			return -1;
+		}
+		if (j == 0) 
+			return i ;
+		rxbuf[i] = c;
+		if (asciiflag & 1){
+			rxbuf[i + 1] = 0;
+			if (c == '\r') break;
+		}
+	}					
+	if(debug >= 5) {
+		printf("i = %d\n",i);
+		printf("serial_io: String returned was:\n");
+		for(j = 0; j < i; j++)
+			printf("%02X ", (unsigned char ) rxbuf[j]);
+		printf("\n");
+	}
+	return i;
+}
+
+/*
+ * Send a nul-terminated string to the serial port
+ */
+
+static int serial_strout(int fd, char *cmd)
+{
+        return serial_io(fd, cmd, NULL, strlen(cmd), 0, 0, 0);
+}
+
+
+/*
+ * ***********************************
+ * Uchameleon specific routines      *
+ * ***********************************
+ */
+
+/*
+ * Open the serial channel and test for the uchameleon device at the end of the link
+ */
+
+static int uchameleon_open(struct daq_desc *desc, char *dev)
+{
+	int count;
+	char *txbuf = "id\n";
+	char *expect = "Chameleon";
+	char rxbuf[14];
+
+	if(!desc)
+		return -1;
+
+
+        if((desc->fd = serial_open(dev, B115200, 0)) == -1){
+		if(debug >= 1)
+                	ast_log(LOG_WARNING, "serial_open on %s failed!\n", dev);
+                return -1;
+        }
+        if((count = serial_io(desc->fd, txbuf, rxbuf, sizeof(txbuf), 14, 100, 1)) < 1){
+		if(debug >= 1)
+               		ast_log(LOG_WARNING, "serial_io on %s failed\n", dev);
+		close(desc->fd);
+                return -1;
+        }
+	if(debug >= 5)
+        	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
+	if((count != 14)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
+		if(debug >= 1)
+			ast_log(LOG_WARNING, "%s is not a uchameleon device\n", dev);
+		close(desc->fd);
+		return -1;
+	}
+	/* uchameleon LED on solid once we are opened successfully */
+	
+	if(serial_strout(desc->fd,"led on\n") == -1){
+		close(desc->fd);
+		return -1;
+	}
+        return 0;
+}
+
+/*
+ * Close uchaneleon
+ */
+
+static int uchameleon_close(struct daq_desc *desc)
+{
+	return close(desc->fd);
+}
+
+/*
+ * Set pintype for uchameleon
+ */
+
+static int uchameleon_set_pintype(struct daq_desc *desc, unsigned int pin, int pintype)
+{
+	char s[20];
+
+	if((pin < 1) || (pin > 18))
+		return -1;
+
+	switch(pintype){
+		case DAQ_PT_IN:
+		case DAQ_PT_INADC:
+		case DAQ_PT_INP:
+			if((pintype == DAQ_PT_INADC) && (pin > 8))
+				return -1;
+			if((pintype == DAQ_PT_INP) && (pin < 9))
+				return -1;
+			snprintf(s, sizeof(s), "pin %u in\n", pin);
+			if(serial_strout(desc->fd, s) == -1)
+				return -1;
+			if(pin > 8){
+				snprintf(s, sizeof(s), "pin %u pullup %d\n", pin, (pintype == DAQ_PT_INP) ? 1 : 0);
+	                        if(serial_strout(desc->fd, s) == -1)
+        	                        return -1;
+			}
+			return 0;
+
+		case DAQ_PT_OUT:
+                        snprintf(s, 63, "pin %d out\n", pin);
+                        if(serial_strout(desc->fd, s) == -1)
+				return -1;
+			return 0;
+
+		default:
+			return -1;
+	}
+}
+
+
+/*
+ * Read ADC channel on uchameleon
+ */
+
+static int uchameleon_read_adcval(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+{
+	int res;
+	char s[10];
+	char r[11];
+
+	if((pin < 1) || (pin > 8) || (val == NULL))
+		return -1;
+	snprintf(s ,sizeof(s), "adc %u\n", pin);
+	memset(r, 0, sizeof(r)); 
+	if((res = serial_io(desc->fd, s, r, strlen(s), sizeof(r) - 1, 50, 1)) == -1)
+		return -1;
+	if(debug >= 3)
+		ast_log(LOG_NOTICE,"uchameleon_read_adcval: size= %d, string=%s\n", res, r); 
+	*val = atoi(r + 6);	
+	return 0;
+}
+
+/*
+ * Read pin on uchameleon
+ */
+
+static int uchameleon_read_pin(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+{
+        int res;
+	unsigned int rpin;
+        char s[14];
+        char r[11];
+
+        if((pin < 1) || (pin > 18) || (val == NULL))
+                return -1;
+        snprintf(s ,sizeof(s), "pin %u state\n", pin);
+        memset(r, 0, sizeof(r));
+        if((res = serial_io(desc->fd, s, r, strlen(s), sizeof(r) - 1, 40, 1)) == -1)
+                return -1;
+        if(debug >= 3)
+                ast_log(LOG_NOTICE,"uchameleon_read_pinstate: size= %d, string=%s\n", res, r);
+	res = sscanf(r,"pin %u %u\r",&rpin, val);
+	if(debug >= 3)
+		ast_log(LOG_NOTICE,"uchameleon_read_pinstate scanf returned %d\n", res);
+        return 0;
+
+}
+
+/*
+ * Write pin on the uchameleon
+ */
+
+static int uchameleon_write_pin(struct daq_desc *desc, unsigned int pin, unsigned int val)
+{
+	char s[12];
+
+	snprintf(s ,sizeof(s), "pin %u %s\n", pin, (val) ? "hi" : "lo");
+	if(serial_strout(desc->fd, s) == -1)
+		return -1;
+	return 0;
+}
+
+/*
+ * **************************
+ * Generic DAQ functions    *
+ * **************************
+ */
+
+/*
+ * Open a daq device
+ */
+
+static struct daq_desc *daq_open(int type, char *name)
+{
+	int fd;
+	struct daq_desc *desc;
+
+        if((desc = ast_malloc(sizeof(struct daq_desc))) == NULL){
+		ast_log(LOG_WARNING,"daq_open out of memory\n");
+		return NULL;
+	}
+	switch(type){
+		case DAQ_TYPE_UCHAMELEON:
+			if((fd = uchameleon_open(desc, name)) == -1){
+				ast_free(desc);
+				return NULL;
+			}
+			break;
+
+		default:
+			ast_free(desc);
+			return NULL;
+	}
+	desc->type = type;
+	return desc;
+}
+
+/*
+ * Close a daq device
+ */
+
+
+static int daq_close(struct daq_desc *desc)
+{
+	int res;
+
+	if(!desc)
+		return -1;
+
+	switch(desc->type){
+		case DAQ_TYPE_UCHAMELEON:
+			res = uchameleon_close(desc);
+			ast_free(desc);
+			return res;
+		default:
+			ast_free(desc);
+			return res;
+	}
+}
+
+/*
+ * Set the pin type (in, out, adc, etc)
+ */
+
+static int daq_set_pintype(struct daq_desc *desc, unsigned int pin, unsigned int pintype)
+{
+	if(!desc)
+		return -1;
+
+        switch(desc->type){
+                case DAQ_TYPE_UCHAMELEON:
+                        if(uchameleon_set_pintype(desc, pin, pintype) == -1)
+                                return -1;
+                        break;
+
+                default:
+                        return -1;
+        }
+	return 0;
+}
+
+/*
+ * Read adc value from a pin 
+ */
+	
+static int daq_read_adcval(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+{
+	if(!desc)
+		return -1;
+
+        switch(desc->type){
+                case DAQ_TYPE_UCHAMELEON:
+                        if(uchameleon_read_adcval(desc, pin, val) == -1)
+                                return -1;
+                        break;
+
+                default:
+                        return -1;
+        }
+        return 0;
+}
+
+/*
+ * Read digital input pin
+ */
+
+static int daq_read_pin(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+{
+        if(!desc)
+                return -1;
+
+        switch(desc->type){
+                case DAQ_TYPE_UCHAMELEON:
+                        if(uchameleon_read_pin(desc, pin, val) == -1)
+                                return -1;
+                        break;
+
+                default:
+                        return -1;
+        }
+        return 0;
+}
+
+/*
+ * Write digital output pin
+ */
+
+static int daq_write_pin(struct daq_desc *desc, unsigned int pin, unsigned int val)
+{
+	if(!desc)
+		return -1;
+
+	switch(desc->type){
+		case DAQ_TYPE_UCHAMELEON:
+			if(uchameleon_write_pin(desc, pin, val) == -1)
+				return -1;
+			break;
+
+		default:
+			return -1;
+	}
+	return 0;
+}
+
+/*
+ ********************** 
+* End of DAQ functions*
+* *********************
+*/
+
 
 static long diskavail(struct rpt *myrpt)
 {
@@ -2010,11 +2525,16 @@ static char *eatwhite(char *s)
 * str - delimited string ( will be modified )
 * strp- list of pointers to substrings (this is built by this function), NULL will be placed at end of list
 * limit- maximum number of substrings to process
+* delim- user specified delimeter
+* quote- user specified quote for escaping a substring. Set to zero to escape nothing.
+*
+* Note: This modifies the string str, be suer to save an intact copy if you need it later.
+*
+* Returns number of substrings found.
 */
 	
 
-
-static int finddelim(char *str, char *strp[], int limit)
+static int explode_string(char *str, char *strp[], int limit, char delim, char quote)
 {
 int     i,l,inquo;
 
@@ -2027,31 +2547,50 @@ int     i,l,inquo;
                 return(0);
            }
         for(l = 0; *str && (l < limit) ; str++)
-           {
-                if (*str == QUOTECHR)
-                   {
-                        if (inquo)
-                           {
-                                *str = 0;
-                                inquo = 0;
-                           }
-                        else
-                           {
-                                strp[i - 1] = str + 1;
-                                inquo = 1;
-                           }
-		}
-                if ((*str == DELIMCHR) && (!inquo))
+        {
+		if(quote)
+		{
+                	if (*str == quote)
+                   	{	
+                        	if (inquo)
+                           	{
+                                	*str = 0;
+                                	inquo = 0;
+                           	}
+                        	else
+                           	{
+                                	strp[i - 1] = str + 1;
+                                	inquo = 1;
+                           	}
+			}
+		}	
+                if ((*str == delim) && (!inquo))
                 {
                         *str = 0;
 			l++;
                         strp[i++] = str + 1;
                 }
-           }
+        }
         strp[i] = 0;
         return(i);
 
 }
+/*
+* Break up a delimited string into a table of substrings
+*
+* str - delimited string ( will be modified )
+* strp- list of pointers to substrings (this is built by this function), NULL will be placed at end of list
+* limit- maximum number of substrings to process
+*/
+	
+
+
+static int finddelim(char *str, char *strp[], int limit)
+{
+	return explode_string(str, strp, limit, DELIMCHR, QUOTECHR);
+}
+
+
 /*
 	send asterisk frame text message on the current tx channel
 */
@@ -2241,7 +2780,8 @@ int	i,ls;
 	for( i = 0 ; keywords[i] ; i++){
 		ls = strlen(keywords[i]);
 		if(!ls){
-			*param = NULL;
+			if(param)
+				*param = NULL;
 			return 0;
 		}
 		if(!strncmp(string, keywords[i], ls)){
@@ -2250,7 +2790,8 @@ int	i,ls;
 			return i + 1; 
 		}
 	}
-	*param = NULL;
+	if(param)
+		*param = NULL;
 	return 0;
 }
 
@@ -3741,6 +4282,7 @@ static struct ast_cli_entry rpt_cli[] = {
 
 #endif
 
+
 static int send_morse(struct ast_channel *chan, char *string, int speed, int freq, int amplitude)
 {
 
@@ -4234,6 +4776,7 @@ static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 
 static int split_freq(char *mhz, char *decimals, char *freq);
 
+
 static void handle_varcmd_tele(struct rpt *myrpt,struct ast_channel *mychannel,char *varcmd)
 {
 char	*strs[100],*p;
@@ -4467,6 +5010,211 @@ struct	tm localtm;
 	return;
 }
 
+
+/*
+ * Parse a request METER request for telemetry thread
+ * This is passed in a comma separated list of items from the function table entry
+ * There should be 3 fields in the function table entry: device, channel, and meter face
+ */
+
+static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+{
+	int i,res,files;
+	int pin = 0;
+	int pintype = 0;
+	int device = 0;
+	int metertype = 0;
+	unsigned int val;
+	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
+	char *myargs,*meter_face;
+	const char *p;
+	char *start, *end;
+	char *sounds = NULL;
+	char *ftablentries[4];
+	char *sound_files[MAX_METER_FILES];
+	
+	if(!(myargs = ast_strdup(args))){ /* Make a local copy */
+		ast_log(LOG_WARNING, "Out of memory\n");
+		return -1;
+	}
+	
+	i = explode_string(myargs, ftablentries, 4, ',', 0);
+	if(i != 3){ /* Must have exactly 3 substrings */
+		ast_log(LOG_WARNING,"Wrong number of substrings for meter telemetry function is: %d s/b 3", i);
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug >= 3){
+		ast_log(LOG_NOTICE,"Device: %s, Pin: %s, Meter Face: %s\n",
+		ftablentries[0],ftablentries[1],ftablentries[2]);	
+	}
+	/* Find our device index */
+	
+	for(device = 0; device < MAX_DAQ_ENTRIES; device++){
+		if(!strcmp(daq_entries[device].name, ftablentries[0]))
+			break;
+	}
+	if(device == MAX_DAQ_ENTRIES){
+		ast_log(LOG_WARNING,"Cannot find device %s in daq-list\n",ftablentries[0]);
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug)
+		ast_log(LOG_NOTICE,"Device index = %d\n", device);
+	
+
+	/* Check for compatible pin type */
+	if(!(p = ast_variable_retrieve(myrpt->cfg,ftablentries[0],ftablentries[1]))){
+		ast_log(LOG_WARNING,"Channel %s not defined for %s\n", ftablentries[1], ftablentries[0]);
+		ast_free(myargs);
+		return -1;
+	}
+
+	if(!strcmp("inadc",p))
+		pintype = 1;
+	if((!strcmp("inp",p))||(!strcmp("in",p)))
+		pintype = 2;
+	if(!pintype){
+		ast_log(LOG_WARNING,"Pin type must be one of inadc, inp, or in for channel %s\n",ftablentries[1]);
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug >= 3)
+		ast_log(LOG_NOTICE,"Pintype = %d\n",pintype);
+
+	pin = atoi(ftablentries[1]);
+
+	/*
+ 	Look up and parse the meter face
+
+	[meter-faces]
+	batvolts=scale(0,12.8,0),?,volts
+	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),wind,is,from,the,?
+
+	*/
+
+	if(!(p = ast_variable_retrieve(myrpt->cfg,"meter-faces", ftablentries[2]))){
+		ast_log(LOG_WARNING,"Meter face %s not found", ftablentries[2]);
+		ast_free(myargs);		
+		return -1;
+	}
+
+	if(!(meter_face = ast_strdup(p))){
+		ast_log(LOG_WARNING,"Out of memory");
+		ast_free(myargs);
+		return -1;
+	}
+	
+	if(!strncmp("scale", meter_face, 5)){ /* scale function? */
+		metertype = 1;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0; /* Points to comma delimited scaling values */
+		*end = 0;
+		sounds = end + 2; /* Start of sounds part */
+		if(sscanf(start,"%f,%f,%f",&scalepre, &scalediv, &scalepost) != 3){
+			ast_log(LOG_WARNING,"Scale must have 3 args in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}		
+	}
+	else if(!strncmp("range", meter_face, 5)){ /* range function */
+		metertype = 2;
+	}
+	else if(!strncmp("bit", meter_face, 3)){ /* bit function */
+		metertype = 3;
+	}
+	else{
+		ast_log(LOG_WARNING,"Meter face %s needs to specify one of scale, range or bit\n", ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+
+	if(pintype == 1){
+		res = daq_read_adcval(daq_entries[device].desc, pin, &val);
+		if(!res)
+			scaledval = ((val + scalepre)/scalediv) + scalepost;
+	}
+	else{
+		res = daq_read_pin(daq_entries[device].desc, pin, &val);
+	}
+	if(res){
+		ast_log(LOG_WARNING,"I/O error on meter face %s\n", ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+
+	if(debug){ /* Spew the variables */
+		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
+		if(metertype == 1)
+			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
+		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
+		ast_log(LOG_NOTICE,"raw value = %u\n", val);
+		ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
+ 	}
+	
+	/* Wait the normal telemetry delay time */
+	
+	wait_interval(myrpt, DLY_TELEM, mychannel);
+	
+
+	/* Split up the sounds string */
+	
+	files = explode_string(sounds, sound_files, MAX_METER_FILES, ',', 0);
+	if(files == 0){
+		ast_log(LOG_WARNING,"No sound files to say for meter %s\n",ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+	/* Say the files one by one acting specially on the ? character */
+	res = 0;
+	for(i = 0; i < files && !res; i++){
+		if(sound_files[i][0] == '?'){ /* Insert sample */
+			if(metertype == 1){
+				int whole, fraction, precision = 0;
+				if((scalediv >= 10) && (scalediv < 100)) /* Adjust precision of decimal places */
+					precision = 10; 
+				else if(scalediv >= 100)
+					precision = 100;
+				whole = (int) scaledval;
+				fraction = (int) roundf(((scaledval - whole) * precision));
+				if((precision) && (fraction == precision)){
+					fraction = 0;
+					whole++;
+				}
+				if(debug)
+					ast_log(LOG_NOTICE,"whole = %d, fraction = %d\n", whole, fraction);
+				res = saynum(mychannel, whole);
+				if(!res && precision && fraction){
+					res = sayfile(mychannel,"point");
+					if(!res)
+						res = saynum(mychannel, fraction);
+				}
+			}
+		}
+		else{
+			res = sayfile(mychannel, sound_files[i]); /* Say the next word in the list */
+		}					
+	}
+ 	
+	/* Done */
+	ast_free(myargs);
+	ast_free(meter_face);
+	return 0;
+}
+
+
+
 static void *rpt_tele_thread(void *this)
 {
 ZT_CONFINFO ci;  /* conference info */
@@ -4600,6 +5348,11 @@ struct zt_params par;
 	ast_stopstream(mychannel);
 	switch(mytele->mode)
 	{
+	    case METER:
+		say_meter_tele(myrpt, mychannel, mytele->param);
+		imdone = 1;
+		break;
+
 	    case VARCMD:
 		handle_varcmd_tele(myrpt,mychannel,mytele->param);
 		imdone = 1;
@@ -5979,7 +6732,7 @@ struct rpt_link *l;
 		}
 	}
 	else if ((mode == ARB_ALPHA) || (mode == REV_PATCH) || 
-	    (mode == PLAYBACK) || (mode == LOCALPLAY) || (mode == VARCMD)) {
+	    (mode == PLAYBACK) || (mode == LOCALPLAY) || (mode == VARCMD) || (mode == METER)) {
 		strncpy(tele->param, (char *) data, TELEPARAMSIZE - 1);
 		tele->param[TELEPARAMSIZE - 1] = 0;
 	}
@@ -7230,6 +7983,26 @@ static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int
 	rpt_telemetry(myrpt,PLAYBACK,param);
 	return DC_COMPLETE;
 }
+
+/*
+*  Playback a meter reading
+*/
+
+static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+	if(debug)
+		ast_log(LOG_NOTICE, "meter param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	
+	rpt_telem_select(myrpt,command_source,mylink);
+	rpt_telemetry(myrpt,METER,param);
+	return DC_COMPLETE;
+}
+
+
 
 /*
  * *  Playback a recording locally
@@ -14352,10 +15125,11 @@ char tmpstr[300],lstr[MAXLINKLIST];
 	
 static void *rpt_master(void *ignore)
 {
-int	i,n;
+int	i,j,n,res;
 pthread_attr_t attr;
 struct ast_config *cfg;
-char *this,*val;
+struct ast_variable *var,*var2;
+char *this,*val,s[32];
 
 	/* init nodelog queue */
 	nodelog.next = nodelog.prev = &nodelog;
@@ -14377,6 +15151,81 @@ char *this,*val;
 		ast_log(LOG_NOTICE, "Unable to open radio repeater configuration rpt.conf.  Radio Repeater disabled.\n");
 		pthread_exit(NULL);
 	}
+
+	/*
+ 	* If there are daq devices present, open and initialize them
+ 	*/
+	ndaqs = j = 0;
+	var = ast_variable_browse(cfg,"daq-list");
+	while(var){
+		const char *p;
+		if(strncmp("device",var->name,6)){
+			ast_log(LOG_WARNING,"Error in daq_entries stanza on line %d\n", var->lineno);
+			break;
+		}
+		strncpy(s,var->value,sizeof(s)); /* Make copy of device entry */
+		if(!(p = ast_variable_retrieve(cfg,s,"type"))){
+			ast_log(LOG_WARNING,"Type variable required for %s stanza\n", s);
+			break;
+		}
+		if(strncmp(p,"uchameleon",10)){
+			ast_log(LOG_WARNING,"Type must be uchameleon for %s stanza\n", s);
+			break;
+		}
+                if(!(p = ast_variable_retrieve(cfg,s,"name"))){
+                        ast_log(LOG_WARNING,"Name variable required for %s stanza\n", s);
+                        break;
+                }
+		if(!(daq_entries[ndaqs].desc = daq_open(DAQ_TYPE_UCHAMELEON, (char *) p))){
+			ast_log(LOG_WARNING,"Cannot open device name %s\n",p);
+			break;
+		}	
+		/* Save the devicename */
+		strncpy(daq_entries[ndaqs].name, s, 32);
+		daq_entries[ndaqs].name[MAX_DAQ_NAME - 1] = 0;
+
+		/* Pin Initialization */
+		var2 = ast_variable_browse(cfg, s);
+		while(var2){
+			unsigned int pin;
+			static char *pin_keywords[]={"inadc","inp","in","out",NULL};
+			if((var2->name[0] < '0')||(var2->name[0] > '9')){
+				var2 = var2->next;
+				continue;
+			}
+			pin = (unsigned int) atoi(var2->name);
+			i = matchkeyword(var2->value, NULL, pin_keywords);
+			if(debug >= 3)
+				ast_log(LOG_NOTICE, "Pin = %d, Index = %d\n", pin, i);
+			switch(i){
+				case 1:
+					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_INADC); /* ADC */
+					break;
+				case 2:
+					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_INP); /* Pullup */
+					break;
+				case 3:
+					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_IN); /* In  */
+					break;
+				case 4:
+					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_OUT); /* Out */
+					break;
+				default:
+					res = -1;
+					break;
+			}
+			if(res)
+				ast_log(LOG_WARNING,"Invalid pin type on line: %d\n",var2->lineno);
+			else
+				j++;
+			var2 = var2->next;
+		}
+		ndaqs++;	
+		if(ndaqs >= MAX_DAQ_ENTRIES)
+			break;
+		var = var->next;
+	}
+		
 	while((this = ast_category_browse(cfg,this)) != NULL)
 	{
 		for(i = 0 ; i < strlen(this) ; i++){
@@ -16655,6 +17504,9 @@ static int unload_module(void)
 #ifdef	OLD_ASTERISK
 	STANDARD_HANGUP_LOCALUSERS;
 #endif
+	for(i = 0; i < ndaqs; i++)
+		daq_close(daq_entries[i].desc);
+
 	for(i = 0; i < nrpts; i++) {
 		if (!strcmp(rpt_vars[i].name,rpt_vars[i].p.nodes)) continue;
                 ast_mutex_destroy(&rpt_vars[i].lock);
