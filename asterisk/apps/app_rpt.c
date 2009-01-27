@@ -5038,6 +5038,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	char *ftablentries[4];
 	char *sound_files[MAX_METER_FILES];
 	char *range_strings[MAX_DAQ_RANGES];
+	char *bitphrases[2];
 	
 	if(!(myargs = ast_strdup(args))){ /* Make a local copy */
 		ast_log(LOG_WARNING, "Out of memory\n");
@@ -5094,8 +5095,9 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
  	Look up and parse the meter face
 
 	[meter-faces]
-	batvolts=scale(0,12.8,0),?,volts
-	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),wind,is,from,the,?
+	batvolts=scale(0,12.8,0),thevoltage,is,volts
+	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),thewindis,?
+	door=bit(open,closed),thedooris,?
 
 	*/
 
@@ -5157,6 +5159,23 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	}
 	else if(!strncmp("bit", meter_face, 3)){ /* bit function */
 		metertype = 3;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0;
+		*end = 0;
+		sounds = end + 2;
+		if(2 != explode_string(start, bitphrases, 2, ',', 0)){
+			ast_log(LOG_WARNING, "2 phrases required for bit() in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}		
 	}
 	else{
 		ast_log(LOG_WARNING,"Meter face %s needs to specify one of scale, range or bit\n", ftablentries[2]);
@@ -5184,6 +5203,10 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 		return -1;
 	}
 
+	/*
+ 	* Select Range
+ 	*/
+
 	if(metertype == 2){
 		for(i = 0; i < numranges; i++){
 			if(2 != sscanf(range_strings[i],"%u-%u:", &rangemin, &rangemax)){
@@ -5209,7 +5232,6 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 			return -1;
 		}
 	}
-
 
 	if(debug){ /* Spew the variables */
 		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
@@ -5267,6 +5289,10 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 			if(metertype == 2){
 				res = sayfile(mychannel, rangephrase);
 			}
+			if(metertype == 3){
+				res = sayfile(mychannel, bitphrases[(val) ? 1: 0]);
+			}
+	
 		}
 		else{
 			res = sayfile(mychannel, sound_files[i]); /* Say the next word in the list */
