@@ -302,6 +302,7 @@
 
 #define EL_DB_ROOT "echolink"
 
+#define MAX_DAQ_RANGES 16  /* Max number of entries for range() */
 #define MAX_DAQ_ENTRIES 10 /* Max number of DAQ devices */
 #define MAX_DAQ_NAME 32 /* Max length of a device name */
 #define MAX_METER_FILES 10 /* Max number of sound files in a meter def. */
@@ -664,7 +665,7 @@ struct function_table_tag
 } ;
 
 /*
- * Used in the DAQ code
+ * Structs used in the DAQ code
  */
 
 struct daq_desc{
@@ -676,6 +677,7 @@ struct daq_entry{
 	char name[MAX_DAQ_NAME];
 	struct daq_desc *desc;
 };
+
 
 /* Used to store the morse code patterns */
 
@@ -5024,14 +5026,18 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	int pintype = 0;
 	int device = 0;
 	int metertype = 0;
+	int numranges = 0;
 	unsigned int val;
+	int rangemin,rangemax;
 	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
 	char *myargs,*meter_face;
 	const char *p;
 	char *start, *end;
 	char *sounds = NULL;
+	char *rangephrase = NULL;
 	char *ftablentries[4];
 	char *sound_files[MAX_METER_FILES];
+	char *range_strings[MAX_DAQ_RANGES];
 	
 	if(!(myargs = ast_strdup(args))){ /* Make a local copy */
 		ast_log(LOG_WARNING, "Out of memory\n");
@@ -5127,6 +5133,27 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	}
 	else if(!strncmp("range", meter_face, 5)){ /* range function */
 		metertype = 2;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0;
+		*end = 0;
+		sounds = end + 2; 
+		/*
+ 		* Parse range entries
+ 		*/
+		if((numranges = explode_string(start, range_strings, MAX_DAQ_RANGES, ',', 0)) < 2 ){
+			ast_log(LOG_WARNING, "At least 2 ranges required for range() in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+
 	}
 	else if(!strncmp("bit", meter_face, 3)){ /* bit function */
 		metertype = 3;
@@ -5137,6 +5164,10 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 		ast_free(meter_face);
 		return -1;
 	}
+
+	/*
+ 	* Acquire 
+ 	*/
 
 	if(pintype == 1){
 		res = daq_read_adcval(daq_entries[device].desc, pin, &val);
@@ -5153,13 +5184,45 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 		return -1;
 	}
 
+	if(metertype == 2){
+		for(i = 0; i < numranges; i++){
+			if(2 != sscanf(range_strings[i],"%u-%u:", &rangemin, &rangemax)){
+				ast_log(LOG_WARNING,"Range variable error on meter face %s\n", ftablentries[2]);
+				ast_free(myargs);
+				ast_free(meter_face);
+				return -1;
+			}
+			if((!(rangephrase = strchr(range_strings[i],':')) || (!rangephrase[1]))){
+				ast_log(LOG_WARNING,"Range phrase missing on meter face %s\n", ftablentries[2]);
+				ast_free(myargs);
+				ast_free(meter_face);
+				return -1;
+			}
+			rangephrase++;
+			if((val >= rangemin) && (val <= rangemax))
+				break;
+		}
+		if(i == MAX_DAQ_RANGES){
+			ast_log(LOG_WARNING,"Range missing on meter face %s for value %u\n", ftablentries[2], val);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+	}
+
+
 	if(debug){ /* Spew the variables */
 		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
-		if(metertype == 1)
-			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
-		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
 		ast_log(LOG_NOTICE,"raw value = %u\n", val);
-		ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
+		if(metertype == 1){
+			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
+			ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
+		}
+		if(metertype == 2){
+			ast_log(LOG_NOTICE,"Range phrase is: %s for meter face %s\n", rangephrase, ftablentries[2]);
+		}
+		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
+
  	}
 	
 	/* Wait the normal telemetry delay time */
@@ -5200,6 +5263,9 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 					if(!res)
 						res = saynum(mychannel, fraction);
 				}
+			}
+			if(metertype == 2){
+				res = sayfile(mychannel, rangephrase);
 			}
 		}
 		else{
