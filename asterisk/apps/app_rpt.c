@@ -5016,7 +5016,7 @@ struct	tm localtm;
 /*
  * Parse a request METER request for telemetry thread
  * This is passed in a comma separated list of items from the function table entry
- * There should be 3 fields in the function table entry: device, channel, and meter face
+ * There should be 3 or 4 fields in the function table entry: device, channel, meter face, and  optionally: filter
  */
 
 static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
@@ -5027,6 +5027,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	int device = 0;
 	int metertype = 0;
 	int numranges = 0;
+	int filtertype = 0;
 	unsigned int val;
 	int rangemin,rangemax;
 	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
@@ -5040,21 +5041,27 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	char *range_strings[MAX_DAQ_RANGES];
 	char *bitphrases[2];
 	
-	if(!(myargs = ast_strdup(args))){ /* Make a local copy */
+	if(!(myargs = ast_strdup(args))){ /* Make a local copy to slice and dice */
 		ast_log(LOG_WARNING, "Out of memory\n");
 		return -1;
 	}
 	
 	i = explode_string(myargs, ftablentries, 4, ',', 0);
-	if(i != 3){ /* Must have exactly 3 substrings */
-		ast_log(LOG_WARNING,"Wrong number of substrings for meter telemetry function is: %d s/b 3", i);
+	if((i != 4) && (i != 3)){ /* Must have 3 or 4 substrings, no more, no less */
+		ast_log(LOG_WARNING,"Wrong number of substrings for meter telemetry function is: %d s/b 3 or 4", i);
 		ast_free(myargs);
 		return -1;
 	}
 	if(debug >= 3){
-		ast_log(LOG_NOTICE,"Device: %s, Pin: %s, Meter Face: %s\n",
-		ftablentries[0],ftablentries[1],ftablentries[2]);	
+		ast_log(LOG_NOTICE,"Device: %s, Pin: %s, Meter Face: %s Filter: %s\n",
+		ftablentries[0],ftablentries[1],ftablentries[2], ftablentries[3]);	
 	}
+	if((i == 4) && (strcmp(ftablentries[3],"none"))){ /* TODO: Support filters: max, min, avg5min, max5min, min5min */
+		ast_log(LOG_WARNING,"Unsupported filter type: %s\n",ftablentries[3]);
+		ast_free(myargs);
+		return -1;
+	}
+
 	/* Find our device index */
 	
 	for(device = 0; device < MAX_DAQ_ENTRIES; device++){
@@ -5097,7 +5104,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 	[meter-faces]
 	batvolts=scale(0,12.8,0),thevoltage,is,volts
 	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),thewindis,?
-	door=bit(open,closed),thedooris,?
+	door=bit(closed,open),thedooris,?
 
 	*/
 
@@ -5131,6 +5138,13 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 			ast_free(myargs);
 			ast_free(meter_face);
 			return -1;
+		}
+		if(scalediv < 1.0){
+			ast_log(LOG_WARNING,"scalediv must be >= 1\n");
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+
 		}		
 	}
 	else if(!strncmp("range", meter_face, 5)){ /* range function */
@@ -5225,7 +5239,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 			if((val >= rangemin) && (val <= rangemax))
 				break;
 		}
-		if(i == MAX_DAQ_RANGES){
+		if(i == numranges){
 			ast_log(LOG_WARNING,"Range missing on meter face %s for value %u\n", ftablentries[2], val);
 			ast_free(myargs);
 			ast_free(meter_face);
@@ -5242,6 +5256,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 		}
 		if(metertype == 2){
 			ast_log(LOG_NOTICE,"Range phrase is: %s for meter face %s\n", rangephrase, ftablentries[2]);
+		ast_log(LOG_NOTICE,"filtertype = %d\n", filtertype);
 		}
 		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
 
@@ -5272,7 +5287,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 				else if(scalediv >= 100)
 					precision = 100;
 				whole = (int) scaledval;
-				fraction = (int) roundf(((scaledval - whole) * precision));
+				fraction = (int) round((double)((scaledval - whole) * precision));
 				if((precision) && (fraction == precision)){
 					fraction = 0;
 					whole++;
