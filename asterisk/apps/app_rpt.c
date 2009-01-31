@@ -1827,7 +1827,10 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 		return NULL;
 	}
 
+
 	memset(desc, 0, sizeof(struct daq_entry_tag));
+
+	ast_mutex_init(&desc->lock);
 
 
 	/* Save the device path for open*/
@@ -1868,6 +1871,8 @@ static int daq_close(struct daq_entry_tag *desc)
 	if(!desc)
 		return res;
 
+	ast_mutex_lock(&desc->lock);
+
 	switch(desc->type){
 		case DAQ_TYPE_UCHAMELEON:
 			res = uchameleon_close(desc);
@@ -1876,6 +1881,8 @@ static int daq_close(struct daq_entry_tag *desc)
 		default:
 			break;
 	}
+	ast_mutex_unlock(&desc->lock);
+
 	return res;
 }
 
@@ -1885,19 +1892,27 @@ static int daq_close(struct daq_entry_tag *desc)
 
 static int daq_set_pintype(struct daq_entry_tag *desc, unsigned int pin, unsigned int pintype)
 {
+	int res = -1;
+
 	if(!desc)
-		return -1;
+		return res;
+
+	ast_mutex_lock(&desc->lock);
 
         switch(desc->type){
                 case DAQ_TYPE_UCHAMELEON:
                         if(uchameleon_set_pintype(desc, pin, pintype) == -1)
-                                return -1;
+                                break;
+			res = 0;
                         break;
 
                 default:
-                        return -1;
+                        break;
         }
-	return 0;
+
+	ast_mutex_unlock(&desc->lock);
+
+	return res;
 }
 
 /*
@@ -1906,19 +1921,27 @@ static int daq_set_pintype(struct daq_entry_tag *desc, unsigned int pin, unsigne
 	
 static int daq_read_adcval(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
+	int res = -1;
+
 	if(!desc)
-		return -1;
+		return res;
+
+	ast_mutex_lock(&desc->lock);
 
         switch(desc->type){
                 case DAQ_TYPE_UCHAMELEON:
                         if(uchameleon_read_adcval(desc, pin, val) == -1)
-                                return -1;
+                                break;
+			res = 0;
                         break;
 
                 default:
-                        return -1;
+                        break;
         }
-        return 0;
+
+	ast_mutex_unlock(&desc->lock);
+
+        return res;
 }
 
 /*
@@ -1927,19 +1950,27 @@ static int daq_read_adcval(struct daq_entry_tag *desc, unsigned int pin, unsigne
 
 static int daq_read_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
+	int res = -1;
+
         if(!desc)
-                return -1;
+                return res;
+
+	ast_mutex_lock(&desc->lock);
 
         switch(desc->type){
                 case DAQ_TYPE_UCHAMELEON:
                         if(uchameleon_read_pin(desc, pin, val) == -1)
-                                return -1;
+                                break;
+			res = 0;
                         break;
 
                 default:
-                        return -1;
+                        break;
         }
-        return 0;
+
+	ast_mutex_unlock(&desc->lock);
+
+        return res;
 }
 
 /*
@@ -1948,19 +1979,27 @@ static int daq_read_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned i
 
 static int daq_write_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int val)
 {
+	int res = -1;
+
 	if(!desc)
-		return -1;
+		return res;
+
+	ast_mutex_lock(&desc->lock);
 
 	switch(desc->type){
 		case DAQ_TYPE_UCHAMELEON:
 			if(uchameleon_write_pin(desc, pin, val) == -1)
-				return -1;
+				break;
+			res = 0;
 			break;
 
 		default:
-			return -1;
+			break;
 	}
-	return 0;
+
+	ast_mutex_unlock(&desc->lock);
+
+	return res;
 }
 
 /*
