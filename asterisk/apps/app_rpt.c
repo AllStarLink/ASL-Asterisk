@@ -305,6 +305,7 @@
 #define MAX_DAQ_RANGES 16  /* Max number of entries for range() */
 #define MAX_DAQ_ENTRIES 10 /* Max number of DAQ devices */
 #define MAX_DAQ_NAME 32 /* Max length of a device name */
+#define MAX_DAQ_DEV 64 /* Max length of a daq device path */
 #define MAX_METER_FILES 10 /* Max number of sound files in a meter def. */
 
 enum {REM_OFF,REM_MONITOR,REM_TX};
@@ -668,14 +669,18 @@ struct function_table_tag
  * Structs used in the DAQ code
  */
 
-struct daq_desc{
+struct daq_entry_tag{
+	char name[MAX_DAQ_NAME];
+	char dev[MAX_DAQ_DEV];
 	int type;
 	int fd;
+	ast_mutex_t lock;
+	struct daq_entry_tag *next;
 };
 
-struct daq_entry{
-	char name[MAX_DAQ_NAME];
-	struct daq_desc *desc;
+struct daq_tag{
+	int ndaqs;
+	struct daq_entry_tag *hw;
 };
 
 
@@ -1398,11 +1403,10 @@ static struct telem_defaults tele_defs[] = {
 
 
 /*
- * DAQ descriptor array
+ * DAQ variables
  */
 
-static int ndaqs;
-static struct daq_entry daq_entries[MAX_DAQ_ENTRIES];
+static struct daq_tag daq;
 
 
 /*
@@ -1634,25 +1638,25 @@ static int serial_strout(int fd, char *cmd)
  * Open the serial channel and test for the uchameleon device at the end of the link
  */
 
-static int uchameleon_open(struct daq_desc *desc, char *dev)
+static int uchameleon_open(struct daq_entry_tag *desc)
 {
 	int count;
-	char *txbuf = "id\n";
-	char *expect = "Chameleon";
+	static char *txbuf = "id\n";
+	static char *expect = "Chameleon";
 	char rxbuf[14];
 
 	if(!desc)
 		return -1;
 
 
-        if((desc->fd = serial_open(dev, B115200, 0)) == -1){
+        if((desc->fd = serial_open(desc->dev, B115200, 0)) == -1){
 		if(debug >= 1)
-                	ast_log(LOG_WARNING, "serial_open on %s failed!\n", dev);
+                	ast_log(LOG_WARNING, "serial_open on %s failed!\n", desc->name);
                 return -1;
         }
         if((count = serial_io(desc->fd, txbuf, rxbuf, sizeof(txbuf), 14, 100, 1)) < 1){
 		if(debug >= 1)
-               		ast_log(LOG_WARNING, "serial_io on %s failed\n", dev);
+               		ast_log(LOG_WARNING, "serial_io on %s failed\n", desc->name);
 		close(desc->fd);
                 return -1;
         }
@@ -1660,7 +1664,7 @@ static int uchameleon_open(struct daq_desc *desc, char *dev)
         	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
 	if((count != 14)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
 		if(debug >= 1)
-			ast_log(LOG_WARNING, "%s is not a uchameleon device\n", dev);
+			ast_log(LOG_WARNING, "%s is not a uchameleon device\n", desc->name);
 		close(desc->fd);
 		return -1;
 	}
@@ -1677,16 +1681,19 @@ static int uchameleon_open(struct daq_desc *desc, char *dev)
  * Close uchaneleon
  */
 
-static int uchameleon_close(struct daq_desc *desc)
+static int uchameleon_close(struct daq_entry_tag *desc)
 {
-	return close(desc->fd);
+	int res;
+	res = close(desc->fd);
+	desc->fd = -1;
+	return res;
 }
 
 /*
  * Set pintype for uchameleon
  */
 
-static int uchameleon_set_pintype(struct daq_desc *desc, unsigned int pin, int pintype)
+static int uchameleon_set_pintype(struct daq_entry_tag *desc, unsigned int pin, int pintype)
 {
 	char s[20];
 
@@ -1727,7 +1734,7 @@ static int uchameleon_set_pintype(struct daq_desc *desc, unsigned int pin, int p
  * Read ADC channel on uchameleon
  */
 
-static int uchameleon_read_adcval(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+static int uchameleon_read_adcval(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
 	int res;
 	char s[10];
@@ -1749,7 +1756,7 @@ static int uchameleon_read_adcval(struct daq_desc *desc, unsigned int pin, unsig
  * Read pin on uchameleon
  */
 
-static int uchameleon_read_pin(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+static int uchameleon_read_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
         int res;
 	unsigned int rpin;
@@ -1775,7 +1782,7 @@ static int uchameleon_read_pin(struct daq_desc *desc, unsigned int pin, unsigned
  * Write pin on the uchameleon
  */
 
-static int uchameleon_write_pin(struct daq_desc *desc, unsigned int pin, unsigned int val)
+static int uchameleon_write_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int val)
 {
 	char s[12];
 
@@ -1792,21 +1799,50 @@ static int uchameleon_write_pin(struct daq_desc *desc, unsigned int pin, unsigne
  */
 
 /*
+ * Forward Decl's
+ */
+
+static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
+static int saynum(struct ast_channel *mychannel, int num);
+static int sayfile(struct ast_channel *mychannel,char *fname);
+static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
+static int matchkeyword(char *string, char **param, char *keywords[]);
+static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
+static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
+
+/*
  * Open a daq device
  */
 
-static struct daq_desc *daq_open(int type, char *name)
+static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 {
 	int fd;
-	struct daq_desc *desc;
+	struct daq_entry_tag *desc;
 
-        if((desc = ast_malloc(sizeof(struct daq_desc))) == NULL){
+	if(!name)
+		return NULL;
+
+        if((desc = ast_malloc(sizeof(struct daq_entry_tag))) == NULL){
 		ast_log(LOG_WARNING,"daq_open out of memory\n");
 		return NULL;
 	}
+
+	memset(desc, 0, sizeof(struct daq_entry_tag));
+
+
+	/* Save the device path for open*/
+	if(dev){
+		strncpy(desc->dev, dev, MAX_DAQ_DEV);
+		desc->dev[MAX_DAQ_DEV - 1] = 0;
+	}
+	/* Save the name*/
+	strncpy(desc->name, name, MAX_DAQ_NAME);
+	desc->dev[MAX_DAQ_NAME - 1] = 0;
+
+
 	switch(type){
 		case DAQ_TYPE_UCHAMELEON:
-			if((fd = uchameleon_open(desc, name)) == -1){
+			if((fd = uchameleon_open(desc)) == -1){
 				ast_free(desc);
 				return NULL;
 			}
@@ -1825,29 +1861,29 @@ static struct daq_desc *daq_open(int type, char *name)
  */
 
 
-static int daq_close(struct daq_desc *desc)
+static int daq_close(struct daq_entry_tag *desc)
 {
-	int res;
+	int res  = -1;
 
 	if(!desc)
-		return -1;
+		return res;
 
 	switch(desc->type){
 		case DAQ_TYPE_UCHAMELEON:
 			res = uchameleon_close(desc);
 			ast_free(desc);
-			return res;
+			break;
 		default:
-			ast_free(desc);
-			return res;
+			break;
 	}
+	return res;
 }
 
 /*
  * Set the pin type (in, out, adc, etc)
  */
 
-static int daq_set_pintype(struct daq_desc *desc, unsigned int pin, unsigned int pintype)
+static int daq_set_pintype(struct daq_entry_tag *desc, unsigned int pin, unsigned int pintype)
 {
 	if(!desc)
 		return -1;
@@ -1868,7 +1904,7 @@ static int daq_set_pintype(struct daq_desc *desc, unsigned int pin, unsigned int
  * Read adc value from a pin 
  */
 	
-static int daq_read_adcval(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+static int daq_read_adcval(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
 	if(!desc)
 		return -1;
@@ -1889,7 +1925,7 @@ static int daq_read_adcval(struct daq_desc *desc, unsigned int pin, unsigned int
  * Read digital input pin
  */
 
-static int daq_read_pin(struct daq_desc *desc, unsigned int pin, unsigned int *val)
+static int daq_read_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int *val)
 {
         if(!desc)
                 return -1;
@@ -1910,7 +1946,7 @@ static int daq_read_pin(struct daq_desc *desc, unsigned int pin, unsigned int *v
  * Write digital output pin
  */
 
-static int daq_write_pin(struct daq_desc *desc, unsigned int pin, unsigned int val)
+static int daq_write_pin(struct daq_entry_tag *desc, unsigned int pin, unsigned int val)
 {
 	if(!desc)
 		return -1;
@@ -1926,6 +1962,447 @@ static int daq_write_pin(struct daq_desc *desc, unsigned int pin, unsigned int v
 	}
 	return 0;
 }
+
+/*
+ * Initialize DAQ subsystem
+ */
+
+static void daq_init(struct ast_config *cfg)
+{
+	int i,j,res;
+	struct ast_variable *var,*var2;
+	struct daq_entry_tag **daq_next, *daqv;
+	char s[32];
+
+	daq.ndaqs = j = 0;
+	daq_next = &daq.hw;
+	var = ast_variable_browse(cfg,"daq-list");
+	while(var){
+		const char *p;
+		if(strncmp("device",var->name,6)){
+			ast_log(LOG_WARNING,"Error in daq_entries stanza on line %d\n", var->lineno);
+			break;
+		}
+		strncpy(s,var->value,sizeof(s)); /* Make copy of device entry */
+		if(!(p = ast_variable_retrieve(cfg,s,"type"))){
+			ast_log(LOG_WARNING,"Type variable required for %s stanza\n", s);
+			break;
+		}
+		if(strncmp(p,"uchameleon",10)){
+			ast_log(LOG_WARNING,"Type must be uchameleon for %s stanza\n", s);
+			break;
+		}
+                if(!(p = ast_variable_retrieve(cfg,s,"devnode"))){
+                        ast_log(LOG_WARNING,"devnode variable required for %s stanza\n", s);
+                        break;
+                }
+		if(!(daqv = daq_open(DAQ_TYPE_UCHAMELEON, (char *) s, (char *) p))){
+			ast_log(LOG_WARNING,"Cannot open device name %s\n",p);
+			break;
+		}
+		/* Add to linked list */
+		*daq_next = daqv;
+		daq_next = &daqv->next;
+
+
+		/* Pin Initialization */
+		var2 = ast_variable_browse(cfg, s);
+		while(var2){
+			unsigned int pin;
+			static char *pin_keywords[]={"inadc","inp","in","out",NULL};
+			if((var2->name[0] < '0')||(var2->name[0] > '9')){
+				var2 = var2->next;
+				continue;
+			}
+			pin = (unsigned int) atoi(var2->name);
+			i = matchkeyword(var2->value, NULL, pin_keywords);
+			if(debug >= 3)
+				ast_log(LOG_NOTICE, "Pin = %d, Index = %d\n", pin, i);
+			switch(i){
+				case 1:
+					res = daq_set_pintype(daqv, pin, DAQ_PT_INADC); /* ADC */
+					break;
+				case 2:
+					res = daq_set_pintype(daqv, pin, DAQ_PT_INP); /* Pullup */
+					break;
+				case 3:
+					res = daq_set_pintype(daqv, pin, DAQ_PT_IN); /* In  */
+					break;
+				case 4:
+					res = daq_set_pintype(daqv, pin, DAQ_PT_OUT); /* Out */
+					break;
+				default:
+					res = -1;
+					break;
+			}
+			if(res)
+				ast_log(LOG_WARNING,"Invalid pin type on line: %d\n",var2->lineno);
+			else
+				j++;
+			var2 = var2->next;
+		}
+		daq.ndaqs++;	
+		if(daq.ndaqs >= MAX_DAQ_ENTRIES)
+			break;
+		var = var->next;
+	}
+}		
+
+/*
+ * Uninitialize DAQ Subsystem
+ */
+
+static void daq_uninit(void)
+{
+	struct daq_entry_tag *daq_next, *daqv;
+
+	/* Free daq memory */
+	daqv = daq.hw;
+	while(daqv){
+		daq_next = daqv->next;
+		daq_close(daqv);
+		daqv = daq_next;
+	}
+	daq.hw = NULL;
+}
+
+/*
+ * Look up a device entry for a particular device name
+ */
+
+static struct daq_entry_tag *daq_devtoentry(char *name)
+{
+	struct daq_entry_tag *e = daq.hw;
+
+	while(e){
+		if(!strcmp(name, e->name))
+			break; 
+		e = e->next;
+	}
+	return e;
+}
+
+
+
+/*
+ * Parse a request METER request for telemetry thread
+ * This is passed in a comma separated list of items from the function table entry
+ * There should be 3 or 4 fields in the function table entry: device, channel, meter face, and  optionally: filter
+ */
+
+
+static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+{
+	int i,res,files;
+	int pin = 0;
+	int pintype = 0;
+	int device = 0;
+	int metertype = 0;
+	int numranges = 0;
+	int filtertype = 0;
+	unsigned int val;
+	int rangemin,rangemax;
+	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
+	char *myargs,*meter_face;
+	const char *p;
+	char *start, *end;
+	char *sounds = NULL;
+	char *rangephrase = NULL;
+	char *ftablentries[4];
+	char *sound_files[MAX_METER_FILES];
+	char *range_strings[MAX_DAQ_RANGES];
+	char *bitphrases[2];
+	struct daq_entry_tag *entry;
+	
+	if(!(myargs = ast_strdup(args))){ /* Make a local copy to slice and dice */
+		ast_log(LOG_WARNING, "Out of memory\n");
+		return -1;
+	}
+	
+	i = explode_string(myargs, ftablentries, 4, ',', 0);
+	if((i != 4) && (i != 3)){ /* Must have 3 or 4 substrings, no more, no less */
+		ast_log(LOG_WARNING,"Wrong number of substrings for meter telemetry function is: %d s/b 3 or 4", i);
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug >= 3){
+		ast_log(LOG_NOTICE,"Device: %s, Pin: %s, Meter Face: %s Filter: %s\n",
+		ftablentries[0],ftablentries[1],ftablentries[2], ftablentries[3]);	
+	}
+	if((i == 4) && (strcmp(ftablentries[3],"none"))){ /* TODO: Support filters: max, min, avg5min, max5min, min5min */
+		ast_log(LOG_WARNING,"Unsupported filter type: %s\n",ftablentries[3]);
+		ast_free(myargs);
+		return -1;
+	}
+
+	/* Find our device */
+	if(!(entry = daq_devtoentry(ftablentries[0]))){
+		ast_log(LOG_WARNING,"Cannot find device %s in daq-list\n",ftablentries[0]);
+		ast_free(myargs);
+		return -1;
+	}
+
+	/* Check for compatible pin type */
+	if(!(p = ast_variable_retrieve(myrpt->cfg,ftablentries[0],ftablentries[1]))){
+		ast_log(LOG_WARNING,"Channel %s not defined for %s\n", ftablentries[1], ftablentries[0]);
+		ast_free(myargs);
+		return -1;
+	}
+
+	if(!strcmp("inadc",p))
+		pintype = 1;
+	if((!strcmp("inp",p))||(!strcmp("in",p)))
+		pintype = 2;
+	if(!pintype){
+		ast_log(LOG_WARNING,"Pin type must be one of inadc, inp, or in for channel %s\n",ftablentries[1]);
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug >= 3)
+		ast_log(LOG_NOTICE,"Pintype = %d\n",pintype);
+
+	pin = atoi(ftablentries[1]);
+
+	/*
+ 	Look up and parse the meter face
+
+	[meter-faces]
+	batvolts=scale(0,12.8,0),thevoltage,is,volts
+	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),thewindis,?
+	door=bit(closed,open),thedooris,?
+
+	*/
+
+	if(!(p = ast_variable_retrieve(myrpt->cfg,"meter-faces", ftablentries[2]))){
+		ast_log(LOG_WARNING,"Meter face %s not found", ftablentries[2]);
+		ast_free(myargs);		
+		return -1;
+	}
+
+	if(!(meter_face = ast_strdup(p))){
+		ast_log(LOG_WARNING,"Out of memory");
+		ast_free(myargs);
+		return -1;
+	}
+	
+	if(!strncmp("scale", meter_face, 5)){ /* scale function? */
+		metertype = 1;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0; /* Points to comma delimited scaling values */
+		*end = 0;
+		sounds = end + 2; /* Start of sounds part */
+		if(sscanf(start,"%f,%f,%f",&scalepre, &scalediv, &scalepost) != 3){
+			ast_log(LOG_WARNING,"Scale must have 3 args in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		if(scalediv < 1.0){
+			ast_log(LOG_WARNING,"scalediv must be >= 1\n");
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+
+		}		
+	}
+	else if(!strncmp("range", meter_face, 5)){ /* range function */
+		metertype = 2;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0;
+		*end = 0;
+		sounds = end + 2; 
+		/*
+ 		* Parse range entries
+ 		*/
+		if((numranges = explode_string(start, range_strings, MAX_DAQ_RANGES, ',', 0)) < 2 ){
+			ast_log(LOG_WARNING, "At least 2 ranges required for range() in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+
+	}
+	else if(!strncmp("bit", meter_face, 3)){ /* bit function */
+		metertype = 3;
+		if((!(end = strchr(meter_face,')')))||
+			(!(start = strchr(meter_face, '(')))||
+			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
+			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+		*start++ = 0;
+		*end = 0;
+		sounds = end + 2;
+		if(2 != explode_string(start, bitphrases, 2, ',', 0)){
+			ast_log(LOG_WARNING, "2 phrases required for bit() in meter face %s\n", ftablentries[2]);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}		
+	}
+	else{
+		ast_log(LOG_WARNING,"Meter face %s needs to specify one of scale, range or bit\n", ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+
+	/*
+ 	* Acquire 
+ 	*/
+
+	if(pintype == 1){
+		res = daq_read_adcval(entry, pin, &val);
+		if(!res)
+			scaledval = ((val + scalepre)/scalediv) + scalepost;
+	}
+	else{
+		res = daq_read_pin(entry, pin, &val);
+	}
+	if(res){
+		ast_log(LOG_WARNING,"I/O error on meter face %s\n", ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+
+	/*
+ 	* Select Range
+ 	*/
+
+	if(metertype == 2){
+		for(i = 0; i < numranges; i++){
+			if(2 != sscanf(range_strings[i],"%u-%u:", &rangemin, &rangemax)){
+				ast_log(LOG_WARNING,"Range variable error on meter face %s\n", ftablentries[2]);
+				ast_free(myargs);
+				ast_free(meter_face);
+				return -1;
+			}
+			if((!(rangephrase = strchr(range_strings[i],':')) || (!rangephrase[1]))){
+				ast_log(LOG_WARNING,"Range phrase missing on meter face %s\n", ftablentries[2]);
+				ast_free(myargs);
+				ast_free(meter_face);
+				return -1;
+			}
+			rangephrase++;
+			if((val >= rangemin) && (val <= rangemax))
+				break;
+		}
+		if(i == numranges){
+			ast_log(LOG_WARNING,"Range missing on meter face %s for value %u\n", ftablentries[2], val);
+			ast_free(myargs);
+			ast_free(meter_face);
+			return -1;
+		}
+	}
+
+	if(debug){ /* Spew the variables */
+		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
+		ast_log(LOG_NOTICE,"raw value = %u\n", val);
+		if(metertype == 1){
+			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
+			ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
+		}
+		if(metertype == 2){
+			ast_log(LOG_NOTICE,"Range phrase is: %s for meter face %s\n", rangephrase, ftablentries[2]);
+		ast_log(LOG_NOTICE,"filtertype = %d\n", filtertype);
+		}
+		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
+
+ 	}
+	
+	/* Wait the normal telemetry delay time */
+	
+	wait_interval(myrpt, DLY_TELEM, mychannel);
+	
+
+	/* Split up the sounds string */
+	
+	files = explode_string(sounds, sound_files, MAX_METER_FILES, ',', 0);
+	if(files == 0){
+		ast_log(LOG_WARNING,"No sound files to say for meter %s\n",ftablentries[2]);
+		ast_free(myargs);
+		ast_free(meter_face);
+		return -1;
+	}
+	/* Say the files one by one acting specially on the ? character */
+	res = 0;
+	for(i = 0; i < files && !res; i++){
+		if(sound_files[i][0] == '?'){ /* Insert sample */
+			if(metertype == 1){
+				int whole, fraction, precision = 0;
+				if((scalediv >= 10) && (scalediv < 100)) /* Adjust precision of decimal places */
+					precision = 10; 
+				else if(scalediv >= 100)
+					precision = 100;
+				whole = (int) scaledval;
+				fraction = (int) round((double)((scaledval - whole) * precision));
+				if((precision) && (fraction == precision)){
+					fraction = 0;
+					whole++;
+				}
+				if(debug)
+					ast_log(LOG_NOTICE,"whole = %d, fraction = %d\n", whole, fraction);
+				res = saynum(mychannel, whole);
+				if(!res && precision && fraction){
+					res = sayfile(mychannel,"point");
+					if(!res)
+						res = saynum(mychannel, fraction);
+				}
+			}
+			if(metertype == 2){
+				res = sayfile(mychannel, rangephrase);
+			}
+			if(metertype == 3){
+				res = sayfile(mychannel, bitphrases[(val) ? 1: 0]);
+			}
+	
+		}
+		else{
+			res = sayfile(mychannel, sound_files[i]); /* Say the next word in the list */
+		}					
+	}
+ 	
+	/* Done */
+	ast_free(myargs);
+	ast_free(meter_face);
+	return 0;
+}
+
+/*
+*  Playback a meter reading
+*/
+
+static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+	if(debug)
+		ast_log(LOG_NOTICE, "meter param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	
+	rpt_telem_select(myrpt,command_source,mylink);
+	rpt_telemetry(myrpt,METER,param);
+	return DC_COMPLETE;
+}
+
 
 /*
  ********************** 
@@ -5012,316 +5489,6 @@ struct	tm localtm;
 	return;
 }
 
-
-/*
- * Parse a request METER request for telemetry thread
- * This is passed in a comma separated list of items from the function table entry
- * There should be 3 or 4 fields in the function table entry: device, channel, meter face, and  optionally: filter
- */
-
-static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
-{
-	int i,res,files;
-	int pin = 0;
-	int pintype = 0;
-	int device = 0;
-	int metertype = 0;
-	int numranges = 0;
-	int filtertype = 0;
-	unsigned int val;
-	int rangemin,rangemax;
-	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
-	char *myargs,*meter_face;
-	const char *p;
-	char *start, *end;
-	char *sounds = NULL;
-	char *rangephrase = NULL;
-	char *ftablentries[4];
-	char *sound_files[MAX_METER_FILES];
-	char *range_strings[MAX_DAQ_RANGES];
-	char *bitphrases[2];
-	
-	if(!(myargs = ast_strdup(args))){ /* Make a local copy to slice and dice */
-		ast_log(LOG_WARNING, "Out of memory\n");
-		return -1;
-	}
-	
-	i = explode_string(myargs, ftablentries, 4, ',', 0);
-	if((i != 4) && (i != 3)){ /* Must have 3 or 4 substrings, no more, no less */
-		ast_log(LOG_WARNING,"Wrong number of substrings for meter telemetry function is: %d s/b 3 or 4", i);
-		ast_free(myargs);
-		return -1;
-	}
-	if(debug >= 3){
-		ast_log(LOG_NOTICE,"Device: %s, Pin: %s, Meter Face: %s Filter: %s\n",
-		ftablentries[0],ftablentries[1],ftablentries[2], ftablentries[3]);	
-	}
-	if((i == 4) && (strcmp(ftablentries[3],"none"))){ /* TODO: Support filters: max, min, avg5min, max5min, min5min */
-		ast_log(LOG_WARNING,"Unsupported filter type: %s\n",ftablentries[3]);
-		ast_free(myargs);
-		return -1;
-	}
-
-	/* Find our device index */
-	
-	for(device = 0; device < MAX_DAQ_ENTRIES; device++){
-		if(!strcmp(daq_entries[device].name, ftablentries[0]))
-			break;
-	}
-	if(device == MAX_DAQ_ENTRIES){
-		ast_log(LOG_WARNING,"Cannot find device %s in daq-list\n",ftablentries[0]);
-		ast_free(myargs);
-		return -1;
-	}
-	if(debug)
-		ast_log(LOG_NOTICE,"Device index = %d\n", device);
-	
-
-	/* Check for compatible pin type */
-	if(!(p = ast_variable_retrieve(myrpt->cfg,ftablentries[0],ftablentries[1]))){
-		ast_log(LOG_WARNING,"Channel %s not defined for %s\n", ftablentries[1], ftablentries[0]);
-		ast_free(myargs);
-		return -1;
-	}
-
-	if(!strcmp("inadc",p))
-		pintype = 1;
-	if((!strcmp("inp",p))||(!strcmp("in",p)))
-		pintype = 2;
-	if(!pintype){
-		ast_log(LOG_WARNING,"Pin type must be one of inadc, inp, or in for channel %s\n",ftablentries[1]);
-		ast_free(myargs);
-		return -1;
-	}
-	if(debug >= 3)
-		ast_log(LOG_NOTICE,"Pintype = %d\n",pintype);
-
-	pin = atoi(ftablentries[1]);
-
-	/*
- 	Look up and parse the meter face
-
-	[meter-faces]
-	batvolts=scale(0,12.8,0),thevoltage,is,volts
-	winddir=range(0-33:north,34-96:west,97-160:south,161-224:east,225-255:north),thewindis,?
-	door=bit(closed,open),thedooris,?
-
-	*/
-
-	if(!(p = ast_variable_retrieve(myrpt->cfg,"meter-faces", ftablentries[2]))){
-		ast_log(LOG_WARNING,"Meter face %s not found", ftablentries[2]);
-		ast_free(myargs);		
-		return -1;
-	}
-
-	if(!(meter_face = ast_strdup(p))){
-		ast_log(LOG_WARNING,"Out of memory");
-		ast_free(myargs);
-		return -1;
-	}
-	
-	if(!strncmp("scale", meter_face, 5)){ /* scale function? */
-		metertype = 1;
-		if((!(end = strchr(meter_face,')')))||
-			(!(start = strchr(meter_face, '(')))||
-			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
-			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-		*start++ = 0; /* Points to comma delimited scaling values */
-		*end = 0;
-		sounds = end + 2; /* Start of sounds part */
-		if(sscanf(start,"%f,%f,%f",&scalepre, &scalediv, &scalepost) != 3){
-			ast_log(LOG_WARNING,"Scale must have 3 args in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-		if(scalediv < 1.0){
-			ast_log(LOG_WARNING,"scalediv must be >= 1\n");
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-
-		}		
-	}
-	else if(!strncmp("range", meter_face, 5)){ /* range function */
-		metertype = 2;
-		if((!(end = strchr(meter_face,')')))||
-			(!(start = strchr(meter_face, '(')))||
-			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
-			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-		*start++ = 0;
-		*end = 0;
-		sounds = end + 2; 
-		/*
- 		* Parse range entries
- 		*/
-		if((numranges = explode_string(start, range_strings, MAX_DAQ_RANGES, ',', 0)) < 2 ){
-			ast_log(LOG_WARNING, "At least 2 ranges required for range() in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-
-	}
-	else if(!strncmp("bit", meter_face, 3)){ /* bit function */
-		metertype = 3;
-		if((!(end = strchr(meter_face,')')))||
-			(!(start = strchr(meter_face, '(')))||
-			(!end[1])||(!end[2])||(end[1] != ',')){ /* Properly formed? */
-			ast_log(LOG_WARNING,"Syntax error in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-		*start++ = 0;
-		*end = 0;
-		sounds = end + 2;
-		if(2 != explode_string(start, bitphrases, 2, ',', 0)){
-			ast_log(LOG_WARNING, "2 phrases required for bit() in meter face %s\n", ftablentries[2]);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}		
-	}
-	else{
-		ast_log(LOG_WARNING,"Meter face %s needs to specify one of scale, range or bit\n", ftablentries[2]);
-		ast_free(myargs);
-		ast_free(meter_face);
-		return -1;
-	}
-
-	/*
- 	* Acquire 
- 	*/
-
-	if(pintype == 1){
-		res = daq_read_adcval(daq_entries[device].desc, pin, &val);
-		if(!res)
-			scaledval = ((val + scalepre)/scalediv) + scalepost;
-	}
-	else{
-		res = daq_read_pin(daq_entries[device].desc, pin, &val);
-	}
-	if(res){
-		ast_log(LOG_WARNING,"I/O error on meter face %s\n", ftablentries[2]);
-		ast_free(myargs);
-		ast_free(meter_face);
-		return -1;
-	}
-
-	/*
- 	* Select Range
- 	*/
-
-	if(metertype == 2){
-		for(i = 0; i < numranges; i++){
-			if(2 != sscanf(range_strings[i],"%u-%u:", &rangemin, &rangemax)){
-				ast_log(LOG_WARNING,"Range variable error on meter face %s\n", ftablentries[2]);
-				ast_free(myargs);
-				ast_free(meter_face);
-				return -1;
-			}
-			if((!(rangephrase = strchr(range_strings[i],':')) || (!rangephrase[1]))){
-				ast_log(LOG_WARNING,"Range phrase missing on meter face %s\n", ftablentries[2]);
-				ast_free(myargs);
-				ast_free(meter_face);
-				return -1;
-			}
-			rangephrase++;
-			if((val >= rangemin) && (val <= rangemax))
-				break;
-		}
-		if(i == numranges){
-			ast_log(LOG_WARNING,"Range missing on meter face %s for value %u\n", ftablentries[2], val);
-			ast_free(myargs);
-			ast_free(meter_face);
-			return -1;
-		}
-	}
-
-	if(debug){ /* Spew the variables */
-		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
-		ast_log(LOG_NOTICE,"raw value = %u\n", val);
-		if(metertype == 1){
-			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
-			ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
-		}
-		if(metertype == 2){
-			ast_log(LOG_NOTICE,"Range phrase is: %s for meter face %s\n", rangephrase, ftablentries[2]);
-		ast_log(LOG_NOTICE,"filtertype = %d\n", filtertype);
-		}
-		ast_log(LOG_NOTICE,"sounds = %s\n", sounds);
-
- 	}
-	
-	/* Wait the normal telemetry delay time */
-	
-	wait_interval(myrpt, DLY_TELEM, mychannel);
-	
-
-	/* Split up the sounds string */
-	
-	files = explode_string(sounds, sound_files, MAX_METER_FILES, ',', 0);
-	if(files == 0){
-		ast_log(LOG_WARNING,"No sound files to say for meter %s\n",ftablentries[2]);
-		ast_free(myargs);
-		ast_free(meter_face);
-		return -1;
-	}
-	/* Say the files one by one acting specially on the ? character */
-	res = 0;
-	for(i = 0; i < files && !res; i++){
-		if(sound_files[i][0] == '?'){ /* Insert sample */
-			if(metertype == 1){
-				int whole, fraction, precision = 0;
-				if((scalediv >= 10) && (scalediv < 100)) /* Adjust precision of decimal places */
-					precision = 10; 
-				else if(scalediv >= 100)
-					precision = 100;
-				whole = (int) scaledval;
-				fraction = (int) round((double)((scaledval - whole) * precision));
-				if((precision) && (fraction == precision)){
-					fraction = 0;
-					whole++;
-				}
-				if(debug)
-					ast_log(LOG_NOTICE,"whole = %d, fraction = %d\n", whole, fraction);
-				res = saynum(mychannel, whole);
-				if(!res && precision && fraction){
-					res = sayfile(mychannel,"point");
-					if(!res)
-						res = saynum(mychannel, fraction);
-				}
-			}
-			if(metertype == 2){
-				res = sayfile(mychannel, rangephrase);
-			}
-			if(metertype == 3){
-				res = sayfile(mychannel, bitphrases[(val) ? 1: 0]);
-			}
-	
-		}
-		else{
-			res = sayfile(mychannel, sound_files[i]); /* Say the next word in the list */
-		}					
-	}
- 	
-	/* Done */
-	ast_free(myargs);
-	ast_free(meter_face);
-	return 0;
-}
-
-
-
 static void *rpt_tele_thread(void *this)
 {
 ZT_CONFINFO ci;  /* conference info */
@@ -8088,24 +8255,6 @@ static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int
 
 	rpt_telem_select(myrpt,command_source,mylink);
 	rpt_telemetry(myrpt,PLAYBACK,param);
-	return DC_COMPLETE;
-}
-
-/*
-*  Playback a meter reading
-*/
-
-static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
-{
-
-	if (myrpt->remote)
-		return DC_ERROR;
-
-	if(debug)
-		ast_log(LOG_NOTICE, "meter param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
-	
-	rpt_telem_select(myrpt,command_source,mylink);
-	rpt_telemetry(myrpt,METER,param);
 	return DC_COMPLETE;
 }
 
@@ -15232,11 +15381,10 @@ char tmpstr[300],lstr[MAXLINKLIST];
 	
 static void *rpt_master(void *ignore)
 {
-int	i,j,n,res;
+int	i,n;
 pthread_attr_t attr;
 struct ast_config *cfg;
-struct ast_variable *var,*var2;
-char *this,*val,s[32];
+char *this,*val;
 
 	/* init nodelog queue */
 	nodelog.next = nodelog.prev = &nodelog;
@@ -15262,77 +15410,9 @@ char *this,*val,s[32];
 	/*
  	* If there are daq devices present, open and initialize them
  	*/
-	ndaqs = j = 0;
-	var = ast_variable_browse(cfg,"daq-list");
-	while(var){
-		const char *p;
-		if(strncmp("device",var->name,6)){
-			ast_log(LOG_WARNING,"Error in daq_entries stanza on line %d\n", var->lineno);
-			break;
-		}
-		strncpy(s,var->value,sizeof(s)); /* Make copy of device entry */
-		if(!(p = ast_variable_retrieve(cfg,s,"type"))){
-			ast_log(LOG_WARNING,"Type variable required for %s stanza\n", s);
-			break;
-		}
-		if(strncmp(p,"uchameleon",10)){
-			ast_log(LOG_WARNING,"Type must be uchameleon for %s stanza\n", s);
-			break;
-		}
-                if(!(p = ast_variable_retrieve(cfg,s,"name"))){
-                        ast_log(LOG_WARNING,"Name variable required for %s stanza\n", s);
-                        break;
-                }
-		if(!(daq_entries[ndaqs].desc = daq_open(DAQ_TYPE_UCHAMELEON, (char *) p))){
-			ast_log(LOG_WARNING,"Cannot open device name %s\n",p);
-			break;
-		}	
-		/* Save the devicename */
-		strncpy(daq_entries[ndaqs].name, s, 32);
-		daq_entries[ndaqs].name[MAX_DAQ_NAME - 1] = 0;
+	daq_init(cfg);
 
-		/* Pin Initialization */
-		var2 = ast_variable_browse(cfg, s);
-		while(var2){
-			unsigned int pin;
-			static char *pin_keywords[]={"inadc","inp","in","out",NULL};
-			if((var2->name[0] < '0')||(var2->name[0] > '9')){
-				var2 = var2->next;
-				continue;
-			}
-			pin = (unsigned int) atoi(var2->name);
-			i = matchkeyword(var2->value, NULL, pin_keywords);
-			if(debug >= 3)
-				ast_log(LOG_NOTICE, "Pin = %d, Index = %d\n", pin, i);
-			switch(i){
-				case 1:
-					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_INADC); /* ADC */
-					break;
-				case 2:
-					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_INP); /* Pullup */
-					break;
-				case 3:
-					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_IN); /* In  */
-					break;
-				case 4:
-					res = daq_set_pintype(daq_entries[ndaqs].desc, pin, DAQ_PT_OUT); /* Out */
-					break;
-				default:
-					res = -1;
-					break;
-			}
-			if(res)
-				ast_log(LOG_WARNING,"Invalid pin type on line: %d\n",var2->lineno);
-			else
-				j++;
-			var2 = var2->next;
-		}
-		ndaqs++;	
-		if(ndaqs >= MAX_DAQ_ENTRIES)
-			break;
-		var = var->next;
-	}
-		
+
 	while((this = ast_category_browse(cfg,this)) != NULL)
 	{
 		for(i = 0 ; i < strlen(this) ; i++){
@@ -17611,8 +17691,8 @@ static int unload_module(void)
 #ifdef	OLD_ASTERISK
 	STANDARD_HANGUP_LOCALUSERS;
 #endif
-	for(i = 0; i < ndaqs; i++)
-		daq_close(daq_entries[i].desc);
+
+	daq_uninit();
 
 	for(i = 0; i < nrpts; i++) {
 		if (!strcmp(rpt_vars[i].name,rpt_vars[i].p.nodes)) continue;
