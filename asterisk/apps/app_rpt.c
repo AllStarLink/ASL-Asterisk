@@ -1523,13 +1523,13 @@ static int serial_open(char *fname, int speed, int stop2)
  */
 
 
-static int serial_rxready(int fd, int timeoutusec)
+static int serial_rxready(int fd, int timeoutms)
 {
 	fd_set readyset;
 	struct timeval tv;
 
 	tv.tv_sec = 0;
-	tv.tv_usec = timeoutusec;
+	tv.tv_usec = 1000 * timeoutms;
         FD_ZERO(&readyset);
         FD_SET(fd, &readyset);
         return select(fd + 1, &readyset, NULL, NULL, &tv);
@@ -1543,12 +1543,12 @@ static int serial_rxready(int fd, int timeoutusec)
 *
 */
 
-static int serial_rxflush(int fd)
+static int serial_rxflush(int fd, int timeoutms)
 {
 	int res, flushed = 0;
 	char c;
 	
-	while((res = serial_rxready(fd, 1000)) == 1){
+	while((res = serial_rxready(fd, timeoutms)) == 1){
 		if(read(fd, &c, 1) == -1){
 			res = -1;
 			break;
@@ -1557,38 +1557,22 @@ static int serial_rxflush(int fd)
 	}		
 	return (res == -1)? res : flushed;
 }
-		
 /*
- * Write some bytes to the serial port, then optionally expect a fixed response
+ * Receive a string from the serial device
  */
 
-static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, int asciiflag)
+static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, int asciiflag)
 {
 	char c;
-	int i,j,res;
+	int i, j, res;
 
-	if(debug >= 7)
-		ast_log(LOG_NOTICE,"fd = %d\n",fd);
-
-	if ((rxmaxbytes) && (rxbuf != NULL)){ 
-		if((i = serial_rxflush(fd)) == -1)
-			return -1;
-		if(debug >= 7)
-			ast_log(LOG_NOTICE,"serial_io: %d bytes flushed prior to write\n", i);
-	}
-
-	if(write(fd, txbuf, txbytes) != txbytes){
-		ast_log(LOG_WARNING,"serial_io: write failed: %s\n", strerror(errno));
-		return -1;
-	}
-		
 	if ((!rxmaxbytes) || (rxbuf == NULL)){ 
 		return 0;
 	}
 	memset(rxbuf,0,rxmaxbytes);
 	for(i = 0; i < rxmaxbytes; i++){
 		if(timeoutms){
-			res = serial_rxready(fd, 1000 * timeoutms);
+			res = serial_rxready(fd, timeoutms);
 			if(res < 0)
 				return -1;
 			if(!res){
@@ -1619,7 +1603,53 @@ static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbyt
 }
 
 /*
- * Send a nul-terminated string to the serial port
+ * Send a nul-terminated string to the serial device (without RX-flush)
+ */
+
+static int serial_txstring(int fd, char *txstring)
+{
+	int txbytes;
+
+	txbytes = strlen(txstring);
+
+	if(debug > 3)
+		ast_log(LOG_NOTICE, "serial_txstring sending: %s\n", txstring);
+
+	if(write(fd, txstring, txbytes) != txbytes){
+		ast_log(LOG_WARNING,"serial_io: write failed: %s\n", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+		
+/*
+ * Write some bytes to the serial port, then optionally expect a fixed response
+ */
+
+static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, int asciiflag)
+{
+	int i;
+
+	if(debug >= 7)
+		ast_log(LOG_NOTICE,"fd = %d\n",fd);
+
+	if ((rxmaxbytes) && (rxbuf != NULL)){ 
+		if((i = serial_rxflush(fd, 10)) == -1)
+			return -1;
+		if(debug >= 7)
+			ast_log(LOG_NOTICE,"serial_io: %d bytes flushed prior to write\n", i);
+	}
+
+	if(write(fd, txbuf, txbytes) != txbytes){
+		ast_log(LOG_WARNING,"serial_io: write failed: %s\n", strerror(errno));
+		return -1;
+	}
+
+	return serial_rx(fd, rxbuf, rxmaxbytes, timeoutms, asciiflag);
+}
+
+/*
+ * Send a nul-terminated string to the serial port and flush the RX buffer prior to sending
  */
 
 static int serial_strout(int fd, char *cmd)
@@ -1790,7 +1820,7 @@ static int uchameleon_write_pin(struct daq_entry_tag *desc, unsigned int pin, un
 	if(serial_strout(desc->fd, s) == -1)
 		return -1;
 	return 0;
-}
+}		
 
 /*
  * **************************
@@ -2120,7 +2150,6 @@ static struct daq_entry_tag *daq_devtoentry(char *name)
 	}
 	return e;
 }
-
 
 
 /*
