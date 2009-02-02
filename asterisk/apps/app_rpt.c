@@ -302,11 +302,20 @@
 
 #define EL_DB_ROOT "echolink"
 
+/*
+ * DAQ subsystem
+ */
+
 #define MAX_DAQ_RANGES 16  /* Max number of entries for range() */
 #define MAX_DAQ_ENTRIES 10 /* Max number of DAQ devices */
 #define MAX_DAQ_NAME 32 /* Max length of a device name */
 #define MAX_DAQ_DEV 64 /* Max length of a daq device path */
 #define MAX_METER_FILES 10 /* Max number of sound files in a meter def. */
+#define DAQ_RX_TIMEOUT 50 /* Receive time out for DAQ subsystem */ 
+#define DAQ_ADC_ACQINT 10 /* Acquire interval for ADC channels */
+#define ADC_HIST_TIME 100 /* Time to calculate avg, high and low peaks from. Must be a integer mult. of DAQ_ADC_ACQINT */
+#define ADC_HISTORY_DEPTH ADC_HIST_TIME/DAQ_ADC_ACQINT
+ 
 
 enum {REM_OFF,REM_MONITOR,REM_TX};
 
@@ -339,7 +348,7 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
       HF_SCAN_DOWN_FAST,HF_SCAN_UP_SLOW,HF_SCAN_UP_QUICK,HF_SCAN_UP_FAST};
 
 /*
- * Enums for DAQ
+ * DAQ Subsystem
  */
 
 enum{DAQ_PS_IDLE = 0,DAQ_PS_START,DAQ_PS_BUSY};
@@ -691,7 +700,8 @@ struct daq_pin_entry_tag{
 	int command;
 	int state;
 	int value;
-	void (*exec)(char *dev, int num, int value);
+	int adclastupdate;
+	int adchistory[ADC_HISTORY_DEPTH];
 	struct daq_pin_entry_tag *next;
 };
 
@@ -701,6 +711,8 @@ struct daq_entry_tag{
 	char dev[MAX_DAQ_DEV];
 	int type;
 	int fd;
+	int active;
+	time_t adcacqtime;
 	pthread_t threadid;
 	ast_mutex_t lock;
 	struct daq_tx_entry_tag *txhead;
@@ -1592,7 +1604,7 @@ static int serial_rxflush(int fd, int timeoutms)
  * Receive a string from the serial device
  */
 
-static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, int asciiflag)
+static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, char termchr)
 {
 	char c;
 	int i, j, res;
@@ -1618,9 +1630,9 @@ static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, in
 		if (j == 0) 
 			return i ;
 		rxbuf[i] = c;
-		if (asciiflag & 1){
+		if (termchr){
 			rxbuf[i + 1] = 0;
-			if (c == '\r') break;
+			if (c == termchr) break;
 		}
 	}					
 	if(i && debug >= 5) {
@@ -1657,7 +1669,7 @@ static int serial_txstring(int fd, char *txstring)
  * Write some bytes to the serial port, then optionally expect a fixed response
  */
 
-static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, int asciiflag)
+static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, char termchr)
 {
 	int i;
 
@@ -1676,7 +1688,7 @@ static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbyt
 		return -1;
 	}
 
-	return serial_rx(fd, rxbuf, rxmaxbytes, timeoutms, asciiflag);
+	return serial_rx(fd, rxbuf, rxmaxbytes, timeoutms, termchr);
 }
 
 /*
@@ -1711,21 +1723,21 @@ static int uchameleon_open(struct daq_entry_tag *desc)
                	ast_log(LOG_WARNING, "serial_open on %s failed!\n", desc->name);
                 return -1;
         }
-        if((count = serial_io(desc->fd, idbuf, rxbuf, strlen(idbuf), 14, 100, 1)) < 1){
+        if((count = serial_io(desc->fd, idbuf, rxbuf, strlen(idbuf), 14, DAQ_RX_TIMEOUT, 0x0a)) < 1){
               	ast_log(LOG_WARNING, "serial_io on %s failed\n", desc->name);
 		close(desc->fd);
                 return -1;
         }
 	if(debug >= 5)
         	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
-	if((count != 14)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
+	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
 		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", desc->name);
 		close(desc->fd);
 		return -1;
 	}
 	/* uchameleon LED on solid once we communicate with it successfully */
 	
-	if(serial_io(desc->fd, ledbuf, NULL, strlen(ledbuf), 0, 100, 0) == -1){
+	if(serial_io(desc->fd, ledbuf, NULL, strlen(ledbuf), 0, DAQ_RX_TIMEOUT, 0) == -1){
 		ast_log(LOG_WARNING, "Can't set LED on uchameleon device\n");
 		close(desc->fd);
 		return -1;
@@ -1752,6 +1764,7 @@ static int uchameleon_open(struct daq_entry_tag *desc)
 static int uchameleon_close(struct daq_entry_tag *t)
 {
 	int res;
+	char *ledpat="led pattern 253\n";
 	struct daq_pin_entry_tag *p,*pn;
 	struct daq_tx_entry_tag *q,*qn;
 
@@ -1764,6 +1777,8 @@ static int uchameleon_close(struct daq_entry_tag *t)
 		ast_log(LOG_WARNING, "Can't kill monitor thread");
 
 	ast_mutex_unlock(&t->lock);
+
+	serial_io(t->fd, ledpat, NULL, strlen(ledpat) ,0, 0, 0); /* LED back to flashing */
 
 	/* Free linked lists */
 
@@ -1795,15 +1810,30 @@ static int uchameleon_close(struct daq_entry_tag *t)
  */
 
 
-static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
+static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
 {	
+	int tries = 5;
 	struct daq_pin_entry_tag *p, *listl, *listp;
 
 	if(!t)
-		return;
+		return -1;
+
+	ast_mutex_lock(&t->lock);
+
+	while((!t->active) && tries){ /* Wait a little bit if thread isn't up and running */
+		ast_mutex_unlock(&t->lock);
+		usleep(10*1000);
+		ast_mutex_lock(&t->lock);
+		tries--;
+	}
+	if(!tries){
+		ast_log(LOG_WARNING,"DAQ monitor thread not running\n");
+		ast_mutex_unlock(&t->lock);
+		return -1;
+	}
 
 	/* Find our pin */
-	ast_mutex_lock(&t->lock);
+
 	listp = listl = t->pinhead;
 	while(listp){
 		listl = listp;
@@ -1828,6 +1858,14 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 			}
 		}
 		else{
+			/* Instant read of ADC value */
+
+			if(cmd == DAQ_CMD_ADC){
+				*arg1 = listp->value;
+				ast_mutex_unlock(&t->lock);
+				return 0;
+			}
+
 			while(listp->state){
 				ast_mutex_unlock(&t->lock);
 				usleep(10*1000); /* Wait */
@@ -1839,14 +1877,14 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 				}
 				else{
 					ast_mutex_unlock(&t->lock);
-					return;
+					return 0;
 				}
 			}
 			listp->command = cmd;
 			listp->state = DAQ_PS_START;
 			if(cmd == DAQ_CMD_OUT){
 				ast_mutex_unlock(&t->lock);
-				return;
+				return 0;
 			}
  			while(listp->state){
 				ast_mutex_unlock(&t->lock);
@@ -1855,7 +1893,7 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 			}
 			*arg1 = listp->value;
 			ast_mutex_unlock(&t->lock);
-			return;
+			return 0;
 		}
 	}
 	else{ /* Pin not in list */
@@ -1865,7 +1903,7 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 				if(!(p = (struct daq_pin_entry_tag *) malloc(sizeof(struct daq_pin_entry_tag)))){
 					ast_log(LOG_ERROR,"Out of memory");
 					ast_mutex_unlock(&t->lock);
-					return;
+					return -1;
 				}
 				memset(p, 0, sizeof(struct daq_pin_entry_tag));
 				p->pintype = *arg1;
@@ -1878,6 +1916,8 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 					listl->next = p; 
 				}
 				p->state = DAQ_PS_START;
+				ast_mutex_unlock(&t->lock);
+				return 0;
 			}
 			else{
 				ast_log(LOG_WARNING,"Invalid pin number for pinset\n");
@@ -1888,7 +1928,7 @@ static void uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1,
 		}
 	}
 	ast_mutex_unlock(&t->lock);
-	return;
+	return -1;
 }
  
 
@@ -1934,7 +1974,8 @@ static int explode_string(char *str, char *strp[], int limit, char delim, char q
 
 static void *uchameleon_monitor_thread(void *this)
 {
-	int i,sample,res,pin,valid;
+	int i,sample,res,pin,valid,adc_acquire;
+	time_t now;
 	char rxbuff[32];
 	char txbuff[32];
 	char *rxargs[3];
@@ -1942,14 +1983,22 @@ static void *uchameleon_monitor_thread(void *this)
 	struct daq_pin_entry_tag *p;
 	struct daq_tx_entry_tag *q;
 
-	ast_log(LOG_NOTICE, "DAQ: thread started\n");
-		
+	if(debug)
+		ast_log(LOG_NOTICE, "DAQ: thread started\n");
+
+	ast_mutex_lock(&t->lock);
+	t->active = 1;
+	ast_mutex_unlock(&t->lock);
 
 	for(;;){
+		adc_acquire = 0;
 		 /* If receive data */
-		res = serial_rx(t->fd, rxbuff, sizeof(rxbuff), 10, 1);
+		res = serial_rx(t->fd, rxbuff, sizeof(rxbuff), DAQ_RX_TIMEOUT, 0x0a);
 		if(res == -1){
 			ast_log(LOG_ERROR,"serial_rx failed\n");
+			ast_mutex_lock(&t->lock);
+			t->active = 0;
+			ast_mutex_unlock(&t->lock);
 			return this; /* Thread dies */
 		}
 		if(res){
@@ -1992,10 +2041,23 @@ static void *uchameleon_monitor_thread(void *this)
 			}
 		}
 		
+
+		if(time(&now) >= t->adcacqtime){
+			t->adcacqtime = now + DAQ_ADC_ACQINT;
+			if(debug >= 1)
+				ast_log(LOG_NOTICE,"Acquiring analog data\n");
+			adc_acquire = 1;
+		}
+
 		/* Go through the pin linked list looking for new work */
 		ast_mutex_lock(&t->lock);		
 		p = t->pinhead;
 		while(p){
+			/* Time to acquire all ADC channels ? */
+			if((adc_acquire) && (p->pintype == DAQ_PT_INADC)){
+				p->state = DAQ_PS_START;
+				p->command = DAQ_CMD_ADC;
+			}
 			if(p->state == DAQ_PS_START){
 				p->state = DAQ_PS_BUSY;
 				switch(p->command){
@@ -2085,6 +2147,7 @@ static void *uchameleon_monitor_thread(void *this)
 			} /* if */
 		p = p->next;
 		} /* while */
+		
 		/* Transmit queued commands */
 		while(t->txhead){
 			q = t->txhead;
@@ -2096,7 +2159,12 @@ static void *uchameleon_monitor_thread(void *this)
 				t->txtail = NULL;
 			ast_free(q);
 			ast_mutex_unlock(&t->lock);
-			serial_txstring(t->fd, txbuff);
+			if(serial_txstring(t->fd, txbuff) == -1){
+				t->active= 0;
+				ast_log(LOG_ERROR,"Tx failed, terminating monitor thread\n");
+				return this;
+			}
+				
 			ast_mutex_lock(&t->lock);
 		}/* while */
 		ast_mutex_unlock(&t->lock);
@@ -2201,15 +2269,18 @@ static int daq_close(struct daq_entry_tag *desc)
  * Do something with the daq subsystem
  */
 
-static void daq_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
+static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
 {
+	int res = -1;
+
 	switch(t->type){
 		case DAQ_TYPE_UCHAMELEON:
-			uchameleon_do(t, pin, cmd, arg1, arg2);
+			res = uchameleon_do(t, pin, cmd, arg1, arg2);
 			break;
 		default:
 			break;
 	}
+	return res;
 }
 
 /*
@@ -2272,6 +2343,7 @@ static void daq_init(struct ast_config *cfg)
 				ast_log(LOG_WARNING,"Invalid pin type: %s\n", var2->value);
 			var2 = var2->next;
 		}
+		time(&daqv->adcacqtime); /* Start ADC Acquisition */ 
 		daq.ndaqs++;	
 		if(daq.ndaqs >= MAX_DAQ_ENTRIES)
 			break;
@@ -2498,11 +2570,18 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 
 	val = 0;
 	if(pintype == 1){
-		daq_do(entry, pin, DAQ_CMD_ADC, &val, NULL);
-		scaledval = ((val + scalepre)/scalediv) + scalepost;
+		res = daq_do(entry, pin, DAQ_CMD_ADC, &val, NULL);
+		if(!res)
+			scaledval = ((val + scalepre)/scalediv) + scalepost;
 	}
 	else{
-		daq_do(entry, pin, DAQ_CMD_IN, &val, NULL);
+		res = daq_do(entry, pin, DAQ_CMD_IN, &val, NULL);
+	}
+
+	if(res){ /* DAQ Subsystem is down */
+		ast_free(myargs);
+		ast_free(meter_face);
+		return res;
 	}
 
 	/*
@@ -2535,7 +2614,7 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 		}
 	}
 
-	if(debug){ /* Spew the variables */
+	if(debug >= 3){ /* Spew the variables */
 		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
 		ast_log(LOG_NOTICE,"raw value = %u\n", val);
 		if(metertype == 1){
