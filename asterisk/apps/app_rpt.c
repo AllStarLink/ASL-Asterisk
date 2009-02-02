@@ -351,8 +351,10 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
  * DAQ Subsystem
  */
 
-enum{DAQ_PS_IDLE = 0,DAQ_PS_START,DAQ_PS_BUSY};
-enum{DAQ_CMD_IN,DAQ_CMD_ADC,DAQ_CMD_OUT,DAQ_CMD_PINSET};
+enum{DAQ_PS_IDLE = 0, DAQ_PS_START, DAQ_PS_BUSY};
+enum{DAQ_CMD_IN, DAQ_CMD_ADC, DAQ_CMD_OUT, DAQ_CMD_PINSET};
+enum{DAQ_SUB_CUR, DAQ_SUB_STAVG, DAQ_SUB_STMAX, DAQ_SUB_STMIN, DAQ_SUB_MAX,
+	DAQ_SUB_MIN, DAQ_SUB_RESET_MAX, DAQ_SUB_RESET_MIN};
 enum{DAQ_PT_INADC = 1, DAQ_PT_INP, DAQ_PT_IN, DAQ_PT_OUT};
 enum{DAQ_TYPE_UCHAMELEON};
 
@@ -700,7 +702,9 @@ struct daq_pin_entry_tag{
 	int command;
 	int state;
 	int value;
-	int adclastupdate;
+	int valuemax;
+	int valuemin;
+	int adcnextupdate;
 	int adchistory[ADC_HISTORY_DEPTH];
 	struct daq_pin_entry_tag *next;
 };
@@ -1635,7 +1639,7 @@ static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, ch
 			if (c == termchr) break;
 		}
 	}					
-	if(i && debug >= 5) {
+	if(i && debug >= 6) {
 		printf("i = %d\n",i);
 		printf("String returned was:\n");
 		for(j = 0; j < i; j++)
@@ -1655,7 +1659,7 @@ static int serial_txstring(int fd, char *txstring)
 
 	txbytes = strlen(txstring);
 
-	if(debug > 3)
+	if(debug > 5)
 		ast_log(LOG_NOTICE, "sending: %s\n", txstring);
 
 	if(write(fd, txstring, txbytes) != txbytes){
@@ -1728,7 +1732,7 @@ static int uchameleon_open(struct daq_entry_tag *desc)
 		close(desc->fd);
                 return -1;
         }
-	if(debug >= 5)
+	if(debug >= 3)
         	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
 	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
 		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", desc->name);
@@ -1812,6 +1816,7 @@ static int uchameleon_close(struct daq_entry_tag *t)
 
 static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
 {	
+	int i,j,x;
 	int tries = 5;
 	struct daq_pin_entry_tag *p, *listl, *listp;
 
@@ -1851,6 +1856,8 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, 
 				}
 				listp->command = DAQ_CMD_PINSET;
 				listp->pintype = *arg1; /* Pin redefinition */
+				listp->valuemin = 255;
+				listp->valuemax = 0;
 				listp->state = DAQ_PS_START;
 			}
 			else{
@@ -1858,11 +1865,103 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, 
 			}
 		}
 		else{
-			/* Instant read of ADC value */
+			/* Return ADC value */
 
 			if(cmd == DAQ_CMD_ADC){
-				*arg1 = listp->value;
-				ast_mutex_unlock(&t->lock);
+				if(arg2){
+					switch(*arg2){
+						case DAQ_SUB_CUR:
+							if(arg1)
+								*arg1 = listp->value;
+							break;
+
+						case DAQ_SUB_STAVG: /* Short term average */
+							x = 0;
+							i = listp->adcnextupdate;
+							for(j = 0 ; j < ADC_HISTORY_DEPTH; j++){
+								if(debug >= 4){
+									ast_log(LOG_NOTICE, "Sample for avg: %d\n",
+									listp->adchistory[i]);
+								}
+								x += listp->adchistory[i];
+								if(++i >= ADC_HISTORY_DEPTH)
+									i = 0;
+							}
+							x /= ADC_HISTORY_DEPTH;
+							if(debug >= 3)
+								ast_log(LOG_NOTICE, "Average: %d\n", x);
+							if(arg1)
+								*arg1 = x;
+							break;
+
+						case DAQ_SUB_STMAX: /* Short term maximum */
+							x = 0;
+							i = listp->adcnextupdate;
+							for(j = 0 ; j < ADC_HISTORY_DEPTH; j++){
+								if(debug >= 4){
+									ast_log(LOG_NOTICE, "Sample for max: %d\n",
+									listp->adchistory[i]);
+								}
+								if(listp->adchistory[i] > x)
+									x = listp->adchistory[i];
+								if(++i >= ADC_HISTORY_DEPTH)
+									i = 0;
+							}
+							if(debug >= 3)
+								ast_log(LOG_NOTICE, "Maximum: %d\n", x);
+							if(arg1)
+								*arg1 = x;
+							break;
+
+						case DAQ_SUB_STMIN: /* Short term minimum */
+							x = 255 ;
+							i = listp->adcnextupdate;
+							if(i >= ADC_HISTORY_DEPTH)
+								i = 0;
+							for(j = 0 ; j < ADC_HISTORY_DEPTH; j++){
+								if(debug >= 4){
+									ast_log(LOG_NOTICE, "Sample for min: %d\n",
+									listp->adchistory[i]);
+								}
+								if(listp->adchistory[i] < x)
+									x = listp->adchistory[i];
+								if(++i >= ADC_HISTORY_DEPTH)
+									i = 0;
+								}
+							if(debug >= 3)
+								ast_log(LOG_NOTICE, "Minimum: %d\n", x);
+							if(arg1)
+								*arg1 = x;
+							break;
+
+						case DAQ_SUB_MAX: /* Max since start or reset */
+							if(arg1)
+								*arg1 = listp->valuemax;
+							break;
+
+						case DAQ_SUB_MIN: /* Min since start or reset */
+							if(arg1)
+								*arg1 = listp->valuemin;
+							break;
+
+						case DAQ_SUB_RESET_MAX:
+							listp->valuemax = 0;
+							break;
+
+						case DAQ_SUB_RESET_MIN:
+							listp->valuemin = 255;
+							break;							
+
+						default:
+							ast_mutex_unlock(&t->lock);
+							return -1;
+					}
+				}
+				else{
+					if(arg1)
+						*arg1 = listp->value;
+				}
+				ast_mutex_unlock(&t->lock);	
 				return 0;
 			}
 
@@ -2002,7 +2101,7 @@ static void *uchameleon_monitor_thread(void *this)
 			return this; /* Thread dies */
 		}
 		if(res){
-			if(debug >= 3)
+			if(debug >= 5)
 				printf("Received: %s\n", rxbuff);
 			valid = 0;
 			/* Parse return string */
@@ -2031,6 +2130,13 @@ static void *uchameleon_monitor_thread(void *this)
 						}
 						if((valid == 2)&&(p->pintype == DAQ_PT_INADC)){
 							p->value = sample;
+							if(sample > p->valuemax)
+								p->valuemax = sample;
+							if(sample < p->valuemin)
+								p->valuemin = sample;
+							p->adchistory[p->adcnextupdate++] = sample;
+							if(p->adcnextupdate >= ADC_HISTORY_DEPTH)
+								p->adcnextupdate = 0;
 							p->state = DAQ_PS_IDLE;
 						}
 						break;
@@ -2044,7 +2150,7 @@ static void *uchameleon_monitor_thread(void *this)
 
 		if(time(&now) >= t->adcacqtime){
 			t->adcacqtime = now + DAQ_ADC_ACQINT;
-			if(debug >= 1)
+			if(debug >= 4)
 				ast_log(LOG_NOTICE,"Acquiring analog data\n");
 			adc_acquire = 1;
 		}
@@ -2125,6 +2231,8 @@ static void *uchameleon_monitor_thread(void *this)
 									(p->pintype == DAQ_PT_INP) ? 1 : 0);
 									uchameleon_queue_tx(t, txbuff);
 								}
+								p->valuemin = 255;
+								p->valuemax = 0;
 								p->state = DAQ_PS_IDLE;
 								break;
 
