@@ -1977,7 +1977,8 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec
 
 			if(listp->state == DAQ_PS_IN_MONITOR){
 				if((cmd != DAQ_CMD_MONITOR) || (exec)){
-					ast_log(LOG_WARNING,"Monitor enable on pin %d is invalid\n",listp->num);
+					ast_log(LOG_WARNING,
+						"Monitor was previously set on pin %d, command ignored\n",listp->num);
 					ast_mutex_unlock(&t->lock);
 					return -1;
 				}
@@ -2133,7 +2134,7 @@ static void *uchameleon_monitor_thread(void *this)
 			return this; /* Thread dies */
 		}
 		if(res){
-			if(debug >= 5)
+			if(debug >= 5) 
 				printf("Received: %s\n", rxbuff);
 			valid = 0;
 			/* Parse return string */
@@ -2156,8 +2157,12 @@ static void *uchameleon_monitor_thread(void *this)
 				p = t->pinhead;
 				while(p){
 					if(p->num == pin){
-						if((valid == 1)&&((p->pintype == DAQ_PT_IN)||(p->pintype == DAQ_PT_INP))){
+						if((valid == 1)&&((p->pintype == DAQ_PT_IN)||
+							(p->pintype == DAQ_PT_INP)||(p->pintype == DAQ_PT_OUT))){
 							p->value = sample ? 1 : 0;
+							if(debug >= 3)
+								ast_log(LOG_NOTICE,"Input pin %d is a %d\n",
+									p->num, p->value);
 							/* Exec monitor fun if state is monitor */
 							if(p->state == DAQ_PS_IN_MONITOR){
 								if(!p->alarmmask && !p->ignorefirstalarm && p->monexec){
@@ -2165,6 +2170,8 @@ static void *uchameleon_monitor_thread(void *this)
 								}
 								p->ignorefirstalarm = 0;
 							}
+							else
+								p->state = DAQ_PS_IDLE;
 						}
 						if((valid == 2)&&(p->pintype == DAQ_PT_INADC)){
 							p->value = sample;
@@ -2207,7 +2214,7 @@ static void *uchameleon_monitor_thread(void *this)
 				switch(p->command){
 					case DAQ_CMD_OUT:
 						if(p->pintype == DAQ_PT_OUT){
-							snprintf(txbuff,sizeof(txbuff),"pin %u %s\n", p->num, (p->value) ?
+							snprintf(txbuff,sizeof(txbuff),"pin %d %s\n", p->num, (p->value) ?
 							"hi" : "lo");
 							if(debug >= 3)
 								ast_log(LOG_NOTICE, "DAQ_CMD_OUT: %s\n", txbuff);
@@ -2222,7 +2229,7 @@ static void *uchameleon_monitor_thread(void *this)
 
 					case DAQ_CMD_MONITOR:
 						if((p->pintype == DAQ_PT_IN) || (p->pintype == DAQ_PT_INP)){
-							snprintf(txbuff, sizeof(txbuff), "pin %u monitor %s\n", 
+							snprintf(txbuff, sizeof(txbuff), "pin %d monitor %s\n", 
 							p->num, p->monexec ? "on" : "off");
 							uchameleon_queue_tx(t, txbuff);
 							if(!p->monexec)
@@ -2237,8 +2244,9 @@ static void *uchameleon_monitor_thread(void *this)
 						break;
 
 					case DAQ_CMD_IN:
-						if((p->pintype == DAQ_PT_IN)||(p->pintype == DAQ_PT_INP)){
-							snprintf(txbuff,sizeof(txbuff),"pin %u state\n", p->num);
+						if((p->pintype == DAQ_PT_IN)||
+							(p->pintype == DAQ_PT_INP)||(p->pintype == DAQ_PT_OUT)){
+							snprintf(txbuff,sizeof(txbuff),"pin %d state\n", p->num);
 							uchameleon_queue_tx(t, txbuff);
 						}
 						else{
@@ -2249,7 +2257,7 @@ static void *uchameleon_monitor_thread(void *this)
 					
 					case DAQ_CMD_ADC:
 						if(p->pintype == DAQ_PT_INADC){
-							snprintf(txbuff,sizeof(txbuff),"adc %u\n", p->num);
+							snprintf(txbuff,sizeof(txbuff),"adc %d\n", p->num);
 							uchameleon_queue_tx(t, txbuff);
 						}
 						else{
@@ -2279,11 +2287,11 @@ static void *uchameleon_monitor_thread(void *this)
 									p->state = DAQ_PS_IDLE;
 									break;
 								}
-								snprintf(txbuff, sizeof(txbuff), "pin %u in\n", p->num);
+								snprintf(txbuff, sizeof(txbuff), "pin %d in\n", p->num);
 								uchameleon_queue_tx(t, txbuff);
 								if(p->num > 8){
 									snprintf(txbuff, sizeof(txbuff),
-									"pin %u pullup %d\n", p->num,
+									"pin %d pullup %d\n", p->num,
 									(p->pintype == DAQ_PT_INP) ? 1 : 0);
 									uchameleon_queue_tx(t, txbuff);
 								}
@@ -2668,10 +2676,10 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 
 	if(!strcmp("inadc",p))
 		pintype = 1;
-	if((!strcmp("inp",p))||(!strcmp("in",p)))
+	if((!strcmp("inp",p))||(!strcmp("in",p)||(!strcmp("out", p))))
 		pintype = 2;
 	if(!pintype){
-		ast_log(LOG_WARNING,"Pin type must be one of inadc, inp, or in for channel %s\n",ftablentries[1]);
+		ast_log(LOG_WARNING,"Pin type must be one of inadc, inp, in, or out for channel %s\n",ftablentries[1]);
 		ast_free(myargs);
 		return -1;
 	}
@@ -2823,7 +2831,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 				break;
 		}
 		if(i == numranges){
-			ast_log(LOG_WARNING,"Range missing on meter face %s for value %u\n", ftablentries[2], val);
+			ast_log(LOG_WARNING,"Range missing on meter face %s for value %d\n", ftablentries[2], val);
 			ast_free(myargs);
 			ast_free(meter_face);
 			return -1;
@@ -2832,7 +2840,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 
 	if(debug >= 3){ /* Spew the variables */
 		ast_log(LOG_NOTICE,"device = %d, pin = %d, pintype = %d, metertype = %d\n",device, pin, pintype, metertype);
-		ast_log(LOG_NOTICE,"raw value = %u\n", val);
+		ast_log(LOG_NOTICE,"raw value = %d\n", val);
 		if(metertype == 1){
 			ast_log(LOG_NOTICE,"scalepre = %f, scalediv = %f, scalepost = %f\n",scalepre, scalediv, scalepost);
 			ast_log(LOG_NOTICE,"scaled value = %f\n", scaledval);
