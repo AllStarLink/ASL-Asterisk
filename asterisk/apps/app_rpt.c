@@ -352,7 +352,7 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
  */
 
 enum{DAQ_PS_IDLE = 0, DAQ_PS_START, DAQ_PS_BUSY};
-enum{DAQ_CMD_IN, DAQ_CMD_ADC, DAQ_CMD_OUT, DAQ_CMD_PINSET};
+enum{DAQ_CMD_IN, DAQ_CMD_ADC, DAQ_CMD_OUT, DAQ_CMD_PINSET, DAQ_CMD_MONITOR};
 enum{DAQ_SUB_CUR, DAQ_SUB_STAVG, DAQ_SUB_STMAX, DAQ_SUB_STMIN, DAQ_SUB_MAX,
 	DAQ_SUB_MIN, DAQ_SUB_RESET_MAX, DAQ_SUB_RESET_MIN};
 enum{DAQ_PT_INADC = 1, DAQ_PT_INP, DAQ_PT_IN, DAQ_PT_OUT};
@@ -706,6 +706,8 @@ struct daq_pin_entry_tag{
 	int valuemin;
 	int adcnextupdate;
 	int adchistory[ADC_HISTORY_DEPTH];
+	char alarmtag[32];
+	void (*monexec)(char *, char *, int, int);
 	struct daq_pin_entry_tag *next;
 };
 
@@ -1814,7 +1816,7 @@ static int uchameleon_close(struct daq_entry_tag *t)
  */
 
 
-static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
+static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec)(char *name, char *alarmtag, int pin, int state), int *arg1, void *arg2)
 {	
 	int i,j,x;
 	int tries = 5;
@@ -1869,7 +1871,7 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, 
 
 			if(cmd == DAQ_CMD_ADC){
 				if(arg2){
-					switch(*arg2){
+					switch(*((int *) arg2)){
 						case DAQ_SUB_CUR:
 							if(arg1)
 								*arg1 = listp->value;
@@ -1965,13 +1967,24 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, 
 				return 0;
 			}
 
+			/* Rest of commands are processed here */
+
 			while(listp->state){
 				ast_mutex_unlock(&t->lock);
 				usleep(10*1000); /* Wait */
 				ast_mutex_lock(&t->lock);
 			}
+
+			if(cmd == DAQ_CMD_MONITOR){
+				listp->monexec = exec;
+				strncpy(listp->alarmtag, (char *) arg2, 32);
+				listp->alarmtag[31] = 0; 
+			}
+
+			listp->command = cmd;
+
 			if(cmd == DAQ_CMD_OUT){
-				if(*arg1){
+				if(arg1){
 					listp->value = *arg1;
 				}
 				else{
@@ -1979,9 +1992,8 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, 
 					return 0;
 				}
 			}
-			listp->command = cmd;
 			listp->state = DAQ_PS_START;
-			if(cmd == DAQ_CMD_OUT){
+			if((cmd == DAQ_CMD_OUT)||(cmd == DAQ_CMD_MONITOR)){
 				ast_mutex_unlock(&t->lock);
 				return 0;
 			}
@@ -2126,6 +2138,12 @@ static void *uchameleon_monitor_thread(void *this)
 					if(p->num == pin){
 						if((valid == 1)&&((p->pintype == DAQ_PT_IN)||(p->pintype == DAQ_PT_INP))){
 							p->value = sample ? 1 : 0;
+							/* Exec monitor fun if command is monitor */
+							if(p->command == DAQ_CMD_MONITOR){
+								if(p->monexec){
+									(*p->monexec)(t->name, p->alarmtag, pin, p->value);
+								}
+							}
 							p->state = DAQ_PS_IDLE;
 						}
 						if((valid == 2)&&(p->pintype == DAQ_PT_INADC)){
@@ -2176,6 +2194,19 @@ static void *uchameleon_monitor_thread(void *this)
 						}
 						else{
 							ast_log(LOG_WARNING,"Wrong pin type for out command\n");
+							p->state = DAQ_PS_IDLE;
+						}
+						break;
+
+					case DAQ_CMD_MONITOR:
+						if((p->pintype == DAQ_PT_IN) || (p->pintype == DAQ_PT_INP)){
+							snprintf(txbuff, sizeof(txbuff), "pin %u monitor %s\n", 
+							p->num, p->monexec ? "on" : "off");
+							uchameleon_queue_tx(t, txbuff);
+							p->state = DAQ_PS_IDLE; /* Let RX handle the messages */
+						}
+						else{
+							ast_log(LOG_WARNING, "Wrong pin type for monitor command\n");
 							p->state = DAQ_PS_IDLE;
 						}
 						break;
@@ -2377,13 +2408,13 @@ static int daq_close(struct daq_entry_tag *desc)
  * Do something with the daq subsystem
  */
 
-static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *arg2)
+static int daq_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec)(char *name, char *alarmtag, int pin, int state), int *arg1, void *arg2)
 {
 	int res = -1;
 
 	switch(t->type){
 		case DAQ_TYPE_UCHAMELEON:
-			res = uchameleon_do(t, pin, cmd, arg1, arg2);
+			res = uchameleon_do(t, pin, cmd, exec, arg1, arg2);
 			break;
 		default:
 			break;
@@ -2395,11 +2426,20 @@ static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int *arg1, int *ar
  * Initialize DAQ subsystem
  */
 
+
+
+/*
+static void mymonfun(char *name, char *alarmtag, int pin, int state)
+{
+	ast_log(LOG_NOTICE, "Event on devicename: %s alarmtag: %s pin: %d, state = %d\n", name, alarmtag, pin, state);
+}
+*/
+
 static void daq_init(struct ast_config *cfg)
 {
 	int i;
 	struct ast_variable *var,*var2;
-	struct daq_entry_tag **daq_next, *daqv;
+	struct daq_entry_tag **daq_next, *daqv = NULL;
 	char s[32];
 
 	daq.ndaqs = 0;
@@ -2446,7 +2486,7 @@ static void daq_init(struct ast_config *cfg)
 			if(debug >= 3)
 				ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
 			if(i && i < 5)
-				daq_do(daqv, pin, DAQ_CMD_PINSET,  &i, NULL);	
+				daq_do(daqv, pin, DAQ_CMD_PINSET, NULL, &i, NULL);	
 			else
 				ast_log(LOG_WARNING,"Invalid pin type: %s\n", var2->value);
 			var2 = var2->next;
@@ -2457,6 +2497,12 @@ static void daq_init(struct ast_config *cfg)
 			break;
 		var = var->next;
 	}
+
+/*
+	printf("******** Monitor enable ***********\n");
+	daq_do(daqv, 9, DAQ_CMD_MONITOR, mymonfun, NULL, "door");
+*/
+
 }		
 
 /*
@@ -2678,12 +2724,12 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 
 	val = 0;
 	if(pintype == 1){
-		res = daq_do(entry, pin, DAQ_CMD_ADC, &val, NULL);
+		res = daq_do(entry, pin, DAQ_CMD_ADC, NULL, &val, NULL);
 		if(!res)
 			scaledval = ((val + scalepre)/scalediv) + scalepost;
 	}
 	else{
-		res = daq_do(entry, pin, DAQ_CMD_IN, &val, NULL);
+		res = daq_do(entry, pin, DAQ_CMD_IN, NULL, &val, NULL);
 	}
 
 	if(res){ /* DAQ Subsystem is down */
