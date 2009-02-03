@@ -329,7 +329,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	MEMNOTFOUND, INVFREQ, REMMODE, REMLOGIN, REMXXX, REMSHORTSTATUS,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
-	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER};
+	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -351,7 +351,7 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
  * DAQ Subsystem
  */
 
-enum{DAQ_PS_IDLE = 0, DAQ_PS_START, DAQ_PS_BUSY};
+enum{DAQ_PS_IDLE = 0, DAQ_PS_START, DAQ_PS_BUSY, DAQ_PS_IN_MONITOR};
 enum{DAQ_CMD_IN, DAQ_CMD_ADC, DAQ_CMD_OUT, DAQ_CMD_PINSET, DAQ_CMD_MONITOR};
 enum{DAQ_SUB_CUR, DAQ_SUB_STAVG, DAQ_SUB_STMAX, DAQ_SUB_STMIN, DAQ_SUB_MAX,
 	DAQ_SUB_MIN, DAQ_SUB_RESET_MAX, DAQ_SUB_RESET_MIN};
@@ -704,6 +704,8 @@ struct daq_pin_entry_tag{
 	int value;
 	int valuemax;
 	int valuemin;
+	int ignorefirstalarm;
+	int alarmmask;
 	int adcnextupdate;
 	int adchistory[ADC_HISTORY_DEPTH];
 	char alarmtag[32];
@@ -1486,6 +1488,7 @@ static int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int co
 static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 /*
 * Function table
@@ -1501,7 +1504,10 @@ static struct function_table_tag function_table[] = {
 	{"macro", function_macro},
 	{"playback", function_playback},
 	{"localplay", function_localplay},
-	{"meter", function_meter}
+	{"meter", function_meter},
+	{"userout", function_userout}
+
+
 } ;
 
 
@@ -1967,6 +1973,16 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec
 				return 0;
 			}
 
+			/* Don't deadlock if monitor has been previously issued for a pin */
+
+			if(listp->state == DAQ_PS_IN_MONITOR){
+				if((cmd != DAQ_CMD_MONITOR) || (exec)){
+					ast_log(LOG_WARNING,"Monitor enable on pin %d is invalid\n",listp->num);
+					ast_mutex_unlock(&t->lock);
+					return -1;
+				}
+			}
+
 			/* Rest of commands are processed here */
 
 			while(listp->state){
@@ -1976,6 +1992,8 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec
 			}
 
 			if(cmd == DAQ_CMD_MONITOR){
+				if(arg1)
+					listp->ignorefirstalarm = *arg1;
 				listp->monexec = exec;
 				strncpy(listp->alarmtag, (char *) arg2, 32);
 				listp->alarmtag[31] = 0; 
@@ -1997,6 +2015,7 @@ static int uchameleon_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec
 				ast_mutex_unlock(&t->lock);
 				return 0;
 			}
+
  			while(listp->state){
 				ast_mutex_unlock(&t->lock);
 				usleep(10*1000); /* Wait */
@@ -2061,7 +2080,8 @@ static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
 
 	memset(q, 0, sizeof(struct daq_tx_entry_tag));
 
-	strcpy(q->txbuff, txbuff);
+	strncpy(q->txbuff, txbuff, 32);
+	q->txbuff[31] = 0;
 
 	if(t->txtail){
 		t->txtail->next = q;
@@ -2138,13 +2158,13 @@ static void *uchameleon_monitor_thread(void *this)
 					if(p->num == pin){
 						if((valid == 1)&&((p->pintype == DAQ_PT_IN)||(p->pintype == DAQ_PT_INP))){
 							p->value = sample ? 1 : 0;
-							/* Exec monitor fun if command is monitor */
-							if(p->command == DAQ_CMD_MONITOR){
-								if(p->monexec){
+							/* Exec monitor fun if state is monitor */
+							if(p->state == DAQ_PS_IN_MONITOR){
+								if(!p->alarmmask && !p->ignorefirstalarm && p->monexec){
 									(*p->monexec)(t->name, p->alarmtag, pin, p->value);
 								}
+								p->ignorefirstalarm = 0;
 							}
-							p->state = DAQ_PS_IDLE;
 						}
 						if((valid == 2)&&(p->pintype == DAQ_PT_INADC)){
 							p->value = sample;
@@ -2183,12 +2203,14 @@ static void *uchameleon_monitor_thread(void *this)
 				p->command = DAQ_CMD_ADC;
 			}
 			if(p->state == DAQ_PS_START){
-				p->state = DAQ_PS_BUSY;
+				p->state = DAQ_PS_BUSY; /* Assume we are busy */
 				switch(p->command){
 					case DAQ_CMD_OUT:
 						if(p->pintype == DAQ_PT_OUT){
 							snprintf(txbuff,sizeof(txbuff),"pin %u %s\n", p->num, (p->value) ?
 							"hi" : "lo");
+							if(debug >= 3)
+								ast_log(LOG_NOTICE, "DAQ_CMD_OUT: %s\n", txbuff);
 							uchameleon_queue_tx(t, txbuff);
 							p->state = DAQ_PS_IDLE; /* TX is considered done */ 
 						}
@@ -2203,7 +2225,10 @@ static void *uchameleon_monitor_thread(void *this)
 							snprintf(txbuff, sizeof(txbuff), "pin %u monitor %s\n", 
 							p->num, p->monexec ? "on" : "off");
 							uchameleon_queue_tx(t, txbuff);
-							p->state = DAQ_PS_IDLE; /* Let RX handle the messages */
+							if(!p->monexec)
+								p->state = DAQ_PS_IDLE; /* Restore to idle channel */
+							else
+								p->state = DAQ_PS_IN_MONITOR;
 						}
 						else{
 							ast_log(LOG_WARNING, "Wrong pin type for monitor command\n");
@@ -2290,7 +2315,8 @@ static void *uchameleon_monitor_thread(void *this)
 		/* Transmit queued commands */
 		while(t->txhead){
 			q = t->txhead;
-			strcpy(txbuff,q->txbuff);
+			strncpy(txbuff,q->txbuff,sizeof(txbuff));
+			txbuff[sizeof(txbuff)-1] = 0;
 			t->txhead = q->next;
 			if(t->txhead)
 				t->txhead->prev = NULL;
@@ -2423,27 +2449,29 @@ static int daq_do( struct daq_entry_tag *t, int pin, int cmd, void (*exec)(char 
 }
 
 /*
- * Initialize DAQ subsystem
+ * Alarm event handler
  */
+
+static void daq_alarm_handler(char *name, char *alarmtag, int pin, int state)
+{
+	ast_log(LOG_NOTICE, "Event on devicename: %s alarmtag: %s pin: %d, state = %d\n", name, alarmtag, pin, state);
+}
 
 
 
 /*
-static void mymonfun(char *name, char *alarmtag, int pin, int state)
-{
-	ast_log(LOG_NOTICE, "Event on devicename: %s alarmtag: %s pin: %d, state = %d\n", name, alarmtag, pin, state);
-}
-*/
+ * Initialize DAQ subsystem
+ */
 
 static void daq_init(struct ast_config *cfg)
 {
-	int i;
+	int i,x,pin;
 	struct ast_variable *var,*var2;
-	struct daq_entry_tag **daq_next, *daqv = NULL;
-	char s[32];
+	struct daq_entry_tag **t_next, *t = NULL;
+	char s[64];
 
 	daq.ndaqs = 0;
-	daq_next = &daq.hw;
+	t_next = &daq.hw;
 	var = ast_variable_browse(cfg,"daq-list");
 	while(var){
 		const char *p;
@@ -2464,16 +2492,17 @@ static void daq_init(struct ast_config *cfg)
                         ast_log(LOG_WARNING,"devnode variable required for %s stanza\n", s);
                         break;
                 }
-		if(!(daqv = daq_open(DAQ_TYPE_UCHAMELEON, (char *) s, (char *) p))){
+		if(!(t = daq_open(DAQ_TYPE_UCHAMELEON, (char *) s, (char *) p))){
 			ast_log(LOG_WARNING,"Cannot open device name %s\n",p);
 			break;
 		}
 		/* Add to linked list */
-		*daq_next = daqv;
-		daq_next = &daqv->next;
+		*t_next = t;
+		t_next = &t->next;
 
 		/* Pin Initialization */
 		var2 = ast_variable_browse(cfg, s);
+		x = 0;
 		while(var2){
 			unsigned int pin;
 			static char *pin_keywords[]={"inadc","inp","in","out",NULL};
@@ -2485,23 +2514,56 @@ static void daq_init(struct ast_config *cfg)
 			i = matchkeyword(var2->value, NULL, pin_keywords);
 			if(debug >= 3)
 				ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
-			if(i && i < 5)
-				daq_do(daqv, pin, DAQ_CMD_PINSET, NULL, &i, NULL);	
+			if(i && i < 5){
+				daq_do(t, pin, DAQ_CMD_PINSET, NULL, &i, NULL);	
+				if(i == DAQ_PT_OUT){
+					if(debug >= 3)
+						ast_log(LOG_NOTICE,"Set output pin %d low\n", pin);
+					daq_do(t, pin, DAQ_CMD_OUT, NULL, &x, NULL);
+				}
+			}
 			else
 				ast_log(LOG_WARNING,"Invalid pin type: %s\n", var2->value);
 			var2 = var2->next;
 		}
-		time(&daqv->adcacqtime); /* Start ADC Acquisition */ 
+		time(&t->adcacqtime); /* Start ADC Acquisition */ 
 		daq.ndaqs++;	
 		if(daq.ndaqs >= MAX_DAQ_ENTRIES)
 			break;
 		var = var->next;
 	}
 
-/*
-	printf("******** Monitor enable ***********\n");
-	daq_do(daqv, 9, DAQ_CMD_MONITOR, mymonfun, NULL, "door");
-*/
+
+	/*
+ 	* Alarm initialization
+ 	*/
+
+	var = ast_variable_browse(cfg,"alarms");
+	while(var){
+		int ignorefirst;
+		char *args[6];
+		/* Parse alarm entry */
+
+		strncpy(s,var->value,sizeof(s));
+
+		if(explode_string(s, args, 6, ',', 0) != 6){
+			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
+			var = var->next;
+			continue;
+		}
+
+		ignorefirst = atoi(args[2]);
+
+		if(!(pin = atoi(args[1]))){
+			ast_log(LOG_WARNING,"Pin must be greater than 0 for %s\n",var->name);
+			var = var->next;
+			continue;
+		}
+
+		ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
+		daq_do(t, pin, DAQ_CMD_MONITOR, daq_alarm_handler, &ignorefirst, var->name);
+		var = var->next;
+	}
 
 }		
 
@@ -2511,14 +2573,14 @@ static void daq_init(struct ast_config *cfg)
 
 static void daq_uninit(void)
 {
-	struct daq_entry_tag *daq_next, *daqv;
+	struct daq_entry_tag *t_next, *t;
 
 	/* Free daq memory */
-	daqv = daq.hw;
-	while(daqv){
-		daq_next = daqv->next;
-		daq_close(daqv);
-		daqv = daq_next;
+	t = daq.hw;
+	while(t){
+		t_next = t->next;
+		daq_close(t);
+		t = t_next;
 	}
 	daq.hw = NULL;
 }
@@ -2547,7 +2609,7 @@ static struct daq_entry_tag *daq_devtoentry(char *name)
  */
 
 
-static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
 {
 	int i,res,files,val;
 	int pin = 0;
@@ -2842,6 +2904,63 @@ static int say_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char
 }
 
 /*
+ * Handle USEROUT telemetry
+ */
+
+static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+{
+	int argc, i, pin, reqstate, res;
+	char *myargs;
+	char *argv[10];
+	struct daq_entry_tag *t;
+
+	if(!(myargs = ast_strdup(args))){ /* Make a local copy to slice and dice */
+		ast_log(LOG_WARNING, "Out of memory\n");
+		return -1;
+	}
+
+	if(debug >= 3)
+		ast_log(LOG_NOTICE, "String: %s\n", myargs);
+
+	argc = explode_string(myargs, argv, 10, ',', 0);
+	if(argc < 4){ /* Must have at least 4 arguments */
+		ast_log(LOG_WARNING,"Incorrect number of arguments for USEROUT function");
+		ast_free(myargs);
+		return -1;
+	}
+	if(debug >= 3){
+		ast_log(LOG_NOTICE,"USEROUT Device: %s, Pin: %s, Requested state: %s\n",
+		argv[0],argv[1],argv[2]);	
+	}
+	pin = atoi(argv[1]);
+	reqstate = atoi(argv[2]);
+
+	/* Find our device */
+	if(!(t = daq_devtoentry(argv[0]))){
+		ast_log(LOG_WARNING,"Cannot find device %s in daq-list\n",argv[0]);
+		ast_free(myargs);
+		return -1;
+	}
+
+	if(debug >= 3){
+		ast_log(LOG_NOTICE, "Output to pin %d a value of %d with argc = %d\n", pin, reqstate, argc);
+	}
+
+	/* Set or reset the bit */
+
+	daq_do( t, pin, DAQ_CMD_OUT, NULL, &reqstate, NULL);
+
+	/* Say the files one by one at argc index 3 */
+	for(i = 3, res = 0; i < argc && !res; i++){
+		res = sayfile(mychannel, argv[i]); /* Say the next word in the list */
+	}					
+	
+	ast_free(myargs);
+	return 0;
+}
+
+
+/*
 *  Playback a meter reading
 */
 
@@ -2858,6 +2977,28 @@ static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int co
 	rpt_telemetry(myrpt,METER,param);
 	return DC_COMPLETE;
 }
+
+
+
+/*
+*  Set or reset a USER Output bit
+*/
+
+static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+	if(debug)
+		ast_log(LOG_NOTICE, "userout param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	
+	rpt_telem_select(myrpt,command_source,mylink);
+	rpt_telemetry(myrpt,USEROUT,param);
+	return DC_COMPLETE;
+}
+
+
 
 
 /*
@@ -6078,8 +6219,13 @@ struct zt_params par;
 	ast_stopstream(mychannel);
 	switch(mytele->mode)
 	{
+	    case USEROUT:
+		handle_userout_tele(myrpt, mychannel, mytele->param);
+		imdone = 1;
+		break;
+
 	    case METER:
-		say_meter_tele(myrpt, mychannel, mytele->param);
+		handle_meter_tele(myrpt, mychannel, mytele->param);
 		imdone = 1;
 		break;
 
@@ -7462,7 +7608,8 @@ struct rpt_link *l;
 		}
 	}
 	else if ((mode == ARB_ALPHA) || (mode == REV_PATCH) || 
-	    (mode == PLAYBACK) || (mode == LOCALPLAY) || (mode == VARCMD) || (mode == METER)) {
+	    (mode == PLAYBACK) || (mode == LOCALPLAY) ||
+            (mode == VARCMD) || (mode == METER) || (mode == USEROUT)) {
 		strncpy(tele->param, (char *) data, TELEPARAMSIZE - 1);
 		tele->param[TELEPARAMSIZE - 1] = 0;
 	}
