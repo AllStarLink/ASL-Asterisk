@@ -1822,7 +1822,7 @@ static int uchameleon_close(struct daq_entry_tag *t)
  */
 
 
-static int uchameleon_do( struct daq_entry_tag *t, int pin,
+static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 {	
 	int i,j,x;
@@ -2437,20 +2437,32 @@ static int daq_close(struct daq_entry_tag *desc)
  * Do something with the daq subsystem
  */
 
-static int daq_do( struct daq_entry_tag *t, int pin, int cmd,
+static int daq_do_long( struct daq_entry_tag *t, int pin, int cmd,
 void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 {
 	int res = -1;
 
 	switch(t->type){
 		case DAQ_TYPE_UCHAMELEON:
-			res = uchameleon_do(t, pin, cmd, exec, arg1, arg2);
+			res = uchameleon_do_long(t, pin, cmd, exec, arg1, arg2);
 			break;
 		default:
 			break;
 	}
 	return res;
 }
+
+/*
+ * Short version of above
+ */
+
+static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int arg1)
+{
+	int a1 = arg1;
+
+	return daq_do_long(t, pin, cmd, NULL, &a1, NULL);
+}
+
 
 /*
  * Alarm event handler
@@ -2584,12 +2596,12 @@ static void daq_init(struct ast_config *cfg)
 			if(debug >= 3)
 				ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
 			if(i && i < 5){
-				daq_do(t, pin, DAQ_CMD_PINSET, NULL, &i, NULL);	 /* Set pin type */
-				daq_do(t, pin, DAQ_CMD_MONITOR, NULL, NULL, NULL); /* Monitor off */
+				daq_do(t, pin, DAQ_CMD_PINSET,i);	 /* Set pin type */
+				daq_do(t, pin, DAQ_CMD_MONITOR,0); /* Monitor off */
 				if(i == DAQ_PT_OUT){
 					if(debug >= 3)
 						ast_log(LOG_NOTICE,"Set output pin %d low\n", pin); /* Set output pins low */
-					daq_do(t, pin, DAQ_CMD_OUT, NULL, &x, NULL);
+					daq_do(t, pin, DAQ_CMD_OUT, x);
 				}
 			}
 			else
@@ -2655,7 +2667,7 @@ static void daq_init(struct ast_config *cfg)
 		p->alarmargs[63] = 0;
 
 		ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
-		daq_do(t, pin, DAQ_CMD_MONITOR, daq_alarm_handler, &ignorefirst, NULL);
+		daq_do_long(t, pin, DAQ_CMD_MONITOR, daq_alarm_handler, &ignorefirst, NULL);
 		var = var->next;
 	}
 
@@ -2872,12 +2884,12 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 
 	val = 0;
 	if(pintype == 1){
-		res = daq_do(entry, pin, DAQ_CMD_ADC, NULL, &val, &filter);
+		res = daq_do_long(entry, pin, DAQ_CMD_ADC, NULL, &val, &filter);
 		if(!res)
 			scaledval = ((val + scalepre)/scalediv) + scalepost;
 	}
 	else{
-		res = daq_do(entry, pin, DAQ_CMD_IN, NULL, &val, NULL);
+		res = daq_do_long(entry, pin, DAQ_CMD_IN, NULL, &val, NULL);
 	}
 
 	if(res){ /* DAQ Subsystem is down */
@@ -3034,7 +3046,7 @@ static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel,
 
 	/* Set or reset the bit */
 
-	daq_do( t, pin, DAQ_CMD_OUT, NULL, &reqstate, NULL);
+	daq_do( t, pin, DAQ_CMD_OUT, reqstate);
 	
 	/* Wait the normal telemetry delay time */
 	
