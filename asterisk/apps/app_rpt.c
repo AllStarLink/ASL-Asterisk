@@ -87,6 +87,8 @@
  *  24 - Flush all telemetry
  *  25 - Query last node un-keyed
  *  26 - Query all nodes keyed/unkeyed
+ *  27 - Reset DAQ minimum on a pin
+ *  28 - Reset DAQ maximum on a pin
  *  30 - Recall Memory Setting in Attached Xcvr
  *  31 - Channel Selector for Parallel Programmed Xcvr
  *  32 - Touchtone pad test: command + Digit string + # to playback all digits pressed
@@ -312,8 +314,8 @@
 #define MAX_DAQ_DEV 64 /* Max length of a daq device path */
 #define MAX_METER_FILES 10 /* Max number of sound files in a meter def. */
 #define DAQ_RX_TIMEOUT 50 /* Receive time out for DAQ subsystem */ 
-#define DAQ_ADC_ACQINT 10 /* Acquire interval for ADC channels */
-#define ADC_HIST_TIME 100 /* Time to calculate avg, high and low peaks from. Must be a integer mult. of DAQ_ADC_ACQINT */
+#define DAQ_ADC_ACQINT 10 /* Acquire interval in sec. for ADC channels */
+#define ADC_HIST_TIME 300 /* Time  in sec. to calculate short term avg, high and low peaks from. */
 #define ADC_HISTORY_DEPTH ADC_HIST_TIME/DAQ_ADC_ACQINT
  
 
@@ -353,8 +355,7 @@ enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
 
 enum{DAQ_PS_IDLE = 0, DAQ_PS_START, DAQ_PS_BUSY, DAQ_PS_IN_MONITOR};
 enum{DAQ_CMD_IN, DAQ_CMD_ADC, DAQ_CMD_OUT, DAQ_CMD_PINSET, DAQ_CMD_MONITOR};
-enum{DAQ_SUB_CUR = 0, DAQ_SUB_MIN, DAQ_SUB_MAX, DAQ_SUB_STMIN, DAQ_SUB_STMAX, DAQ_SUB_STAVG,
-	DAQ_SUB_RESET_MAX, DAQ_SUB_RESET_MIN};
+enum{DAQ_SUB_CUR = 0, DAQ_SUB_MIN, DAQ_SUB_MAX, DAQ_SUB_STMIN, DAQ_SUB_STMAX, DAQ_SUB_STAVG};
 enum{DAQ_PT_INADC = 1, DAQ_PT_INP, DAQ_PT_IN, DAQ_PT_OUT};
 enum{DAQ_TYPE_UCHAMELEON};
 
@@ -1953,14 +1954,6 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 								*arg1 = listp->valuemin;
 							break;
 
-						case DAQ_SUB_RESET_MAX:
-							listp->valuemax = 0;
-							break;
-
-						case DAQ_SUB_RESET_MIN:
-							listp->valuemin = 255;
-							break;							
-
 						default:
 							ast_mutex_unlock(&t->lock);
 							return -1;
@@ -2061,6 +2054,38 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 	return -1;
 }
  
+/*
+ * Reset a minimum or maximum reading
+ */
+
+static int uchameleon_reset_minmax(struct daq_entry_tag *t, int pin, int minmax)
+{
+	struct daq_pin_entry_tag *p;
+
+	/* Find the pin */
+	p = t->pinhead;
+	while(p){
+		if(p->num == pin)
+			break;
+		p = p->next;
+	}
+	if(!p)
+		return -1;
+	ast_mutex_lock(&t->lock);
+	if(minmax){
+		ast_log(LOG_NOTICE, "Resetting maximum on device %s, pin %d\n",t->name, pin);
+		p->valuemax = 0;
+	}
+	else{
+		p->valuemin = 255;
+		ast_log(LOG_NOTICE, "Resetting minimum on device %s, pin %d\n",t->name, pin);
+	}
+	ast_mutex_unlock(&t->lock);
+	return 0;
+}
+
+
+
 
 /*
  * Queue up a tx command (used exclusively by uchameleon_monitor() )
@@ -2434,6 +2459,24 @@ static int daq_close(struct daq_entry_tag *desc)
 }
 
 /*
+ * Look up a device entry for a particular device name
+ */
+
+static struct daq_entry_tag *daq_devtoentry(char *name)
+{
+	struct daq_entry_tag *e = daq.hw;
+
+	while(e){
+		if(!strcmp(name, e->name))
+			break; 
+		e = e->next;
+	}
+	return e;
+}
+
+
+
+/*
  * Do something with the daq subsystem
  */
 
@@ -2461,6 +2504,28 @@ static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int arg1)
 	int a1 = arg1;
 
 	return daq_do_long(t, pin, cmd, NULL, &a1, NULL);
+}
+
+
+/*
+ * Function to reset the long term minimum or maximum
+ */
+
+static int daq_reset_minmax(char *device, int pin, int minmax)
+{
+	int res = -1;
+	struct daq_entry_tag *t;
+	
+	if(!(t = daq_devtoentry(device)))
+		return -1;
+	switch(t->type){
+		case DAQ_TYPE_UCHAMELEON:
+			res = uchameleon_reset_minmax(t, pin, minmax);
+			break;
+		default:
+			break;
+	}
+	return res;
 }
 
 
@@ -2522,22 +2587,6 @@ static void daq_alarm_handler(struct daq_pin_entry_tag *p)
 		ast_log(LOG_WARNING, "Function decoder busy while processing alarm");
 	}
 	ast_free(valuecopy);
-}
-
-/*
- * Look up a device entry for a particular device name
- */
-
-static struct daq_entry_tag *daq_devtoentry(char *name)
-{
-	struct daq_entry_tag *e = daq.hw;
-
-	while(e){
-		if(!strcmp(name, e->name))
-			break; 
-		e = e->next;
-	}
-	return e;
 }
 
 /*
@@ -8993,13 +9042,24 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char string[16];
-
+	char paramcopy[64];
+	int  argc;
+	char *argv[7];
 	int i, r, src;
+
+
 
 	if(!param)
 		return DC_ERROR;
+
+	strncpy(paramcopy, param, 64);
+	paramcopy[63] = 0;
+	argc = explode_string(paramcopy, argv, 6, ',', 0);
+
+	if(!argc)
+		return DC_ERROR;
 	
-	switch(myatoi(param)){
+	switch(myatoi(argv[0])){
 		case 1: /* System reset */
 			system("killall -9 asterisk");
 			return DC_COMPLETE;
@@ -9170,6 +9230,27 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
+
+		case 27: /* Reset DAQ minimum */
+			if(argc != 3)
+				return DC_ERROR;
+			if(!(daq_reset_minmax(argv[1], atoi(argv[2]), 0))){
+				rpt_telem_select(myrpt,command_source,mylink);
+				rpt_telemetry(myrpt,COMPLETE,NULL);
+				return DC_COMPLETE;
+			}
+			return DC_ERROR;
+				
+		case 28: /* Reset DAQ maximum */
+			if(argc != 3)
+				return DC_ERROR;
+			if(!(daq_reset_minmax(argv[1], atoi(argv[2]), 1))){
+				rpt_telem_select(myrpt,command_source,mylink);
+				rpt_telemetry(myrpt,COMPLETE,NULL);
+				return DC_COMPLETE;
+			}
+			return DC_ERROR;
+
 
 		case 30: /* recall memory location on programmable radio */
 
