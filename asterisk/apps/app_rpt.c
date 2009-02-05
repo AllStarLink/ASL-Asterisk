@@ -3197,14 +3197,15 @@ static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel,
 
 	/* Set or reset the bit */
 
-	daq_do( t, pin, DAQ_CMD_OUT, reqstate);
+	res = daq_do( t, pin, DAQ_CMD_OUT, reqstate);
 	
 	/* Wait the normal telemetry delay time */
 	
-	wait_interval(myrpt, DLY_TELEM, mychannel);
+	if(!res)
+		wait_interval(myrpt, DLY_TELEM, mychannel);
 
 	/* Say the files one by one at argc index 3 */
-	for(i = 3, res = 0; i < argc && !res; i++){
+	for(i = 3; i < argc && !res; i++){
 		res = sayfile(mychannel, argv[i]); /* Say the next word in the list */
 	}					
 	
