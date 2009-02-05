@@ -1925,7 +1925,7 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 	while(var){
 		int ignorefirst,pin;
 		char s[64];
-		char *args[7];
+		char *argv[7];
 		struct daq_pin_entry_tag *p;
 
 
@@ -1933,15 +1933,15 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 
 		strncpy(s,var->value,sizeof(s));
 
-		if(explode_string(s, args, 6, ',', 0) != 6){
+		if(explode_string(s, argv, 6, ',', 0) != 6){
 			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
 			var = var->next;
 			continue;
 		}
 
-		ignorefirst = atoi(args[2]);
+		ignorefirst = atoi(argv[2]);
 
-		if(!(pin = atoi(args[1]))){
+		if(!(pin = atoi(argv[1]))){
 			ast_log(LOG_WARNING,"Pin must be greater than 0 for %s\n",var->name);
 			var = var->next;
 			continue;
@@ -1955,7 +1955,7 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 			p = p->next;
 		}
 		if(!p){
-			ast_log(LOG_WARNING,"Can't find pin %s for device %d\n", args[0], pin);
+			ast_log(LOG_WARNING,"Can't find pin %s for device %d\n", argv[0], pin);
 			var = var->next;
 			continue;
 		}
@@ -2638,48 +2638,48 @@ static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_l
 static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 {
 	int fd;
-	struct daq_entry_tag *desc;
+	struct daq_entry_tag *t;
 
 
 	if(!name)
 		return NULL;
 
-        if((desc = ast_malloc(sizeof(struct daq_entry_tag))) == NULL){
+        if((t = ast_malloc(sizeof(struct daq_entry_tag))) == NULL){
 		ast_log(LOG_WARNING,"daq_open out of memory\n");
 		return NULL;
 	}
 
 
-	memset(desc, 0, sizeof(struct daq_entry_tag));
+	memset(t, 0, sizeof(struct daq_entry_tag));
 
 
 	/* Save the device path for open*/
 	if(dev){
-		strncpy(desc->dev, dev, MAX_DAQ_DEV);
-		desc->dev[MAX_DAQ_DEV - 1] = 0;
+		strncpy(t->dev, dev, MAX_DAQ_DEV);
+		t->dev[MAX_DAQ_DEV - 1] = 0;
 	}
 
 
 
 	/* Save the name*/
-	strncpy(desc->name, name, MAX_DAQ_NAME);
-	desc->dev[MAX_DAQ_NAME - 1] = 0;
+	strncpy(t->name, name, MAX_DAQ_NAME);
+	t->dev[MAX_DAQ_NAME - 1] = 0;
 
 
 	switch(type){
 		case DAQ_TYPE_UCHAMELEON:
-			if((fd = uchameleon_open(desc)) == -1){
-				ast_free(desc);
+			if((fd = uchameleon_open(t)) == -1){
+				ast_free(t);
 				return NULL;
 			}
 			break;
 
 		default:
-			ast_free(desc);
+			ast_free(t);
 			return NULL;
 	}
-	desc->type = type;
-	return desc;
+	t->type = type;
+	return t;
 }
 
 /*
@@ -2687,22 +2687,22 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
  */
 
 
-static int daq_close(struct daq_entry_tag *desc)
+static int daq_close(struct daq_entry_tag *t)
 {
 	int res  = -1;
 
-	if(!desc)
+	if(!t)
 		return res;
 
-	switch(desc->type){
+	switch(t->type){
 		case DAQ_TYPE_UCHAMELEON:
-			res = uchameleon_close(desc);
+			res = uchameleon_close(t);
 			break;
 		default:
 			break;
 	}
 
-	ast_free(desc);
+	ast_free(t);
 	return res;
 }
 
