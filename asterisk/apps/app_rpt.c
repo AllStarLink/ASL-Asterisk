@@ -1710,51 +1710,33 @@ static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbyt
  * ***********************************
  */
 
-/*
- * Open the serial channel and test for the uchameleon device at the end of the link
- */
+/* Forward Decl's */
 
-/* Forward decl's */
-
+static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
+int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
+static int matchkeyword(char *string, char **param, char *keywords[]);
+static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
 static void *uchameleon_monitor_thread(void *this);
 
-static int uchameleon_open(struct daq_entry_tag *desc)
+
+
+
+
+/*
+ * Start the Uchameleon monitor thread
+ */
+
+
+
+
+static int uchameleon_thread_start(struct daq_entry_tag *t)
 {
-	int count, res;
-	static char *idbuf = "id\n";
-	static char *ledbuf = "led on\n";
-	static char *expect = "Chameleon";
-	char rxbuf[14];
+	int res, tries = 50;
 	pthread_attr_t attr;
 
 
-	if(!desc)
-		return -1;
+	ast_mutex_init(&t->lock);
 
-
-        if((desc->fd = serial_open(desc->dev, B115200, 0)) == -1){
-               	ast_log(LOG_WARNING, "serial_open on %s failed!\n", desc->name);
-                return -1;
-        }
-        if((count = serial_io(desc->fd, idbuf, rxbuf, strlen(idbuf), 14, DAQ_RX_TIMEOUT, 0x0a)) < 1){
-              	ast_log(LOG_WARNING, "serial_io on %s failed\n", desc->name);
-		close(desc->fd);
-                return -1;
-        }
-	if(debug >= 3)
-        	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
-	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
-		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", desc->name);
-		close(desc->fd);
-		return -1;
-	}
-	/* uchameleon LED on solid once we communicate with it successfully */
-	
-	if(serial_io(desc->fd, ledbuf, NULL, strlen(ledbuf), 0, DAQ_RX_TIMEOUT, 0) == -1){
-		ast_log(LOG_WARNING, "Can't set LED on uchameleon device\n");
-		close(desc->fd);
-		return -1;
-	}
 
 	/*
  	* Start up uchameleon monitor thread
@@ -1762,12 +1744,261 @@ static int uchameleon_open(struct daq_entry_tag *desc)
 
        	pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	res = ast_pthread_create(&desc->threadid,&attr,uchameleon_monitor_thread,(void *) desc);
+	res = ast_pthread_create(&t->threadid,&attr,uchameleon_monitor_thread,(void *) t);
 	if(res){
 		ast_log(LOG_WARNING, "Could not start uchameleon monitor thread\n");
 		return -1;
 	}
+
+	ast_mutex_lock(&t->lock);
+	while((!t->active)&&(tries)){
+		ast_mutex_unlock(&t->lock);
+		usleep(100*1000);
+		ast_mutex_lock(&t->lock);
+		tries--;
+	}
+	ast_mutex_unlock(&t->lock);
+
+	if(!tries)
+		return -1;
+
+
         return 0;
+}
+
+static int uchameleon_connect(struct daq_entry_tag *t)
+{
+	int count;
+	static char *idbuf = "id\n";
+	static char *ledbuf = "led on\n";
+	static char *expect = "Chameleon";
+	char rxbuf[20];
+
+        if((t->fd = serial_open(t->dev, B115200, 0)) == -1){
+               	ast_log(LOG_WARNING, "serial_open on %s failed!\n", t->name);
+                return -1;
+        }
+        if((count = serial_io(t->fd, idbuf, rxbuf, strlen(idbuf), 14, DAQ_RX_TIMEOUT, 0x0a)) < 1){
+              	ast_log(LOG_WARNING, "serial_io on %s failed\n", t->name);
+		close(t->fd);
+		t->fd = -1;
+                return -1;
+        }
+	if(debug >= 3)
+        	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
+	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
+		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", t->name);
+		close(t->fd);
+		t->fd = -1;
+		return -1;
+	}
+	/* uchameleon LED on solid once we communicate with it successfully */
+	
+	if(serial_io(t->fd, ledbuf, NULL, strlen(ledbuf), 0, DAQ_RX_TIMEOUT, 0) == -1){
+		ast_log(LOG_WARNING, "Can't set LED on uchameleon device\n");
+		close(t->fd);
+		t->fd= -1;
+		return -1;
+	}
+	return 0;
+}
+
+/*
+ * Uchameleon alarm handler
+ */
+
+
+static void uchameleon_alarm_handler(struct daq_pin_entry_tag *p)
+{
+	char *valuecopy;
+	int i, busy;
+	char *s;
+	char *argv[7];
+	int argc;
+
+
+	if(!(valuecopy = ast_strdup(p->alarmargs))){
+		ast_log(LOG_ERROR,"Out of memory\n");
+		return;
+	}
+	
+	argc = explode_string(valuecopy, argv, 6, ',', 0);
+
+	if(debug >= 3){
+		ast_log(LOG_NOTICE, "Alarm event on device %s, pin %d, state = %d\n", argv[0], p->num, p->value);
+	}
+
+	/*
+ 	* Node: argv[3]
+ 	* low function: argv[4]
+ 	* high function: argv[5]
+ 	*
+ 	*/
+	i = busy = 0;
+	s = (p->value) ? argv[5]: argv[4];
+	if((argc == 6)&&(s[0] != '-')){
+		for(i = 0; i < nrpts; i++){
+			if(!strcmp(argv[3], rpt_vars[i].name)){
+
+				struct rpt *myrpt = &rpt_vars[i];
+				rpt_mutex_lock(&myrpt->lock);
+				if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(s)){
+					rpt_mutex_unlock(&myrpt->lock);
+					busy=1;
+				}
+				if(!busy){
+					myrpt->macrotimer = MACROTIME;
+					strncat(myrpt->macrobuf,s,MAXMACRO - 1);
+				}
+				rpt_mutex_unlock(&myrpt->lock);
+
+			}
+		}
+	}
+	if(argc != 6){
+		ast_log(LOG_WARNING, "Not enough arguments to process alarm\n"); 
+	}
+	else if(busy){
+		ast_log(LOG_WARNING, "Function decoder busy while processing alarm");
+	}
+	ast_free(valuecopy);
+}
+
+
+
+
+/*
+ * Initialize pins
+ */
+
+
+
+static int uchameleon_pin_init(struct daq_entry_tag *t)
+{
+	int i;
+	struct ast_config *ourcfg;
+	struct ast_variable *var,*var2;
+
+	/* Pin Initialization */
+
+	#ifdef	NEW_ASTERISK
+		ourcfg = ast_config_load("rpt.conf",config_flags);
+	#else
+		ourcfg = ast_config_load("rpt.conf");
+	#endif
+
+	if(!ourcfg)
+		return -1;
+
+	var2 = ast_variable_browse(ourcfg, t->name);
+	while(var2){
+		unsigned int pin;
+		int x = 0;
+		static char *pin_keywords[]={"inadc","inp","in","out",NULL};
+		if((var2->name[0] < '0')||(var2->name[0] > '9')){
+			var2 = var2->next;
+			continue;
+		}
+		pin = (unsigned int) atoi(var2->name);
+		i = matchkeyword(var2->value, NULL, pin_keywords);
+		if(debug >= 3)
+			ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
+		if(i && i < 5){
+			uchameleon_do_long(t, pin, DAQ_CMD_PINSET, NULL, &i, NULL);	 /* Set pin type */
+			uchameleon_do_long(t, pin, DAQ_CMD_MONITOR, NULL, &x, NULL); /* Monitor off */
+			if(i == DAQ_PT_OUT){
+				if(debug >= 3)
+					ast_log(LOG_NOTICE,"Set output pin %d low\n", pin); /* Set output pins low */
+				uchameleon_do_long(t, pin, DAQ_CMD_OUT, NULL, &x, NULL);
+			}
+		}
+		else
+			ast_log(LOG_WARNING,"Invalid pin type: %s\n", var2->value);
+		var2 = var2->next;
+	}
+
+	/*
+ 	* Alarm initialization
+ 	*/
+
+	var = ast_variable_browse(ourcfg,"alarms");
+	while(var){
+		int ignorefirst,pin;
+		char s[64];
+		char *args[7];
+		struct daq_pin_entry_tag *p;
+
+
+		/* Parse alarm entry */
+
+		strncpy(s,var->value,sizeof(s));
+
+		if(explode_string(s, args, 6, ',', 0) != 6){
+			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
+			var = var->next;
+			continue;
+		}
+
+		ignorefirst = atoi(args[2]);
+
+		if(!(pin = atoi(args[1]))){
+			ast_log(LOG_WARNING,"Pin must be greater than 0 for %s\n",var->name);
+			var = var->next;
+			continue;
+		}
+
+		/* Find the pin entry */
+		p = t->pinhead;
+		while(p){
+			if(p->num == pin)
+				break;
+			p = p->next;
+		}
+		if(!p){
+			ast_log(LOG_WARNING,"Can't find pin %s for device %d\n", args[0], pin);
+			var = var->next;
+			continue;
+		}
+
+
+		strncpy(p->alarmargs, var->value, 64); /* Save the alarm arguments in the pin entry */
+		p->alarmargs[63] = 0;
+
+		ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
+		uchameleon_do_long(t, pin, DAQ_CMD_MONITOR, uchameleon_alarm_handler, &ignorefirst, NULL);
+		var = var->next;
+	}
+
+	ast_config_destroy(ourcfg);
+	time(&t->adcacqtime); /* Start ADC Acquisition */ 
+	return -0;
+}
+
+
+/*
+ * Open the serial channel and test for the uchameleon device at the end of the link
+ */
+
+static int uchameleon_open(struct daq_entry_tag *t)
+{
+	int res;
+
+
+	if(!t)
+		return -1;
+
+	if(uchameleon_connect(t)){
+		ast_log(LOG_WARNING,"Cannot open device %s", t->name);
+		return -1;
+	}
+
+	res = uchameleon_thread_start(t);
+
+	if(!res)
+		res = uchameleon_pin_init(t);
+
+	return res;
+
 }
 
 /*
@@ -1776,7 +2007,7 @@ static int uchameleon_open(struct daq_entry_tag *desc)
 
 static int uchameleon_close(struct daq_entry_tag *t)
 {
-	int res;
+	int res = 0;
 	char *ledpat="led pattern 253\n";
 	struct daq_pin_entry_tag *p,*pn;
 	struct daq_tx_entry_tag *q,*qn;
@@ -1785,36 +2016,49 @@ static int uchameleon_close(struct daq_entry_tag *t)
 		return -1;
 
 	ast_mutex_lock(&t->lock);
-	res = pthread_kill(t->threadid, 0);
-	if(res)
+
+	if(t->active){
+		res = pthread_kill(t->threadid, 0);
+		if(res)
 		ast_log(LOG_WARNING, "Can't kill monitor thread");
+		ast_mutex_unlock(&t->lock);
+		return -1;
+	}
 
-	ast_mutex_unlock(&t->lock);
-
-	serial_io(t->fd, ledpat, NULL, strlen(ledpat) ,0, 0, 0); /* LED back to flashing */
+	if(t->fd > 0)
+		serial_io(t->fd, ledpat, NULL, strlen(ledpat) ,0, 0, 0); /* LED back to flashing */
 
 	/* Free linked lists */
 
-	p = t->pinhead;
-	while(p){
-		pn = p->next;
-		ast_free(p);
-		p = pn;
+	if(t->pinhead){
+		p = t->pinhead;
+		while(p){
+			pn = p->next;
+			ast_free(p);
+			p = pn;
+		}
+		t->pinhead = NULL;
 	}
-	t->pinhead = NULL;
 
-	q = t->txhead;
-	while(q){
-		qn = q->next;
-		ast_free(q);
-		q = qn;
+
+	if(t->txhead){
+		q = t->txhead;
+		while(q){
+			qn = q->next;
+			ast_free(q);
+			q = qn;
+		}
+		t->txhead = t->txtail = NULL;
 	}
-	t->txhead = t->txtail = NULL;
-		
-	res = close(t->fd);
-	if(res)
-		ast_log(LOG_WARNING, "Error closing serial port");
-	t->fd = -1;
+	
+	if(t->fd > 0){	
+		res = close(t->fd);
+		if(res)
+			ast_log(LOG_WARNING, "Error closing serial port");
+		t->fd = -1;
+	}
+	ast_mutex_unlock(&t->lock);
+	ast_mutex_destroy(&t->lock);
 	return res;
 }
 
@@ -1822,12 +2066,10 @@ static int uchameleon_close(struct daq_entry_tag *t)
  * Uchameleon generic interface which supports monitor thread
  */
 
-
 static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 {	
 	int i,j,x;
-	int tries = 5;
 	struct daq_pin_entry_tag *p, *listl, *listp;
 
 	if(!t)
@@ -1835,17 +2077,19 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 
 	ast_mutex_lock(&t->lock);
 
-	while((!t->active) && tries){ /* Wait a little bit if thread isn't up and running */
+	if(!t->active){
+		/* Try to restart thread and re-open device */
 		ast_mutex_unlock(&t->lock);
+		uchameleon_close(t);
 		usleep(10*1000);
+		if(uchameleon_open(t)){
+			ast_log(LOG_WARNING,"Could not re-open Uchameleon\n");
+			return -1;
+		}
 		ast_mutex_lock(&t->lock);
-		tries--;
+		/* We're back in business! */
 	}
-	if(!tries){
-		ast_log(LOG_WARNING,"DAQ monitor thread not running\n");
-		ast_mutex_unlock(&t->lock);
-		return -1;
-	}
+
 
 	/* Find our pin */
 
@@ -2123,11 +2367,8 @@ static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
  * Monitor thread for Uchameleon devices
  *
  * started by uchameleon_open() and shutdown by uchameleon_close()
+ *
  */
-
-/* Forward decls */
-static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
-
 static void *uchameleon_monitor_thread(void *this)
 {
 	int i,sample,res,pin,valid,adc_acquire;
@@ -2138,6 +2379,8 @@ static void *uchameleon_monitor_thread(void *this)
 	struct daq_entry_tag *t = (struct daq_entry_tag *) this;
 	struct daq_pin_entry_tag *p;
 	struct daq_tx_entry_tag *q;
+
+
 
 	if(debug)
 		ast_log(LOG_NOTICE, "DAQ: thread started\n");
@@ -2152,10 +2395,12 @@ static void *uchameleon_monitor_thread(void *this)
 		res = serial_rx(t->fd, rxbuff, sizeof(rxbuff), DAQ_RX_TIMEOUT, 0x0a);
 		if(res == -1){
 			ast_log(LOG_ERROR,"serial_rx failed\n");
+			close(t->fd);
 			ast_mutex_lock(&t->lock);
+			t->fd = -1;
 			t->active = 0;
 			ast_mutex_unlock(&t->lock);
-			return this; /* Thread dies */
+			return this; /* Now, we die */
 		}
 		if(res){
 			if(debug >= 5) 
@@ -2353,9 +2598,13 @@ static void *uchameleon_monitor_thread(void *this)
 			ast_free(q);
 			ast_mutex_unlock(&t->lock);
 			if(serial_txstring(t->fd, txbuff) == -1){
+				close(t->fd);
+				ast_mutex_lock(&t->lock);
 				t->active= 0;
+				t->fd = -1;
+				ast_mutex_unlock(&t->lock);
 				ast_log(LOG_ERROR,"Tx failed, terminating monitor thread\n");
-				return this;
+				return this; /* Now, we die */
 			}
 				
 			ast_mutex_lock(&t->lock);
@@ -2376,11 +2625,9 @@ static void *uchameleon_monitor_thread(void *this)
  * Forward Decl's
  */
 
-static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
 static int saynum(struct ast_channel *mychannel, int num);
 static int sayfile(struct ast_channel *mychannel,char *fname);
 static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
-static int matchkeyword(char *string, char **param, char *keywords[]);
 static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 
@@ -2393,6 +2640,7 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 	int fd;
 	struct daq_entry_tag *desc;
 
+
 	if(!name)
 		return NULL;
 
@@ -2404,14 +2652,15 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 
 	memset(desc, 0, sizeof(struct daq_entry_tag));
 
-	ast_mutex_init(&desc->lock);
-
 
 	/* Save the device path for open*/
 	if(dev){
 		strncpy(desc->dev, dev, MAX_DAQ_DEV);
 		desc->dev[MAX_DAQ_DEV - 1] = 0;
 	}
+
+
+
 	/* Save the name*/
 	strncpy(desc->name, name, MAX_DAQ_NAME);
 	desc->dev[MAX_DAQ_NAME - 1] = 0;
@@ -2453,7 +2702,6 @@ static int daq_close(struct daq_entry_tag *desc)
 			break;
 	}
 
-	ast_mutex_destroy(&desc->lock);
 	ast_free(desc);
 	return res;
 }
@@ -2528,77 +2776,14 @@ static int daq_reset_minmax(char *device, int pin, int minmax)
 	return res;
 }
 
-
-/*
- * Alarm event handler
- */
-
-static void daq_alarm_handler(struct daq_pin_entry_tag *p)
-{
-	char *valuecopy;
-	int i, busy;
-	char *s;
-	char *argv[7];
-	int argc;
-
-
-	if(!(valuecopy = ast_strdup(p->alarmargs))){
-		ast_log(LOG_ERROR,"Out of memory\n");
-		return;
-	}
-	
-	argc = explode_string(valuecopy, argv, 6, ',', 0);
-
-	if(debug >= 3){
-		ast_log(LOG_NOTICE, "Alarm event on device %s, pin %d, state = %d\n", argv[0], p->num, p->value);
-	}
-
-	/*
- 	* Node: argv[3]
- 	* low function: argv[4]
- 	* high function: argv[5]
- 	*
- 	*/
-	i = busy = 0;
-	s = (p->value) ? argv[5]: argv[4];
-	if((argc == 6)&&(s[0] != '-')){
-		for(i = 0; i < nrpts; i++){
-			if(!strcmp(argv[3], rpt_vars[i].name)){
-
-				struct rpt *myrpt = &rpt_vars[i];
-				rpt_mutex_lock(&myrpt->lock);
-				if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(s)){
-					rpt_mutex_unlock(&myrpt->lock);
-					busy=1;
-				}
-				if(!busy){
-					myrpt->macrotimer = MACROTIME;
-					strncat(myrpt->macrobuf,s,MAXMACRO - 1);
-				}
-				rpt_mutex_unlock(&myrpt->lock);
-
-			}
-		}
-	}
-	if(argc != 6){
-		ast_log(LOG_WARNING, "Not enough arguments to process alarm\n"); 
-	}
-	else if(busy){
-		ast_log(LOG_WARNING, "Function decoder busy while processing alarm");
-	}
-	ast_free(valuecopy);
-}
-
 /*
  * Initialize DAQ subsystem
  */
 
 static void daq_init(struct ast_config *cfg)
 {
-	int i,x,pin;
-	struct ast_variable *var,*var2;
+	struct ast_variable *var;
 	struct daq_entry_tag **t_next, *t = NULL;
-	struct daq_pin_entry_tag *p;
 	char s[64];
 	daq.ndaqs = 0;
 	t_next = &daq.hw;
@@ -2630,95 +2815,12 @@ static void daq_init(struct ast_config *cfg)
 		*t_next = t;
 		t_next = &t->next;
 
-		/* Pin Initialization */
-		var2 = ast_variable_browse(cfg, s);
-		x = 0;
-		while(var2){
-			unsigned int pin;
-			static char *pin_keywords[]={"inadc","inp","in","out",NULL};
-			if((var2->name[0] < '0')||(var2->name[0] > '9')){
-				var2 = var2->next;
-				continue;
-			}
-			pin = (unsigned int) atoi(var2->name);
-			i = matchkeyword(var2->value, NULL, pin_keywords);
-			if(debug >= 3)
-				ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
-			if(i && i < 5){
-				daq_do(t, pin, DAQ_CMD_PINSET,i);	 /* Set pin type */
-				daq_do(t, pin, DAQ_CMD_MONITOR,0); /* Monitor off */
-				if(i == DAQ_PT_OUT){
-					if(debug >= 3)
-						ast_log(LOG_NOTICE,"Set output pin %d low\n", pin); /* Set output pins low */
-					daq_do(t, pin, DAQ_CMD_OUT, x);
-				}
-			}
-			else
-				ast_log(LOG_WARNING,"Invalid pin type: %s\n", var2->value);
-			var2 = var2->next;
-		}
-		time(&t->adcacqtime); /* Start ADC Acquisition */ 
 		daq.ndaqs++;	
 		if(daq.ndaqs >= MAX_DAQ_ENTRIES)
 			break;
 		var = var->next;
 	}
 
-
-	/*
- 	* Alarm initialization
- 	*/
-
-	var = ast_variable_browse(cfg,"alarms");
-	while(var){
-		int ignorefirst;
-		char *args[7];
-
-
-		/* Parse alarm entry */
-
-		strncpy(s,var->value,sizeof(s));
-
-		if(explode_string(s, args, 6, ',', 0) != 6){
-			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
-			var = var->next;
-			continue;
-		}
-
-		ignorefirst = atoi(args[2]);
-
-		if(!(pin = atoi(args[1]))){
-			ast_log(LOG_WARNING,"Pin must be greater than 0 for %s\n",var->name);
-			var = var->next;
-			continue;
-		}
-
-		if(!(t = daq_devtoentry(args[0]))){ /* Get our device */
-			ast_log(LOG_WARNING,"Can't find device %s specified for alarm %s\n",args[0], var->name);
-			var = var->next;
-			continue;
-		}
-		/* Find the pin entry */
-		p = t->pinhead;
-		while(p){
-			if(p->num == pin)
-				break;
-			p = p->next;
-		}
-		if(!p){
-			ast_log(LOG_WARNING,"Can't find pin %s for device %d\n", args[0], pin);
-			var = var->next;
-			continue;
-		}
-
-
-		strncpy(p->alarmargs, var->value, 64); /* Save the alarm arguments in the pin entry */
-		p->alarmargs[63] = 0;
-
-		ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
-		daq_do_long(t, pin, DAQ_CMD_MONITOR, daq_alarm_handler, &ignorefirst, NULL);
-		var = var->next;
-	}
 
 }		
 
