@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.174 12/22/08 
+ *  version 0.999 exp 2/5/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -437,7 +437,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.174  12/22/2008";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.999  2/05/2009";
 
 static char *app = "Rpt";
 
@@ -3113,24 +3113,25 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 	for(i = 0; i < files && !res; i++){
 		if(sound_files[i][0] == '?'){ /* Insert sample */
 			if(metertype == 1){
-				int whole, fraction, precision = 0;
+				int integer, decimal, precision = 0;
 				if((scalediv >= 10) && (scalediv < 100)) /* Adjust precision of decimal places */
 					precision = 10; 
 				else if(scalediv >= 100)
 					precision = 100;
-				whole = (int) scaledval;
-				fraction = (int) round((double)((scaledval - whole) * precision));
-				if((precision) && (fraction == precision)){
-					fraction = 0;
-					whole++;
+				integer = (int) scaledval;
+				 /* grrr.. inline lroundf doesn't work with uClibc! */
+				decimal = (int) ((scaledval - integer) * precision);
+				if((precision) && (decimal == precision)){
+					decimal = 0;
+					integer++;
 				}
 				if(debug)
-					ast_log(LOG_NOTICE,"whole = %d, fraction = %d\n", whole, fraction);
-				res = saynum(mychannel, whole);
-				if(!res && precision && fraction){
+					ast_log(LOG_NOTICE,"integer = %d, decimal = %d\n", integer, decimal);
+				res = saynum(mychannel, integer);
+				if(!res && precision && decimal){
 					res = sayfile(mychannel,"point");
 					if(!res)
-						res = saynum(mychannel, fraction);
+						res = saynum(mychannel, decimal);
 				}
 			}
 			if(metertype == 2){
