@@ -2371,7 +2371,8 @@ static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
  */
 static void *uchameleon_monitor_thread(void *this)
 {
-	int i,sample,res,pin,valid,adc_acquire;
+	int pin = 0, sample = 0;
+	int i,res,valid,adc_acquire;
 	time_t now;
 	char rxbuff[32];
 	char txbuff[32];
