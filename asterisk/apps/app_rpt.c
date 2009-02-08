@@ -2405,7 +2405,7 @@ static void *uchameleon_monitor_thread(void *this)
 		}
 		if(res){
 			if(debug >= 5) 
-				printf("Received: %s\n", rxbuff);
+				ast_log(LOG_NOTICE, "Received: %s\n", rxbuff);
 			valid = 0;
 			/* Parse return string */
 			i = explode_string(rxbuff, rxargs, 3, ' ', 0);
@@ -2861,7 +2861,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 	int numranges = 0;
 	int filtertype = 0;
 	int rangemin,rangemax;
-	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0;
+	float scaledval = 0.0, scalepre = 0.0, scalepost = 0.0, scalediv = 1.0, valtoround;
 	char *myargs,*meter_face;
 	const char *p;
 	char *start, *end;
@@ -3120,8 +3120,9 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 				else if(scalediv >= 100)
 					precision = 100;
 				integer = (int) scaledval;
+				valtoround = ((scaledval - integer) * precision);
 				 /* grrr.. inline lroundf doesn't work with uClibc! */
-				decimal = (int) ((scaledval - integer) * precision);
+				decimal = (int) ((valtoround + ((valtoround >= 0) ? 0.5 : -0.5)));
 				if((precision) && (decimal == precision)){
 					decimal = 0;
 					integer++;
