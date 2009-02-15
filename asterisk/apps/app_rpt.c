@@ -1955,17 +1955,17 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 			p = p->next;
 		}
 		if(!p){
-			ast_log(LOG_WARNING,"Can't find pin %s for device %d\n", argv[0], pin);
+			ast_log(LOG_WARNING,"Can't find pin %d for device %s\n", pin, argv[0]);
 			var = var->next;
 			continue;
 		}
 
-
-		strncpy(p->alarmargs, var->value, 64); /* Save the alarm arguments in the pin entry */
-		p->alarmargs[63] = 0;
-
-		ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
-		uchameleon_do_long(t, pin, DAQ_CMD_MONITOR, uchameleon_alarm_handler, &ignorefirst, NULL);
+		if(!strcmp(argv[0], t->name)){
+			strncpy(p->alarmargs, var->value, 64); /* Save the alarm arguments in the pin entry */
+			p->alarmargs[63] = 0;
+			ast_log(LOG_NOTICE,"Adding alarm %s on pin %d\n", var->name, pin);
+			uchameleon_do_long(t, pin, DAQ_CMD_MONITOR, uchameleon_alarm_handler, &ignorefirst, NULL);
+		}
 		var = var->next;
 	}
 
