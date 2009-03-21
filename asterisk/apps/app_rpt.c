@@ -522,6 +522,7 @@ struct rpt_chan_stat
 char *discstr = "!!DISCONNECT!!";
 char *newkeystr = "!NEWKEY!";
 char *newkey1str = "!NEWKEY1!";
+static char *remote_rig_ft950="ft950";
 static char *remote_rig_ft897="ft897";
 static char *remote_rig_rbi="rbi";
 static char *remote_rig_kenwood="kenwood";
@@ -827,6 +828,7 @@ static struct rpt
 		char	*startupmacro;
 		int iobase;
 		char *ioport;
+		int iospeed;
 		char funcchar;
 		char endchar;
 		char nobusyout;
@@ -865,6 +867,7 @@ static struct rpt
 		char linkmodedynamic[10];
 		char *locallist[16];
 		int nlocallist;
+		char ctgroup[16];
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1217,6 +1220,8 @@ static int multimode_capable(struct rpt *myrpt)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+		return 1;
 	if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 		return 1;
 	return 0;
@@ -1467,6 +1472,7 @@ static struct daq_tag daq;
 
 static int setrbi(struct rpt *myrpt);
 static int set_ft897(struct rpt *myrpt);
+static int set_ft950(struct rpt *myrpt);
 static int set_ic706(struct rpt *myrpt);
 static int setkenwood(struct rpt *myrpt);
 static int set_tm271(struct rpt *myrpt);
@@ -3691,7 +3697,7 @@ struct termios mode;
 	}
 	if (enable)
 	{
-		cfsetspeed(&mode, B9600);
+		cfsetspeed(&mode, /* B9600 */ B38400);
 	}
 	else
 	{
@@ -3734,8 +3740,8 @@ static int openserial(struct rpt *myrpt,char *fname)
 	mode.c_cc[VMIN] = 1; 
 #endif
 
-	cfsetispeed(&mode, B9600);
-	cfsetospeed(&mode, B9600);
+	cfsetispeed(&mode, myrpt->p.iospeed);
+	cfsetospeed(&mode, myrpt->p.iospeed);
 	if (tcsetattr(fd, TCSANOW, &mode)) 
 		ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", fname, strerror(errno));
 	if(!strcmp(myrpt->remoterig, remote_rig_kenwood)) setdtr(fd,0); 
@@ -3930,7 +3936,7 @@ static int send_usb_txt(struct rpt *myrpt, char *txt)
 {
 	struct ast_frame wf;
  
-	if (debug)ast_log(LOG_NOTICE, "send_usb_txt %s\n",txt);
+	/* if (debug) */ ast_log(LOG_NOTICE, "send_usb_txt %s\n",txt);
 	wf.frametype = AST_FRAME_TEXT;
 	wf.subclass = 0;
 	wf.offset = 0;
@@ -3942,6 +3948,38 @@ static int send_usb_txt(struct rpt *myrpt, char *txt)
 	ast_write(myrpt->txchannel,&wf); 
 	return 0;
 }
+/*
+	send asterisk frame text message on the current tx channel
+*/
+static int send_link_pl(struct rpt *myrpt, char *txt) 
+{
+	struct ast_frame wf;
+	struct	rpt_link *l;
+	char	str[300];
+ 
+	if (!strcmp(myrpt->p.ctgroup,"0")) return 0;
+	snprintf(str, sizeof(str), "C %s %s %s", myrpt->name, myrpt->p.ctgroup, txt);
+/* if (debug) */ ast_log(LOG_NOTICE, "send_link_pl %s\n",str);
+	wf.frametype = AST_FRAME_TEXT;
+	wf.subclass = 0;
+	wf.offset = 0;
+	wf.mallocd = 0;
+	wf.datalen = strlen(str) + 1;
+	wf.data = str;
+	wf.samples = 0;
+	wf.src = "send_link_pl";
+	l = myrpt->links.next;
+	while(l && (l != &myrpt->links))
+	{
+		if ((l->chan) && l->name[0] && (l->name[0] != '0'))
+		{
+			ast_write(l->chan,&wf); 
+		}
+		l = l->next;
+	}
+	return 0;
+}
+
 /* must be called locked */
 static void __mklinklist(struct rpt *myrpt, struct rpt_link *mylink, char *buf)
 {
@@ -4525,6 +4563,11 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		rpt_vars[n].p.nlocallist = finddelim(val,rpt_vars[n].p.locallist,16);
 	}
 
+	val = (char *) ast_variable_retrieve(cfg,this,"ctgroup");
+	if (val) {
+		strncpy(rpt_vars[n].p.ctgroup,val,sizeof(rpt_vars[n].p.ctgroup) - 1);
+	} else strcpy(rpt_vars[n].p.ctgroup,"0");
+
 	val = (char *) ast_variable_retrieve(cfg,this,"inxlat");
 	if (val) {
 		memset(&rpt_vars[n].p.inxlat,0,sizeof(struct rpt_xlat));
@@ -4552,6 +4595,35 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	/* retreive the stanza name for the txlimits */
 	val = (char *) ast_variable_retrieve(cfg,this,"txlimits");
 	rpt_vars[n].p.txlimitsstanzaname = val;
+
+	rpt_vars[n].p.iospeed = B9600;
+	if (!strcasecmp(rpt_vars[n].remoterig,remote_rig_ft950))
+		rpt_vars[n].p.iospeed = B38400;
+	val = (char *) ast_variable_retrieve(cfg,this,"iospeed");
+	if (val)
+	{
+	    switch(atoi(val))
+	    {
+		case 2400:
+			rpt_vars[n].p.iospeed = B2400;
+			break;
+		case 4800:
+			rpt_vars[n].p.iospeed = B4800;
+			break;
+		case 19200:
+			rpt_vars[n].p.iospeed = B19200;
+			break;
+		case 38400:
+			rpt_vars[n].p.iospeed = B38400;
+			break;
+		case 57600:
+			rpt_vars[n].p.iospeed = B57600;
+			break;
+		default:
+			ast_log(LOG_ERROR,"%s is not valid baud rate for iospeed\n",val);
+			break;
+	    }
+	}
 
 	longestnode = 0;
 
@@ -6935,6 +7007,10 @@ struct zt_params par;
 		if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		{
 			res = set_ft897(myrpt);
+		}
+		else if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+		{
+			res = set_ft950(myrpt);
 		}
 		else if(!strcmp(myrpt->remoterig, remote_rig_tm271))
 		{
@@ -9674,6 +9750,44 @@ struct	ast_frame wf;
 		return;
 	}
 
+	if (tmp[0] == 'C')
+	{
+		if (sscanf(tmp,"%s %s %s %s",cmd,src,tmp1,dest) != 4)
+		{
+			ast_log(LOG_WARNING, "Unable to parse ctcss string %s\n",str);
+			return;
+		}
+		if (!strcmp(myrpt->p.ctgroup,"0")) return;
+		if (strcasecmp(myrpt->p.ctgroup,tmp1)) return;
+		l = myrpt->links.next;
+		/* otherwise, send it to all of em */
+		while(l != &myrpt->links)
+		{
+			if (l->name[0] == '0') 
+			{
+				l = l->next;
+				continue;
+			}
+			/* dont send back from where it came */
+			if ((l == mylink) || (!strcmp(l->name,mylink->name)))
+			{
+				l = l->next;
+				continue;
+			}
+			/* send, but not to src */
+			if (strcmp(l->name,src)) {
+				wf.data = str;
+				if (l->chan) rpt_qwrite(l,&wf); 
+			}
+			l = l->next;
+		}
+		/* if is from me, ignore */
+		if (!strcmp(src,myrpt->name)) return;
+		sprintf(cmd,"TXTONE %s",dest);
+		if (IS_XPMR(myrpt)) send_usb_txt(myrpt,cmd);
+		return;
+	}
+
 	if (tmp[0] == 'K')
 	{
 		if (sscanf(tmp,"%s %s %s %d %d",cmd,dest,src,&seq,&ts) != 5)
@@ -10383,8 +10497,8 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 	char c;
 
 	 if(debug) {
-	    ast_log(LOG_NOTICE, "ioport=%s  iofd=0x%x\n",myrpt->p.ioport,myrpt->iofd);
-		printf("String output was:\n");
+	    ast_log(LOG_NOTICE, "ioport=%s baud=%d iofd=0x%x\n",myrpt->p.ioport,myrpt->p.iospeed,myrpt->iofd);
+		printf("String output was %s:\n",txbuf);
 		for(i = 0; i < txbytes; i++)
 			printf("%02X ", (unsigned char ) txbuf[i]);
 		printf("\n");
@@ -10596,6 +10710,104 @@ char *s;
 
 /* take a PL frequency and turn it into a code */
 static int tm271_pltocode(char *str)
+{
+int i;
+char *s;
+
+	s = strchr(str,'.');
+	i = 0;
+	if (s) i = atoi(s + 1);
+	i += atoi(str) * 10;
+	switch(i)
+	{
+	    case 670:
+		return 0;
+	    case 693:
+		return 1;
+	    case 719:
+		return 2;
+	    case 744:
+		return 3;
+	    case 770:
+		return 4;
+	    case 797:
+		return 5;
+	    case 825:
+		return 6;
+	    case 854:
+		return 7;
+	    case 885:
+		return 8;
+	    case 915:
+		return 9;
+	    case 948:
+		return 10;
+	    case 974:
+		return 11;
+	    case 1000:
+		return 12;
+	    case 1035:
+		return 13;
+	    case 1072:
+		return 14;
+	    case 1109:
+		return 15;
+	    case 1148:
+		return 16;
+	    case 1188:
+		return 17;
+	    case 1230:
+		return 18;
+	    case 1273:
+		return 19;
+	    case 1318:
+		return 20;
+	    case 1365:
+		return 21;
+	    case 1413:
+		return 22;
+	    case 1462:
+		return 23;
+	    case 1514:
+		return 24;
+	    case 1567:
+		return 25;
+	    case 1622:
+		return 26;
+	    case 1679:
+		return 27;
+	    case 1738:
+		return 28;
+	    case 1799:
+		return 29;
+	    case 1862:
+		return 30;
+	    case 1928:
+		return 31;
+	    case 2035:
+		return 32;
+	    case 2065:
+		return 33;
+	    case 2107:
+		return 34;
+	    case 2181:
+		return 35;
+	    case 2257:
+		return 36;
+	    case 2291:
+		return 37;
+	    case 2336:
+		return 38;
+	    case 2418:
+		return 39;
+	    case 2503:
+		return 40;
+	}
+	return -1;
+}
+
+/* take a PL frequency and turn it into a code */
+static int ft950_pltocode(char *str)
 {
 int i;
 char *s;
@@ -11704,6 +11916,311 @@ static int multimode_bump_freq_ft897(struct rpt *myrpt, int interval)
 
 
 /*
+* FT-950 I/O handlers
+*/
+
+/* Check to see that the frequency is valid */
+/* Hard coded limits now, configurable later, maybe? */
+
+
+static int check_freq_ft950(int m, int d, int *defmode)
+{
+	int dflmd = REM_MODE_FM;
+
+	if(m == 1){ /* 160 meters */
+		dflmd =	REM_MODE_LSB; 
+		if(d < 80000)
+			return -1;
+	}
+	else if(m == 3){ /* 80 meters */
+		dflmd = REM_MODE_LSB;
+		if(d < 50000)
+			return -1;
+	}
+	else if(m == 7){ /* 40 meters */
+		dflmd = REM_MODE_LSB;
+		if(d > 30000)
+			return -1;
+	}
+	else if(m == 14){ /* 20 meters */
+		dflmd = REM_MODE_USB;
+		if(d > 35000)
+			return -1;
+	}
+	else if(m == 18){ /* 17 meters */
+		dflmd = REM_MODE_USB;
+		if((d < 6800) || (d > 16800))
+			return -1;
+	}
+	else if(m == 21){ /* 15 meters */
+		dflmd = REM_MODE_USB;
+		if((d < 20000) || (d > 45000))
+			return -1;
+	}
+	else if(m == 24){ /* 12 meters */
+		dflmd = REM_MODE_USB;
+		if((d < 89000) || (d > 99000))
+			return -1;
+	}
+	else if(m == 28){ /* 10 meters */
+		dflmd = REM_MODE_USB;
+	}
+	else if(m == 29){ 
+		if(d >= 51000)
+			dflmd = REM_MODE_FM;
+		else
+			dflmd = REM_MODE_USB;
+		if(d > 70000)
+			return -1;
+	}
+	else if(m == 50){ /* 6 meters */
+		if(d >= 30000)
+			dflmd = REM_MODE_FM;
+		else
+			dflmd = REM_MODE_USB;
+
+	}
+	else if((m >= 51) && ( m < 54)){
+		dflmd = REM_MODE_FM;
+	}
+	else
+		return -1;
+
+	if(defmode)
+		*defmode = dflmd;
+
+	return 0;
+}
+
+/*
+* Set a new frequency for the ft950
+*/
+
+static int set_freq_ft950(struct rpt *myrpt, char *newfreq)
+{
+	char cmdstr[20];
+	int fd,m,d;
+	char mhz[MAXREMSTR];
+	char decimals[MAXREMSTR];
+
+	fd = 0;
+	if(debug) 
+		printf("New frequency: %s\n",newfreq);
+
+	if(split_freq(mhz, decimals, newfreq))
+		return -1; 
+
+	m = atoi(mhz);
+	d = atoi(decimals);
+
+
+	sprintf(cmdstr,"FA%d%06d;",m,d * 10);
+	return serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0);
+
+}
+
+/* ft-950 offset */
+
+static int set_offset_ft950(struct rpt *myrpt, char offset)
+{
+	char *cmdstr;
+	
+	switch(offset){
+		case	REM_SIMPLEX:
+			cmdstr = "OS00;";
+			break;
+
+		case	REM_MINUS:
+			cmdstr = "OS02;";
+			break;
+		
+		case	REM_PLUS:
+			cmdstr = "OS01;";
+			break;	
+
+		default:
+			return -1;
+	}
+
+	return serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0);
+}
+
+/* ft-950 mode */
+
+static int set_mode_ft950(struct rpt *myrpt, char newmode)
+{
+	char *cmdstr;
+	
+	switch(newmode){
+		case	REM_MODE_FM:
+			cmdstr = "MD04;";
+			break;
+
+		case	REM_MODE_USB:
+			cmdstr = "MD02;";
+			break;
+
+		case	REM_MODE_LSB:
+			cmdstr = "MD01;";
+			break;
+
+		case	REM_MODE_AM:
+			cmdstr = "MD05;";
+			break;
+		
+		default:
+			return -1;
+	}
+
+	return serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0);
+}
+
+/* Set tone encode and decode modes */
+
+static int set_ctcss_mode_ft950(struct rpt *myrpt, char txplon, char rxplon)
+{
+	char *cmdstr;
+	
+	
+	if(rxplon && txplon)
+		cmdstr = "CT01;";
+	else if (!rxplon && txplon)
+		cmdstr = "CT02;"; /* Encode only */
+	else if (rxplon && !txplon)
+		cmdstr = "CT02;"; /* Encode only */
+	else
+		cmdstr = "CT00;"; /* OFF */
+
+	return serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0);
+}
+
+
+/* Set transmit and receive ctcss tone frequencies */
+
+static int set_ctcss_freq_ft950(struct rpt *myrpt, char *txtone, char *rxtone)
+{
+	char cmdstr[10];
+	int c;
+
+	c = ft950_pltocode(txtone);
+	if (c < 0) return(-1);
+	
+	sprintf(cmdstr,"CN0%02d;",c);
+
+	return serial_remote_io(myrpt, (unsigned char *)cmdstr, 5, NULL, 0, 0);
+}	
+
+
+
+static int set_ft950(struct rpt *myrpt)
+{
+	int res;
+	char *cmdstr;
+	
+	if(debug)
+		printf("@@@@ ptt off\n");
+
+	cmdstr = "MX0;";
+	res = serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0); /* MOX off */
+
+	if(debug)
+		printf("Modulation mode\n");
+
+	if(!res)
+		res = set_mode_ft950(myrpt, myrpt->remmode);		/* Modulation mode */
+
+	if(debug)
+		printf("Split off\n");
+
+	cmdstr = "OS00;";
+	if(!res)
+		res = serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0); /* Split off */
+
+	if(debug)
+		printf("VFO Modes\n");
+
+	if (!res) 
+		res = serial_remote_io(myrpt, (unsigned char *)"FR0;", 4, NULL, 0, 0);
+	if (!res) 
+		res = serial_remote_io(myrpt, (unsigned char *)"FT2;", 4, NULL, 0, 0);
+
+	if(debug)
+		printf("Frequency\n");
+
+	if(!res)
+		res = set_freq_ft950(myrpt, myrpt->freq);		/* Frequency */
+	if((myrpt->remmode == REM_MODE_FM)){
+		if(debug)
+			printf("Offset\n");
+		if(!res)
+			res = set_offset_ft950(myrpt, myrpt->offset);	/* Offset if FM */
+		if((!res)&&(myrpt->rxplon || myrpt->txplon)){
+			if(debug)
+				printf("CTCSS tone freqs.\n");
+			res = set_ctcss_freq_ft950(myrpt, myrpt->txpl, myrpt->rxpl); /* CTCSS freqs if CTCSS is enabled */
+		}
+		if(!res){
+			if(debug)
+				printf("CTCSS mode\n");
+			res = set_ctcss_mode_ft950(myrpt, myrpt->txplon, myrpt->rxplon); /* CTCSS mode */
+		}
+	}
+	if((myrpt->remmode == REM_MODE_USB)||(myrpt->remmode == REM_MODE_LSB)){
+		if(debug)
+			printf("Clarifier off\n");
+		cmdstr = "RT0;";
+		serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0); /* Clarifier off if LSB or USB */
+	}
+	return res;
+}
+
+/*
+* Bump frequency up or down by a small amount 
+* Return 0 if the new frequnecy is valid, or -1 if invalid
+* Interval is in Hz, resolution is 10Hz 
+*/
+
+static int multimode_bump_freq_ft950(struct rpt *myrpt, int interval)
+{
+	int m,d;
+	char mhz[MAXREMSTR], decimals[MAXREMSTR];
+
+	if(debug)
+		printf("Before bump: %s\n", myrpt->freq);
+
+	if(split_freq(mhz, decimals, myrpt->freq))
+		return -1;
+	
+	m = atoi(mhz);
+	d = atoi(decimals);
+
+	d += (interval / 10); /* 10Hz resolution */
+	if(d < 0){
+		m--;
+		d += 100000;
+	}
+	else if(d >= 100000){
+		m++;
+		d -= 100000;
+	}
+
+	if(check_freq_ft950(m, d, NULL)){
+		if(debug)
+			printf("Bump freq invalid\n");
+		return -1;
+	}
+
+	snprintf(myrpt->freq, MAXREMSTR, "%d.%05d", m, d);
+
+	if(debug)
+		printf("After bump: %s\n", myrpt->freq);
+
+	return set_freq_ft950(myrpt, myrpt->freq);	
+}
+
+
+
+/*
 * IC-706 I/O handlers
 */
 
@@ -12382,6 +12899,11 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
 		res = 0;
 	}
+	if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+	{
+		rpt_telemetry(myrpt,SETREMOTE,NULL);
+		res = 0;
+	}
 	if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 	{
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
@@ -12434,6 +12956,8 @@ static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return check_freq_ft897(m, d, defmode);
+	else if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+		return check_freq_ft950(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 		return check_freq_ic706(m, d, defmode,myrpt->p.remote_mars);
 	else if(!strcmp(myrpt->remoterig, remote_rig_rbi))
@@ -12605,6 +13129,8 @@ static int multimode_bump_freq(struct rpt *myrpt, int interval)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return multimode_bump_freq_ft897(myrpt, interval);
+	else if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+		return multimode_bump_freq_ft950(myrpt, interval);
 	else if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 		return multimode_bump_freq_ic706(myrpt, interval);
 	else
@@ -13197,6 +13723,7 @@ invalid_freq:
 			/* if not currently going, and valid to do */
 			if((!myrpt->tunerequest) && 
 			    ((!strcmp(myrpt->remoterig, remote_rig_ft897) || 
+			    (!strcmp(myrpt->remoterig, remote_rig_ft950)) || 
 				!strcmp(myrpt->remoterig, remote_rig_ic706)) )) { 
 				myrpt->remotetx = 0;
 				if (strncasecmp(myrpt->txchannel->name,
@@ -13392,6 +13919,7 @@ int	seq,res;
 		return 0;
 	}
 #endif
+	if (tmp[0] == 'L') return 0;
 	if (sscanf(tmp,"%s %s %s %d %c",cmd,dest,src,&seq,&c) != 5)
 	{
 		ast_log(LOG_WARNING, "Unable to parse link string %s\n",str);
@@ -15408,6 +15936,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					{
 						char *val, busy = 0;
 
+						send_link_pl(myrpt,f->data);
 
 						if (myrpt->p.nlocallist)
 						{
@@ -15459,7 +15988,12 @@ char tmpstr[300],lstr[MAXLINKLIST];
 							}
 						 	if (!busy) strcpy(myrpt->lasttone,(char*)f->data);
 						}
-					} else myrpt->lasttone[0] = 0;
+					} 
+					else
+					{
+						myrpt->lasttone[0] = 0;
+						send_link_pl(myrpt,"0");
+					}
 				}
 				/* if RX un-key */
 				if (f->subclass == AST_CONTROL_RADIO_UNKEY)
@@ -15471,6 +16005,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 							rpt_telemetry(myrpt,UNKEY,NULL);
 						}
 					}
+					send_link_pl(myrpt,"0");
 					myrpt->keyed = 0;
 					if ((myrpt->p.duplex > 1) && myrpt->localoverride)
 					{
@@ -16319,6 +16854,7 @@ char *this,*val;
 		if (val) rpt_vars[n].txchanname = ast_strdup(val);
 		rpt_vars[n].remote = 0;
 		rpt_vars[n].remoterig = "";
+		rpt_vars[n].p.iospeed = B9600;
 		val = (char *) ast_variable_retrieve(cfg,this,"remote");
 		if (val) 
 		{
@@ -17322,6 +17858,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		/* if PCIRADIO and Yaesu ft897/ICOM IC-706 selected */
 		if ((myrpt->iofd < 1) && (!res) &&
 		   ((!strcmp(myrpt->remoterig,remote_rig_ft897)) ||
+		    (!strcmp(myrpt->remoterig,remote_rig_ft950)) ||
 		      (!strcmp(myrpt->remoterig,remote_rig_ic706)) ||
 		         (!strcmp(myrpt->remoterig,remote_rig_tm271))))
 		{
