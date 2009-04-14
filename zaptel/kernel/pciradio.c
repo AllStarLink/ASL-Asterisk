@@ -143,7 +143,7 @@ struct encdec
 	unsigned char saudio_ctrl[NUM_CHANS];
 	unsigned char saudio_setup[NUM_CHANS];
 	unsigned char txcode[NUM_CHANS];
-	unsigned long lastcmd;
+	unsigned long long lastcmd;
 	int myindex[NUM_CHANS];
 	unsigned long waittime;
 	unsigned char retstate;
@@ -208,7 +208,7 @@ struct pciradio {
 	struct zt_chan chans[NUM_CHANS];
 	unsigned char mx828_addr;
 	struct encdec encdec;
-	unsigned long lastremcmd;
+	unsigned long long lastremcmd;
 };
 
 
@@ -542,17 +542,17 @@ unsigned long flags;
 		interruptible_sleep_on_timeout(&mywait,2);   
 		spin_lock_irqsave(&rad->lock,flags);  
 	}
-	rad->encdec.lastcmd = jiffies + 1000;
+	rad->encdec.lastcmd = jiffies_64 + 1000;
 	spin_unlock_irqrestore(&rad->lock,flags);  
 	while(__pciradio_getcreg(rad,0xc) & 1);
-	rad->encdec.lastcmd = jiffies + 1000;
+	rad->encdec.lastcmd = jiffies_64 + 1000;
 	spin_lock_irqsave(&rad->lock,flags);  
-	rad->encdec.lastcmd = jiffies + 1000;
+	rad->encdec.lastcmd = jiffies_64 + 1000;
 	mx828_command(rad,channel,command,byte1,byte2);
 	spin_unlock_irqrestore(&rad->lock,flags);  
-	rad->encdec.lastcmd = jiffies + 1000;
+	rad->encdec.lastcmd = jiffies_64 + 1000;
 	while(__pciradio_getcreg(rad,0xc) & 1);
-	rad->encdec.lastcmd = jiffies;
+	rad->encdec.lastcmd = jiffies_64;
 }
 
 static void _do_encdec(struct pciradio *rad)
@@ -561,7 +561,7 @@ int	i,n;
 unsigned char byte1 = 0,byte2 = 0;
 
 	/* return doing nothing if busy */
-	if ((rad->encdec.lastcmd + 2) > jiffies) return;
+	if ((rad->encdec.lastcmd + 2) > jiffies_64) return;
 	if (__pciradio_getcreg(rad,0xc) & 1) return;
 	n = 0;
 	byte2 = 0;
@@ -630,6 +630,8 @@ unsigned char byte1 = 0,byte2 = 0;
 		rad->encdec.state = 4;
 		break;
 	    case 4:
+		byte1 = 0;
+		byte2 = 0;
 		if (rad->encdec.cttx[rad->encdec.chan])
 		{
 			rad->encdec.saudio_ctrl[rad->encdec.chan] |= 0x80;
@@ -1280,9 +1282,9 @@ static int pciradio_ioctl(struct zt_chan *chan, unsigned int cmd, unsigned long 
 				i = (byte2 != byte1);
 				__pciradio_setcreg(rad,8,byte2);
 				spin_unlock_irqrestore(&rad->lock,flags);
-				if (i || (jiffies < rad->lastremcmd + 10))
+				if (i || (jiffies_64 < rad->lastremcmd + 10))
 					interruptible_sleep_on_timeout(&mywait,10);
-				rad->lastremcmd = jiffies;
+				rad->lastremcmd = jiffies_64;
 				rbi_out(rad,chan->chanpos - 1,(unsigned char *)&stack.p.data);
 				spin_lock_irqsave(&rad->lock,flags);
 				break;
@@ -1314,9 +1316,9 @@ static int pciradio_ioctl(struct zt_chan *chan, unsigned int cmd, unsigned long 
 			spin_unlock_irqrestore(&rad->lock,flags);
 			if (byte1 != byte2) 
 				interruptible_sleep_on_timeout(&mywait,3);
-			while (jiffies < rad->lastremcmd + 10)
+			while (jiffies_64 < rad->lastremcmd + 10)
 				interruptible_sleep_on_timeout(&mywait,10);
-			rad->lastremcmd = jiffies;
+			rad->lastremcmd = jiffies_64;
 			for(;;)
 			{
 				if (!(__pciradio_getcreg(rad,0xc) & 2)) break;
