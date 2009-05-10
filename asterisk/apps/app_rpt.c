@@ -3,7 +3,7 @@
 /*
  * Asterisk -- An open source telephony toolkit.
  *
- * Copyright (C) 2002-2008, Jim Dixon, WB6NIL
+ * Copyright (C) 2002-2009, Jim Dixon, WB6NIL
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.999 exp 2/5/2009 
+ *  version 0.178 exp 5/10/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -12118,9 +12118,15 @@ static int set_ft950(struct rpt *myrpt)
 	char *cmdstr;
 	
 	if(debug)
-		printf("@@@@ ptt off\n");
+		printf("ptt off\n");
 
 	cmdstr = "MX0;";
+	res = serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0); /* MOX off */
+
+	if(debug)
+		printf("select ant. 1\n");
+
+	cmdstr = "AN01;";
 	res = serial_remote_io(myrpt, (unsigned char *)cmdstr, strlen(cmdstr), NULL, 0, 0); /* MOX off */
 
 	if(debug)
