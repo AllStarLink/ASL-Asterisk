@@ -31,10 +31,7 @@
 /*** MODULEINFO
  ***/
 
-#define	rpt_free(p) __ast_free(p,__FILE__,__LINE__,__PRETTY_FUNCTION__)
-
-
-/* Version 0.18, 12/1/2008
+/* Version 0.24, 5/09/2009
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -52,7 +49,7 @@ Eric, KA6UAI for putting up with a few miserable days of
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 176936 $")
 
 #include <stdio.h>
 #include <string.h>
@@ -80,6 +77,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/app.h"
 #include "asterisk/translate.h"
 #include "asterisk/cli.h"
+#include "asterisk/astdb.h"
+#include "asterisk/dsp.h"
 
 #define	MAX_RXKEY_TIME 4
 
@@ -103,10 +102,13 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #define	LARGEST_PACKET_SIZE 1024
 #define	DISC_LINGER_TIME 2
+#define IRLP_DB_ROOT "irlp"
+
 #define	IRLP_ROOT "/home/irlp/local"
 #define	IRLP_RESET "su - repeater /tmp/irlpwrap /home/irlp/custom/irlp_fullreset"
 #define	IRLP_END "su - repeater /tmp/irlpwrap /home/irlp/scripts/end &"
 #define	IRLP_CALL_REFL "su - repeater /tmp/irlpwrap /home/irlp/scripts/connect_to_reflector ref%04d &"
+#define	IRLP_CALL_EXP "su - repeater /tmp/irlpwrap /home/irlp/scripts/experimental_call exp%04d &"
 #define	IRLP_CALL "su - repeater /tmp/irlpwrap /home/irlp/scripts/call stn%04d &"
 #define	IRLP_WRAPPER "echo '#! /bin/sh\n\n. /home/irlp/custom/environment\n" \
 	"exec $1 $2 $3 $4 $5 $6\n' > /tmp/irlpwrap ; chown repeater /tmp/irlpwrap ; chmod 755 /tmp/irlpwrap"
@@ -118,6 +120,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 	"/bin/mknod /home/irlp/astrun/dtmf_fifo p;" \
 	"chown repeater /home/irlp/astrun/dtmf_fifo) > /dev/null 2>&1"
 #define	IRLP_SEND_DTMF "su - repeater /tmp/irlpwrap \"/home/irlp/scripts/fifoecho stn%04d dtmfregen %s\""
+
+#define	DELIMCHR ':'
+#define	QUOTECHR 34
 
 enum {IRLP_NOPROTO,IRLP_ISADPCM,IRLP_ISGSM,IRLP_ISULAW} ;
 
@@ -150,6 +155,8 @@ struct irlp_pvt {
 	char txkey;
 	int rxkey;
 	struct ast_frame fr;	
+	struct ast_dsp *dsp;
+	struct ast_trans_pvt *xpath;
 	struct ast_module_user *u;
 };
 
@@ -203,6 +210,8 @@ struct rtcp_t {
 */ 
 static char remote_irlp_node_ip[IRLP_IP_SIZE + 1];
 
+int myformats[] = {AST_FORMAT_ADPCM,AST_FORMAT_ADPCM,AST_FORMAT_GSM,AST_FORMAT_ULAW} ;
+char *myformatstrs[] = {"ADPCM","ADPCM","GSM","UNCOMP"} ;
 /* 
    This is your local IRLP node and
    some config values.
@@ -216,6 +225,7 @@ static short rtcptimeout = 10;
 static short localispeakerport = 2174;
 time_t lingertime = 0;
 static int radmode = 0;
+static int expmode = 0;
 static int nodenum = 0;
 static int audio_sock = -1;
 static int ctrl_sock = -1;
@@ -227,13 +237,15 @@ static uint16_t audio_port_cfg = 2084;
 static uint16_t audio_port;
 static uint16_t ctrl_port;
 static char *config = "irlp.conf";
-static const char tdesc[] = "irlp channel driver by KI4LKF";
+static const char tdesc[] = "irlp channel driver";
 static int prefformat = AST_FORMAT_ADPCM;
 static char context[AST_MAX_EXTENSION] = "default";
 static char type[] = "irlp";
 static pthread_t irlp_reader_thread;
 static int run_forever = 1;
 static int proto = IRLP_NOPROTO;
+static int default_proto = IRLP_ISULAW;
+static int lastproto = -1;
 static int in_node = 0;
 static struct irlp_rxqast rxqast;
 static char *outbuf_old;
@@ -246,11 +258,13 @@ static char stream[256];
 static int nullfd = -1;
 static int dfd = -1;
 static int playing = 0;
-static unsigned int xcount = 0;
 static char havedtmf = 0;
 static char irlp_dtmf_string[64];
 static char irlp_dtmf_special = 0;
 time_t keepalive = 0;
+static char db_active = 'a';
+static char db_loading = 0;
+static unsigned long xmagic = 0;
 
 #ifdef OLD_ASTERISK
 #define ast_free free
@@ -293,8 +307,13 @@ void static reset_stuff(void)
 	alt_audio_sock = -1;
 	if (alt_ctrl_sock != -1) close(alt_ctrl_sock);
 	alt_ctrl_sock = -1;
-	proto = IRLP_NOPROTO;
+	if (!expmode)
+		proto = IRLP_NOPROTO;
+	else
+		proto = default_proto;
+	lastproto = -1;
 	time(&lingertime);
+	xmagic = 0;
 	keepalive = 0;
 	in_node = 0;
 	nodenum = 0;
@@ -311,7 +330,7 @@ void static reset_stuff(void)
 	irlp_dtmf_special = 0;
 	if (curcall)
 	{
-	       curcall->nativeformats = AST_FORMAT_ADPCM;
+	       curcall->nativeformats = myformats[default_proto];
 	       ast_set_read_format(curcall,curcall->readformat);
 	       ast_set_write_format(curcall,curcall->writeformat);
 	}
@@ -351,6 +370,218 @@ struct stat mystat;
 	str[len] = 0;
 	return(str);
 }
+
+
+static char *irlp_get_node(char *ip)
+{
+
+char active = 'a',str[200],dbstr[200];
+
+	if (!ast_db_get(IRLP_DB_ROOT,"active",str,sizeof(str) - 1))
+	{
+		active = *str;
+	}
+
+	sprintf(dbstr,"%c/ipaddr/%s",active,ip);
+	if (!ast_db_get(IRLP_DB_ROOT,dbstr,str,sizeof(str) - 1))
+	{
+		return(strdup(str));
+	}
+	return(NULL);
+}
+
+static char *irlp_get_ip(char *nodenum)
+{
+
+char active = 'a',str[200],dbstr[200];
+
+	if (!ast_db_get(IRLP_DB_ROOT,"active",str,sizeof(str) - 1))
+	{
+		active = *str;
+	}
+
+	sprintf(dbstr,"%c/nodenum/%s",active,nodenum);
+	if (!ast_db_get(IRLP_DB_ROOT,dbstr,str,sizeof(str) - 1))
+	{
+		return(strdup(str));
+	}
+	return(NULL);
+}
+
+/*
+* Break up a delimited string into a table of substrings
+*
+* str - delimited string ( will be modified )
+* strp- list of pointers to substrings (this is built by this function), NULL will be placed at end of list
+* limit- maximum number of substrings to process
+*/
+	
+
+
+static int finddelim(char *str, char *strp[], int limit)
+{
+int     i,l,inquo;
+
+        inquo = 0;
+        i = 0;
+        strp[i++] = str;
+        if (!*str)
+           {
+                strp[0] = 0;
+                return(0);
+           }
+        for(l = 0; *str && (l < limit) ; str++)
+           {
+                if (*str == QUOTECHR)
+                   {
+                        if (inquo)
+                           {
+                                *str = 0;
+                                inquo = 0;
+                           }
+                        else
+                           {
+                                strp[i - 1] = str + 1;
+                                inquo = 1;
+                           }
+		}
+                if ((*str == DELIMCHR) && (!inquo))
+                {
+                        *str = 0;
+			l++;
+                        strp[i++] = str + 1;
+                }
+           }
+        strp[i] = 0;
+        return(i);
+
+}
+
+/* IRLP db load stuff */
+static void irlp_zapem(char loading)
+{
+char str[10];
+
+	str[0] = loading;
+	str[1] = 0;
+	ast_db_deltree(IRLP_DB_ROOT,str);
+}
+
+static int do_irlp_dbload(void)
+{
+char	str[200],mystn[200],myip[200],dbstr[300];
+char	*strs[100];
+int	n = 0;
+FILE	*fp;
+struct ast_hostent ahp;
+struct hostent *hp;
+struct in_addr ia;
+
+	db_active = 'a';
+	db_loading = 'a';
+	if (!ast_db_get(IRLP_DB_ROOT,"active",str,sizeof(str) - 1))
+	{
+		db_active = *str;
+		if (db_active == 'a') db_loading = 'b';
+	}
+	irlp_zapem(db_loading);
+	fp = fopen("/var/lib/asterisk/irlphosts","r");
+	if (fp)
+	{
+		while(fgets(str,sizeof(str) - 1,fp))
+		{
+			if (!str[0]) continue;
+			if (str[strlen(str) - 1] == '\n')
+				str[strlen(str) - 1] = 0;
+			if (!str[0]) continue;
+			if (str[0] < '0') continue;
+			if (str[0] > '9') continue;
+			if (sscanf(str,"%s %s",myip,mystn) != 2) continue;
+			sprintf(dbstr,"%c/ipaddr/%s",db_loading,myip);
+			usleep(2000); /* To get to dry land */
+			if (ast_db_put(IRLP_DB_ROOT,dbstr,mystn) != 0)
+			{
+				ast_log(LOG_ERROR,"Error in putting ipaddr record %s (nodenum %s)",myip,mystn);
+				fclose(fp);
+				return -1;
+			}
+			sprintf(dbstr,"%c/nodenum/%s",db_loading,mystn);
+			usleep(2000); /* To get to dry land */
+			if (ast_db_put(IRLP_DB_ROOT,dbstr,myip))
+			{
+	 			ast_log(LOG_ERROR,"Error in putting nodenum record %s (ipaddr %s)",mystn,myip);
+				fclose(fp);
+				return -1;
+			}
+			n++;
+		}
+		fclose(fp);
+	}
+	fp = fopen("/var/lib/asterisk/exp-x-reference","r");
+	if (fp)
+	{
+		while(fgets(str,sizeof(str) - 1,fp))
+		{
+			if (!str[0]) continue;
+			if (str[strlen(str) - 1] == '\n')
+				str[strlen(str) - 1] = 0;
+			if (!str[0]) continue;
+			if (strncasecmp(str,"exp",3)) continue;
+			if(finddelim(str,strs,100) != 5) continue;
+			hp = ast_gethostbyname(strs[1], &ahp);
+			if (!hp)
+			{
+				ast_log(LOG_WARNING, "Reported node %s cannot be found!!\n",strs[1]);
+				continue;
+			}
+			memcpy(&ia,hp->h_addr,sizeof(in_addr_t));
+#ifdef	OLD_ASTERISK
+			ast_inet_ntoa(myip,sizeof(myip) - 1,ia);
+#else
+			strncpy(myip,ast_inet_ntoa(ia),sizeof(myip) - 1);
+#endif
+			sprintf(dbstr,"%c/ipaddr/%s",db_loading,myip);
+			usleep(2000); /* To get to dry land */
+			if (ast_db_put(IRLP_DB_ROOT,dbstr,strs[0]) != 0)
+			{
+				ast_log(LOG_ERROR,"Error in putting ipaddr record %s (nodenum %s)",strs[1],strs[0]);
+				fclose(fp);
+				return -1;
+			}
+			sprintf(dbstr,"%c/nodenum/%s",db_loading,strs[0]);
+			usleep(2000); /* To get to dry land */
+			if (ast_db_put(IRLP_DB_ROOT,dbstr,myip))
+			{
+	 			ast_log(LOG_ERROR,"Error in putting nodenum record %s (ipaddr %s)",strs[0],strs[1]);
+				fclose(fp);
+				return -1;
+			}
+			snprintf(myip,sizeof(myip) - 1,"%s:%s:%s",strs[2],strs[3],strs[4]);
+			snprintf(dbstr,sizeof(dbstr) - 1,"%c/params/%s",db_loading,strs[0]);
+			usleep(2000); /* To get to dry land */
+			if (ast_db_put(IRLP_DB_ROOT,dbstr,myip) != 0)
+			{
+				ast_log(LOG_ERROR,"Error in putting params record %s (nodenum %s)",myip,strs[0]);
+				fclose(fp);
+				return -1;
+			}
+			n++;
+		}
+		fclose(fp);
+	}
+	db_active = db_loading;
+	db_loading = 0;
+	dbstr[0] = db_active;
+	dbstr[1] = 0;
+	if (ast_db_put(IRLP_DB_ROOT,"active",dbstr) != 0)
+	{
+		ast_log(LOG_ERROR,"Error in finalizing DB process\n");
+		return -1;
+	}
+	ast_log(LOG_NOTICE,"IRLP databasse load done %d records\n",n);
+	return(0);
+}
+
 
 static int is_rtcp_bye(unsigned char *p, int len)
 {
@@ -468,6 +699,8 @@ static int rtcp_make_bye(unsigned char *p, char *reason)
     unsigned char *ap, *zp;
     int l, hl, pl;
 
+    xmagic = htonl(0x0310F987);
+    
     zp = p;
     hl = 0;
 
@@ -475,13 +708,13 @@ static int rtcp_make_bye(unsigned char *p, char *reason)
     *p++ = 201;
     *p++ = 0;
     *p++ = 1;
-    *((long *) p) = htonl(0x0310f987);
+    *((long *) p) = xmagic; /* htonl(something); */
     p += 4;
     hl = 8;
 
     rp = (struct rtcp_t *)p;
     *((short *) p) = htons((2 << 14) | 203 | (1 << 8));
-    rp->r.bye.src[0] = htonl(0x0310f987);
+    rp->r.bye.src[0] = xmagic; /* (htonl(something)) */
     ap = (unsigned char *) rp->r.sdes.item;
     l = 0; 
     if (reason != NULL) {
@@ -510,25 +743,13 @@ static int rtcp_make_bye(unsigned char *p, char *reason)
     return l;
 }
 
-static void send_bye(char *reason)
+static void send_bye_ip(char *reason, char *ipbuf)
 {
-char	buf[200],*cp,ipbuf[100];
+char	buf[200];
 int	len,x;
 struct sockaddr_in sin;
 
-	if (!*remote_irlp_node_ip)
-	{
-		cp = irlp_read_file(IRLP_ROOT,"calledip");
-		if (!cp) return;
-		if (cp[strlen(cp) - 1] == '\n')
-			cp[strlen(cp) - 1] = 0;
-		strncpy(ipbuf,cp,sizeof(ipbuf) - 1);
-		ast_free(cp);
-	}
-	else
-	{
-		strncpy(ipbuf,remote_irlp_node_ip,sizeof(buf) - 1);
-	}
+	if ((!ipbuf) || (*ipbuf < '0') || (*ipbuf > '9')) return;
         sin.sin_family = AF_INET;
         sin.sin_addr.s_addr = inet_addr(ipbuf);
         sin.sin_port = htons(tx_audio_port + 1);
@@ -538,17 +759,53 @@ struct sockaddr_in sin;
 	        sendto((alt_ctrl_sock != -1) ? alt_ctrl_sock : ctrl_sock,buf,len,
         	        0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
 	}
+	if (expmode)
+	{
+		sprintf(buf,"nc %s 15425 < /dev/null > /dev/null &",ipbuf);
+		ast_safe_system(buf); 
+	}
 	return;
+}
+
+static void send_bye(char *reason)
+{
+char	ipbuf[100];
+
+	if (!expmode)
+	{	
+		if (!*remote_irlp_node_ip)
+		{
+			char *cp;
+
+			cp = irlp_read_file(IRLP_ROOT,"calledip");
+			if (!cp) return;
+			if (cp[strlen(cp) - 1] == '\n')
+				cp[strlen(cp) - 1] = 0;
+			strncpy(ipbuf,cp,sizeof(ipbuf) - 1);
+			ast_free(cp);
+		}
+		else
+		{
+			strncpy(ipbuf,remote_irlp_node_ip,sizeof(ipbuf) - 1);
+		}
+	}
+	else
+	{
+		strncpy(ipbuf,remote_irlp_node_ip,sizeof(ipbuf) - 1);
+	}
+	send_bye_ip(reason,ipbuf);
 }
 
 static void send_keepalive(void)
 {
-char	buf[200],*cp;
+char	buf[200];
 int	len;
 struct sockaddr_in sin;
 
-	if (!*remote_irlp_node_ip)
+	if ((!*remote_irlp_node_ip) && (!expmode))
 	{
+		char *cp;
+
 		cp = irlp_read_file(IRLP_ROOT,"calledip");
 		if (!cp) return;
 		if (cp[strlen(cp) - 1] == '\n')
@@ -592,7 +849,9 @@ static int do_new_call(void)
 static int irlp_call(struct ast_channel *ast, char *dest, int timeout)
 {
 	struct irlp_pvt *p;
-	char *cp,str[100];
+	char *cp,str[300];
+	int len;	
+	struct sockaddr_in sin;
 
 	p = ast->tech_pvt;
 
@@ -600,23 +859,51 @@ static int irlp_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_log(LOG_WARNING, "irlp_call called on %s, neither down nor reserved\n", ast->name);
 		return -1;
 	}
-	cp = irlp_read_file(IRLP_ROOT,"active");
-	if (cp && *cp) 
+	if (!expmode)
 	{
-		ast_safe_system(IRLP_END);
-		usleep(10000);
+		cp = irlp_read_file(IRLP_ROOT,"active");
+		if (cp && *cp) 
+		{
+			ast_safe_system(IRLP_END);
+			usleep(10000);
+		}
+		if (cp) ast_free(cp);
+		if ((!radmode) && nodenum)
+		{
+			if (nodenum >= 9000)
+				snprintf(str,sizeof(str) - 1,IRLP_CALL_REFL,nodenum);
+			else
+			{
+				if (nodenum < 1000)
+					snprintf(str,sizeof(str) - 1,IRLP_CALL_EXP,nodenum);
+				else
+					snprintf(str,sizeof(str) - 1,IRLP_CALL,nodenum);
+			}
+			ast_safe_system(str);
+			usleep(10000);
+		}		
 	}
-	if (cp) ast_free(cp);
-	if ((!radmode) && nodenum)
+	else
 	{
-		if (nodenum >= 9000)
-			snprintf(str,sizeof(str) - 1,IRLP_CALL_REFL,nodenum);
-		else
-			snprintf(str,sizeof(str) - 1,IRLP_CALL,nodenum);
-		ast_safe_system(str);
-		usleep(10000);
-	}		
-
+		if (nodenum > 999)
+		{
+			ast_log(LOG_WARNING, "irlp_call called invalid node %04d on %s\n", nodenum,ast->name);
+			return -1;
+		}
+		sprintf(str,"exp%04d",nodenum);
+		cp = irlp_get_ip(str);
+		if (!cp)
+		{
+			ast_log(LOG_WARNING, "irlp_call called unknown node %04d on %s\n", nodenum,ast->name);
+			return -1;
+		}
+	        sin.sin_family = AF_INET;
+	        sin.sin_addr.s_addr = inet_addr(cp);
+	        sin.sin_port = htons(tx_audio_port + 1);
+		len = rtcp_make_sdes((unsigned char *)str,sizeof(str) - 1);
+	        sendto((alt_ctrl_sock != -1) ? alt_ctrl_sock : ctrl_sock,str,len,
+	                0,(struct sockaddr *)&sin,sizeof(struct sockaddr));
+	}
 	ast_setstate(ast,(radmode) ? AST_STATE_UP : AST_STATE_RINGING);
 	return 0;
 }
@@ -624,6 +911,8 @@ static int irlp_call(struct ast_channel *ast, char *dest, int timeout)
 static void irlp_destroy(struct irlp_pvt *p)
 {
 	reset_stuff();
+	if (p->dsp) ast_dsp_reset(p->dsp);
+	if (p->xpath) ast_translator_free_path(p->xpath);
 	curcall = NULL;
 	ast_module_user_remove(p->u);
 	ast_free(p);
@@ -631,10 +920,14 @@ static void irlp_destroy(struct irlp_pvt *p)
 
 static void process_codec_file(struct ast_channel *ast)
 {
-	char *cp;
 
-	  if (!ready) return;
-	  cp = irlp_read_file(IRLP_ROOT,"codec");
+	  char *cp;
+
+	  if ((!ready) && (!expmode)) return;
+	  if (expmode)
+		cp = strdup(myformatstrs[default_proto]);
+	  else
+		cp = irlp_read_file(IRLP_ROOT,"codec");
 	  if (cp) 
 	  {
 		  if (cp[strlen(cp) - 1] == '\n') cp[strlen(cp) - 1] = 0;
@@ -678,7 +971,7 @@ static void *irlp_reader(void *nothing)
 
 	fd_set fds[3];
 	struct timeval tmout;
-	int i,myaud,myctl,x,was_outbound,seen_curcall;
+	int i,myaud,myctl,x,seen_curcall;
 
 	char buf[LARGEST_PACKET_SIZE + 1];
 	struct sockaddr_in sin;
@@ -687,34 +980,39 @@ static void *irlp_reader(void *nothing)
         socklen_t fromlen;
 	ssize_t recvlen;
         size_t len;
-	struct stat statbuf;
-	static int play_outbound = 0;
 	time_t now;
 
 	ast_log(LOG_NOTICE, "IRLP reader thread started.\n");
 	seen_curcall = 0;
 	while(run_forever)
 	{
-		if ((proto == IRLP_NOPROTO) && curcall) process_codec_file(curcall);
-		i = ((stat(IRLP_PLAY_FILE,&statbuf) != -1));
-		if (i != playing)
+		if (!expmode)
 		{
-			char mystr[60];
+			int was_outbound;
+			struct stat statbuf;
+			static int play_outbound = 0;
 
-			if (!playing)
+			if ((proto == IRLP_NOPROTO) && curcall) process_codec_file(curcall);
+			i = ((stat(IRLP_PLAY_FILE,&statbuf) != -1));
+			if (i != playing)
 			{
-				was_outbound = 0;
-				if (((curcall != NULL)) != play_outbound)
+				char mystr[60];
+	
+				if (!playing)
 				{
-					was_outbound = play_outbound;
-					play_outbound = ((curcall != NULL));
+					was_outbound = 0;
+					if (((curcall != NULL)) != play_outbound)
+					{
+						was_outbound = play_outbound;
+						play_outbound = ((curcall != NULL));
+					}
+					snprintf(mystr,sizeof(mystr) - 1,
+					    IRLP_AST_PLAYFILE,(play_outbound || 
+						was_outbound) ? astnode1 : astnode);
+					ast_cli_command(nullfd,mystr);
 				}
-				snprintf(mystr,sizeof(mystr) - 1,
-				    IRLP_AST_PLAYFILE,(play_outbound || 
-					was_outbound) ? astnode1 : astnode);
-				ast_cli_command(nullfd,mystr);
+				playing = i;
 			}
-			playing = i;
 		}
 		myaud = (alt_audio_sock != -1) ? alt_audio_sock : audio_sock;
 		myctl = (alt_ctrl_sock != -1) ? alt_ctrl_sock : ctrl_sock;
@@ -722,9 +1020,13 @@ static void *irlp_reader(void *nothing)
 		time(&now);
 		if (keepalive && ((keepalive + KEEPALIVE_TIME) < now))
 		{
-			cp = irlp_read_file(IRLP_ROOT,"codec");
-			i = ((cp && *cp));
-			if (cp) ast_free(cp);
+			if (!expmode)
+			{
+				cp = irlp_read_file(IRLP_ROOT,"codec");
+				i = ((cp && *cp));
+				if (cp) ast_free(cp);
+			}
+			else i = 1;
 			if (i) send_keepalive();
 			keepalive = now;
 		}
@@ -766,12 +1068,25 @@ static void *irlp_reader(void *nothing)
 		      {
 	                 if (!is_rtcp_bye((unsigned char *)buf,recvlen))
 			 {
+			    if (!xmagic) memcpy(&xmagic,buf + 4,sizeof(xmagic));
 	                    if (strncmp(ip, "127.0.0.1",IRLP_IP_SIZE) != 0)
 			    {
+				if (remote_irlp_node_ip[0] && strcasecmp(remote_irlp_node_ip,ip)) 
+				{
+					ast_log(LOG_NOTICE,"irlp node attempted connect from %s while busy\n", ip);
+					send_bye_ip("Exiting Speak Freely",ip);
+				} else
 	                       if (strncmp(remote_irlp_node_ip, ip, IRLP_IP_SIZE) != 0) 
 			       {
-	                          strncpy(remote_irlp_node_ip, ip, IRLP_IP_SIZE);
-				  cp = irlp_read_file(IRLP_ROOT,"active");
+				  if (!expmode)
+				  {
+				    cp = irlp_read_file(IRLP_ROOT,"active");
+				  }
+				  else
+				  {
+	  		  	    cp = irlp_get_node(ip);
+	                            strncpy(remote_irlp_node_ip, ip, IRLP_IP_SIZE);
+				  }
 				  if ((cp && (strlen(cp) > 3)) && 
 				    (time(NULL) >= (lingertime + DISC_LINGER_TIME)))
 				  {
@@ -779,6 +1094,8 @@ static void *irlp_reader(void *nothing)
 						cp[strlen(cp) - 1] = 0;
 					in_node = atoi(cp + 3);
 				  	ast_log(LOG_NOTICE,"irlp node connected from %s node %s\n",ip,cp + 3);
+	                       		if (!expmode)
+						strncpy(remote_irlp_node_ip, ip, IRLP_IP_SIZE);
 					if (in_node >= 9990) keepalive = 0;
 				  	if (!curcall) do_new_call();
 					if ((!ready) && curcall)
@@ -796,11 +1113,17 @@ static void *irlp_reader(void *nothing)
 						fr.delivery.tv_sec = 0;
 						fr.delivery.tv_usec = 0;
 						ast_queue_frame(curcall,&fr);
-		
+
+						process_codec_file(curcall);
 					}
 					ready = 1;
-					if (curcall && (proto == IRLP_NOPROTO)) process_codec_file(curcall);
-				  } else ast_log(LOG_NOTICE,"irlp node attempted connect from %s with no node info\n", ip);
+					if ((curcall) && (proto == IRLP_NOPROTO)) process_codec_file(curcall);
+				  }
+				   else 
+				  {
+					ast_log(LOG_NOTICE,"irlp node attempted connect from %s with no node info\n", ip);
+					/* We used to call send_bye_ip here, but that causes a loop when disconnectiong from reflectors */
+				  }
 				  if (cp) ast_free(cp);
 	                       }
 	                    }
@@ -964,7 +1287,7 @@ static struct irlp_pvt *irlp_alloc(void *data)
 		if ((!radmode) && args.nodenum && *args.nodenum)
 		{
 			nodenum = atoi(args.nodenum);
-			if ((nodenum < 1000) || (nodenum > 9999))
+			if ((nodenum < 10) || (nodenum > 9999))
 			{
 				ast_log(LOG_ERROR,"Requested node number %s invalid\n",args.nodenum);
 				ast_free(p);
@@ -1014,6 +1337,17 @@ static struct irlp_pvt *irlp_alloc(void *data)
 	                fcntl(alt_ctrl_sock,F_SETFL,O_NONBLOCK);
 		}
 	}
+	p->dsp = ast_dsp_new();
+	if (p->dsp)
+	{
+#ifdef  NEW_ASTERISK
+          ast_dsp_set_features(p->dsp,DSP_FEATURE_DIGIT_DETECT);
+          ast_dsp_set_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#else
+          ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
+          ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#endif
+	}
 	time(&keepalive);
 	return p;
 }
@@ -1029,6 +1363,7 @@ static int irlp_hangup(struct ast_channel *ast)
 		ast_log(LOG_WARNING, "Asked to hangup channel not connected\n");
 		return 0;
 	}
+	send_bye("disconnected");
 	reset_stuff();
 	irlp_destroy(p);
 	curcall = 0;
@@ -1037,8 +1372,8 @@ static int irlp_hangup(struct ast_channel *ast)
 		ast->tech_pvt = NULL;
 		ast_setstate(ast, AST_STATE_DOWN);
 	}
-	ast_safe_system(IRLP_END);
-	send_bye("disconnected");
+	if (!expmode) 
+		ast_safe_system(IRLP_END);
 	return 0;
 }
 
@@ -1067,35 +1402,64 @@ static int irlp_text(struct ast_channel *ast, const char *text)
 int	destnode,hisnode,seqno,i,j;
 char	c;
 
+	struct ast_frame fr;	
+
+	fr.datalen = 0;
+	fr.samples = 0;
+	fr.frametype = AST_FRAME_DTMF;
+	fr.subclass = c;
+	fr.data =  0;
+	fr.src = type;
+	fr.offset = 0;
+	fr.mallocd=0;
+	fr.delivery.tv_sec = 0;
+	fr.delivery.tv_usec = 0;
+
 /*	struct irlp_pvt *p = ast->tech_pvt; */
 
 /*	if (!p->txkey) return(0); */
 	if (text[0] != 'D') return 0;
 	if (sscanf(text + 2,"%d %d %d %c",&destnode,&hisnode,&seqno,&c) != 4) return(0);
 	if (destnode != (in_node + 40000)) return(0);
-	if (c == '*') c = 'S';
-	if (c == '#') c = 'P';
+	if (!expmode)
+	{
+		if (c == '*') c = 'S';
+		if (c == '#') c = 'P';
+	}
 	if ((c == 'D') && (!irlp_dtmf_special))
 	{
 		irlp_dtmf_special = 1;
 		return 0;
 	}
-	i = strlen(irlp_dtmf_string);
-	j = 1;
-	if (irlp_dtmf_special && (c != 'D')) j = 2;
-	if (i < (sizeof(irlp_dtmf_string) - j))
+	if (!expmode)
 	{
-		irlp_dtmf_string[i + 1] = 0;
-		if ((irlp_dtmf_special) && (c != 'D'))
+		i = strlen(irlp_dtmf_string);
+		j = 1;
+		if (irlp_dtmf_special && (c != 'D')) j = 2;
+		if (i < (sizeof(irlp_dtmf_string) - j))
 		{
-			irlp_dtmf_string[i + 2] = 0;
-			irlp_dtmf_string[i] = 'P';
-			irlp_dtmf_string[i + 1] = c;
+			irlp_dtmf_string[i + 1] = 0;
+			if ((irlp_dtmf_special) && (c != 'D'))
+			{
+				irlp_dtmf_string[i + 2] = 0;
+				irlp_dtmf_string[i] = 'P';
+				irlp_dtmf_string[i + 1] = c;
+			}
+			else 
+			{
+				irlp_dtmf_string[i] = c;
+			}
 		}
-		else 
+	}
+	else
+	{
+		if (irlp_dtmf_special)
 		{
-			irlp_dtmf_string[i] = c;
+			fr.subclass = '#';
+			ast_queue_frame(ast,&fr);
 		}
+		fr.subclass = c;
+		ast_queue_frame(ast,&fr);
 	}
 	irlp_dtmf_special = 0;
 	return 0;
@@ -1134,13 +1498,14 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	struct irlp_pvt *p = ast->tech_pvt;
 	struct ast_frame fr;
 	struct irlp_rxqast *qpast;
-	int n,i,len,gotone,dosync,blocking_factor,frame_size,frame_samples,recvlen,flen;
+	int n,i,len,gotone,dosync,blocking_factor,frame_size,frame_samples,flen;
         char outbuf[ULAW_FRAME_SIZE + AST_FRIENDLY_OFFSET + 3]; /* turns out that ADPCM is larger */
         struct irlp_audio irlp_audio_packet;
         static char tx_buf[(ADPCM_BLOCKING_FACTOR * ADPCM_FRAME_SIZE) + 3]; /* turns out the ADPCM is larger */
-	char *outbuf_new,*cp,c,str[200];
+	char *outbuf_new,*cp;
         unsigned char *dp;
 	static int lasttx = 0;
+	char str[200];
 
 	if (ast->_state != AST_STATE_UP) 
            return 0;
@@ -1150,44 +1515,6 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 
 	if (proto == IRLP_NOPROTO) return 0;
 
-	if ((xcount++ & 3) == 0)  /* every 80 ms */
-	{
-		struct ast_frame fr;
-
-		fr.datalen = 0;
-		fr.samples = 0;
-		fr.frametype = AST_FRAME_DTMF_END;
-		fr.subclass = havedtmf;
-		fr.len = 80;
-		fr.data =  0;
-		fr.src = type;
-		fr.offset = 0;
-		fr.mallocd=0;
-		fr.delivery.tv_sec = 0;
-		fr.delivery.tv_usec = 0;
-		if (havedtmf)
-		{
-			if (curcall) ast_queue_frame(curcall,&fr);
-			ast_log(LOG_NOTICE,"Got DTMF %c on IRLP\n",havedtmf);
-			havedtmf = 0;
-		}
-		else
-		{
-			recvlen = read(dfd,&c,1);
-			if ((recvlen > 0) && strchr("0123456789SPABCD",c))
-			{
-
-				if (c == 'S') c = '*';
-				if (c == 'P') c = '#';
-
-				fr.len = 0;
-				fr.subclass = c;
-				fr.frametype = AST_FRAME_DTMF_BEGIN;
-				if (curcall) ast_queue_frame(curcall,&fr);
-				havedtmf = c;
-			}
-		}
-	}
         /* IRLP to Asterisk */
 	frame_samples = 160;
 	if (proto == IRLP_ISGSM)
@@ -1297,6 +1624,8 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	}
 	if (gotone)
 	{
+		int x;
+
  		p->rxkey = MAX_RXKEY_TIME;
 		fr.datalen = frame_size;
 		fr.samples = frame_samples;
@@ -1325,8 +1654,53 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		fr.mallocd=0;
 		fr.delivery.tv_sec = 0;
 		fr.delivery.tv_usec = 0;
-		ast_queue_frame(ast,&fr);
-	}
+		if (proto != lastproto)
+		{
+		    int ipath = AST_FORMAT_ULAW;
+		    switch(proto)
+		    {
+			case IRLP_ISADPCM:
+				ipath = AST_FORMAT_ADPCM;
+				break;
+			case IRLP_ISGSM:
+				ipath = AST_FORMAT_GSM;
+				break;
+		    }
+		    if (p->xpath) ast_translator_free_path(p->xpath);
+		    p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,ipath);
+		    lastproto = proto;
+		}
+	
+                x = 0;
+                if (p->dsp && (!radmode))
+                {
+
+			struct ast_frame *f1,*f2;
+
+                        f2 = ast_translate(p->xpath,&fr,0);
+                        f1 = ast_dsp_process(NULL,p->dsp,f2);
+                        ast_frfree(f2);
+#ifdef  OLD_ASTERISK
+                        if (f1->frametype == AST_FRAME_DTMF)
+#else
+                        if ((f1->frametype == AST_FRAME_DTMF_END) ||
+                                (f1->frametype == AST_FRAME_DTMF_BEGIN))
+#endif
+                        {
+                                if ((f1->subclass != 'm') && (f1->subclass != 'u'))
+                                {
+#ifndef OLD_ASTERISK
+                                        if (f1->frametype == AST_FRAME_DTMF_END)
+#endif
+	                                        ast_log(LOG_NOTICE,"IRLP got DTMF char %c\n",f1->subclass);
+                                        ast_queue_frame(ast,f1);
+                                        x = 1;
+                                }
+                        }
+                        ast_frfree(f1);
+                }
+                if (!x) ast_queue_frame(ast,&fr);
+        }
 	if (p->rxkey == 1) {
 		fr.datalen = 0;
 		fr.samples = 0;
@@ -1360,8 +1734,11 @@ static int irlp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 					irlp_dtmf_string[i] = 'P';
 				}
 			}
-			sprintf(str,IRLP_SEND_DTMF,in_node,irlp_dtmf_string);
-			ast_safe_system(str);
+			if (!expmode)
+			{
+				sprintf(str,IRLP_SEND_DTMF,in_node,irlp_dtmf_string);
+				ast_safe_system(str);
+			}
 			ast_log(LOG_NOTICE,"Sent DTMF %s to IRLP\n",irlp_dtmf_string);
 		}
 		irlp_dtmf_string[0] = 0;
@@ -1543,14 +1920,17 @@ static struct ast_channel *irlp_request(const char *type, int format, void *data
 		return NULL;
 	}
 	oldformat = format;
-	format &= (AST_FORMAT_ADPCM | AST_FORMAT_GSM);
+	format &= (AST_FORMAT_ADPCM | AST_FORMAT_GSM | AST_FORMAT_ULAW);
 	if (!format) {
 		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
 	}
-	unlink(IRLP_PLAY_FILE);
-	ast_safe_system(IRLP_RESET);
-	usleep(10000);
+	if (!expmode)
+	{
+		unlink(IRLP_PLAY_FILE);
+		ast_safe_system(IRLP_RESET);
+		usleep(10000);
+	}
 	reset_stuff();
 	p = irlp_alloc(data);
 	if (p) {
@@ -1561,6 +1941,21 @@ static struct ast_channel *irlp_request(const char *type, int format, void *data
 	curcall = tmp;
 	return tmp;
 }
+
+static int irlp_cli_do_dbload(int fd, int argc, char *argv[])
+{
+	if (argc != 2) return RESULT_SHOWUSAGE;
+	do_irlp_dbload();
+	return RESULT_SUCCESS;
+}
+
+static char dbload_usage[] =
+"Usage: irlp dbload.\n"
+"       load irlp db.\n";
+
+static struct ast_cli_entry  cli_dbload =
+        { { "irlp", "dbload" }, irlp_cli_do_dbload,
+		"Load IRLP DB", dbload_usage };
 
 static int unload_module(void)
 {
@@ -1576,6 +1971,7 @@ static int unload_module(void)
 	alt_ctrl_sock = -1;
 	if (nullfd != -1) close(nullfd);
 	if (dfd != -1) close(dfd);
+	ast_cli_unregister(&cli_dbload);
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&irlp_tech);
 	return 0;
@@ -1602,7 +1998,8 @@ static int load_module(void)
                 return AST_MODULE_LOAD_DECLINE;
         }
 
-	ast_safe_system(IRLP_WRAPPER);
+	if (!expmode)
+		ast_safe_system(IRLP_WRAPPER);
 
         /* some of these values can be copied from /home/irlp/custom/environment */
         val = (char *)ast_variable_retrieve(cfg,"general","rtcptimeout");
@@ -1632,6 +2029,9 @@ static int load_module(void)
         val = (char *)ast_variable_retrieve(cfg,"general","radmode");
         if (val) radmode = ast_true(val);
 
+        val = (char *)ast_variable_retrieve(cfg,"general","expmode");
+        if (val) expmode = ast_true(val);
+
         val = (char *)ast_variable_retrieve(cfg,"general","audioport");
         if (!val)
 	    audio_port_cfg = 2074;
@@ -1650,14 +2050,25 @@ static int load_module(void)
         else
            strncpy(context,val,sizeof(context) - 1);
 
+        val = (char *)ast_variable_retrieve(cfg,"general","codec");
+	if (val)
+	{
+		if (!strcasecmp(val,"GSM")) default_proto = IRLP_ISGSM;
+		else if (!strcasecmp(val,"ADPCM")) default_proto = IRLP_ISADPCM;
+		else if (!strcasecmp(val,"UNCOMP")) default_proto = IRLP_ISULAW;
+	}
+
         /* initialize local and remote IRLP node */
 	reset_stuff();
 	curcall = 0;
 
         ast_config_destroy(cfg);
 
-	ast_safe_system(IRLP_RESET);
-	usleep(10000);
+	if (!expmode)
+	{
+		ast_safe_system(IRLP_RESET);
+		usleep(10000);
+	}
 
 	audio_port = audio_port_cfg;
 	if ((audio_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1) 
@@ -1697,19 +2108,22 @@ static int load_module(void)
         fcntl(ctrl_sock,F_SETFL,O_NONBLOCK);
 	nullfd = open("/dev/null",O_RDWR);
 
-	ast_safe_system(IRLP_MAKE_FIFO);
-	dfd = open(IRLP_DTMF_FIFO,O_RDONLY | O_NONBLOCK);
-	if (dfd == -1)
+	if (!expmode)
 	{
-		ast_log(LOG_ERROR,"Cannot open FIFO for DTMF!!\n");
-		return AST_MODULE_LOAD_DECLINE;
+		ast_safe_system(IRLP_MAKE_FIFO);
+		dfd = open(IRLP_DTMF_FIFO,O_RDONLY | O_NONBLOCK);
+		if (dfd == -1)
+		{
+			ast_log(LOG_ERROR,"Cannot open FIFO for DTMF!!\n");
+			return AST_MODULE_LOAD_DECLINE;
+		}
+		ast_safe_system(IRLP_RESET);
+		unlink(IRLP_PLAY_FILE);
+		usleep(100000);
 	}
-	ast_safe_system(IRLP_RESET);
-	unlink(IRLP_PLAY_FILE);
-
-	usleep(100000);
         cfg = NULL; 
 
+	ast_cli_register(&cli_dbload);
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         ast_pthread_create(&irlp_reader_thread,&attr,irlp_reader,NULL);
