@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.178 exp 5/10/2009 
+ *  version 0.179 exp 5/10/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -242,6 +242,11 @@
 #define	DEFAULT_REMOTE_TIMEOUT_WARNING (3 * 60)
 #define	DEFAULT_REMOTE_TIMEOUT_WARNING_FREQ 30
 
+#define	DEFAULT_ERXGAIN "-3.0"
+#define	DEFAULT_ETXGAIN "3.0"
+#define	DEFAULT_IRXGAIN "-10.0"
+#define	DEFAULT_ITXGAIN "10.0"
+
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
 #define MEMORY "memory"
@@ -437,7 +442,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.999  2/05/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.179  4/10/2009";
 
 static char *app = "Rpt";
 
@@ -868,6 +873,10 @@ static struct rpt
 		char *locallist[16];
 		int nlocallist;
 		char ctgroup[16];
+		float erxgain;
+		float etxgain;
+		float irxgain;
+		float itxgain;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -4499,6 +4508,18 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"remote_timeout_warning_freq");
 	if (val) rpt_vars[n].p.remotetimeoutwarningfreq = atoi(val); 
 	else rpt_vars[n].p.remotetimeoutwarningfreq = DEFAULT_REMOTE_TIMEOUT_WARNING_FREQ;
+	val = (char *) ast_variable_retrieve(cfg,this,"erxgain");
+	if (!val) val = DEFAULT_ERXGAIN;
+	rpt_vars[n].p.erxgain = pow(10.0,atof(val) / 20.0); 
+	val = (char *) ast_variable_retrieve(cfg,this,"etxgain");
+	if (!val) val = DEFAULT_ETXGAIN;
+	rpt_vars[n].p.etxgain = pow(10.0,atof(val) / 20.0);
+	val = (char *) ast_variable_retrieve(cfg,this,"irxgain");
+	if (!val) val = DEFAULT_IRXGAIN;	
+	rpt_vars[n].p.irxgain = pow(10.0,atof(val) / 20.0);
+	val = (char *) ast_variable_retrieve(cfg,this,"itxgain");
+	if (!val) val = DEFAULT_ITXGAIN;
+	rpt_vars[n].p.itxgain = pow(10.0,atof(val) / 20.0);
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
 	if (val) {
@@ -8364,7 +8385,7 @@ struct	rpt_link *l;
 	while(l != &myrpt->links)
 	{
 		wf.data = str;
-		if (l->chan) rpt_qwrite(l,&wf);
+		if (l->chan && l->mode) rpt_qwrite(l,&wf);
 		l = l->next;
 	}
 	rpt_telemetry(myrpt,VARCMD,cmd);
@@ -9474,6 +9495,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				if(debug > 3)
 				ast_log(LOG_NOTICE,"Padtest entered");
 				myrpt->inpadtest = 1;
+				break;
 			}
 			else{
 				if(debug > 3)
@@ -16280,10 +16302,14 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				if (f->frametype == AST_FRAME_VOICE)
 				{
 					int ismuted,n1;
+					float fac,fsamp;
 
-					if (l->chan && 
-					    ((!strncasecmp(l->chan->name,"irlp",4)) ||
-						(!strncasecmp(l->chan->name,"echolink",8))))
+					fac = 1.0;
+					if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
+						fac = myrpt->p.irxgain;
+					else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+						fac = myrpt->p.erxgain;
+					if (fac != 1.0)
 					{
 						int x1;
 						short *sp;
@@ -16291,7 +16317,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 						sp = (short *)f->data;
 						for(x1 = 0; x1 < f->datalen / 2; x1++)
 						{
-							sp[x1] /= 3;
+							fsamp = (float) sp[x1] * fac;
+							sp[x1] = (int) fsamp;
 						}
 					}
 
@@ -16588,18 +16615,24 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				}
 				if (f->frametype == AST_FRAME_VOICE)
 				{
-					if (l->chan && 
-					    ((!strncasecmp(l->chan->name,"irlp",4)) ||
-						(!strncasecmp(l->chan->name,"echolink",8))))
+					float fac,fsamp;
 
+					fac = 1.0;
+					if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
+						fac = myrpt->p.itxgain;
+					else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+						fac = myrpt->p.etxgain;
+
+					if (fac != 1.0)
 					{
 						int x1;
 						short *sp;
-
+						
 						sp = (short *) f->data;
 						for(x1 = 0; x1 < f->datalen / 2; x1++)
 						{
-							sp[x1] += (sp[x1] << 1);
+							fsamp = (float) sp[x1] * fac;
+							sp[x1] = (int) fsamp;
 						}
 					}
 					/* foop */
@@ -16640,15 +16673,25 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				struct ast_frame *fs;
 				short *sp;
 				int x1;
+				float fac,fsamp;
 
 				if (myrpt->monstream) 
 					ast_writestream(myrpt->monstream,f);
 
 				fs = ast_frdup(f);
-				sp = (short *)fs->data;
-				for(x1 = 0; x1 < fs->datalen / 2; x1++)
+				fac = 1.0;
+				if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
+					fac = myrpt->p.itxgain;
+				else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+					fac = myrpt->p.etxgain;
+				if (fac != 1.0)
 				{
-					sp[x1] += (sp[x1] << 1);
+					sp = (short *)fs->data;
+					for(x1 = 0; x1 < fs->datalen / 2; x1++)
+					{
+						fsamp = (float) sp[x1] * fac;
+						sp[x1] = (int) fsamp;
+					}
 				}
 				l = myrpt->links.next;
 				/* go thru all the links */
