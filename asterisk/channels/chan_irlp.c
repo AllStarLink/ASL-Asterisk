@@ -31,7 +31,7 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.24, 5/09/2009
+/* Version 0.25, 5/14/2009
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -1337,7 +1337,7 @@ static struct irlp_pvt *irlp_alloc(void *data)
 	                fcntl(alt_ctrl_sock,F_SETFL,O_NONBLOCK);
 		}
 	}
-	p->dsp = ast_dsp_new();
+	/* p->dsp = ast_dsp_new(); */ /* Commented out, we have an issue with in-band DTMF falsing, so disable DTMF decoding for now... */
 	if (p->dsp)
 	{
 #ifdef  NEW_ASTERISK
