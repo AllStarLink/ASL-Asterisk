@@ -31,7 +31,7 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.25, 5/14/2009
+/* Version 0.26, 5/16/2009
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -477,6 +477,7 @@ struct ast_hostent ahp;
 struct hostent *hp;
 struct in_addr ia;
 
+	if (!expmode) return -1;
 	db_active = 'a';
 	db_loading = 'a';
 	if (!ast_db_get(IRLP_DB_ROOT,"active",str,sizeof(str) - 1))
