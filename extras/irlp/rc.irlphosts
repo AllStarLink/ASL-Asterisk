@@ -1,0 +1,138 @@
+#!/bin/bash
+
+mkdir -p /var/lib/asterisk
+
+export RUN=/tmp
+export LOCAL=/var/lib/asterisk
+export TRUE=1
+
+while [ TRUE ]
+do
+   while [ TRUE ]
+   do
+
+echo -n "Obtaining best server IP ... "
+
+#!/bin/bash
+
+# Since Fedora was started, netcat the simple TCP listener/sender
+# requires that the "nc" used is the one from the distro. We have to
+# export the proper netcat to use. We check if it is in the /usr/bin
+# and then set the environment.
+
+if [ -f /usr/bin/nc ] ; then
+  NETCAT=/usr/bin/nc
+elif [ -f /bin/nc ] ; then
+  NETCAT=/bin/nc
+else
+  NETCAT=$BIN/nc
+fi
+
+DEFAULTSERVER="server3"
+
+SERVERS=\
+209.160.72.104-\
+208.67.255.163-\
+206.246.140.250-\
+203.194.18.195-\
+64.72.133.146
+
+NUM_SERVERS=5
+
+LOOPCOUNT=0
+STARTCOUNT=${DEFAULTSERVER#server}
+
+# Added this line in case people have set their default server to 6
+# or 7 before they were both removed.
+if [ $STARTCOUNT -gt $NUM_SERVERS ] ; then STARTCOUNT=1 ; fi
+
+# Even though this would loop forever, all cases have a "break" command.
+while [ TRUE ] ; do
+
+  #This is a roundabout way to find the IP we want to test when playing with
+  #stacked variables. If someone else finds a better way, please let me know
+
+  TEST_IP=`echo $SERVERS | cut -d"-" -f"$STARTCOUNT"`
+
+  if [ "$1" = "debug" ] ; then echo -n "Trying Server No. $STARTCOUNT..." ; fi
+
+  TEST_STRING=`echo stn9999 | $NETCAT -w2 "$TEST_IP" 15428`
+
+  if [ -z $TEST_STRING ] ; then
+    let STARTCOUNT+=1
+    let LOOPCOUNT+=1
+    if [ $LOOPCOUNT -eq 4 ] ; then
+      if [ "$1" = "debug" ] ; then echo -e "failed.\nDefaulting to Server No. 1." ; fi
+      SERVERIP=209.160.72.104
+      break
+    fi
+    if [ $STARTCOUNT -gt $NUM_SERVERS ] ; then STARTCOUNT=1 ; fi
+    if [ "$1" = "debug" ] ; then echo "failed." ; fi
+  else
+    if [ "$1" = "debug" ] ; then echo "responded." ; fi
+    SERVERIP=$TEST_IP
+    break
+  fi
+
+done
+
+echo "found IP = $SERVERIP"
+
+echo "Performing hosts update"
+
+#Prevents multiple instances of this from running
+  if [ -f $RUN/hostupdatelock ] ; then
+    echo Update already pending
+    break
+  else
+    touch $RUN/hostupdatelock
+  fi
+  trap "rm -f $RUN/hostupdatelock" EXIT
+
+  if [ "$TERM" = "" -o "$TERM" = "unknown" -o "$TERM" = "dumb" ] ; then
+    export TERM=vt100
+  fi
+
+  wget -q -t1 -O $RUN/hosts.gz http://${SERVERIP}:15427/hosts/hosts.gz >/dev/null 2>&1
+
+  gunzip $RUN/hosts.gz >/dev/null 2>&1
+
+  if ! [ -f "$RUN"/hosts ] ; then
+    echo "Gzipped file was unavailable, downloading hosts.update direct"
+    $BIN/wget -q -t1 -O $RUN/hosts http://${SERVERIP}:15427/hosts/hosts.update >/dev/null 2>&1
+  fi
+
+  if (grep ENDfile $RUN/hosts >/dev/null 2>&1) ; then
+    cp -f $RUN/hosts $LOCAL/irlphosts
+  else
+    echo "ERROR: Hosts file seems invalid"
+    cp -f $LOCAL/irlphosts
+  fi
+  rm -f $RUN/hosts
+  rm -f $RUN/hosts.gz
+  rm -f $RUN/hostupdatelock
+
+echo "Performing exp hosts update"
+
+  if [ "$OPTION10" = "YES" ] || [ "$RSYNC8873" = "YES" ] ; then  
+    rsync --timeout=120 --port=8873 -Wazv $SERVERIP::irlp/scripts/exp-x-reference $LOCAL
+  else
+    rsync --timeout=120 -Wazv $SERVERIP::irlp/scripts/exp-x-reference $LOCAL
+  fi
+
+echo "Loading all DB entries into Asterisk (takes a while)"
+
+  asterisk -r -x 'irlp dbload'
+
+echo "Done, looping until next time."
+
+  if [ TRUE ]
+  then
+	break
+  fi
+done
+  sleep 600
+done
+exit
+
+
