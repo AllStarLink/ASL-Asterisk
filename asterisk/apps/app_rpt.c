@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.179 exp 5/10/2009 
+ *  version 0.181 exp 5/16/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -99,6 +99,11 @@
  *  37 - Foreign Link Local Output Path Disable
  *  38 - Foreign Link Local Output Path Follows Local Telemetry
  *  39 - Foreign Link Local Output Path on Demand
+ *  40 - IRLP announce Enable
+ *  41 - IRLP announce Disable
+ *  42 - Echolink announce node # only
+ *  43 - Echolink announce node Callsign only
+ *  44 - Echolink announce node # & Callsign
  *
  * ilink cmds:
  *
@@ -246,6 +251,9 @@
 #define	DEFAULT_ETXGAIN "3.0"
 #define	DEFAULT_IRXGAIN "-10.0"
 #define	DEFAULT_ITXGAIN "10.0"
+
+#define	DEFAULT_IRLPANN 1
+#define	DEFAULT_EANNMODE 1
 
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
@@ -442,7 +450,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.179  4/10/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.181  5/16/2009";
 
 static char *app = "Rpt";
 
@@ -877,6 +885,10 @@ static struct rpt
 		float etxgain;
 		float irxgain;
 		float itxgain;
+		char irlpann;
+		char eannmode; /* {NONE,NODE,CALL,BOTH} */
+		char *discpgm;
+		char *connpgm;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1337,6 +1349,7 @@ static int rpt_do_reload(int fd, int argc, char *argv[]);
 static int rpt_do_restart(int fd, int argc, char *argv[]);
 static int rpt_do_playback(int fd, int argc, char *argv[]);
 static int rpt_do_localplay(int fd, int argc, char *argv[]);
+static int rpt_do_irlpplay(int fd, int argc, char *argv[]);
 static int rpt_do_fun(int fd, int argc, char *argv[]);
 static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
@@ -1379,6 +1392,11 @@ static char playback_usage[] =
 
 static char localplay_usage[] =
 "Usage: rpt localplay <nodename> <sound_file_base_name>\n"
+"       Send an Audio File to a node, do not send to other connected nodes (local)\n";
+
+
+static char irlpplay_usage[] =
+"Usage: rpt irlpplay <nodename> <sound_file_base_name>\n"
 "       Send an Audio File to a node, do not send to other connected nodes (local)\n";
 
 
@@ -1431,6 +1449,11 @@ static struct ast_cli_entry  cli_playback =
 static struct ast_cli_entry  cli_localplay =
         { { "rpt", "localplay" }, rpt_do_localplay,
                 "Play Back an Audio File Locally", localplay_usage };
+
+
+static struct ast_cli_entry  cli_irlpplay =
+        { { "rpt", "irlpplay" }, rpt_do_irlpplay,
+                "Play Back an Audio File Locally", irlpplay_usage };
 
 
 static struct ast_cli_entry  cli_fun =
@@ -4053,6 +4076,48 @@ struct rpt_link *l;
 	myrpt->linkposttimer = LINKPOSTSHORTTIME;
 	return;
 }
+static void dodispgm(struct rpt *myrpt,char *them)
+{
+char 	*a;
+int	i;
+
+	if (!myrpt->p.discpgm) return;
+	i = strlen(them) + strlen(myrpt->p.discpgm) + 100;
+	a = ast_malloc(i);
+	if (!a) 
+	{
+		ast_log(LOG_NOTICE,"Unable to alloc");
+		return;
+	}
+	memset(a,0,i);
+	sprintf(a,"%s %s %s &",myrpt->p.discpgm,
+		myrpt->name,them);
+	ast_safe_system(a);
+	free(a);
+	return;
+}
+
+static void doconpgm(struct rpt *myrpt,char *them)
+{
+char 	*a;
+int	i;
+
+	if (!myrpt->p.connpgm) return;
+	i = strlen(them) + strlen(myrpt->p.connpgm) +  + 100;
+	a = ast_malloc(i);
+	if (!a) 
+	{
+		ast_log(LOG_NOTICE,"Unable to alloc");
+		return;
+	}
+	memset(a,0,i);
+	sprintf(a,"%s %s %s &",myrpt->p.connpgm,
+		myrpt->name,them);
+	ast_safe_system(a);
+	ast_free(a);
+	return;
+}
+
 
 static void statpost(struct rpt *myrpt,char *pairs)
 {
@@ -4520,6 +4585,18 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"itxgain");
 	if (!val) val = DEFAULT_ITXGAIN;
 	rpt_vars[n].p.itxgain = pow(10.0,atof(val) / 20.0);
+	val = (char *) ast_variable_retrieve(cfg,this,"irlpann");
+	if (val) rpt_vars[n].p.irlpann = ast_true(val);
+	else rpt_vars[n].p.irlpann = DEFAULT_IRLPANN;
+	val = (char *) ast_variable_retrieve(cfg,this,"eannmode");
+	if (val) rpt_vars[n].p.eannmode = atoi(val);
+	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
+	if (rpt_vars[n].p.eannmode < 1) rpt_vars[n].p.eannmode = 1;
+	if (rpt_vars[n].p.eannmode > 3) rpt_vars[n].p.eannmode = 3;
+	val = (char *) ast_variable_retrieve(cfg,this,"discpgm");
+	rpt_vars[n].p.discpgm = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
+	rpt_vars[n].p.connpgm = val;
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
 	if (val) {
@@ -5328,7 +5405,7 @@ static int rpt_do_fun(int fd, int argc, char *argv[])
                                                                                                                                  
 static int rpt_do_playback(int fd, int argc, char *argv[])
 {
-	int	i,busy=0;
+	int	i;
 
         if (argc != 4) return RESULT_SHOWUSAGE;
 
@@ -5338,15 +5415,12 @@ static int rpt_do_playback(int fd, int argc, char *argv[])
 			rpt_telemetry(myrpt,PLAYBACK,argv[3]);			
 		}
 	}
-	if(busy){
-		ast_cli(fd, "Function decoder busy");
-	}
-	return RESULT_FAILURE;
+	return RESULT_SUCCESS;
 }
 
 static int rpt_do_localplay(int fd, int argc, char *argv[])
 {
-        int     i,busy=0;
+        int     i;
 
         if (argc != 4) return RESULT_SHOWUSAGE;
 
@@ -5356,10 +5430,24 @@ static int rpt_do_localplay(int fd, int argc, char *argv[])
                         rpt_telemetry(myrpt,LOCALPLAY,argv[3]);
                 }
         }
-        if(busy){
-                ast_cli(fd, "Function decoder busy");
+        return RESULT_SUCCESS;
+}
+
+
+static int rpt_do_irlpplay(int fd, int argc, char *argv[])
+{
+        int     i;
+
+        if (argc != 4) return RESULT_SHOWUSAGE;
+
+        for(i = 0; i < nrpts; i++){
+		if (!rpt_vars[i].p.irlpann) continue;
+                if(!strcmp(argv[2], rpt_vars[i].name)){
+                        struct rpt *myrpt = &rpt_vars[i];
+                        rpt_telemetry(myrpt,LOCALPLAY,argv[3]);
+                }
         }
-        return RESULT_FAILURE;
+        return RESULT_SUCCESS;
 }
 
 
@@ -5498,11 +5586,6 @@ static int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration
 static int play_tone(struct ast_channel *chan, int freq, int duration, int amplitude)
 {
 	return play_tone_pair(chan, freq, 0, duration, amplitude);
-}
-
-static int play_silence(struct ast_channel *chan, int duration)
-{
-	return play_tone_pair(chan, 0, 0, duration, 0);
 }
 
 #ifdef	NEW_ASTERISK
@@ -5708,6 +5791,29 @@ static struct ast_cli_entry rpt_cli[] = {
 #endif
 
 
+static int morse_cat(char *str, int freq, int duration)
+{
+	char *p;
+	int len;
+
+	if(!str)
+		return -1;
+
+	len = strlen(str);	
+	p = str+len;
+
+	if(len){
+		*p++ = ',';
+		*p = '\0';
+	}
+
+	snprintf(p, 62,"!%d/%d", freq, duration);
+ 
+	return 0;
+}
+
+
+
 static int send_morse(struct ast_channel *chan, char *string, int speed, int freq, int amplitude)
 {
 
@@ -5782,10 +5888,15 @@ static struct morse_bits mbits[] = {
 	int len, ddcomb;
 	int res;
 	int c;
-	int i;
-	int flags;
+	char *str = NULL;
 			
 	res = 0;
+
+
+	str = ast_malloc(12*8*strlen(string)); /* 12 chrs/element max, 8 elements/letter max */
+	if(!str)
+		return -1;
+	str[0] = '\0';
 	
 	/* Approximate the dot time from the speed arg. */
 	
@@ -5815,8 +5926,10 @@ static struct morse_bits mbits[] = {
 		/* If space char, wait the inter word time */
 					
 		if(c == ' '){
-			if(!res)
-				res = play_silence(chan, interwordtime);
+			if(!res){
+				if((res = morse_cat(str, 0, interwordtime)))
+					break;
+			}
 			continue;
 		}
 		
@@ -5833,40 +5946,36 @@ static struct morse_bits mbits[] = {
 		
 		for(; len ; len--){
 			if(!res)
-				res = play_tone(chan, freq, (ddcomb & 1) ? dashtime : dottime, amplitude);
+				res = morse_cat(str, freq, (ddcomb & 1) ? dashtime : dottime);
 			if(!res)
-				res = play_silence(chan, intralettertime);
+				res = morse_cat(str, 0, intralettertime);
 			ddcomb >>= 1;
 		}
 		
 		/* Wait the interletter time */
 		
 		if(!res)
-			res = play_silence(chan, interlettertime - intralettertime);
+			res = morse_cat(str, 0, interlettertime - intralettertime);
+
 	}
 	
-	/* Wait for all the frames to be sent */
-	
-	if (!res) 
-		res = ast_waitstream(chan, "");
-	ast_stopstream(chan);
-	
-	/*
-	* Wait for the zaptel driver to physically write the tone blocks to the hardware
-	*/
+	/* Wait for all the characters to be sent */
 
-	for(i = 0; i < 20 ; i++){
-		flags =  ZT_IOMUX_WRITEEMPTY | ZT_IOMUX_NOWAIT; 
-		res = ioctl(chan->fds[0], ZT_IOMUX, &flags);
-		if(flags & ZT_IOMUX_WRITEEMPTY)
-			break;
-		if( ast_safe_sleep(chan, 50)){
-			res = -1;
-			break;
-		}
+	if(!res){
+		if(debug > 4)
+			ast_log(LOG_NOTICE,"Morse string: %s\n", str);
+		ast_safe_sleep(chan,100);
+		ast_playtones_start(chan, amplitude, str, 0);
+		while(chan->generatordata){
+			if(ast_safe_sleep(chan, 20)){
+				res = -1;
+				break;
+			}
+		}		
+				 
 	}
-
-	
+	if(str)
+		ast_free(str);
 	return res;
 }
 
@@ -5983,18 +6092,22 @@ config, and see if there's a custom node file to play, and if so, play it */
 
 static int saynode(struct rpt *myrpt, struct ast_channel *mychannel, char *name)
 {
-int	res;
+int	res = 0;
 char	*val,fname[300],dbstr[100],actstr[100];
 
-	val = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name, "nodenames");
-	if (!val) val = NODENAMES;
-	snprintf(fname,sizeof(fname) - 1,"%s/%s",val,name);
-	if (ast_fileexists(fname,NULL,mychannel->language) > 0)
-		return(sayfile(mychannel,fname));
-	res = sayfile(mychannel,"rpt/node");
-	if (!res) 
-		res = ast_say_character_str(mychannel,name,NULL,mychannel->language);
+	if ((name[0] != '3') || (myrpt->p.eannmode != 2))
+	{
+		val = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name, "nodenames");
+		if (!val) val = NODENAMES;
+		snprintf(fname,sizeof(fname) - 1,"%s/%s",val,name);
+		if (ast_fileexists(fname,NULL,mychannel->language) > 0)
+			return(sayfile(mychannel,fname));
+		res = sayfile(mychannel,"rpt/node");
+		if (!res) 
+			res = ast_say_character_str(mychannel,name,NULL,mychannel->language);
+	}
 	if (name[0] != '3') return res;
+	if (myrpt->p.eannmode < 2) return res;
 	if (ast_db_get(EL_DB_ROOT,"active",actstr,sizeof(actstr) - 1)) return res;
 	sprintf(dbstr,"%s/nodenum-call/%d",actstr,atoi(name + 1));
 	if (ast_db_get(EL_DB_ROOT,dbstr,fname,sizeof(fname))) return res;
@@ -6528,10 +6641,12 @@ struct zt_params par;
 	rpt_mutex_unlock(&myrpt->lock);
 
 	while((mytele->mode != SETREMOTE) && (mytele->mode != UNKEY) &&
-		(mytele->mode != LINKUNKEY) && (mytele->mode != LOCUNKEY))
+	    (mytele->mode != LINKUNKEY) && (mytele->mode != LOCUNKEY) &&
+		(mytele->mode != COMPLETE) && (mytele->mode != REMGO))
 	{	
                 rpt_mutex_lock(&myrpt->lock);
-		if (!myrpt->active_telem)
+		if ((!myrpt->active_telem) &&
+			(myrpt->tele.prev == mytele))
 		{
 			myrpt->active_telem = mytele;
 	                rpt_mutex_unlock(&myrpt->lock);
@@ -9593,6 +9708,26 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				return DC_COMPLETE;
 			}
 			break;
+                case 40: /* IRLP announce Enable */
+			myrpt->p.irlpann = 1;
+			rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
+                case 41: /* IRLP announce Disable */
+			myrpt->p.irlpann = 0;
+			rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
+                case 42: /* Echolink announce node # only */
+			myrpt->p.eannmode = 1;
+			rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
+                case 43: /* Echolink announce node Callsign only */
+			myrpt->p.eannmode = 2;
+			rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
+                case 44: /* Echolink announce node # & Callsign */
+			myrpt->p.eannmode = 3;
+			rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
 	}	
 	return DC_INDETERMINATE;
 }
@@ -15618,6 +15753,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			sprintf(str,"LINKDISC,%s",l->name);
 			donodelog(myrpt,str);
 		}
+		dodispgm(myrpt,l->name);
                 /* hang-up on call to device */
                 ast_hangup(l->pchan);
                 ast_free(l);
@@ -16288,6 +16424,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 							sprintf(str,"LINKDISC,%s",l->name);
 						donodelog(myrpt,str);
 					}
+					dodispgm(myrpt,l->name);
 					if (l->lastf1) ast_frfree(l->lastf1);
 					l->lastf1 = NULL;
 					if (l->lastf2) ast_frfree(l->lastf2);
@@ -16483,6 +16620,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 									sprintf(str,"LINKMONITOR,%s",l->name);
 								donodelog(myrpt,str);
 							}
+							doconpgm(myrpt,l->name);
 						}		
 						else
 							l->reconnects++;
@@ -16586,6 +16724,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 								sprintf(str,"LINKDISC,%s",l->name);
 							donodelog(myrpt,str);
 						}
+						if (l->hasconnected) dodispgm(myrpt,l->name);
 						if (l->lastf1) ast_frfree(l->lastf1);
 						l->lastf1 = NULL;
 						if (l->lastf2) ast_frfree(l->lastf2);
@@ -17634,6 +17773,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				sprintf(str,"LINK,%s",l->name);
 			donodelog(myrpt,str);
 		}
+		doconpgm(myrpt,l->name);
 		if (!phone_mode) send_newkey(chan);
 		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
 		    (!strncasecmp(l->chan->name,"irlp",4)))
@@ -18012,6 +18152,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		}
 		sprintf(mycmd,"CONNECT,%s",b1);
 		donodelog(myrpt,mycmd);
+		doconpgm(myrpt,b1);
 	}
 	myrpt->loginuser[0] = 0;
 	myrpt->loginlevel[0] = 0;
@@ -18595,7 +18736,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			continue;
 		}
 	}
-	if (myrpt->p.archivedir)
+	if (myrpt->p.archivedir || myrpt->p.discpgm)
 	{
 		char mycmd[100],*b,*b1;
 
@@ -18608,7 +18749,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_shrink_phone_number(b1);
 		}
 		sprintf(mycmd,"DISCONNECT,%s",b1);
-		donodelog(myrpt,mycmd);
+		if (myrpt->p.archivedir) donodelog(myrpt,mycmd);
+		dodispgm(myrpt,b1);
 	}
 	/* wait for telem to be done */
 	while(myrpt->tele.next != &myrpt->tele) usleep(100000);
@@ -19228,6 +19370,7 @@ static int load_module(void)
 	ast_cli_register(&cli_restart);
 	ast_cli_register(&cli_playback);
 	ast_cli_register(&cli_localplay);
+	ast_cli_register(&cli_irlpplay);
 	ast_cli_register(&cli_fun);
 	ast_cli_register(&cli_fun1);
 	res = ast_cli_register(&cli_cmd);
