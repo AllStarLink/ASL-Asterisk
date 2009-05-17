@@ -31,7 +31,7 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.26, 5/16/2009
+/* Version 0.27, 5/17/2009
 irlp channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -112,7 +112,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 176936 $")
 #define	IRLP_CALL "su - repeater /tmp/irlpwrap /home/irlp/scripts/call stn%04d &"
 #define	IRLP_WRAPPER "echo '#! /bin/sh\n\n. /home/irlp/custom/environment\n" \
 	"exec $1 $2 $3 $4 $5 $6\n' > /tmp/irlpwrap ; chown repeater /tmp/irlpwrap ; chmod 755 /tmp/irlpwrap"
-#define	IRLP_AST_PLAYFILE "rpt playback %s /home/irlp/astrun/astplay"
+#define	IRLP_AST_PLAYFILE "rpt irlpplay %s /home/irlp/astrun/astplay"
 #define	IRLP_PLAY_FILE "/home/irlp/astrun/astplay.pcm"
 #define	IRLP_DTMF_FIFO "/home/irlp/astrun/dtmf_fifo"
 #define	IRLP_MAKE_FIFO "(mkdir -p /home/irlp/astrun; " \
