@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.181 exp 5/16/2009 
+ *  version 0.182 exp 5/19/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -104,6 +104,9 @@
  *  42 - Echolink announce node # only
  *  43 - Echolink announce node Callsign only
  *  44 - Echolink announce node # & Callsign
+ *  45 - Link Activity timer enable
+ *  46 - Link Activity timer disable
+ *  47 - Reset "Link Config Changed" Flag 
  *
  * ilink cmds:
  *
@@ -450,7 +453,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.181  5/16/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.182  5/19/2009";
 
 static char *app = "Rpt";
 
@@ -825,12 +828,15 @@ static struct rpt
 		char *nodes;
 		char *extnodes;
 		char *extnodefile;
+		char *lnkactmacro;
+		char *lnkacttimerwarn;
 		int hangtime;
 		int althangtime;
 		int totime;
 		int idtime;
 		int tailmessagetime;
 		int tailsquashedtime;
+		int lnkacttime;
 		int duplex;
 		int politeid;
 		char *tailmessages[500];
@@ -874,6 +880,7 @@ static struct rpt
 		int simplexphonedelay;
 		char telemdefault;
 		char telemdynamic;		
+		char lnkactenable;
 		char *statpost_program;
 		char *statpost_url;
 		char linkmode[10];
@@ -914,6 +921,7 @@ static struct rpt
 	char bargechan;						// barge in channel
 	char macropatch;					// autopatch via tonemacro state
 	char parrotstate;
+	char linkactivityflag;
 	int  parrottimer;
 	unsigned int parrotcnt;
 	int telemmode;
@@ -926,7 +934,7 @@ static struct rpt
 	pthread_t rpt_call_thread,rpt_thread;
 	time_t dtmf_time,rem_dtmf_time,dtmf_time_rem;
 	int calldigittimer;
-	int tailtimer,totimer,idtimer,txconf,conf,callmode,cidx,scantimer,tmsgtimer,skedtimer;
+	int tailtimer,totimer,idtimer,txconf,conf,callmode,cidx,scantimer,tmsgtimer,skedtimer,linkactivitytimer;
 	int mustid,tailid;
 	int tailevent;
 	int telemrefcount;
@@ -4597,6 +4605,14 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.discpgm = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
 	rpt_vars[n].p.connpgm = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"lnkactenable");
+	if (val) rpt_vars[n].p.lnkactenable = ast_true(val);
+	rpt_vars[n].p.lnkacttime = retrieve_astcfgint(&rpt_vars[n],this, "lnkacttime", -120, 90000, 0);	/* Enforce a min max including zero */
+	val = (char *) ast_variable_retrieve(cfg, this, "lnkactmacro");
+	rpt_vars[n].p.lnkactmacro = val;
+	val = (char *) ast_variable_retrieve(cfg, this, "lnkacttimerwarn");
+	rpt_vars[n].p.lnkacttimerwarn = val;
+
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
 	if (val) {
@@ -8894,6 +8910,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 					if (ast_safe_sleep(l->chan,250) == -1) return DC_ERROR;
 					ast_softhangup(l->chan,AST_SOFTHANGUP_DEV);
 				}
+				myrpt->linkactivityflag = 1;
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt, COMPLETE, NULL);
 				return DC_COMPLETE;
@@ -8915,6 +8932,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 					return DC_COMPLETE; /* Silent error */
 
 				case 0:
+					myrpt->linkactivityflag = 1;
 					rpt_telem_select(myrpt,command_source,mylink);
 					rpt_telemetry(myrpt, COMPLETE, NULL);
 					return DC_COMPLETE;
@@ -9728,6 +9746,32 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			myrpt->p.eannmode = 3;
 			rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
+		case 45: /* Link activity timer enable */
+			if(myrpt->p.lnkacttime && myrpt->p.lnkactmacro){
+				myrpt->linkactivitytimer = 0;
+				myrpt->linkactivityflag = 0;
+				myrpt->p.lnkactenable = 1;
+				rpt_telem_select(myrpt,command_source,mylink);
+				rpt_telemetry(myrpt, ARB_ALPHA, (void *) "LATENA");
+			}
+			return DC_COMPLETE;
+
+		case 46: /* Link activity timer disable */
+			if(myrpt->p.lnkacttime && myrpt->p.lnkactmacro){
+				myrpt->linkactivitytimer = 0;
+				myrpt->linkactivityflag = 0;
+				myrpt->p.lnkactenable = 0;
+				rpt_telem_select(myrpt,command_source,mylink);
+				rpt_telemetry(myrpt, ARB_ALPHA, (void *) "LATDIS");
+			}
+			return DC_COMPLETE;
+
+	
+		case 47: /* Link activity flag kill */
+			myrpt->linkactivitytimer = 0;
+			myrpt->linkactivityflag = 0;
+			return DC_COMPLETE; /* Silent for a reason (only used in macros) */
+
 	}	
 	return DC_INDETERMINATE;
 }
@@ -14462,6 +14506,32 @@ static void do_scheduler(struct rpt *myrpt)
 	if(myrpt->lasttv.tv_sec == myrpt->curtv.tv_sec)
 		return;
 
+	/* Service activity timer */
+	if(myrpt->p.lnkactmacro && myrpt->p.lnkacttime && myrpt->p.lnkactenable && myrpt->linkactivityflag){
+		myrpt->linkactivitytimer++;
+		/* 30 second warn */
+		if ((myrpt->p.lnkacttime - myrpt->linkactivitytimer == 30) && myrpt->p.lnkacttimerwarn){
+			if(debug > 4)
+				ast_log(LOG_NOTICE, "Warning user of activity timeout\n");
+			rpt_telemetry(myrpt,LOCALPLAY, myrpt->p.lnkacttimerwarn);
+		}
+		if(myrpt->linkactivitytimer >= myrpt->p.lnkacttime){
+			/* Execute lnkactmacro */
+			if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myrpt->p.lnkactmacro)){
+				ast_log(LOG_WARNING, "Link Activity timer could not execute macro %s: Macro buffer full\n",
+					myrpt->p.lnkactmacro);
+			}
+			else{
+				if(debug > 4)
+					ast_log(LOG_NOTICE, "Executing activity timer macro %s\n", myrpt->p.lnkactmacro);
+				myrpt->macrotimer = MACROTIME;
+				strncat(myrpt->macrobuf,myrpt->p.lnkactmacro, MAXMACRO - 1);
+			}
+			myrpt->linkactivitytimer = 0;
+			myrpt->linkactivityflag = 0;
+		}
+	}
+
 	rpt_localtime(&myrpt->curtv.tv_sec, &tmnow);
 
 	/* If midnight, then reset all daily statistics */
@@ -15007,6 +15077,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 	myrpt->lastdtmfcommand[0] = '\0';
 	voxinit_rpt(myrpt,1);
 	myrpt->wasvox = 0;
+	myrpt->linkactivityflag = 0;
+	myrpt->linkactivitytimer = 0;
 	if (myrpt->p.startupmacro)
 	{
 		snprintf(myrpt->macrobuf,MAXMACRO - 1,"PPPP%s",myrpt->p.startupmacro);
@@ -15050,6 +15122,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			ast_log(LOG_NOTICE,"myrpt->totimer = %d\n",myrpt->totimer);
 			ast_log(LOG_NOTICE,"myrpt->tailtimer = %d\n",myrpt->tailtimer);
 			ast_log(LOG_NOTICE,"myrpt->tailevent = %d\n",myrpt->tailevent);
+			ast_log(LOG_NOTICE,"myrpt->linkactivitytimer = %d\n",myrpt->linkactivitytimer);
+			ast_log(LOG_NOTICE,"myrpt->linkactivityflag = %d\n",(int) myrpt->linkactivityflag);
 
 			zl = myrpt->links.next;
               		while(zl != &myrpt->links){
@@ -16087,6 +16161,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					if ((!lasttx) || (myrpt->p.duplex > 1) || (myrpt->p.linktolink)) 
 					{
 						if (debug == 7) printf("@@@@ rx key\n");
+						myrpt->linkactivitytimer = 0;
 						myrpt->keyed = 1;
 						time(&myrpt->lastkeyedtime);
 						myrpt->keyposttimer = KEYPOSTSHORTTIME;
