@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.182 exp 5/19/2009 
+ *  version 0.183 exp 5/20/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -107,6 +107,7 @@
  *  45 - Link Activity timer enable
  *  46 - Link Activity timer disable
  *  47 - Reset "Link Config Changed" Flag 
+ *  48 - Send Page Tone (Tone specs separated by parenthesis)
  *
  * ilink cmds:
  *
@@ -347,7 +348,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	MEMNOTFOUND, INVFREQ, REMMODE, REMLOGIN, REMXXX, REMSHORTSTATUS,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
-	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT};
+	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -453,7 +454,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.182  5/19/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.183  5/20/2009";
 
 static char *app = "Rpt";
 
@@ -547,6 +548,24 @@ static char *remote_rig_ic706="ic706";
 static char *remote_rig_rtx150="rtx150";
 static char *remote_rig_rtx450="rtx450";
 static char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
+
+static char* dtmf_tones[] = {
+	"!941+1336/200,!0/200",	/* 0 */
+	"!697+1209/200,!0/200",	/* 1 */
+	"!697+1336/200,!0/200",	/* 2 */
+	"!697+1477/200,!0/200",	/* 3 */
+	"!770+1209/200,!0/200",	/* 4 */
+	"!770+1336/200,!0/200",	/* 5 */
+	"!770+1477/200,!0/200",	/* 6 */
+	"!852+1209/200,!0/200",	/* 7 */
+	"!852+1336/200,!0/200",	/* 8 */
+	"!852+1477/200,!0/200",	/* 9 */
+	"!697+1633/200,!0/200",	/* A */
+	"!770+1633/200,!0/200",	/* B */
+	"!852+1633/200,!0/200",	/* C */
+	"!941+1633/200,!0/200",	/* D */
+	"!941+1209/200,!0/200",	/* * */
+	"!941+1477/200,!0/200" };	/* # */
 
 #define ISRIG_RTX(x) ((!strcmp(x,remote_rig_rtx150)) || (!strcmp(x,remote_rig_rtx450)))
 #define	IS_XPMR(x) (!strncasecmp(x->rxchanname,"rad",3))
@@ -3654,24 +3673,6 @@ static void do_dtmf_local(struct rpt *myrpt, char c)
 {
 int	i;
 char	digit;
-static const char* dtmf_tones[] = {
-	"!941+1336/200,!0/200",	/* 0 */
-	"!697+1209/200,!0/200",	/* 1 */
-	"!697+1336/200,!0/200",	/* 2 */
-	"!697+1477/200,!0/200",	/* 3 */
-	"!770+1209/200,!0/200",	/* 4 */
-	"!770+1336/200,!0/200",	/* 5 */
-	"!770+1477/200,!0/200",	/* 6 */
-	"!852+1209/200,!0/200",	/* 7 */
-	"!852+1336/200,!0/200",	/* 8 */
-	"!852+1477/200,!0/200",	/* 9 */
-	"!697+1633/200,!0/200",	/* A */
-	"!770+1633/200,!0/200",	/* B */
-	"!852+1633/200,!0/200",	/* C */
-	"!941+1633/200,!0/200",	/* D */
-	"!941+1209/200,!0/200",	/* * */
-	"!941+1477/200,!0/200" };	/* # */
-
 
 	if (c)
 	{
@@ -6654,8 +6655,14 @@ struct zt_params par;
 #endif
 	rpt_mutex_lock(&myrpt->lock);
 	mytele->chan = mychannel;
+	while (myrpt->active_telem && 
+	    (myrpt->active_telem->mode == PAGE))
+	{
+                rpt_mutex_unlock(&myrpt->lock);
+		usleep(100000);
+		rpt_mutex_lock(&myrpt->lock);
+	}
 	rpt_mutex_unlock(&myrpt->lock);
-
 	while((mytele->mode != SETREMOTE) && (mytele->mode != UNKEY) &&
 	    (mytele->mode != LINKUNKEY) && (mytele->mode != LOCUNKEY) &&
 		(mytele->mode != COMPLETE) && (mytele->mode != REMGO))
@@ -6767,6 +6774,25 @@ struct zt_params par;
 		/* wait a little bit */
 		wait_interval(myrpt, DLY_TELEM, mychannel);
 		res = ast_streamfile(mychannel, "rpt/macro_busy", mychannel->language);
+		break;
+	    case PAGE:
+		wait_interval(myrpt, DLY_TELEM, mychannel);
+		res = -1;
+		if (mytele->submode)
+		{
+			res = ast_playtones_start(myrpt->txchannel,0,
+				(char *) mytele->submode,0);
+			while(myrpt->txchannel->generatordata)
+			{
+				if(ast_safe_sleep(myrpt->txchannel, 50))
+				{
+					res = -1;
+					break;
+				}
+			}
+			free((char *)mytele->submode);
+		}
+		imdone = 1;
 		break;
 	    case UNKEY:
 	    case LOCUNKEY:
@@ -8097,7 +8123,7 @@ struct rpt_link *l;
 		strncpy(tele->param, (char *) data, TELEPARAMSIZE - 1);
 		tele->param[TELEPARAMSIZE - 1] = 0;
 	}
-	if (mode == REMXXX) tele->submode = (int) data;
+	if ((mode == REMXXX) || (mode == PAGE)) tele->submode = (int) data;
 	insque((struct qelem *)tele, (struct qelem *)myrpt->tele.next);
 	rpt_mutex_unlock(&myrpt->lock);
         pthread_attr_init(&attr);
@@ -9378,19 +9404,17 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char string[16];
-	char paramcopy[64];
+	char paramcopy[500];
 	int  argc;
-	char *argv[7];
-	int i, r, src;
-
-
+	char *argv[101],*cp;
+	int i, j, k, r, src;
 
 	if(!param)
 		return DC_ERROR;
 
-	strncpy(paramcopy, param, 64);
-	paramcopy[63] = 0;
-	argc = explode_string(paramcopy, argv, 6, ',', 0);
+	strncpy(paramcopy, param, sizeof(paramcopy) - 1);
+	paramcopy[sizeof(paramcopy) - 1] = 0;
+	argc = explode_string(paramcopy, argv, 100, ',', 0);
 
 	if(!argc)
 		return DC_ERROR;
@@ -9772,6 +9796,41 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			myrpt->linkactivityflag = 0;
 			return DC_COMPLETE; /* Silent for a reason (only used in macros) */
 
+		case 48: /* play page sequence */
+			j = 0;
+			for(i = 1; i < argc; i++)
+			{
+				k = strlen(argv[i]);
+				if (k != 1)
+				{
+					j += k + 1;
+					continue;
+				}
+				if (*argv[i] >= '0' && *argv[i] <='9')
+					argv[i] = dtmf_tones[*argv[i]-'0'];
+				else if (*argv[i] >= 'A' && (*argv[i]) <= 'D')
+					argv[i] = dtmf_tones[*argv[i]-'A'+10];
+				else if (*argv[i] == '*')
+					argv[i] = dtmf_tones[14];
+				else if (*argv[i] == '#')
+					argv[i] = dtmf_tones[15];
+				j += strlen(argv[i]);
+			}
+			cp = malloc(j + 100);
+			if (!cp)
+			{
+				ast_log(LOG_NOTICE,"cannot malloc");
+				return DC_ERROR;
+			}
+			memset(cp,0,j + 100);
+			for(i = 1; i < argc; i++)
+			{
+				if (i != 1) strcat(cp,",");
+				strcat(cp,argv[i]);
+			}
+			rpt_telemetry(myrpt,PAGE,cp);
+			return DC_COMPLETE;
+		
 	}	
 	return DC_INDETERMINATE;
 }
