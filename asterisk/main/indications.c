@@ -230,54 +230,55 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char *playlst, 
 		separator = ",";
 	s = strsep(&stringp,separator);
 	while (s && *s) {
-		int freq1, freq2, time, modulate=0, midinote=0;
+		float freq1,freq2;
+		int midi1, midi2, time, modulate=0, midinote=0;
 
 		if (s[0]=='!')
 			s++;
 		else if (d.reppos == -1)
 			d.reppos = d.nitems;
-		if (sscanf(s, "%d+%d/%d", &freq1, &freq2, &time) == 3) {
+		if (sscanf(s, "%f+%f/%d", &freq1, &freq2, &time) == 3) {
 			/* f1+f2/time format */
-		} else if (sscanf(s, "%d+%d", &freq1, &freq2) == 2) {
+		} else if (sscanf(s, "%f+%f", &freq1, &freq2) == 2) {
 			/* f1+f2 format */
 			time = 0;
-		} else if (sscanf(s, "%d*%d/%d", &freq1, &freq2, &time) == 3) {
+		} else if (sscanf(s, "%f*%f/%d", &freq1, &freq2, &time) == 3) {
 			/* f1*f2/time format */
 			modulate = 1;
-		} else if (sscanf(s, "%d*%d", &freq1, &freq2) == 2) {
+		} else if (sscanf(s, "%f*%f", &freq1, &freq2) == 2) {
 			/* f1*f2 format */
 			time = 0;
 			modulate = 1;
-		} else if (sscanf(s, "%d/%d", &freq1, &time) == 2) {
+		} else if (sscanf(s, "%f/%d", &freq1, &time) == 2) {
 			/* f1/time format */
 			freq2 = 0;
-		} else if (sscanf(s, "%d", &freq1) == 1) {
+		} else if (sscanf(s, "%f", &freq1) == 1) {
 			/* f1 format */
 			freq2 = 0;
 			time = 0;
-		} else if (sscanf(s, "M%d+M%d/%d", &freq1, &freq2, &time) == 3) {
+		} else if (sscanf(s, "M%d+M%d/%d", &midi1, &midi2, &time) == 3) {
 			/* Mf1+Mf2/time format */
 			midinote = 1;
-		} else if (sscanf(s, "M%d+M%d", &freq1, &freq2) == 2) {
+		} else if (sscanf(s, "M%d+M%d", &midi1, &midi2) == 2) {
 			/* Mf1+Mf2 format */
 			time = 0;
 			midinote = 1;
-		} else if (sscanf(s, "M%d*M%d/%d", &freq1, &freq2, &time) == 3) {
+		} else if (sscanf(s, "M%d*M%d/%d", &midi1, &midi2, &time) == 3) {
 			/* Mf1*Mf2/time format */
 			modulate = 1;
 			midinote = 1;
-		} else if (sscanf(s, "M%d*M%d", &freq1, &freq2) == 2) {
+		} else if (sscanf(s, "M%d*M%d", &midi1, &midi2) == 2) {
 			/* Mf1*Mf2 format */
 			time = 0;
 			modulate = 1;
 			midinote = 1;
-		} else if (sscanf(s, "M%d/%d", &freq1, &time) == 2) {
+		} else if (sscanf(s, "M%d/%d", &midi1, &time) == 2) {
 			/* Mf1/time format */
-			freq2 = -1;
+			midi2 = -1;
 			midinote = 1;
-		} else if (sscanf(s, "M%d", &freq1) == 1) {
+		} else if (sscanf(s, "M%d", &midi1) == 1) {
 			/* Mf1 format */
-			freq2 = -1;
+			midi2 = -1;
 			time = 0;
 			midinote = 1;
 		} else {
@@ -287,13 +288,13 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char *playlst, 
 
 		if (midinote) {
 			/* midi notes must be between 0 and 127 */
-			if ((freq1 >= 0) && (freq1 <= 127))
-				freq1 = midi_tohz[freq1];
+			if ((midi1 >= 0) && (midi1 <= 127))
+				freq1 = (float) midi_tohz[midi1];
 			else
 				freq1 = 0;
 
-			if ((freq2 >= 0) && (freq2 <= 127))
-				freq2 = midi_tohz[freq2];
+			if ((midi2 >= 0) && (midi2 <= 127))
+				freq2 = (float) midi_tohz[midi2];
 			else
 				freq2 = 0;
 		}
