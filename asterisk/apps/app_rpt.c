@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.183 exp 5/20/2009 
+ *  version 0.184 exp 5/20/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -454,7 +454,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.183  5/20/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.184  5/20/2009";
 
 static char *app = "Rpt";
 
@@ -915,6 +915,7 @@ static struct rpt
 		char eannmode; /* {NONE,NODE,CALL,BOTH} */
 		char *discpgm;
 		char *connpgm;
+		char nolocallinkct;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -4613,6 +4614,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.lnkactmacro = val;
 	val = (char *) ast_variable_retrieve(cfg, this, "lnkacttimerwarn");
 	rpt_vars[n].p.lnkacttimerwarn = val;
+	val = (char *) ast_variable_retrieve(cfg, this, "nolocallinkct");
+	rpt_vars[n].p.nolocallinkct = ast_true(val);
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -6776,7 +6779,7 @@ struct zt_params par;
 		res = ast_streamfile(mychannel, "rpt/macro_busy", mychannel->language);
 		break;
 	    case PAGE:
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		wait_interval(myrpt, DLY_TELEM,  mychannel);
 		res = -1;
 		if (mytele->submode)
 		{
@@ -6890,7 +6893,21 @@ struct zt_params par;
 					l = l->next;
 					continue;
 				}
-				haslink = 1;
+				if (myrpt->p.nolocallinkct)
+				{
+					int v,w;
+
+					w = 1;
+					for(v = 0; v < nrpts; v++)
+					{
+						if (&rpt_vars[v] == myrpt) continue;
+						if (rpt_vars[v].remote) continue;
+						if (strcmp(rpt_vars[v].name,l->name)) continue;
+						w = 0;
+						break;
+					}
+					if (w) haslink = 1;
+				} else haslink = 1;
 				if (l->mode) {
 					hastx++;
 					if (l->isremote) hasremote++;
@@ -7005,7 +7022,25 @@ struct zt_params par;
 			imdone = 1;
 			break;
 		}
-			
+		if (myrpt->p.nolocallinkct) /* if no CT if this guy is on local system */
+		{
+			int v,w;
+			w = 0;
+			for(v = 0; v < nrpts; v++)
+			{
+				if (&rpt_vars[v] == myrpt) continue;
+				if (rpt_vars[v].remote) continue;
+				if (strcmp(rpt_vars[v].name,
+					mytele->mylink.name)) continue;
+				w = 1;
+				break;
+			}
+			if (w) 
+			{
+				imdone = 1;
+				break;
+			}
+		} 
 		/*
 		* Reset the Unkey to CT timer
 		*/
