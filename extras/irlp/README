@@ -1,0 +1,4 @@
+rc.irlphosts is required when running an IRLP reflector. 
+
+If you plan to run an irlp expermental reflector,
+place this file in /etc/rc.d and call from rc.local
