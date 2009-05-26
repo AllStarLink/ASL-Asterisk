@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.184 exp 5/20/2009 
+ *  version 0.185 exp 5/25/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -454,7 +454,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.184  5/20/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.185  5/25/2009";
 
 static char *app = "Rpt";
 
@@ -7085,7 +7085,24 @@ struct zt_params par;
 				mytele->mylink.linkunkeytocttimer -= ctint;
 			rpt_mutex_unlock(&myrpt->lock);
 		}
-	
+		l = myrpt->links.next;
+		unkeys_queued = 0;
+                rpt_mutex_lock(&myrpt->lock);
+                while (l != &myrpt->links)
+                {
+                        if (!strcmp(l->name,mytele->mylink.name))
+			{
+				unkeys_queued = l->lastrx;
+				break;
+                        }
+                        l = l->next;
+		}
+                rpt_mutex_unlock(&myrpt->lock);
+		if( unkeys_queued ){
+			imdone = 1;
+			break;
+		}
+
 		if((ct = (char *) ast_variable_retrieve(myrpt->cfg, nodename, "linkunkeyct"))){ /* Unlinked Courtesy Tone */
 			ct_copy = ast_strdup(ct);
 			if(ct_copy){
