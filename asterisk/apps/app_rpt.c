@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.185 exp 5/25/2009 
+ *  version 0.186 exp 5/31/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -379,7 +379,7 @@ enum{DAQ_TYPE_UCHAMELEON};
 
 
 
-#define	DEFAULT_RPT_TELEMDEFAULT 2
+#define	DEFAULT_RPT_TELEMDEFAULT 1
 #define	DEFAULT_RPT_TELEMDYNAMIC 1
 #define	DEFAULT_GUI_LINK_MODE LINKMODE_ON
 #define	DEFAULT_GUI_LINK_MODE_DYNAMIC 1
@@ -454,7 +454,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.185  5/25/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.186  5/31/2009";
 
 static char *app = "Rpt";
 
@@ -4636,40 +4636,40 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	}
 #endif
 	val = (char *) ast_variable_retrieve(cfg,this,"telemdefault");
-	if (val) rpt_vars[n].p.telemdefault = (ast_true(val) != 0) + 1;
+	if (val) rpt_vars[n].p.telemdefault = atoi(val);
 	else rpt_vars[n].p.telemdefault = DEFAULT_RPT_TELEMDEFAULT;
 	val = (char *) ast_variable_retrieve(cfg,this,"telemdynamic");
 	if (val) rpt_vars[n].p.telemdynamic = ast_true(val);
 	else rpt_vars[n].p.telemdynamic = DEFAULT_RPT_TELEMDYNAMIC;
-	if (rpt_vars[n].p.telemdefault == 1) 
+	if (!rpt_vars[n].p.telemdefault) 
 		rpt_vars[n].telemmode = 0;
-	else if (rpt_vars[n].p.telemdefault > 1)
-		rpt_vars[n].telemmode = 0x7fffffff;
-	else rpt_vars[n].telemmode = 1;
+	else if (rpt_vars[n].p.telemdefault == 2)
+		rpt_vars[n].telemmode = 1;
+	else rpt_vars[n].telemmode = 0x7fffffff;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"guilinkdefault");
-	if (val) rpt_vars[n].p.linkmode[LINKMODE_GUI] = atoi(val) + 3;
+	if (val) rpt_vars[n].p.linkmode[LINKMODE_GUI] = atoi(val) + 4;
 	else rpt_vars[n].p.linkmode[LINKMODE_GUI] = DEFAULT_GUI_LINK_MODE;
 	val = (char *) ast_variable_retrieve(cfg,this,"guilinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_GUI] = ast_true(val);
 	else rpt_vars[n].p.linkmodedynamic[LINKMODE_GUI] = DEFAULT_GUI_LINK_MODE_DYNAMIC;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"phonelinkdefault");
-	if (val) rpt_vars[n].p.linkmode[LINKMODE_PHONE] = atoi(val) + 3;
+	if (val) rpt_vars[n].p.linkmode[LINKMODE_PHONE] = atoi(val) + 4;
 	else rpt_vars[n].p.linkmode[LINKMODE_PHONE] = DEFAULT_PHONE_LINK_MODE;
 	val = (char *) ast_variable_retrieve(cfg,this,"phonelinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_PHONE] = ast_true(val);
 	else rpt_vars[n].p.linkmodedynamic[LINKMODE_PHONE] = DEFAULT_PHONE_LINK_MODE_DYNAMIC;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"echolinkdefault");
-	if (val) rpt_vars[n].p.linkmode[LINKMODE_ECHOLINK] = atoi(val) + 3;
+	if (val) rpt_vars[n].p.linkmode[LINKMODE_ECHOLINK] = atoi(val) + 4;
 	else rpt_vars[n].p.linkmode[LINKMODE_ECHOLINK] = DEFAULT_ECHOLINK_LINK_MODE;
 	val = (char *) ast_variable_retrieve(cfg,this,"echolinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = ast_true(val);
 	else rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = DEFAULT_ECHOLINK_LINK_MODE_DYNAMIC;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"irlplinkdefault");
-	if (val) rpt_vars[n].p.linkmode[LINKMODE_IRLP] = atoi(val) + 3;
+	if (val) rpt_vars[n].p.linkmode[LINKMODE_IRLP] = atoi(val) + 4;
 	else rpt_vars[n].p.linkmode[LINKMODE_IRLP] = DEFAULT_IRLP_LINK_MODE;
 	val = (char *) ast_variable_retrieve(cfg,this,"irlplinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_IRLP] = ast_true(val);
