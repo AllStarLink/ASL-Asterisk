@@ -2,14 +2,14 @@
 
 -include /etc/sysinfo #include if it exists, else use defaults
 
-ASTSRC_VERS:=1.0.7-test3
+ASTSRC_VERS:=1.0.7-test4
 KVERS?=$(shell uname -r)
 PROCESSOR?=i586
 
 /usr/include/linux:
 	-umount /mnt/cf
 	mount /mnt/cf
-	(cd /lib/modules/$(KVERS)/build; tar xvzf /mnt/cf/kdev.tgz)
+	(cd /lib/modules/$(KVERS)/build; tar xvzf /mnt/cf/kdev.tgz; rm -rf arch/blackfin arch/mn10300 arch/powerpc arch/avr32 arch/xtensa arch/x86/boot arch/x86/kernel arch/x86/pci firmware security)
 	umount /mnt/cf
 	rm -f /usr/include/linux
 	ln -s /lib/modules/$(KVERS)/build/include/linux /usr/include/linux 
