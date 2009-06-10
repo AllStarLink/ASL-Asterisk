@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.186 exp 5/31/2009 
+ *  version 0.187 exp 6/09/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -454,7 +454,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.186  5/31/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.187  6/09/2009";
 
 static char *app = "Rpt";
 
@@ -8212,11 +8212,12 @@ struct ast_channel *mychannel,*genchannel;
 #endif
 	ci.chan = 0;
 	ci.confno = myrpt->conf; /* use the pseudo conference */
-#if	0
+#if	1  /* this SHOULDNT have to be this way, something is wrong */
 	ci.confmode = ZT_CONF_REALANDPSEUDO | ZT_CONF_TALKER | ZT_CONF_LISTENER
 		| ZT_CONF_PSEUDO_TALKER | ZT_CONF_PSEUDO_LISTENER; 
-#endif
+#else
 	ci.confmode = ZT_CONF_CONF | ZT_CONF_TALKER | ZT_CONF_LISTENER;
+#endif
 	/* first put the channel on the conference */
 	if (ioctl(mychannel->fds[0],ZT_SETCONF,&ci) == -1)
 	{
