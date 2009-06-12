@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.187 exp 6/09/2009 
+ *  version 0.188 6/11/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -108,6 +108,8 @@
  *  46 - Link Activity timer disable
  *  47 - Reset "Link Config Changed" Flag 
  *  48 - Send Page Tone (Tone specs separated by parenthesis)
+ *  49 - Disable incoming connections (control state noice)
+ *  50 - Enable incoming connections (control state noicd)
  *
  * ilink cmds:
  *
@@ -454,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.187  6/09/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.188  6/11/2009";
 
 static char *app = "Rpt";
 
@@ -796,6 +798,7 @@ struct sysstate
 	char schedulerdisable;
 	char userfundisable;
 	char alternatetail;
+	char noincomingconns;
 };
 
 /* rpt cmd support */
@@ -4405,7 +4408,7 @@ struct ast_config *cfg;
 char *strs[100];
 char s1[256];
 static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis","totena","totdis","skena","skdis",
-				"ufena","ufdis","atena","atdis",NULL};
+				"ufena","ufdis","atena","atdis","noice","noicd",NULL};
 
 	if (option_verbose > 2)
 		ast_verbose(VERBOSE_PREFIX_3 "%s config for repeater %s\n",
@@ -4890,6 +4893,16 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 						case 13: /* atdis */
 							rpt_vars[n].p.s[statenum].alternatetail = 0;
 							break;
+
+						case 14: /* noice */
+							rpt_vars[n].p.s[statenum].noincomingconns = 1;
+							break;
+
+						case 15: /* noicd */
+							rpt_vars[n].p.s[statenum].noincomingconns = 0;
+							break;
+
+
 			
 						default:
 							ast_log(LOG_WARNING,
@@ -4968,6 +4981,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 	char *tot_state, *ider_state, *patch_state;
 	char *reverse_patch_state, *sys_ena, *tot_ena, *link_ena, *patch_ena;
 	char *sch_ena, *input_signal, *called_number, *user_funs, *tail_type;
+	char *iconns;
 	struct rpt *myrpt;
 
 	static char *not_applicable = "N/A";
@@ -5068,6 +5082,11 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 			else
 				tail_type = "STANDARD";
 
+			if(myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns)
+				iconns = "DISABLED";
+			else
+				iconns = "ENABLED";
+
 			if(!myrpt->totimer)
 				tot_state = "TIMED OUT!";
 			else if(myrpt->totimer != myrpt->p.totime)
@@ -5118,6 +5137,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 			ast_cli(fd, "Scheduler........................................: %s\n", sch_ena);
 			ast_cli(fd, "Tail Time........................................: %s\n", tail_type);
 			ast_cli(fd, "Time out timer...................................: %s\n", tot_ena);
+			ast_cli(fd, "Incoming connections.............................: %s\n", iconns);
 			ast_cli(fd, "Time out timer state.............................: %s\n", tot_state);
 			ast_cli(fd, "Time outs since system initialization............: %d\n", timeouts);
 			ast_cli(fd, "Identifier state.................................: %s\n", ider_state);
@@ -9883,6 +9903,20 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			}
 			rpt_telemetry(myrpt,PAGE,cp);
 			return DC_COMPLETE;
+
+               case 49: /* Disable Incoming connections */
+                        myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns = 1;
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "NOICE");
+                        return DC_COMPLETE;
+
+               case 50: /*Enable Incoming connections */
+                        myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns = 0;
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "NOICD");
+                        return DC_COMPLETE;
+
+
 		
 	}	
 	return DC_INDETERMINATE;
@@ -17588,8 +17622,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			return -1;
 		}
 #endif
-	        if(myrpt->p.s[myrpt->p.sysstate_cur].txdisable){ /* Do not allow incoming radio connections if disabled */
-        	        ast_log(LOG_NOTICE, "Connect attempt to node %s  with tx disabled", myrpt->name);
+	        if((myrpt->p.s[myrpt->p.sysstate_cur].txdisable) || myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns){ /* Do not allow incoming radio connections if disabled or noincomingconns is set */
+        	        ast_log(LOG_NOTICE, "Connect attempt to node %s  with tx disabled or NOICE cop function active", myrpt->name);
                 	return -1;
         	}	
 	}
