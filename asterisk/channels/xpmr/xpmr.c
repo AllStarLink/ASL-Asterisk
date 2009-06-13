@@ -48,7 +48,7 @@
 	IIR 	= Infinite Impulse Response (Filter)
 */
 
-// XPMR_FILE_VERSION(__FILE__, "$Revision$")
+// XPMR_FILE_VERSION(__FILE__, "$Revision: 491 $")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -1950,7 +1950,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pSps->selChanOut=0;
 	pSps->sigProc=LsdGen;
 	pSps->nSamples=pChan->nSamplesTx;
-	pSps->outputGain=(.25*M_Q8);
+	pSps->outputGain=(.49*M_Q8);
 	pSps->option=0;
 	pSps->interpolate=1;
 	pSps->decimate=1;
@@ -2407,6 +2407,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pChan->b.smodeturnoff=0;
 
 	pChan->txsettletimer=0;
+	pChan->txrxblankingtimer=0;
 
 	TRACEF(1,("createPmrChannel() end\n"));
 
@@ -2593,6 +2594,16 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	pmr_sps->source=input;
 
 	if(outputrx!=NULL)pChan->spsRxOut->sink=outputrx;	 //last sps
+
+	if(pChan->txrxblankingtimer>0){
+	    for(i=0;i<pChan->nSamplesRx*6;i++)input[i]=0;
+	
+	    pChan->txrxblankingtimer-=MS_PER_FRAME;
+	    if(pChan->txrxblankingtimer<=0){
+	        pChan->txrxblankingtimer=0;
+	        TRACEC(1,("TXRXBLANKING TIME OUT **********\n"));
+	    }
+	}
 
 	#if 0
 	if(pChan->inputBlanking>0)
@@ -2877,6 +2888,8 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	{
 		pChan->txPttOut=0;
 		pChan->spsSigGen0->option=3;
+		pChan->txrxblankingtimer=pChan->txrxblankingtime;
+		TRACEC(1,("PmrRx() txrxblankingtimer=%i\n",pChan->txrxblankingtimer));
 		pChan->txState=CHAN_TXSTATE_IDLE;
 		if(pChan->spsTxLsdLpf)pChan->spsTxLsdLpf->option=3;
 		if(pChan->spsTxOutA)pChan->spsTxOutA->option=3;

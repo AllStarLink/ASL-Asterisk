@@ -38,6 +38,8 @@
 
 #define  XPMR_DEV   		0 			// when running in test mode
 
+#define  XPMR_TRACE_OVFLW   0
+
 #define  XPMR_TRACE_LEVEL	0
 
 #ifdef	 RADIO_RTX
@@ -592,10 +594,13 @@ typedef struct	t_pmr_chan
 	u32 rxfreq;
 	i8  txpower;
 
-	i32 txsettletime;		// in samples
+	i32 txsettletime;			// in samples
 	i32 txsettletimer;
 
-	i16 rxDC;			    // average DC value of input
+    i16 txrxblankingtime;		// in milli-seconds
+	i16 txrxblankingtimer;	
+	
+	i16	rxDC;			    // average DC value of input
 	i16 rxSqSet;			// carrier squelch threshold
 	i16 rxSqHyst;			// carrier squelch hysterysis
 	i16 rxRssi;				// current Rssi level

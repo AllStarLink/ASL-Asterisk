@@ -27,28 +27,20 @@
  * \author Jim Dixon  <jim@lambdatel.com>
  * \author Steve Henke  <w9sh@arrl.net>
  *
- * \par See also
- * \arg \ref Config_usbradio
- *
  * \ingroup channel_drivers
  */
 
 /*** MODULEINFO
 	<depend>ossaudio</depend>
-        <depend>usb</depend> 	 
-        <member name="RADIO_RTX" displayname="Build RTX/DTX Radio Programming"> 	 
-        <defaultenabled>no</defaultenabled> 	 
-        </member> 	 
-        <member name="RADIO_XPMRX" displayname="Build Experimental Radio Protocols"> 	 
-        <defaultenabled>no</defaultenabled> 	 
-        </member>
+        <depend>usb</depend>
+        <defaultenabled>yes</defaultenabled> 	 	 
  ***/
 
 // 20080802 
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -497,6 +489,7 @@ struct chan_usbradio_pvt {
 	int     idleinterval;
 	int		turnoffs;
 	int  	txsettletime;
+	int		txrxblankingtime;
 	char    ukey[48];
 
 	char lastrx;
@@ -600,6 +593,7 @@ struct chan_usbradio_pvt {
 		unsigned rxcap2:1;
 		unsigned rxplmon:1;
 		unsigned remoted:1;
+		unsigned forcetxcode:1;
 		unsigned txpolarity:1;
 		unsigned rxpolarity:1;
 		unsigned dcstxpolarity:1;
@@ -1629,7 +1623,6 @@ static int usbradio_digit_end(struct ast_channel *c, char digit, unsigned int du
 static int usbradio_text(struct ast_channel *c, const char *text)
 {
 	struct chan_usbradio_pvt *o = c->tech_pvt;
-
 	double tx,rx;
 	char cnt,rxs[16],txs[16],txpl[16],rxpl[16];
 	char pwr,*cmd;
@@ -1642,19 +1635,19 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 	cnt=sscanf(text,"%s %s %s %s %s %c",cmd,rxs,txs,rxpl,txpl,&pwr);
 
 	if (strcmp(cmd,"SETCHAN")==0)
-	{ 
+    { 
 		u8 chan;
 		chan=strtod(rxs,NULL);
 		ppbinout(chan);
-	        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio SETCHAN cmd: %s chan: %i\n",text,chan);
-	        return 0;
-	}
+        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio SETCHAN cmd: %s chan: %i\n",text,chan);
+        return 0;
+    }
 	
-	if (cnt < 6)
-	{
-		ast_log(LOG_ERROR,"Cannot parse usbradio text: %s\n",text);
-		return 0;
-	}
+    if (cnt < 6)
+    {
+	    ast_log(LOG_ERROR,"Cannot parse usbradio text: %s\n",text);
+	    return 0;
+    }
 	else
 	{
 		if(o->debuglevel)ast_verbose(" << %s %s %s %s %s %c >> \n", cmd,rxs,txs,rxpl,txpl,pwr);	
@@ -1960,13 +1953,13 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 	{
 		o->rxcarrierdetect=cd;
 		if(o->debuglevel) ast_log(LOG_NOTICE,"rxcarrierdetect = %i, chan %s\n",cd,o->owner->name);
-		// printf("rxcarrierdetect = %i, chan %s\n",res,o->owner->name);
+		//printf("rxcarrierdetect = %i, chan %s\n",res,o->owner->name);
 	}
 
 	if(o->pmrChan->b.ctcssRxEnable && o->pmrChan->rxCtcss->decode!=o->rxctcssdecode)
 	{
 		if(o->debuglevel)ast_log(LOG_NOTICE,"rxctcssdecode = %i, chan %s\n",o->pmrChan->rxCtcss->decode,o->owner->name);
-		// printf("rxctcssdecode = %i, chan %s\n",o->pmrChan->rxCtcss->decode,o->owner->name);
+		//printf("rxctcssdecode = %i, chan %s\n",o->pmrChan->rxCtcss->decode,o->owner->name);
 		o->rxctcssdecode=o->pmrChan->rxCtcss->decode;
 		strcpy(o->rxctcssfreq, o->pmrChan->rxctcssfreq);
 	}
@@ -2150,11 +2143,25 @@ static int usbradio_indicate(struct ast_channel *c, int cond, const void *data, 
 			break;
 		case AST_CONTROL_RADIO_KEY:
 			o->txkeyed = 1;
-			if(o->debuglevel)ast_verbose(" << AST_CONTROL_RADIO_KEY Radio Transmit On. >> \n");
+			if(o->debuglevel)ast_verbose("chan_usbradio ACRK  dev=%s  code=%s TX ON \n",o->name,(char *)data);
+			if(datalen)
+			{
+			    o->b.forcetxcode=1;
+				memset(o->set_txctcssfreq,0,16);
+				strncpy(o->set_txctcssfreq,data,16);
+				o->set_txctcssfreq[15]=0;
+				xpmr_config(o);		
+			}
 			break;
 		case AST_CONTROL_RADIO_UNKEY:
 			o->txkeyed = 0;
-			if(o->debuglevel)ast_verbose(" << AST_CONTROL_RADIO_UNKEY Radio Transmit Off. >> \n");
+			if(o->debuglevel)ast_verbose("chan_usbradio ACRUK  dev=%s TX OFF >> \n",o->name);
+			if(o->b.forcetxcode)
+			{
+				o->b.forcetxcode=0;
+				o->pmrChan->pTxCodeDefault = o->txctcssdefault;
+				if(o->debuglevel)ast_verbose("chan_usbradio dev=%s Forced Tx Squelch Code CLEARED\n",o->name);
+			}
 			break;
 		default:
 			ast_log(LOG_WARNING, "Don't know how to display condition %d on %s\n", cond, c->name);
@@ -3378,6 +3385,7 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 	pd(p->txPttOut);
 
 	pd(p->tracetype);
+	pd(p->b.radioactive);
 
 	return;
 }
@@ -3422,7 +3430,13 @@ static int xpmr_config(struct chan_usbradio_pvt *o)
 		o->pmrChan->rxfreq = o->rxfreq;
 		o->pmrChan->txfreq = o->txfreq;
 	}
-	
+
+	if(o->b.forcetxcode)
+	{
+		o->pmrChan->pTxCodeDefault = o->set_txctcssfreq;
+		if(o->debuglevel)ast_verbose("chan_usbradio dev=%s Forced Tx Squelch Code code=%s\n",o->name,o->pmrChan->pTxCodeDefault);
+	}
+		
 	code_string_parse(o->pmrChan);
 	if(o->pmrChan->rxfreq) o->pmrChan->b.reprog=1;
 
@@ -3508,6 +3522,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_UINT("eeprom",o->wanteeprom)
 			M_UINT("duplex",o->radioduplex)
 			M_UINT("txsettletime",o->txsettletime)
+			M_UINT("txrxblankingtime",o->txrxblankingtime)
 			M_BOOL("rxpolarity",o->b.rxpolarity)
 			M_BOOL("txpolarity",o->b.txpolarity)
 			M_BOOL("dcsrxpolarity",o->b.dcsrxpolarity)
@@ -3652,6 +3667,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 
 		tChan.tracetype=o->tracetype;
 		tChan.tracelevel=o->tracelevel;
+
 		tChan.rptnum=o->rptnum;
 		tChan.idleinterval=o->idleinterval;
 		tChan.turnoffs=o->turnoffs;
@@ -3663,7 +3679,9 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 									 
 		o->pmrChan->radioDuplex=o->radioduplex;
 		o->pmrChan->b.loopback=0; 
+		o->pmrChan->b.radioactive=o->b.radioactive;
 		o->pmrChan->txsettletime=o->txsettletime;
+		o->pmrChan->txrxblankingtime=o->txrxblankingtime;
 		o->pmrChan->rxCpuSaver=o->rxcpusaver;
 		o->pmrChan->txCpuSaver=o->txcpusaver;
 
@@ -3700,15 +3718,10 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 		
 		if(o->b.radioactive)
 		{
-		    // 20080328 sphenke asdf maw !!!
-		    // this diagnostic option was working but now appears broken
-			// it's not required for operation so I'll fix it later.
-			//struct chan_usbradio_pvt *ao;
-			//for (ao = usbradio_default.next; ao && ao->name ; ao = ao->next)ao->pmrChan->b.radioactive=0;
+			struct chan_usbradio_pvt *ao;
+			for (ao = usbradio_default.next; ao && ao->name ; ao = ao->next)ao->pmrChan->b.radioactive=0;
 			usbradio_active = o->name;
-			// o->pmrChan->b.radioactive=1;
-			//o->b.radioactive=0;
-			//o->pmrChan->b.radioactive=0;
+			o->pmrChan->b.radioactive=1;
 			ast_log(LOG_NOTICE,"radio active set to [%s]\n",o->name);
 		}
 	}
