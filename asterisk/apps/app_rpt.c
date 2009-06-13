@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.189 6/13/2009 
+ *  version 0.190 6/13/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.189  6/13/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.190  6/13/2009";
 
 static char *app = "Rpt";
 
@@ -6351,7 +6351,8 @@ static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 	int interval;
 
 	do {
-		while (myrpt->keyed || (myrpt->remrx && (type != DLY_ID)))
+		while (myrpt->p.holdofftelem && 
+			(myrpt->keyed || (myrpt->remrx && (type != DLY_ID))))
 		{
 			if (ast_safe_sleep(chan,100) < 0) return;
 		}
@@ -6364,7 +6365,8 @@ static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 		if(debug)
 			ast_log(LOG_NOTICE,"Delay complete\n");
 	}
-	while (myrpt->keyed || (myrpt->remrx && (type != DLY_ID)));
+	while (myrpt->p.holdofftelem && 
+		(myrpt->keyed || (myrpt->remrx && (type != DLY_ID))));
 	return;
 }
 
