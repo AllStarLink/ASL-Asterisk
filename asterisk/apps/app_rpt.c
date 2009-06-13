@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.188 6/11/2009 
+ *  version 0.189 6/13/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.188  6/11/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.189  6/13/2009";
 
 static char *app = "Rpt";
 
@@ -919,6 +919,8 @@ static struct rpt
 		char *discpgm;
 		char *connpgm;
 		char nolocallinkct;
+		char nounkeyct;
+		char holdofftelem;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -928,6 +930,7 @@ static struct rpt
 	char txkeyed;
 	char exttx;
 	char localtx;
+	char remrx;	
 	char remoterx;
 	char remotetx;
 	char remoteon;
@@ -4619,6 +4622,10 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.lnkacttimerwarn = val;
 	val = (char *) ast_variable_retrieve(cfg, this, "nolocallinkct");
 	rpt_vars[n].p.nolocallinkct = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg, this, "nounkeyct");
+	rpt_vars[n].p.nounkeyct = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg, this, "holdofftelem");
+	rpt_vars[n].p.holdofftelem = ast_true(val);
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -6342,13 +6349,22 @@ static int get_wait_interval(struct rpt *myrpt, int type)
 static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 {
 	int interval;
-	interval = get_wait_interval(myrpt, type);
-	if(debug)
-		ast_log(LOG_NOTICE,"Delay interval = %d\n", interval);
-	if(interval)
-		ast_safe_sleep(chan,interval);
-	if(debug)
-		ast_log(LOG_NOTICE,"Delay complete\n");
+
+	do {
+		while (myrpt->keyed || (myrpt->remrx && (type != DLY_ID)))
+		{
+			if (ast_safe_sleep(chan,100) < 0) return;
+		}
+
+		interval = get_wait_interval(myrpt, type);
+		if(debug)
+			ast_log(LOG_NOTICE,"Delay interval = %d\n", interval);
+		if(interval)
+			ast_safe_sleep(chan,interval);
+		if(debug)
+			ast_log(LOG_NOTICE,"Delay complete\n");
+	}
+	while (myrpt->keyed || (myrpt->remrx && (type != DLY_ID)));
 	return;
 }
 
@@ -8016,6 +8032,7 @@ struct rpt_link *l;
 		break;
 	    case UNKEY:
 	    case LOCUNKEY:
+		if (myrpt->p.nounkeyct) return;
 		/* if any of the following are defined, go ahead and do it,
 		   otherwise, dont bother */
 		v1 = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name, 
@@ -14785,7 +14802,7 @@ static void *rpt(void *this)
 {
 struct	rpt *myrpt = (struct rpt *)this;
 char *tele,*idtalkover,c,myfirst,*p;
-int ms = MSWAIT,i,lasttx=0,val,remrx=0,identqueued,othertelemqueued;
+int ms = MSWAIT,i,lasttx=0,val,identqueued,othertelemqueued;
 int tailmessagequeued,ctqueued,dtmfed,lastmyrx,localmsgqueued;
 struct ast_channel *who;
 ZT_CONFINFO ci;  /* conference info */
@@ -14799,6 +14816,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 	sprintf(tmpstr,"%s/%s",myrpt->p.archivedir,myrpt->name);
 	mkdir(tmpstr,0600);
 	rpt_mutex_lock(&myrpt->lock);
+	myrpt->remrx = 0;
 
 	telem = myrpt->tele.next;
 	while(telem != &myrpt->tele)
@@ -15253,7 +15271,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			myrpt->disgorgetime = 0;
 			ast_log(LOG_NOTICE,"********** Variable Dump Start (app_rpt) **********\n");
 			ast_log(LOG_NOTICE,"totx = %d\n",totx);
-			ast_log(LOG_NOTICE,"remrx = %d\n",remrx);
+			ast_log(LOG_NOTICE,"myrpt->remrx = %d\n",myrpt->remrx);
 			ast_log(LOG_NOTICE,"lasttx = %d\n",lasttx);
 			ast_log(LOG_NOTICE,"elap = %d\n",elap);
 			ast_log(LOG_NOTICE,"toexit = %d\n",toexit);
@@ -15342,11 +15360,11 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		myrpt->localtx = myrpt->keyed;
 		/* If someone's connected, and they're transmitting from their end to us, set remrx true */
 		l = myrpt->links.next;
-		remrx = 0;
+		myrpt->remrx = 0;
 		while(l != &myrpt->links)
 		{
 			if (l->lastrx){
-				remrx = 1;
+				myrpt->remrx = 1;
 				if(l->name[0] != '0') /* Ignore '0' nodes */
 					strcpy(myrpt->lastnodewhichkeyedusup, l->name); /* Note the node which is doing the key up */
 			}
@@ -15354,7 +15372,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		}
 		/* Create a "must_id" flag for the cleanup ID */		
 		if(myrpt->p.idtime) /* ID time must be non-zero */
-			myrpt->mustid |= (myrpt->idtimer) && (myrpt->keyed || remrx) ;
+			myrpt->mustid |= (myrpt->idtimer) && (myrpt->keyed || myrpt->remrx) ;
 		/* Build a fresh totx from myrpt->keyed and autopatch activated */
 		/* If full duplex, add local tx to totx */
 		if (myrpt->p.duplex > 1) 
@@ -15364,7 +15382,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		}
 		else
 		{
-			int myrx = myrpt->localtx || remrx || (!myrpt->callmode);
+			int myrx = myrpt->localtx || myrpt->remrx || (!myrpt->callmode);
 
 			if (lastmyrx != myrx)
 			{
@@ -15428,7 +15446,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		/* If half or 3/4 duplex, add localtx to external link tx */
 		if (myrpt->p.duplex < 2) myrpt->exttx = myrpt->exttx || myrpt->localtx;
 		/* Add in ID telemetry to local transmitter */
-		totx = totx || remrx;
+		totx = totx || myrpt->remrx;
 		/* If 3/4 or full duplex, add in ident, CT telemetry, and local messages */
 		if (myrpt->p.duplex > 0)
 			totx = totx || identqueued || ctqueued;
@@ -15497,7 +15515,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		if (myrpt->totimer) totx = totx || myrpt->tailtimer;
 		/* If user or links key up or are keyed up over standard ID, switch to talkover ID, if one is defined */
 		/* If tail message, kill the message if someone keys up over it */ 
-		if ((myrpt->keyed || remrx || myrpt->localoverride) && ((identqueued && idtalkover) || (tailmessagequeued))) {
+		if ((myrpt->keyed || myrpt->remrx || myrpt->localoverride) && ((identqueued && idtalkover) || (tailmessagequeued))) {
 			int hasid = 0,hastalkover = 0;
 
 			telem = myrpt->tele.next;
@@ -16526,7 +16544,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		l = myrpt->links.next;
 		while(l != &myrpt->links)
 		{
-			int remnomute;
+			int remnomute,remrx;
 			struct timeval now;
 
 			if (l->disctime)
