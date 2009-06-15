@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.190 6/13/2009 
+ *  version 0.191 6/14/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.190  6/13/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.191  6/14/2009";
 
 static char *app = "Rpt";
 
@@ -921,6 +921,7 @@ static struct rpt
 		char nolocallinkct;
 		char nounkeyct;
 		char holdofftelem;
+		char beaconing;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -4626,6 +4627,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.nounkeyct = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg, this, "holdofftelem");
 	rpt_vars[n].p.holdofftelem = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg, this, "beaconing");
+	rpt_vars[n].p.beaconing = ast_true(val);
+
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -15540,8 +15544,9 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		/* If the repeater has been inactive for longer than the ID time, do an initial ID in the tail*/
 		/* If within 30 seconds of the time to ID, try do it in the tail */
 		/* else if at ID time limit, do it right over the top of them */
+		/* If beaconing is enabled, always id when the timer expires */
 		/* Lastly, if the repeater has been keyed, and the ID timer is expired, do a clean up ID */
-		if(myrpt->mustid && (!myrpt->idtimer))
+		if(((myrpt->mustid)||(myrpt->p.beaconing)) && (!myrpt->idtimer))
 			queue_id(myrpt);
 
 		if ((myrpt->p.idtime && totx && (!myrpt->exttx) &&
