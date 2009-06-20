@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.191 6/14/2009 
+ *  version 0.192 6/20/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.191  6/14/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.192  6/20/2009";
 
 static char *app = "Rpt";
 
@@ -714,6 +714,7 @@ struct rpt_tele
 	char param[TELEPARAMSIZE];
 	int	submode;
 	unsigned int parrot;
+	char killed;
 	pthread_t threadid;
 } ;
 
@@ -15526,19 +15527,23 @@ char tmpstr[300],lstr[MAXLINKLIST];
 
 			telem = myrpt->tele.next;
 			while(telem != &myrpt->tele){
-				if(telem->mode == ID){
+				if(telem->mode == ID && !telem->killed){
 					if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
 					hasid = 1;
 				}
-				if(telem->mode == TAILMSG){
+				if(telem->mode == TAILMSG && !telem->killed){
                                         if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
                                 }
 				if (telem->mode == IDTALKOVER) hastalkover = 1;
 				telem = telem->next;
 			}
-			rpt_mutex_unlock(&myrpt->lock);
-			if (hasid && (!hastalkover)) rpt_telemetry(myrpt, IDTALKOVER, NULL); /* Start Talkover ID */
-			rpt_mutex_lock(&myrpt->lock);
+			if(hasid && (!hastalkover)){
+				rpt_mutex_unlock(&myrpt->lock);
+				rpt_telemetry(myrpt, IDTALKOVER, NULL); /* Start Talkover ID */
+				rpt_mutex_lock(&myrpt->lock);
+			}
 		}
 		/* Try to be polite */
 		/* If the repeater has been inactive for longer than the ID time, do an initial ID in the tail*/
