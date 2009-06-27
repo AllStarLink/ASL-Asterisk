@@ -2582,7 +2582,9 @@ static int set_txctcss_level(struct chan_usbradio_pvt *o)
 	}
 	else
 	{
-		*o->pmrChan->ptxCtcssAdjust=(o->txctcssadj * M_Q8) / 1000;
+		if(o->pmrChan->ptxCtcssAdjust){ /* Ignore if ptr not defined */
+			*o->pmrChan->ptxCtcssAdjust=(o->txctcssadj * M_Q8) / 1000;
+		}
 	}
 	return 0;
 }
