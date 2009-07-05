@@ -2,7 +2,7 @@
 
 -include /etc/sysinfo #include if it exists, else use defaults
 
-ASTSRC_VERS:=1.0.7-test4
+ASTSRC_VERS:=1.0.7-test5
 KVERS?=$(shell uname -r)
 PROCESSOR?=i586
 
