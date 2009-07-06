@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.192 6/20/2009 
+ *  version 0.193 7/05/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.192  6/20/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.193  7/05/2009";
 
 static char *app = "Rpt";
 
@@ -591,6 +591,8 @@ LOCAL_USER_DECL;
 #define	MAXXLATTIME 3
 
 #define MAX_SYSSTATES 10
+
+#define FT897_SERIAL_DELAY 75000		/* # of usec to wait between some serial commands on FT-897 */
 
 struct vox {
 	float	speech_energy;
@@ -6784,6 +6786,8 @@ struct zt_params par;
 		break;
 
 	    case IDTALKOVER:
+		if(debug >= 6)
+			ast_log(LOG_NOTICE,"Tracepoint IDTALKOVER: in rpt_tele_thread()\n");
 	    	p = (char *) ast_variable_retrieve(myrpt->cfg, nodename, "idtalkover");
 	    	if(p)
 			res = telem_any(myrpt,mychannel, p); 
@@ -8029,8 +8033,8 @@ time_t	t;
 struct rpt_link *l;
 
 
-	if(debug > 6)
-		ast_log(LOG_NOTICE,"mode=%i  data=%s\n",mode, (char *)data);
+	if(debug >= 6)
+		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
 
 	switch(mode)
 	{
@@ -8231,6 +8235,9 @@ struct rpt_link *l;
 		rpt_mutex_unlock(&myrpt->lock);	
 		ast_log(LOG_WARNING, "Could not create telemetry thread: %s",strerror(res));
 	}
+	if(debug >= 6)
+			ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() exit\n");
+
 	return;
 }
 
@@ -12182,52 +12189,57 @@ static int set_ft897(struct rpt *myrpt)
 {
 	int res;
 	
-	if(debug)
+	if(debug > 2)
 		printf("@@@@ lock on\n");
+	res = simple_command_ft897(myrpt, 0x00);			/* LOCK on */	
 
-	res = simple_command_ft897(myrpt, 0x00);	/* LOCK on */	
-
-	if(debug)
+	if(debug > 2)
 		printf("@@@@ ptt off\n");
-
-	if(!res)
+	if(!res){
 		res = simple_command_ft897(myrpt, 0x88);		/* PTT off */
+	}
 
-	if(debug)
+	if(debug > 2)
 		printf("Modulation mode\n");
-
-	if(!res)
+	if(!res){
 		res = set_mode_ft897(myrpt, myrpt->remmode);		/* Modulation mode */
+	}
 
-	if(debug)
+	if(debug > 2)
 		printf("Split off\n");
-
-	if(!res)
+	if(!res){
 		simple_command_ft897(myrpt, 0x82);			/* Split off */
+	}
 
-	if(debug)
+	if(debug > 2)
 		printf("Frequency\n");
-
-	if(!res)
+	if(!res){
 		res = set_freq_ft897(myrpt, myrpt->freq);		/* Frequency */
+		usleep(FT897_SERIAL_DELAY*2);
+	}
 	if((myrpt->remmode == REM_MODE_FM)){
-		if(debug)
+		if(debug > 2)
 			printf("Offset\n");
-		if(!res)
+		if(!res){
 			res = set_offset_ft897(myrpt, myrpt->offset);	/* Offset if FM */
+			usleep(FT897_SERIAL_DELAY);
+		}
 		if((!res)&&(myrpt->rxplon || myrpt->txplon)){
-			if(debug)
+			usleep(FT897_SERIAL_DELAY);
+			if(debug > 2)
 				printf("CTCSS tone freqs.\n");
 			res = set_ctcss_freq_ft897(myrpt, myrpt->txpl, myrpt->rxpl); /* CTCSS freqs if CTCSS is enabled */
+			usleep(FT897_SERIAL_DELAY);
 		}
 		if(!res){
-			if(debug)
+			if(debug > 2)
 				printf("CTCSS mode\n");
 			res = set_ctcss_mode_ft897(myrpt, myrpt->txplon, myrpt->rxplon); /* CTCSS mode */
+			usleep(FT897_SERIAL_DELAY);
 		}
 	}
 	if((myrpt->remmode == REM_MODE_USB)||(myrpt->remmode == REM_MODE_LSB)){
-		if(debug)
+		if(debug > 2)
 			printf("Clarifier off\n");
 		simple_command_ft897(myrpt, 0x85);			/* Clarifier off if LSB or USB */
 	}
@@ -15540,6 +15552,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				telem = telem->next;
 			}
 			if(hasid && (!hastalkover)){
+				if(debug >= 6)
+					ast_log(LOG_NOTICE,"Tracepoint IDTALKOVER: in rpt()\n");
 				rpt_mutex_unlock(&myrpt->lock);
 				rpt_telemetry(myrpt, IDTALKOVER, NULL); /* Start Talkover ID */
 				rpt_mutex_lock(&myrpt->lock);
@@ -16336,7 +16350,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				{
 					if ((!lasttx) || (myrpt->p.duplex > 1) || (myrpt->p.linktolink)) 
 					{
-						if (debug == 7) printf("@@@@ rx key\n");
+						if (debug >= 6)
+							ast_log(LOG_NOTICE,"**** rx key\n"); 
 						myrpt->linkactivitytimer = 0;
 						myrpt->keyed = 1;
 						time(&myrpt->lastkeyedtime);
@@ -16415,7 +16430,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				{
 					if ((!lasttx) || (myrpt->p.duplex > 1) || (myrpt->p.linktolink))
 					{
-						if (debug == 7) printf("@@@@ rx un-key\n");
+						if (debug >= 6)
+							ast_log(LOG_NOTICE,"**** rx un-key\n");
 						if(myrpt->p.duplex && myrpt->keyed) {
 							rpt_telemetry(myrpt,UNKEY,NULL);
 						}
