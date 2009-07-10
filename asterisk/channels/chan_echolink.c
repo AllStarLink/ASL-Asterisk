@@ -33,7 +33,7 @@
 	<depend>zlib</depend>
  ***/
 
-/* Version 0.19, 09/15/2008
+/* Version 0.21, 07/09/2008
 Echolink channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -158,7 +158,7 @@ do not use 127.0.0.1
    platforms running Linux.
 */
 
-static const char tdesc[] = "Echolink channel driver by KI4LKF";
+static const char tdesc[] = "Echolink channel driver";
 static int prefformat = AST_FORMAT_GSM;
 static char type[] = "echolink";
 static char db_active = 'a';
@@ -1229,7 +1229,7 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
    struct sockaddr_in sin;
    unsigned char  pack[256];
    int pack_length;
-   unsigned short i;
+   unsigned short i,n;
    struct el_node key;
 
    if (strncmp(fromip,"127.0.0.1",EL_IP_SIZE) != 0)
@@ -1282,9 +1282,15 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
       }
 
       if (strcmp(cmd, "o.conip") == 0)
+      {
+	 n = 1;
          pack_length = rtcp_make_sdes(pack,sizeof(pack),instp->mycall,instp->myname);
+      }
       else
+      {
          pack_length = rtcp_make_bye(pack,"bye");
+	 n = 20;
+      }      
       sin.sin_family = AF_INET;
       sin.sin_port = htons(instp->ctrl_port);
       sin.sin_addr.s_addr = inet_addr(arg1);
@@ -1301,7 +1307,7 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
               ast_log(LOG_NOTICE, "Did not find ip=%s to request disconnect\n",key.ip);
       }
       else {
-         for (i = 0; i < 20; i++)
+         for (i = 0; i < n; i++)
 	 {
             sendto(instp->ctrl_sock, pack, pack_length,
                    0,(struct sockaddr *)&sin,sizeof(sin));
@@ -2310,103 +2316,104 @@ static void *el_reader(void *data)
 					copy_sdes_item(items.item[0].r_text,call_name, 127);
 				if (call_name[0] != '\0')
 				{
+					call = call_name;
 					ptr = strchr(call_name, (int)' ');
+					name = "UNKNOWN";
 					if (ptr)
 					{
 						*ptr = '\0';
-						call = call_name;
 						name = ptr + 1;      
-						found_key = (struct el_node **)tfind(&instp->el_node_test,
-							&el_node_list, compare_ip); 
-						if (found_key)
+					}
+					found_key = (struct el_node **)tfind(&instp->el_node_test,
+						&el_node_list, compare_ip); 
+					if (found_key)
+					{
+						if (!(*found_key)->p->firstheard)
 						{
-							if (!(*found_key)->p->firstheard)
+							(*found_key)->p->firstheard = 1;
+							fr.datalen = 0;
+							fr.samples = 0;
+							fr.frametype = AST_FRAME_CONTROL;
+							fr.subclass = AST_CONTROL_ANSWER;
+							fr.data =  0;
+							fr.src = type;
+							fr.offset = 0;
+							fr.mallocd=0;
+							fr.delivery.tv_sec = 0;
+							fr.delivery.tv_usec = 0;
+							ast_queue_frame((*found_key)->chan,&fr);
+							if (debug) ast_log(LOG_DEBUG,"Channel %s answering\n",
+								(*found_key)->chan->name);
+						}
+						(*found_key)->countdown = instp->rtcptimeout;
+						/* different callsigns behind a NAT router, running -L, -R, ... */
+						if (strncmp((*found_key)->call,call,EL_CALL_SIZE) != 0)
+						{
+							ast_log(LOG_NOTICE,"Call changed from %s to %s\n",
+								(*found_key)->call,call);
+							strncpy((*found_key)->call,call,EL_CALL_SIZE);
+						}
+						if (strncmp((*found_key)->name, name, EL_NAME_SIZE) != 0) 
+						{
+							ast_log(LOG_NOTICE,"Name changed from %s to %s\n",
+								(*found_key)->name,name);
+							strncpy((*found_key)->name,name,EL_NAME_SIZE);
+						}
+					}
+					else /* otherwise its a new request */
+					{
+						i = 0;  /* default authorized */
+						if (instp->ndenylist)
+						{
+							for (x = 0; x < instp->ndenylist; x++)
 							{
-								(*found_key)->p->firstheard = 1;
-								fr.datalen = 0;
-								fr.samples = 0;
-								fr.frametype = AST_FRAME_CONTROL;
-								fr.subclass = AST_CONTROL_ANSWER;
-								fr.data =  0;
-								fr.src = type;
-								fr.offset = 0;
-								fr.mallocd=0;
-								fr.delivery.tv_sec = 0;
-								fr.delivery.tv_usec = 0;
-								ast_queue_frame((*found_key)->chan,&fr);
-								if (debug) ast_log(LOG_DEBUG,"Channel %s answering\n",
-									(*found_key)->chan->name);
-							}
-							(*found_key)->countdown = instp->rtcptimeout;
-							/* different callsigns behind a NAT router, running -L, -R, ... */
-							if (strncmp((*found_key)->call,call,EL_CALL_SIZE) != 0)
-							{
-								ast_log(LOG_NOTICE,"Call changed from %s to %s\n",
-									(*found_key)->call,call);
-								strncpy((*found_key)->call,call,EL_CALL_SIZE);
-							}
-							if (strncmp((*found_key)->name, name, EL_NAME_SIZE) != 0) 
-							{
-								ast_log(LOG_NOTICE,"Name changed from %s to %s\n",
-									(*found_key)->name,name);
-								strncpy((*found_key)->name,name,EL_NAME_SIZE);
+								if (!fnmatch(instp->denylist[x],call,FNM_CASEFOLD)) 
+								{
+									i = 1;
+									break;
+								}
 							}
 						}
-						else /* otherwise its a new request */
+						else
 						{
-							i = 0;  /* default authorized */
-							if (instp->ndenylist)
-							{
-								for (x = 0; x < instp->ndenylist; x++)
-								{
-									if (!fnmatch(instp->denylist[x],call,FNM_CASEFOLD)) 
-									{
-										i = 1;
-										break;
-									}
-								}
-							}
-							else
-							{
-								/* if permit list specified, default is not to authorize */
-								if (instp->npermitlist) i = 1;
-							}
-							if (instp->npermitlist)
-							{
-								for (x = 0; x < instp->npermitlist; x++)
-								{
-									if (!fnmatch(instp->permitlist[x],call,FNM_CASEFOLD)) 
-									{
-										i = 0;
-										break;
-									}
-								}
-							}
-							if (!i) /* if authorized */
-							{
-								i = do_new_call(instp,NULL,call,name);
-								if (i < 0)
-								{
-									ast_mutex_unlock(&instp->lock);
-									mythread_exit(NULL);
-								}
-							}
-							if (i) /* if not authorized */
-							{
-								if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",
-									instp->el_node_test.ip);
-								x = rtcp_make_bye(bye,"UN-AUTHORIZED");
-								sin1.sin_family = AF_INET;
-								sin1.sin_addr.s_addr = inet_addr(instp->el_node_test.ip);
-								sin1.sin_port = htons(instp->ctrl_port);
-								for (i = 0; i < 20; i++)
-								{
-									sendto(instp->ctrl_sock, bye, x,
-										0,(struct sockaddr *)&sin1,sizeof(sin1));
-								}
-							}
-						        twalk(el_node_list, send_info); 
+							/* if permit list specified, default is not to authorize */
+							if (instp->npermitlist) i = 1;
 						}
+						if (instp->npermitlist)
+						{
+							for (x = 0; x < instp->npermitlist; x++)
+							{
+								if (!fnmatch(instp->permitlist[x],call,FNM_CASEFOLD)) 
+								{
+									i = 0;
+									break;
+								}
+							}
+						}
+						if (!i) /* if authorized */
+						{
+							i = do_new_call(instp,NULL,call,name);
+							if (i < 0)
+							{
+								ast_mutex_unlock(&instp->lock);
+								mythread_exit(NULL);
+							}
+						}
+						if (i) /* if not authorized */
+						{
+							if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",
+								instp->el_node_test.ip);
+							x = rtcp_make_bye(bye,"UN-AUTHORIZED");
+							sin1.sin_family = AF_INET;
+							sin1.sin_addr.s_addr = inet_addr(instp->el_node_test.ip);
+							sin1.sin_port = htons(instp->ctrl_port);
+							for (i = 0; i < 20; i++)
+							{
+								sendto(instp->ctrl_sock, bye, x,
+									0,(struct sockaddr *)&sin1,sizeof(sin1));
+							}
+						}
+					        twalk(el_node_list, send_info); 
 					}
 				}
 			    }
@@ -2801,5 +2808,5 @@ char *key()
 	return ASTERISK_GPL_KEY;
 }
 #else
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "echolink channel driver by KI4LKF");
+AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "echolink channel driver");
 #endif
