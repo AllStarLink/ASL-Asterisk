@@ -90,7 +90,7 @@ install_pciradio: llastate/id_file upgrade
 	-@mkdir .-p /etc/asterisk
 	-@cp configs/* /etc/asterisk
 	-@cp configs/pciradio/* /etc/asterisk
-	-@mv /etc/asterisk/zap.tel.conf /etc
+	-@mv /etc/asterisk/zaptel.conf /etc
 	-@touch /etc/init.d/pciradio
 	-@svcfg
 #
