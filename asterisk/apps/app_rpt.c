@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.193 7/05/2009 
+ *  version 0.194 7/21/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -3738,7 +3738,7 @@ char	digit;
 	}
 }
 
-static int setdtr(int fd, int enable)
+static int setdtr(struct rpt *myrpt,int fd, int enable)
 {
 struct termios mode;
 
@@ -3749,7 +3749,7 @@ struct termios mode;
 	}
 	if (enable)
 	{
-		cfsetspeed(&mode, /* B9600 */ B38400);
+		cfsetspeed(&mode, myrpt->p.iospeed);
 	}
 	else
 	{
@@ -3796,7 +3796,7 @@ static int openserial(struct rpt *myrpt,char *fname)
 	cfsetospeed(&mode, myrpt->p.iospeed);
 	if (tcsetattr(fd, TCSANOW, &mode)) 
 		ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", fname, strerror(errno));
-	if(!strcmp(myrpt->remoterig, remote_rig_kenwood)) setdtr(fd,0); 
+	if(!strcmp(myrpt->remoterig, remote_rig_kenwood)) setdtr(myrpt,fd,0); 
 	usleep(100000);
 	if (debug)ast_log(LOG_NOTICE,"Opened serial port %s\n",fname);
 	return(fd);	
@@ -7310,9 +7310,9 @@ struct zt_params par;
 		}
 		else if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
 		{
-			if (myrpt->iofd >= 0) setdtr(myrpt->iofd,1);
+			if (myrpt->iofd >= 0) setdtr(myrpt,myrpt->iofd,1);
 			res = setkenwood(myrpt);
-			if (myrpt->iofd >= 0) setdtr(myrpt->iofd,0);
+			if (myrpt->iofd >= 0) setdtr(myrpt,myrpt->iofd,0);
 			setxpmr(myrpt,0);
 			if (ast_safe_sleep(mychannel,200) == -1)
 			{
