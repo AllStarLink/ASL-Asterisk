@@ -1416,6 +1416,7 @@ struct zt_chan {
 	unsigned char getraw[ZT_MAX_CHUNKSIZE];		/* Last received raw data */
 	short	getlin_lastchunk[ZT_MAX_CHUNKSIZE];	/* Last transmitted samples from last chunk */
 	short	putlin[ZT_MAX_CHUNKSIZE];			/* Last received samples */
+	short	putlin_pseudo[ZT_MAX_CHUNKSIZE];		/* Last received samples -- pseudo channel */
 	unsigned char putraw[ZT_MAX_CHUNKSIZE];		/* Last received raw data */
 	short	conflast[ZT_MAX_CHUNKSIZE];			/* Last conference sample -- base part of channel */
 	short	conflast1[ZT_MAX_CHUNKSIZE];		/* Last conference sample  -- pseudo part of channel */

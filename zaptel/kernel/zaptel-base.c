@@ -1715,7 +1715,7 @@ static int zt_ppp_xmit(struct ppp_channel *ppp, struct sk_buff *skb)
 	int x,oldbuf;
 	unsigned int fcs;
 	unsigned char *data;
-	long flags;
+	unsigned long flags;
 	int retval = 0;
 
 	/* See if we have any buffers */
@@ -5635,16 +5635,21 @@ static inline void __zt_process_getaudio_chunk(struct zt_chan *ss, unsigned char
 					/* Store temp value */
 					memcpy(k, getlin, ZT_CHUNKSIZE * sizeof(short));
 					/* Add conf value */
-					ACSS(k, conf_sums[ms->_confn]);
+					ACSS(k, conf_sums_next[ms->_confn]);
+					/* save last one */
+					memcpy(ms->conflast2, ms->conflast1, ZT_CHUNKSIZE * sizeof(short));
+					memcpy(ms->conflast1, k, ZT_CHUNKSIZE * sizeof(short));
 					/*  get amount actually added */
-					memcpy(ms->conflast, k, ZT_CHUNKSIZE * sizeof(short));
-					SCSS(ms->conflast, conf_sums[ms->_confn]);
+					SCSS(ms->conflast1, conf_sums_next[ms->_confn]);
 					/* Really add in new value */
-					ACSS(conf_sums[ms->_confn], ms->conflast);
+					ACSS(conf_sums_next[ms->_confn], ms->conflast1);
+					/* add in stuff from pseudo-receive, too */
+					ACSS(getlin,ms->putlin_pseudo);
 					memcpy(ms->getlin, getlin, ZT_CHUNKSIZE * sizeof(short));
 				} else {
-					memset(ms->conflast, 0, ZT_CHUNKSIZE * sizeof(short));
-					memcpy(getlin, ms->getlin, ZT_CHUNKSIZE * sizeof(short));
+					memset(ms->conflast1, 0, ZT_CHUNKSIZE * sizeof(short));
+					memset(ms->conflast2, 0, ZT_CHUNKSIZE * sizeof(short));
+					memset(getlin, 0, ZT_CHUNKSIZE * sizeof(short));
 				}
 				txb[0] = ZT_LIN2X(0, ms);
 				memset(txb + 1, txb[0], ZT_CHUNKSIZE - 1);
@@ -6451,7 +6456,7 @@ static inline void __zt_process_putaudio_chunk(struct zt_chan *ss, unsigned char
 	} 
 	for (x=0;x<ZT_CHUNKSIZE;x++) {
 		rxb[x] = ms->rxgain[rxb[x]];
-		putlin[x] = ZT_XLAW(rxb[x], ms);
+		putlin[x] = ms->putlin_pseudo[x] = ZT_XLAW(rxb[x], ms);
 	}
 
 #ifndef NO_ECHOCAN_DISABLE
@@ -6624,9 +6629,20 @@ static inline void __zt_process_putaudio_chunk(struct zt_chan *ss, unsigned char
 		case ZT_CONF_CONF:	/* Normal conference mode */
 			if (ms->flags & ZT_FLAG_PSEUDO) /* if a pseudo-channel */
 			   {
+				if (ms->confmode & ZT_CONF_TALKER) {
+					/* Store temp value */
+					memcpy(k, putlin, ZT_CHUNKSIZE * sizeof(short));
+					/* Add conf value */
+					ACSS(k, conf_sums_next[ms->_confn]);
+					/*  get amount actually added */
+					memcpy(ms->conflast, k, ZT_CHUNKSIZE * sizeof(short));
+					SCSS(ms->conflast, conf_sums_next[ms->_confn]);
+					/* Really add in new value */
+					ACSS(conf_sums_next[ms->_confn], ms->conflast);
+				} else memset(ms->conflast, 0, ZT_CHUNKSIZE * sizeof(short));
 				if (ms->confmode & ZT_CONF_LISTENER) {
 					/* Subtract out last sample written to conf */
-					SCSS(putlin, ms->conflast);
+					SCSS(putlin, ms->conflast2);
 					/* Add in conference */
 					ACSS(putlin, conf_sums[ms->_confn]);
 				}
@@ -6700,7 +6716,7 @@ static inline void __putbuf_chunk(struct zt_chan *ss, unsigned char *rxb, int by
 	int oldbuf;
 	int eof=0;
 	int abort=0;
-	int res;
+	int res = 0;
 	int left, x;
 
 	while(bytes) {
