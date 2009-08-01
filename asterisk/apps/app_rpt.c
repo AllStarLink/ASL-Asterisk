@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.195 7/30/2009 
+ *  version 0.196 8/1/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -310,8 +310,8 @@
 #define	VOX_OFF_DEBOUNCE_COUNT 20
 #define	VOX_MAX_THRESHOLD 10000.0
 #define	VOX_MIN_THRESHOLD 3000.0
-#define	VOX_TIMEOUT_MS 5000
-#define	VOX_RECOVER_MS 500
+#define	VOX_TIMEOUT_MS 10000
+#define	VOX_RECOVER_MS 2000
 #define	SIMPLEX_PATCH_DELAY 25
 #define	SIMPLEX_PHONE_DELAY 25
 
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.195  7/30/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.196  8/1/2009";
 
 static char *app = "Rpt";
 
@@ -8263,12 +8263,7 @@ struct ast_channel *mychannel,*genchannel;
 #endif
 	ci.chan = 0;
 	ci.confno = myrpt->conf; /* use the pseudo conference */
-#if	1  /* this SHOULDNT have to be this way, something is wrong */
-	ci.confmode = ZT_CONF_REALANDPSEUDO | ZT_CONF_TALKER | ZT_CONF_LISTENER
-		| ZT_CONF_PSEUDO_TALKER | ZT_CONF_PSEUDO_LISTENER; 
-#else
 	ci.confmode = ZT_CONF_CONF | ZT_CONF_TALKER | ZT_CONF_LISTENER;
-#endif
 	/* first put the channel on the conference */
 	if (ioctl(mychannel->fds[0],ZT_SETCONF,&ci) == -1)
 	{
@@ -8291,8 +8286,7 @@ struct ast_channel *mychannel,*genchannel;
 #endif
 	ci.chan = 0;
 	ci.confno = myrpt->conf;
-	ci.confmode = ZT_CONF_REALANDPSEUDO | ZT_CONF_TALKER | ZT_CONF_LISTENER
-		| ZT_CONF_PSEUDO_TALKER | ZT_CONF_PSEUDO_LISTENER; 
+	ci.confmode = ZT_CONF_CONF | ZT_CONF_TALKER | ZT_CONF_LISTENER;
 	/* first put the channel on the conference */
 	if (ioctl(genchannel->fds[0],ZT_SETCONF,&ci) == -1)
 	{
