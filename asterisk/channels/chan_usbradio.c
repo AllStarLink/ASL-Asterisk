@@ -691,6 +691,15 @@ static const struct ast_channel_tech usbradio_tech = {
 	.setoption = usbradio_setoption,
 };
 
+/* lround for uClibc
+ *
+ * wrapper for lround(x)
+ */
+long lround(double x)
+{
+    return (long) ((x - ((long)x) >= 0.5f) ? (((long)x) + 1) : ((long)x));
+}
+
 /* Call with:  devnum: alsa major device number, param: ascii Formal
 Parameter Name, val1, first or only value, val2 second value, or 0 
 if only 1 value. Values: 0-99 (percent) or 0-1 for baboon.
