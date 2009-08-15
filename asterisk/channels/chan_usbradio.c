@@ -1245,6 +1245,8 @@ static void *hidthread(void *arg)
 		}
 		time(&o->lasthidtime);
 	}
+        o->pmrChan->txPttOut = 0;
+        o->lasttx = 0;
 	buf[o->hid_gpio_loc] = 0;
 	if (o->invertptt) buf[o->hid_gpio_loc] = o->hid_io_ptt;
 	buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
