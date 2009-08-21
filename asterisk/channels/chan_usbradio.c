@@ -145,6 +145,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 
 #define C108_VENDOR_ID		0x0d8c
 #define C108_PRODUCT_ID  	0x000c
+#define C119_PRODUCT_ID  	0x0008
 #define C108_HID_INTERFACE	3
 
 #define HID_REPORT_GET		0x01
@@ -528,8 +529,11 @@ struct chan_usbradio_pvt {
 	float	rxgain;
 	char 	rxcdtype;
 	char 	rxsdtype;
-	int		rxsquelchadj;   /* this copy needs to be here for initialization */
+	int	rxsquelchadj;   /* this copy needs to be here for initialization */
+	int	rxsqhyst;
 	int     rxsqvoxadj;
+	int	rxnoisefiltype;
+	int	rxsquelchdelay;
 	char	txtoctype;
 
 	char    txprelim;
@@ -909,8 +913,8 @@ static struct usb_device *hid_device_init(char *desired_device)
              dev = dev->next) {
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
-                (dev->descriptor.idProduct
-                  == C108_PRODUCT_ID))
+		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
 			for(i = 0; i < 32; i++)
@@ -980,8 +984,8 @@ static int hid_device_mklist(void)
              dev = dev->next) {
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
-                (dev->descriptor.idProduct
-                  == C108_PRODUCT_ID))
+		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
 			for(i = 0;i < 32; i++)
@@ -2368,6 +2372,24 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		return(f1);
 	    }
 	}
+        if ( o->pmrChan->b.txCtcssReady )
+        {
+                 struct ast_frame wf = { AST_FRAME_TEXT };
+                 char msg[32];
+                 memset(msg,0,32);
+
+                 sprintf(msg,"cstx=%s",o->pmrChan->txctcssfreq);
+                 if(o->debuglevel)
+		 {
+                         ast_log(LOG_NOTICE,
+                                 "dev=%s got b.txCtcssReady %s\n",
+	                          o->name,o->pmrChan->txctcssfreq);
+		 }
+                 o->pmrChan->b.txCtcssReady = 0;
+ 	         wf.data = msg;
+ 	         wf.datalen = strlen(msg) + 1;
+                 ast_queue_frame(o->owner, &wf);
+         }
 	return f;
 }
 
@@ -2420,7 +2442,7 @@ static int usbradio_indicate(struct ast_channel *c, int cond, const void *data, 
 		case AST_CONTROL_RADIO_KEY:
 			o->txkeyed = 1;
 			if(o->debuglevel)ast_verbose("chan_usbradio ACRK  dev=%s  code=%s TX ON \n",o->name,(char *)data);
-			if(datalen)
+			if(datalen && ((char *)(data))[0]!='0')
 			{
 			    o->b.forcetxcode=1;
 				memset(o->set_txctcssfreq,0,16);
@@ -2606,6 +2628,8 @@ static int radio_tune(int fd, int argc, char *argv[])
 	if (argc == 2) /* just show stuff */
 	{
 		ast_cli(fd,"Active radio interface is [%s]\n",usbradio_active);
+		ast_cli(fd,"Device String is %s\n",o->devstr);
+ 	  	ast_cli(fd,"Card is %i\n",usb_get_usbdev(o->devstr));
 		ast_cli(fd,"Output A is currently set to ");
 		if(o->txmixa==TX_OUT_COMPOSITE)ast_cli(fd,"composite.\n");
 		else if (o->txmixa==TX_OUT_VOICE)ast_cli(fd,"voice.\n");
@@ -2623,7 +2647,6 @@ static int radio_tune(int fd, int argc, char *argv[])
 		ast_cli(fd,"Tx Voice Level currently set to %d\n",o->txmixaset);
 		ast_cli(fd,"Tx Tone Level currently set to %d\n",o->txctcssadj);
 		ast_cli(fd,"Rx Squelch currently set to %d\n",o->rxsquelchadj);
-		ast_cli(fd,"Device String is %s\n",o->devstr);
 		return RESULT_SHOWUSAGE;
 	}
 
@@ -2904,7 +2927,8 @@ static int radio_active(int fd, int argc, char *argv[])
                 struct chan_usbradio_pvt *o;
                 if (strcmp(argv[2], "show") == 0) {
                         for (o = usbradio_default.next; o; o = o->next)
-                                ast_cli(fd, "device [%s] exists\n", o->name);
+                                ast_cli(fd, "device [%s] exists as device=%s card=%d\n", 
+					o->name,o->devstr,usb_get_usbdev(o->devstr));
                         return RESULT_SUCCESS;
                 }
                 o = find_desc(argv[2]);
@@ -3188,23 +3212,32 @@ static void tune_txoutput(struct chan_usbradio_pvt *o, int value, int fd)
 	o->txtestkey=0;
 }
 /*
+	Adjust Input Attenuator with maximum signal input
 */
 static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 {
-	const int target=23000;
-	const int tolerance=2000;
 	const int settingmin=1;
 	const int settingstart=2;
 	const int maxtries=12;
 
-	float settingmax;
-	
-	int setting=0, tries=0, tmpdiscfactor, meas;
-	int tunetype=0;
+	char success;
+	int target;
+	int tolerance=2750;
+	int setting=0, tries=0, tmpdiscfactor, meas, measnoise;
+	float settingmax,f;
+
+	if(o->rxdemod==RX_AUDIO_SPEAKER && o->rxcdtype==CD_XPMR_NOISE)
+	{
+		ast_cli(fd,"ERROR: usbradio.conf rxdemod=speaker vs. carrierfrom=dsp \n");	
+	}
+
+	if( o->rxdemod==RX_AUDIO_FLAT )
+		target=27000;
+	else
+		target=23000;
 
 	settingmax = o->micmax;
 
-	if(o->pmrChan->rxDemod)tunetype=1;
 	o->pmrChan->b.tuning=1;
 
 	setting = settingstart;
@@ -3215,39 +3248,31 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 	{
 		setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,setting,0);
 		setamixer(o->devicenum,MIXER_PARAM_MIC_BOOST,o->rxboostset,0);
-       
+
 		usleep(100000);
-		if(o->rxcdtype!=CD_XPMR_NOISE || o->rxdemod==RX_AUDIO_SPEAKER) 
-		{
-			// printf("Measure Direct Input\n");
-			o->pmrChan->spsMeasure->source = o->pmrChan->spsRx->source;
-			o->pmrChan->spsMeasure->discfactor=2000;
-			o->pmrChan->spsMeasure->enabled=1;
-			o->pmrChan->spsMeasure->amax = o->pmrChan->spsMeasure->amin = 0;
-			usleep(400000);	
-			meas=o->pmrChan->spsMeasure->apeak;
-			o->pmrChan->spsMeasure->enabled=0;	
-		}
-		else
-		{
-			// printf("Measure HF Noise\n");
-			tmpdiscfactor=o->pmrChan->spsRx->discfactor;
-			o->pmrChan->spsRx->discfactor=(i16)2000;
-			o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
-			o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
-			usleep(200000);
-			meas=o->pmrChan->rxRssi;
-			o->pmrChan->spsRx->discfactor=tmpdiscfactor;
-			o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
-			o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
-		}
-        if(!meas)meas++;
+
+		o->pmrChan->spsMeasure->source = o->pmrChan->spsRx->source;
+		o->pmrChan->spsMeasure->discfactor=2000;
+		o->pmrChan->spsMeasure->enabled=1;
+		o->pmrChan->spsMeasure->amax = o->pmrChan->spsMeasure->amin = 0;
+		usleep(400000);
+		meas=o->pmrChan->spsMeasure->apeak;
+		o->pmrChan->spsMeasure->enabled=0;
+
+		if(!meas)meas++;
 		ast_cli(fd,"tries=%i, setting=%i, meas=%i\n",tries,setting,meas);
 
-		if( meas<(target-tolerance) || meas>(target+tolerance) || tries<3){
-			setting=setting*target/meas;
+		if( (meas<(target-tolerance) || meas>(target+tolerance)) && tries<=2){
+			f=(float)(setting*target)/meas;
+			setting=(int)(f+0.5);
 		}
-		else if(tries>4 && meas>(target-tolerance) && meas<(target+tolerance) )
+		else if( meas<(target-tolerance) && tries>2){
+			setting++;
+		}
+		else if( meas>(target+tolerance) && tries>2){
+			setting--;
+		}
+		else if(tries>5 && meas>(target-tolerance) && meas<(target+tolerance) )
 		{
 			break;
 		}
@@ -3257,13 +3282,54 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 
 		tries++;
 	}
-	ast_cli(fd,"DONE tries=%i, setting=%i, meas=%i\n",tries,
-		(setting * 1000) / o->micmax,meas);
+
+
+	/* Measure HF Noise */
+	tmpdiscfactor=o->pmrChan->spsRx->discfactor;
+	o->pmrChan->spsRx->discfactor=(i16)2000;
+	o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
+	o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
+	usleep(200000);
+	measnoise=o->pmrChan->rxRssi;
+
+	/* Measure RSSI */
+	o->pmrChan->spsRx->discfactor=tmpdiscfactor;
+	o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
+	o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
+	usleep(200000);
+
+	ast_cli(fd,"DONE tries=%i, setting=%i, meas=%i, sqnoise=%i\n",tries,
+		(setting * 1000) / o->micmax,meas,measnoise);
+
 	if( meas<(target-tolerance) || meas>(target+tolerance) ){
+		success=0;
 		ast_cli(fd,"ERROR: RX INPUT ADJUST FAILED.\n");
 	}else{
-		ast_cli(fd,"INFO: RX INPUT ADJUST SUCCESS.\n");	
+		success=1;
+		ast_cli(fd,"INFO: RX INPUT ADJUST SUCCESS.\n");
 		o->rxmixerset=(setting * 1000) / o->micmax;
+
+		if(o->rxcdtype==CD_XPMR_NOISE)
+		{
+			int normRssi=((32767-o->pmrChan->rxRssi)*1000/32767);
+
+			if((meas/(measnoise/10))>26){
+				ast_cli(fd,"WARNING: Insufficient high frequency noise from receiver.\n");
+				ast_cli(fd,"WARNING: Rx input point may be de-emphasized and not flat.\n");
+				ast_cli(fd,"         usbradio.conf setting of 'carrierfrom=dsp' not recommended.\n");
+			}
+			else
+			{
+				ast_cli(fd,"Rx noise input seems sufficient for squelch.\n");	
+			}
+
+			if(o->rxsquelchadj<normRssi)
+			{
+				//o->rxsquelchadj=normRssi+55;
+				ast_cli(fd,"WARNING: RSSI=%i SQUELCH=%i and is set too loose.\n",normRssi,o->rxsquelchadj);
+				ast_cli(fd,"         Use 'radio tune rxsquelch' to adjust.\n");
+			}
+		}
 	}
 	o->pmrChan->b.tuning=0;
 }
@@ -3274,7 +3340,7 @@ static void tune_rxvoice(int fd, struct chan_usbradio_pvt *o)
 	const int target=7200;	 			// peak
 	const int tolerance=360;	   		// peak to peak
 	const float settingmin=0.1;
-	const float settingmax=4;
+	const float settingmax=5;
 	const float settingstart=1;
 	const int maxtries=12;
 
@@ -3282,7 +3348,7 @@ static void tune_rxvoice(int fd, struct chan_usbradio_pvt *o)
 
 	int tries=0, meas;
 
-	ast_cli(fd,"INFO: RX VOICE ADJUST START.\n");	
+	ast_cli(fd,"INFO: RX VOICE ADJUST START.\n");
 	ast_cli(fd,"target=%i tolerance=%i \n",target,tolerance);
 
 	o->pmrChan->b.tuning=1;
@@ -3295,7 +3361,7 @@ static void tune_rxvoice(int fd, struct chan_usbradio_pvt *o)
 	o->pmrChan->spsMeasure->source=o->pmrChan->spsRxOut->sink;
 	o->pmrChan->spsMeasure->enabled=1;
 	o->pmrChan->spsMeasure->discfactor=1000;
-	
+
 	setting=settingstart;
 
 	// ast_cli(fd,"ERROR: NO MEASURE BLOCK.\n");
@@ -3345,9 +3411,10 @@ static void tune_rxctcss(int fd, struct chan_usbradio_pvt *o)
 	const int maxtries=12;
 
 	float setting;
-	int tries=0, meas;
+	char  success;
+	int tries=0,meas;
 
-	ast_cli(fd,"INFO: RX CTCSS ADJUST START.\n");	
+	ast_cli(fd,"INFO: RX CTCSS ADJUST START.\n");
 	ast_cli(fd,"target=%i tolerance=%i \n",target,tolerance);
 
 	o->pmrChan->b.tuning=1;
@@ -3379,12 +3446,27 @@ static void tune_rxctcss(int fd, struct chan_usbradio_pvt *o)
 		tries++;
 	}
 	o->pmrChan->spsMeasure->enabled=0;
-	ast_cli(fd,"DONE tries=%i, setting=%f, meas=%f\n",tries,setting,(float)meas);
+	ast_cli(fd,"DONE tries=%i, setting=%f, meas=%.2f\n",tries,setting,(float)meas);
 	if( meas<(target-tolerance) || meas>(target+tolerance) ){
+		success=0;
 		ast_cli(fd,"ERROR: RX CTCSS GAIN ADJUST FAILED.\n");
 	}else{
+	    success=1;
 		ast_cli(fd,"INFO: RX CTCSS GAIN ADJUST SUCCESS.\n");
 		o->rxctcssadj=setting;
+	}
+
+	if(o->rxcdtype==CD_XPMR_NOISE){
+		int normRssi;
+
+		usleep(200000);
+		normRssi=((32767-o->pmrChan->rxRssi)*1000/32767);
+
+		if(o->rxsquelchadj>normRssi)
+			ast_cli(fd,"WARNING: RSSI=%i SQUELCH=%i and is too tight. Use 'radio tune rxsquelch'.\n",normRssi,o->rxsquelchadj);
+		else
+			ast_cli(fd,"INFO: RX RSSI=%i\n",normRssi);
+
 	}
 	o->pmrChan->b.tuning=0;
 }
@@ -3794,7 +3876,10 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_F("txmixb",store_txmixb(o,(char *)v->value))
 			M_F("carrierfrom",store_rxcdtype(o,(char *)v->value))
 			M_F("ctcssfrom",store_rxsdtype(o,(char *)v->value))
-		    M_UINT("rxsqvox",o->rxsqvoxadj)
+		        M_UINT("rxsqvox",o->rxsqvoxadj)
+		        M_UINT("rxsqhyst",o->rxsqhyst)
+		        M_UINT("rxnoisefiltype",o->rxnoisefiltype)
+		        M_UINT("rxsquelchdelay",o->rxsquelchdelay)
 			M_STR("txctcssdefault",o->txctcssdefault)
 			M_STR("rxctcssfreqs",o->rxctcssfreqs)
 			M_STR("txctcssfreqs",o->txctcssfreqs)
@@ -3846,7 +3931,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 	o->rxvoiceadj = 0.5;
 	o->rxctcssadj = 0.5;
 	o->txctcssadj = 200;
-	o->rxsquelchadj = 500;
+	o->rxsquelchadj = 725;
 	o->devstr[0] = 0;
 	if (cfg1) {
 		for (v = ast_variable_browse(cfg1, o->name); v; v = v->next) {
@@ -3890,7 +3975,15 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
           ast_dsp_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
 	}
+        if(o->rxsqhyst==0)
+		o->rxsqhyst=3000;
 
+        if(o->rxsquelchdelay>RXSQDELAYBUFSIZE/8-1)
+	{
+	        ast_log(LOG_WARNING,"rxsquelchdelay of %i is > maximum of %i. Set to maximum.\n",
+			o->rxsquelchdelay,RXSQDELAYBUFSIZE/8-1);
+		o->rxsquelchdelay=RXSQDELAYBUFSIZE/8-1;
+        }
 	if(o->pmrChan==NULL)
 	{
 		t_pmr_chan tChan;
@@ -3904,7 +3997,9 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 
 		tChan.rxDemod=o->rxdemod;
 		tChan.rxCdType=o->rxcdtype;
+		tChan.rxCarrierHyst=o->rxsqhyst;
 		tChan.rxSqVoxAdj=o->rxsqvoxadj;
+		tChan.rxSquelchDelay=o->rxsquelchdelay;
 
 		if (o->txprelim) 
 			tChan.txMod = 2;
