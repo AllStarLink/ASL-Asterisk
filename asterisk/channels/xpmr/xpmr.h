@@ -34,20 +34,21 @@
  */
 
 #ifndef  XPMR_H
-#define  XPMR_H				1
+#define  XPMR_H					1
 
-#define  XPMR_DEV   		0 			// when running in test mode
+#define  XPMR_DEV   			0 			// when running in test mode
 
-#define  XPMR_TRACE_OVFLW   0
+#define  XPMR_TRACE_OVFLW   	0
+#define  XPMR_TRACE_FRONTEND	0
 
-#define  XPMR_TRACE_LEVEL	0
+#define  XPMR_TRACE_LEVEL		0
 
 #ifdef	 RADIO_RTX
-#define	 DTX_PROG			1			// rf transceiver module
-#define  XPMR_PPTP			0 			// parallel port test probe
+#define	 DTX_PROG				1			// rf transceiver module
+#define  XPMR_PPTP				0 			// parallel port test probe
 #else
-#define	 DTX_PROG			0
-#define  XPMR_PPTP			0 			
+#define	 DTX_PROG				0
+#define  XPMR_PPTP				0 			
 #endif
 
 #if (DTX_PROG == 1) || 	XPMR_PPTP == 1
@@ -154,6 +155,8 @@
 #define SAMPLES_PER_BLOCK       160
 #define MS_PER_FRAME            20
 #define SAMPLES_PER_MS          8
+
+#define RXSQDELAYBUFSIZE		4096
 
 #define CTCSS_NULL              -1
 #define CTCSS_RXONLY            -2
@@ -444,9 +447,7 @@ typedef struct t_pmr_sps
 
 	i16  enabled;		// enabled/disabled
 
-
-	struct t_pmr_chan *parentChan;
-	
+	struct t_pmr_chan *parentChan;	
 	i16  *source;		// source buffer
 	i16  *sourceB;		// source buffer B
 	i16  *sink;			// sink buffer
@@ -486,6 +487,7 @@ typedef struct t_pmr_sps
 	i16  setpt;			// amplitude set point for amplitude comparator
 	i16  hyst;			// hysterysis for amplitude comparator
 	i16  compOut;		// amplitude comparator output
+	i16  blanking;      // blanking timer in frames
 
 	i32  discounteru;	// amplitude detector integrator discharge counter upper
 	i32  discounterl;	// amplitude detector integrator discharge counter lower
@@ -516,6 +518,7 @@ typedef struct t_pmr_sps
 		unsigned outzero:1;
 		unsigned settling:1;
 		unsigned syncing:1;
+		unsigned dirty:1;
 	}b;
 
 	i16  cleared;		// output buffer cleared
@@ -540,8 +543,11 @@ typedef struct t_pmr_sps
 	i16  size_coef;		// size of each coefficient
 	void  *x;			// history registers
 	void  *x2;			// history registers, 2nd bank 
-	void  *coef;		// coefficients
-	void  *coef2;		// coefficients 2
+	void  *coef;
+
+	void  *y;			// history registers, y bank 
+ 	void  *coefa;
+	void  *coefb;
 
 	void  *nextSps;		// next Sps function
 
@@ -620,7 +626,7 @@ typedef struct	t_pmr_chan
 	i16 rxCenterSlicerEnable;
 	i16 rxCtcssDecodeEnable;
 	i16 rxDcsDecodeEnable;
-	i16 rxDelayLineEnable;
+	i16 rxSquelchDelay;
 
 	i16 txHpfEnable;
 	i16 txLimiterEnable;
@@ -628,6 +634,7 @@ typedef struct	t_pmr_chan
 	i16 txLpfEnable;
 
 	char radioDuplex;
+	char rxNoiseFilType;
 
 	char    *pStr;
 
@@ -662,7 +669,7 @@ typedef struct	t_pmr_chan
 	i16		txctcssdefault_index;
 	float 	txctcssdefault_value;
 
-	char	txctcssfreq[32];				// encode now
+	char	txctcssfreq[32];				// encode now for upper layers
 	char    rxctcssfreq[32];				// decode now
 	// 		end most of signaling code info derived from source
 
@@ -759,6 +766,7 @@ typedef struct	t_pmr_chan
 	t_pmr_sps *spsRxHpf;
 	t_pmr_sps *spsRxVox;
 	t_pmr_sps *spsDelayLine;	// Last signal processing struct
+	t_pmr_sps *spsRxSquelchDelay;
 	t_pmr_sps *spsRxOut;		// Last signal processing struct
 
 	t_pmr_sps *spsTx;			// 1st  signal processing struct
@@ -833,6 +841,7 @@ typedef struct	t_pmr_chan
 		unsigned ax25Enable:1;
 
 		unsigned txCtcssInhibit:1;
+		unsigned txCtcssReady:1;
 
 		unsigned rxkeyed:1;
 		unsigned rxhalted:1;
