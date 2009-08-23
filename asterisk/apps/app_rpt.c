@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.197 8/13/2009 
+ *  version 0.198 8/22/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -456,7 +456,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.197  8/13/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.198  8/22/2009";
 
 static char *app = "Rpt";
 
@@ -16722,6 +16722,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 						for(x1 = 0; x1 < f->datalen / 2; x1++)
 						{
 							fsamp = (float) sp[x1] * fac;
+							if (fsamp > 32765.0) fsamp = 32765.0;
+							if (fsamp < -32765.0) fsamp = -32765.0;
 							sp[x1] = (int) fsamp;
 						}
 					}
@@ -17038,6 +17040,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 						for(x1 = 0; x1 < f->datalen / 2; x1++)
 						{
 							fsamp = (float) sp[x1] * fac;
+							if (fsamp > 32765.0) fsamp = 32765.0;
+							if (fsamp < -32765.0) fsamp = -32765.0;
 							sp[x1] = (int) fsamp;
 						}
 					}
@@ -17096,6 +17100,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					for(x1 = 0; x1 < fs->datalen / 2; x1++)
 					{
 						fsamp = (float) sp[x1] * fac;
+						if (fsamp > 32765.0) fsamp = 32765.0;
+						if (fsamp < -32765.0) fsamp = -32765.0;
 						sp[x1] = (int) fsamp;
 					}
 				}
