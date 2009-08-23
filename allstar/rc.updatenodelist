@@ -1,7 +1,7 @@
 #! /bin/sh
 
 TOPDOMAIN=allstarlink.org
-SUBDOMAINS="nodes1"
+SUBDOMAINS="nodes1 nodes2"
 FILEPATH=/var/lib/asterisk
 WGET=`which wget` 
 
