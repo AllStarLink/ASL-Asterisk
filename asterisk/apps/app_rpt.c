@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.200 8/27/2009 
+ *  version 0.201 8/29/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -318,6 +318,8 @@
 #define	RX_LINGER_TIME 50
 #define	RX_LINGER_TIME_IAXKEY 150
 
+#define	REQUIRED_ZAPTEL_VERSION 'A'
+
 #define	STATPOST_PROGRAM "/usr/bin/wget,-q,--output-document=/dev/null,--no-check-certificate"
 
 #define	ALLOW_LOCAL_CHANNELS
@@ -457,7 +459,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.200  8/27/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.201  8/29/2009";
 
 static char *app = "Rpt";
 
@@ -19661,7 +19663,30 @@ int load_module()
 static int load_module(void)
 #endif
 {
-	int res;
+	int res,fd;
+	struct zt_versioninfo zv;
+	char *cp;
+
+	fd = open("/dev/zap/ctl",O_RDWR);
+	if (fd == -1)
+	{
+		ast_log(LOG_ERROR,"Cannot open Zap device for probe\n");
+		return -1;
+	}
+	if (ioctl(fd,ZT_GETVERSION,&zv) == -1)
+	{
+		ast_log(LOG_ERROR,"Cannot get ZAPTEL version info\n");
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	cp = strstr(zv.version,"RPT_");
+	if ((!cp) || (*(cp + 4) < REQUIRED_ZAPTEL_VERSION))
+	{
+		ast_log(LOG_ERROR,"Zaptel version %s must at least level RPT_%c to operate\n",
+			zv.version,REQUIRED_ZAPTEL_VERSION);
+		return -1;
+	}
 	ast_pthread_create(&rpt_master_thread,NULL,rpt_master,NULL);
 
 #ifdef	NEW_ASTERISK
