@@ -145,6 +145,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 
 #define C108_VENDOR_ID		0x0d8c
 #define C108_PRODUCT_ID  	0x000c
+#define C108AH_PRODUCT_ID  	0x013c
 #define C119_PRODUCT_ID  	0x0008
 #define C108_HID_INTERFACE	3
 
@@ -422,6 +423,7 @@ struct chan_usbradio_pvt {
 	int nosound;				/* set to block audio from the PBX */
 #endif
 
+	int devtype;				/* actual type of device */
 	int pttkick[2];
 	int total_blocks;			/* total blocks in the output device */
 	int sounddev;
@@ -717,6 +719,18 @@ long lround(double x)
     return (long) ((x - ((long)x) >= 0.5f) ? (((long)x) + 1) : ((long)x));
 }
 
+static int make_spkr_playback_value(struct chan_usbradio_pvt *o,int val)
+{
+int	v,rv;
+
+	v = (val * o->spkrmax) / 1000;
+	/* if just the old one, do it the old way */
+	if (o->devtype != C108AH_PRODUCT_ID) return v;
+	rv = (o->spkrmax + lround(20.0 * log10((float)(v + 1) / (float)(o->spkrmax + 1)) / 0.25));
+	if (rv < 0) rv = 0;
+	return rv;	
+}
+
 /* Call with:  devnum: alsa major device number, param: ascii Formal
 Parameter Name, val1, first or only value, val2 second value, or 0 
 if only 1 value. Values: 0-99 (percent) or 0-1 for baboon.
@@ -914,6 +928,7 @@ static struct usb_device *hid_device_init(char *desired_device)
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -985,6 +1000,7 @@ static int hid_device_mklist(void)
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -1287,6 +1303,7 @@ static void *hidthread(void *arg)
 		    ast_log(LOG_ERROR,"Not able to create pipe\n");
 			pthread_exit(NULL);
 		}
+		o->devtype = usb_dev->descriptor.idProduct;
 		traceusb1(("hidthread: Starting normally on %s!!\n",o->name));
 		lastrx = 0;
                 if (option_verbose > 1)
@@ -2101,6 +2118,18 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
                 return f;
         }
         if (o->readerrs) ast_log(LOG_WARNING,"Nope, USB read channel [%s] wasn't stuck after all.\n",o->name);
+	if (o->devtype == C108AH_PRODUCT_ID)
+	{
+		short *sp = (short *)  (o->usbradio_read_buf + o->readpos);
+ 		float v;
+		int i;
+		
+		for(i = 0; i < res / 2; i++)
+		{
+			v = ((float)*sp) * 0.800;
+			*sp++ = (int) v;
+		}
+	}
 	o->readerrs = 0;
 	o->readpos += res;
 	if (o->readpos < sizeof(o->usbradio_read_buf))	/* not enough samples */
@@ -2161,6 +2190,20 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		{	
 			/* enough to fill a frame */
 			memcpy(o->usbradio_write_buf + o->usbradio_write_dst, o->usbradio_write_buf_1 + src, l);
+			if (o->devtype == C108AH_PRODUCT_ID)
+			{
+				short *sp = (short *)  o->usbradio_write_buf;
+				float v;
+				int i;
+		
+				for(i = 0; i < l / 2; i++)
+				{
+					v = ((float)*sp) * 1.10;
+					if (v > 32765.0) v = 32765.0;
+					if (v < -32765.0) v = -32765.0;
+					*sp++ = (int) v;
+				}
+			}
 			soundcard_writeframe(o, (short *) o->usbradio_write_buf);
 			src += l;
 			o->usbradio_write_dst = 0;
@@ -2352,7 +2395,6 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 			p[i] = x;
 		}
 	}
-
 	if (!o->rxkeyed) memset(f->data,0,f->datalen);
 	f->offset = AST_FRIENDLY_OFFSET;
 	if (o->usedtmf && o->dsp)
@@ -3522,8 +3564,8 @@ static void mixer_write(struct chan_usbradio_pvt *o)
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
 	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
 	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL,
-		o->txmixaset * o->spkrmax / 1000,
-		o->txmixbset * o->spkrmax / 1000);
+		make_spkr_playback_value(o,o->txmixaset),
+		make_spkr_playback_value(o,o->txmixbset));
 	setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,
 		o->rxmixerset * o->micmax / 1000,0);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_BOOST,o->rxboostset,0);
