@@ -263,7 +263,19 @@ static void *test_thread_body(void *data)
 } 
 
 int test_for_thread_safety(void)
-{ 
+{
+
+/*
+          main/asterisk.c, include/asterisk/utils.h, main/utils.c: Remove
+          the test_for_thread_safety() function completely. The test is not
+          valid. Besides, if we actually suspected that recursive mutexes
+          were not working, we would get a ton of LOG_ERROR messages when
+          DEBUG_THREADS is turned on. (inspired by a discussion on the
+          asterisk-dev list)
+*/
+
+ 	return 0; /* Gah! */
+/*
 	ast_mutex_lock(&test_lock2);
 	ast_mutex_lock(&test_lock);
 	lock_count += 1;
@@ -287,7 +299,8 @@ int test_for_thread_safety(void)
 	if (lock_count != 0) 
 		test_errors++;
 	pthread_join(test_thread, NULL);
-	return(test_errors);          /* return 0 on success. */
+	return(test_errors);
+*/
 }
 
 /*! \brief Produce 32 char MD5 hash of value. */
