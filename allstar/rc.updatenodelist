@@ -30,7 +30,7 @@ do
       if [ $res -eq 0 ]
       then
 #	echo "garbage" >/tmp/rpt_extnodes-temp
-	$GREP extnodes /tmp/rpt_extnodes-temp
+	$GREP -q extnodes /tmp/rpt_extnodes-temp
 	if [ $? -eq 0 ]
 	then
 		downloads=$((downloads+1))
