@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.205 10/11/2009 
+ *  version 0.206 10/11/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -470,7 +470,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.205  10/11/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.206  10/11/2009";
 
 static char *app = "Rpt";
 
@@ -10217,16 +10217,20 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                         return DC_COMPLETE;
 
 		case 53: /* Wake up from Sleep Mode */
-			rpt_telem_select(myrpt,command_source,mylink);
-                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "AWAKE");
 			myrpt->sleep = myrpt->sleepreq = 0;
 			myrpt->sleeptimer=myrpt->p.sleeptime;
+			if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){
+				rpt_telem_select(myrpt,command_source,mylink);
+                        	rpt_telemetry(myrpt, ARB_ALPHA, (void *) "AWAKE");
+			}
 			return DC_COMPLETE;
 		case 54: /* Go to sleep */
-			rpt_telem_select(myrpt,command_source,mylink);
-                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SLEEP");
-			myrpt->sleepreq = 1;
-			myrpt->sleeptimer = 0;
+			if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){
+				rpt_telem_select(myrpt,command_source,mylink);
+                        	rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SLEEP");
+				myrpt->sleepreq = 1;
+				myrpt->sleeptimer = 0;
+			}
 			return DC_COMPLETE;
 
 
@@ -15728,7 +15732,6 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		/* @@@@@@@ LOCK @@@@@@@ */
 		rpt_mutex_lock(&myrpt->lock);
 
-		/* Set local tx with keyed */
 		/* If someone's connected, and they're transmitting from their end to us, set remrx true */
 		l = myrpt->links.next;
 		myrpt->remrx = 0;
@@ -15755,7 +15758,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			}
 		
 			if(myrpt->sleep)
-				myrpt->localtx=0; /* No RX if asleep */
+				myrpt->localtx = 0; /* No RX if asleep */
 			else
 				myrpt->localtx = myrpt->keyed; /* Set localtx to keyed state if awake */
 		}
@@ -16851,18 +16854,21 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				/* if RX un-key */
 				if (f->subclass == AST_CONTROL_RADIO_UNKEY)
 				{
+					char asleep = myrpt->p.s[myrpt->p.sysstate_cur].sleepena & myrpt->sleep;
+
 					if ((!lasttx) || (myrpt->p.duplex > 1) || (myrpt->p.linktolink))
 					{
 						if (debug >= 6)
 							ast_log(LOG_NOTICE,"**** rx un-key\n");
-						if((!myrpt->sleep) && myrpt->p.duplex && myrpt->keyed) {
+		
+						if((!asleep) && myrpt->p.duplex && myrpt->keyed) {
 							rpt_telemetry(myrpt,UNKEY,NULL);
 						}
 					}
 					send_link_pl(myrpt,"0");
 					myrpt->reallykeyed = 0;
 					myrpt->keyed = 0;
-					if ((myrpt->p.duplex > 1) && (!myrpt->sleep) && myrpt->localoverride)
+					if ((myrpt->p.duplex > 1) && (!asleep) && myrpt->localoverride)
 					{
 						rpt_telemetry(myrpt,LOCUNKEY,NULL);
 					}
