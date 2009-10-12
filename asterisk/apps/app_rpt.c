@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.204 9/29/2009 
+ *  version 0.205 10/11/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -110,6 +110,11 @@
  *  48 - Send Page Tone (Tone specs separated by parenthesis)
  *  49 - Disable incoming connections (control state noice)
  *  50 - Enable incoming connections (control state noicd)
+ *  51 - Enable sleep mode
+ *  52 - Disable sleep mode
+ *  53 - Wake up from sleep
+ *  54 - Go to sleep
+ *
  *
  * ilink cmds:
  *
@@ -465,7 +470,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.204  9/29/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.205  10/11/2009";
 
 static char *app = "Rpt";
 
@@ -590,6 +595,7 @@ LOCAL_USER_DECL;
 
 #define	MSWAIT 20
 #define	HANGTIME 5000
+#define SLEEPTIME 900		/* default # of seconds for of no activity before entering sleep mode */
 #define	TOTIME 180000
 #define	IDTIME 300000
 #define	MAXRPTS 20
@@ -813,6 +819,7 @@ struct sysstate
 	char userfundisable;
 	char alternatetail;
 	char noincomingconns;
+	char sleepena;
 };
 
 /* rpt cmd support */
@@ -903,6 +910,7 @@ static struct rpt
 		int idtime;
 		int tailmessagetime;
 		int tailsquashedtime;
+		int sleeptime;
 		int lnkacttime;
 		int duplex;
 		int politeid;
@@ -1081,6 +1089,9 @@ static struct rpt
 	char ready;
 	char lastrxburst;
 	char reallykeyed;
+	char sleepreq;
+	char sleep;
+	int  sleeptimer;
 	tone_detect_state_t burst_tone_state;
 #ifdef OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -4654,7 +4665,7 @@ struct ast_config *cfg;
 char *strs[100];
 char s1[256];
 static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis","totena","totdis","skena","skdis",
-				"ufena","ufdis","atena","atdis","noice","noicd",NULL};
+				"ufena","ufdis","atena","atdis","noice","noicd","slpen","slpds",NULL};
 
 	if (option_verbose > 2)
 		ast_verbose(VERBOSE_PREFIX_3 "%s config for repeater %s\n",
@@ -4966,6 +4977,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		if (i > 1) strncpy(rpt_vars[n].p.outxlat.endcharseq,strs[1],MAXXLAT - 1);
 		if (i > 2) strncpy(rpt_vars[n].p.outxlat.passchars,strs[2],MAXXLAT - 1);
 	}
+	val = (char *) ast_variable_retrieve(cfg,this,"sleeptime");
+	if (val) rpt_vars[n].p.sleeptime = atoi(val);
+	else rpt_vars[n].p.sleeptime = SLEEPTIME;
 	/* retreive the stanza name for the control states if there is one */
 	val = (char *) ast_variable_retrieve(cfg,this,"controlstates");
 	rpt_vars[n].p.csstanzaname = val;
@@ -5163,8 +5177,14 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 							rpt_vars[n].p.s[statenum].noincomingconns = 0;
 							break;
 
+						case 16: /* slpen */
+							rpt_vars[n].p.s[statenum].sleepena = 1;
+							break;
 
-			
+						case 17: /* slpds */
+							rpt_vars[n].p.s[statenum].sleepena = 0;
+							break;
+
 						default:
 							ast_log(LOG_WARNING,
 								"Unhandled control state keyword %s", cs_keywords[i]);
@@ -10181,6 +10201,36 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                         rpt_telemetry(myrpt, ARB_ALPHA, (void *) "NOICD");
                         return DC_COMPLETE;
 
+		case 51: /* Enable Sleep Mode */
+			myrpt->sleeptimer=myrpt->p.sleeptime;
+			myrpt->p.s[myrpt->p.sysstate_cur].sleepena = 1;
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SLPEN");
+                        return DC_COMPLETE;
+
+		case 52: /* Disable Sleep Mode */
+			myrpt->p.s[myrpt->p.sysstate_cur].sleepena = 0;
+			myrpt->sleep = myrpt->sleepreq = 0;
+			myrpt->sleeptimer=myrpt->p.sleeptime;
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SLPDS");
+                        return DC_COMPLETE;
+
+		case 53: /* Wake up from Sleep Mode */
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "AWAKE");
+			myrpt->sleep = myrpt->sleepreq = 0;
+			myrpt->sleeptimer=myrpt->p.sleeptime;
+			return DC_COMPLETE;
+		case 54: /* Go to sleep */
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, ARB_ALPHA, (void *) "SLEEP");
+			myrpt->sleepreq = 1;
+			myrpt->sleeptimer = 0;
+			return DC_COMPLETE;
+
+
+
 
 		
 	}	
@@ -10363,6 +10413,17 @@ struct	ast_frame wf;
 		}
 		/* if is from me, ignore */
 		if (!strcmp(src,myrpt->name)) return;
+
+		/*  If inbound telemetry from a remote node, wake up from sleep if sleep mode is enabled */
+		rpt_mutex_lock(&myrpt->lock); /* LOCK */
+		if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){
+			myrpt->sleeptimer = myrpt->p.sleeptime;
+			if(myrpt->sleep){
+				myrpt->sleep = 0;
+			}
+		}
+		rpt_mutex_unlock(&myrpt->lock); /* UNLOCK */
+
 		rpt_telemetry(myrpt,VARCMD,dest);
 		return;
 	}
@@ -14950,6 +15011,15 @@ static void do_scheduler(struct rpt *myrpt)
 	if(myrpt->lasttv.tv_sec == myrpt->curtv.tv_sec)
 		return;
 
+	/* Service the sleep timer */
+	if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){ /* If sleep mode enabled */
+		if(myrpt->sleeptimer)
+			myrpt->sleeptimer--;
+		else{
+			if(!myrpt->sleep)
+				myrpt->sleep = 1; /* ZZZZZZ */
+		}
+	}
 	/* Service activity timer */
 	if(myrpt->p.lnkactmacro && myrpt->p.lnkacttime && myrpt->p.lnkactenable && myrpt->linkactivityflag){
 		myrpt->linkactivitytimer++;
@@ -15580,6 +15650,14 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			ast_log(LOG_NOTICE,"myrpt->tailevent = %d\n",myrpt->tailevent);
 			ast_log(LOG_NOTICE,"myrpt->linkactivitytimer = %d\n",myrpt->linkactivitytimer);
 			ast_log(LOG_NOTICE,"myrpt->linkactivityflag = %d\n",(int) myrpt->linkactivityflag);
+			ast_log(LOG_NOTICE,"myrpt->p.s[myrpt->p.sysstate_cur].sleepena = %d\n",myrpt->p.s[myrpt->p.sysstate_cur].sleepena);
+			ast_log(LOG_NOTICE,"myrpt->sleeptimer = %d\n",(int) myrpt->sleeptimer);
+			ast_log(LOG_NOTICE,"myrpt->sleep = %d\n",(int) myrpt->sleep);
+			ast_log(LOG_NOTICE,"myrpt->sleepreq = %d\n",(int) myrpt->sleepreq);
+
+
+
+
 
 			zl = myrpt->links.next;
               		while(zl != &myrpt->links){
@@ -15651,7 +15729,6 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		rpt_mutex_lock(&myrpt->lock);
 
 		/* Set local tx with keyed */
-		myrpt->localtx = myrpt->keyed;
 		/* If someone's connected, and they're transmitting from their end to us, set remrx true */
 		l = myrpt->links.next;
 		myrpt->remrx = 0;
@@ -15664,11 +15741,34 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			}
 			l = l->next;
 		}
+		if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){ /* If sleep mode enabled */
+			if(myrpt->remrx){ /* signal coming from net wakes up system */
+				myrpt->sleeptimer=myrpt->p.sleeptime; /* reset sleep timer */
+				if(myrpt->sleep){ /* if asleep, then awake */
+					myrpt->sleep = 0;
+				}
+			}
+			else if(myrpt->keyed){ /* if signal on input */
+				if(!myrpt->sleep){ /* if not sleeping */
+					myrpt->sleeptimer=myrpt->p.sleeptime; /* reset sleep timer */
+				}
+			}
+		
+			if(myrpt->sleep)
+				myrpt->localtx=0; /* No RX if asleep */
+			else
+				myrpt->localtx = myrpt->keyed; /* Set localtx to keyed state if awake */
+		}
+		else{
+			myrpt->localtx = myrpt->keyed; /* If sleep disabled, just copy keyed state to localrx */
+		}
 		/* Create a "must_id" flag for the cleanup ID */		
 		if(myrpt->p.idtime) /* ID time must be non-zero */
 			myrpt->mustid |= (myrpt->idtimer) && (myrpt->keyed || myrpt->remrx) ;
 		/* Build a fresh totx from myrpt->keyed and autopatch activated */
 		/* If full duplex, add local tx to totx */
+
+
 		if (myrpt->p.duplex > 1) 
 		{
 			totx = myrpt->callmode;
@@ -15934,6 +16034,13 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			}
 			rpt_mutex_lock(&myrpt->lock);
 			donodelog(myrpt,"TXUNKEY,MAIN");
+			if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){
+				if(myrpt->sleepreq){
+					myrpt->sleeptimer = 0;
+					myrpt->sleepreq = 0;
+					myrpt->sleep = 1;
+				}
+			}
 		}
 		time(&t);
 		/* if DTMF timeout */
@@ -16748,14 +16855,14 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					{
 						if (debug >= 6)
 							ast_log(LOG_NOTICE,"**** rx un-key\n");
-						if(myrpt->p.duplex && myrpt->keyed) {
+						if((!myrpt->sleep) && myrpt->p.duplex && myrpt->keyed) {
 							rpt_telemetry(myrpt,UNKEY,NULL);
 						}
 					}
 					send_link_pl(myrpt,"0");
 					myrpt->reallykeyed = 0;
 					myrpt->keyed = 0;
-					if ((myrpt->p.duplex > 1) && myrpt->localoverride)
+					if ((myrpt->p.duplex > 1) && (!myrpt->sleep) && myrpt->localoverride)
 					{
 						rpt_telemetry(myrpt,LOCUNKEY,NULL);
 					}
