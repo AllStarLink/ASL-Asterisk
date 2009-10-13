@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.206 10/11/2009 
+ *  version 0.207 10/12/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -114,6 +114,7 @@
  *  52 - Disable sleep mode
  *  53 - Wake up from sleep
  *  54 - Go to sleep
+ *  55 - Parrot Once if parrot mode is disabled
  *
  *
  * ilink cmds:
@@ -470,7 +471,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.206  10/11/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.207  10/12/2009";
 
 static char *app = "Rpt";
 
@@ -1004,6 +1005,7 @@ static struct rpt
 	char bargechan;						// barge in channel
 	char macropatch;					// autopatch via tonemacro state
 	char parrotstate;
+	char parrotonce;
 	char linkactivityflag;
 	int  parrottimer;
 	unsigned int parrotcnt;
@@ -8068,6 +8070,7 @@ struct zt_params par;
 		unlink(mystr);			
 		imdone = 1;
 		myrpt->parrotstate = 0;
+		myrpt->parrotonce = 0;
 		break;
 
 	    case TIMEOUT:
@@ -9910,6 +9913,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			birdbath(myrpt);
 			if (myrpt->p.parrotmode < 2)
 			{
+				myrpt->parrotonce = 0;
 				myrpt->p.parrotmode = 1;
 				rpt_telem_select(myrpt,command_source,mylink);
 				rpt_telemetry(myrpt,COMPLETE,NULL);
@@ -10232,11 +10236,10 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				myrpt->sleeptimer = 0;
 			}
 			return DC_COMPLETE;
-
-
-
-
-		
+		case 55: /* Parrot Once if parrot mode is disabled */
+			if(!myrpt->p.parrotmode)
+				myrpt->parrotonce = 1;
+			return DC_COMPLETE;		
 	}	
 	return DC_INDETERMINATE;
 }
@@ -15658,9 +15661,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			ast_log(LOG_NOTICE,"myrpt->sleeptimer = %d\n",(int) myrpt->sleeptimer);
 			ast_log(LOG_NOTICE,"myrpt->sleep = %d\n",(int) myrpt->sleep);
 			ast_log(LOG_NOTICE,"myrpt->sleepreq = %d\n",(int) myrpt->sleepreq);
-
-
-
+			ast_log(LOG_NOTICE,"myrpt->p.parrotmode = %d\n",(int) myrpt->p.parrotmode);
+			ast_log(LOG_NOTICE,"myrpt->parrotonce = %d\n",(int) myrpt->parrotonce);
 
 
 			zl = myrpt->links.next;
@@ -16062,7 +16064,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		}	
 
 		if (myrpt->exttx && myrpt->parrotchannel && 
-			myrpt->p.parrotmode && (!myrpt->parrotstate))
+			(myrpt->p.parrotmode || myrpt->parrotonce) && (!myrpt->parrotstate))
 		{
 			char myfname[300];
 
@@ -16551,7 +16553,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			rpt_mutex_unlock(&myrpt->lock);
 			continue;
 		}
-		if (myrpt->p.parrotmode && (myrpt->parrotstate == 1) &&
+		if ((myrpt->p.parrotmode || myrpt->parrotonce) && (myrpt->parrotstate == 1) &&
 			(myrpt->parrottimer <= 0))
 		{
 
@@ -17580,7 +17582,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				if (debug) printf("@@@@ rpt:Hung Up\n");
 				break;
 			}
-			if (!myrpt->p.parrotmode)
+			if (!(myrpt->p.parrotmode || myrpt->parrotonce))
 			{
 				char myfname[300];
 
