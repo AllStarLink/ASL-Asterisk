@@ -1,5 +1,4 @@
 #! /bin/bash
-
 TOPDOMAIN=allstarlink.org
 SUBDOMAINS="nodes1 nodes2 nodes3 nodes4"
 FILEPATH=/var/lib/asterisk
@@ -11,6 +10,7 @@ CHMOD=`which chmod`
 GREP=`which grep`
 CAT=`which cat`
 DATE=`which date`
+RSYNC=`which rsync`
 
 # Diagnostics
 dry_run=0
@@ -29,7 +29,7 @@ do
       res=$?
       if [ $res -eq 0 ]
       then
-#	echo "garbage" >/tmp/rpt_extnodes-temp
+#	echo "rubbish" >/tmp/rpt_extnodes-temp
 	$GREP -q extnodes /tmp/rpt_extnodes-temp
 	if [ $? -eq 0 ]
 	then
@@ -52,6 +52,8 @@ do
 		then
 			downloads=0
 			sleep 600
+			# use rsync to update the connect messages
+                        $RSYNC -av rsync://allstarlink.org/connect-messages /var/lib/asterisk/sounds/rpt/nodenames  
 			break; # Don't dwell on one server, Look for a new server
 		fi
 		if [ $dry_run -eq 0 ]
