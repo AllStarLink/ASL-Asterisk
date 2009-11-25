@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.207 10/12/2009 
+ *  version 0.208 11/24/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -471,7 +471,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.207  10/12/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.208  11/24/2009";
 
 static char *app = "Rpt";
 
@@ -3714,6 +3714,37 @@ static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 	    strncasecmp(mylink->chan->name,"echolink",8) &&
 		strncasecmp(mylink->chan->name,"irlp",4)) return(0);
 	if ((myrpt->p.duplex < 2) && (myrpt->tele.next == &myrpt->tele)) return(0);
+	if (mylink->linkmode < 2) return(0);
+	if (mylink->linkmode == 0x7fffffff) return(1);
+	if (mylink->linkmode < 0x7ffffffe) return(1);
+	if (myrpt->telemmode > 1) return(1);
+	return(0);
+}
+
+static int altlink1(struct rpt *myrpt,struct rpt_link *mylink)
+{
+struct  rpt_tele *tlist;
+int	nonlocals;
+
+	if (!myrpt) return(0);
+	if (!mylink) return(0);
+	if (!mylink->chan) return(0);
+	nonlocals = 0;
+	tlist = myrpt->tele.next;
+        if (tlist != &myrpt->tele)
+        {
+                while(tlist != &myrpt->tele)
+		{
+                        if ((tlist->mode == PLAYBACK) || 
+				(tlist->mode == TEST_TONE)) nonlocals++;
+			tlist = tlist->next;
+		}
+	}
+	if ((!myrpt->p.duplex) || (!nonlocals)) return(0);
+	/* if doesnt qual as a foreign link */
+	if ((mylink->name[0] != '0') && (!mylink->phonemode) &&
+	    strncasecmp(mylink->chan->name,"echolink",8) &&
+		strncasecmp(mylink->chan->name,"irlp",4)) return(1);
 	if (mylink->linkmode < 2) return(0);
 	if (mylink->linkmode == 0x7fffffff) return(1);
 	if (mylink->linkmode < 0x7ffffffe) return(1);
@@ -17028,6 +17059,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			if ((who == l->chan) || (!l->lastlinktv.tv_sec) ||
 				(ast_tvdiff_ms(now,l->lastlinktv) >= 19))
 			{
+
 				l->lastlinktv = now;
 				remnomute = myrpt->localtx && 
 				    (!(myrpt->cmdnode[0] || 
@@ -17035,7 +17067,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				totx = (((l->isremote) ? (remnomute) : 
 					myrpt->localtx || myrpt->callmode) || remrx) && l->mode;
 				/* foop */
-				if ((!l->lastrx) && altlink(myrpt,l)) totx = myrpt->txkeyed;
+				if ((!l->lastrx) && (!altlink(myrpt,l))) totx = myrpt->txkeyed;
+				if (altlink1(myrpt,l)) totx = 1;
 				if (l->phonemode == 0 && l->chan && (l->lasttx != totx))
 				{
 					if (totx)
