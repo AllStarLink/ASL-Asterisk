@@ -2,7 +2,7 @@
 
 -include /etc/sysinfo #include if it exists, else use defaults
 
-ASTSRC_VERS:=1.0.9-test1
+ASTSRC_VERS:=1.0.9-test2
 KVERS?=$(shell uname -r)
 PROCESSOR?=i586
 
@@ -13,6 +13,11 @@ PROCESSOR?=i586
 	umount /mnt/cf
 	rm -f /usr/include/linux
 	ln -s /lib/modules/$(KVERS)/build/include/linux /usr/include/linux 
+
+
+llastate:
+	-@mkdir -p llastate
+	
 	
 llastate/zaptel-built: /usr/include/linux	
 	(cd zaptel; ./configure --build=$(PROCESSOR)-pc-linux)
@@ -70,7 +75,7 @@ help:
 # Upgrade Asterisk Zaptel, and LIBPRI only, do not install configs!
 #
 
-upgrade:	/usr/include/linux llastate/zaptel-installed llastate/libpri-installed llastate/asterisk-installed llastate/rpt-sounds-installed
+upgrade:	llastate /usr/include/linux llastate/zaptel-installed llastate/libpri-installed llastate/asterisk-installed llastate/rpt-sounds-installed
 	-rm llastate/asterisk-installed
 	-umount /mnt/cf
 	svastbin
@@ -80,7 +85,7 @@ upgrade:	/usr/include/linux llastate/zaptel-installed llastate/libpri-installed 
 #
 # Asterisk test build without install
 #
-ast-build-only: llastate/zaptel-installed llastate/libpri-installed llastate/asterisk-configured
+ast-build-only: llastate llastate/zaptel-installed llastate/libpri-installed llastate/asterisk-configured
 	$(MAKE)  menuco.nfig
 	$(MAKE) -C asterisk DEBUG=
 #
@@ -130,11 +135,7 @@ install_wct1xxp: llastate/id_file upgrade
 # Remove all object files on the target
 #
 clean:	/usr/include/linux
-	-rm llastate/zaptel-installed \
-	llastate/asterisk-installed \
-	llastate/libpri-installed \
-	llastate/rpt-sounds-installed llastate/zaptel-built \
-        llastate/libpri-built llastate/asterisk-built llastate/id_file
+	-@rm -rf llastate
 	$(MAKE) -C libpri clean
 	$(MAKE) -C asterisk clean
 	(MAKELEVEL=0; $(MAKE) -C zaptel clean)
@@ -142,7 +143,7 @@ clean:	/usr/include/linux
 # Generate the release tarballs from the development host (not the target!)
 #
 release:
-	tar cvzf ../astsrc-vers-$(ASTSRC_VERS).tar.gz  --exclude='.svn' allstar asterisk libpri zaptel sounds configs extras llastate Makefile id.gsm README LICENSE 
+	tar cvzf ../astsrc-vers-$(ASTSRC_VERS).tar.gz  --exclude='.svn' allstar asterisk libpri zaptel sounds configs extras Makefile id.gsm README LICENSE 
 	-@rm ../files.tar.gz
 	(cd ..; ln -s astsrc-vers-$(ASTSRC_VERS).tar.gz files.tar.gz)
 	(cd ..; sha256sum files.tar.gz | cut -d ' ' -f 1 >files.tar.gz.sha256sum)
