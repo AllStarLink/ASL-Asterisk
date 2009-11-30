@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.209 11/29/2009 
+ *  version 0.210 11/29/2009 
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -471,7 +471,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.209  11/29/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.210  11/29/2009";
 
 static char *app = "Rpt";
 
@@ -697,6 +697,7 @@ struct rpt_link
 	char iaxkey;
 	int linkmode;
 	int newkeytimer;
+	char gott;
 #ifdef OLD_ASTERISK
         AST_LIST_HEAD(, ast_frame) rxq;
 #else
@@ -8339,6 +8340,11 @@ struct rpt_link *l;
 
 	switch(mode)
 	{
+	    case REMDISC:
+		mylink = (struct rpt_link *) data;
+		if ((!mylink) || (mylink->name[0] == '0')) return;
+		if ((!mylink->gott) && (!mylink->isremote)) return;
+		break;
 	    case VARCMD:
 		if (myrpt->telemmode < 2) return; 
 		break;
@@ -10451,6 +10457,9 @@ struct	ast_frame wf;
 		}
 		/* if is from me, ignore */
 		if (!strcmp(src,myrpt->name)) return;
+
+		/* set 'got T message' flag */
+		mylink->gott = 1;
 
 		/*  If inbound telemetry from a remote node, wake up from sleep if sleep mode is enabled */
 		rpt_mutex_lock(&myrpt->lock); /* LOCK */
@@ -18462,6 +18471,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		l->lastf1 = NULL;
 		l->lastf2 = NULL;
 		l->dtmfed = 0;
+		l->gott = 0;
 		l->rxlingertimer = ((l->iaxkey) ? RX_LINGER_TIME_IAXKEY : RX_LINGER_TIME);
 		l->newkeytimer = NEWKEYTIME;
 		l->newkey = 0;
