@@ -354,6 +354,7 @@ struct ast_dsp {
 	int digitmode;
 	int thinkdigit;
 	float genergy;
+	int began;
 	union {
 		dtmf_detect_state_t dtmf;
 		mf_detect_state_t mf;
@@ -1499,6 +1500,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 		return &dsp->f;
 	}
 	if ((dsp->features & DSP_FEATURE_DTMF_DETECT)) {
+
 		digit = __ast_dsp_digitdetect(dsp, shortdata, len, &writeback);
 #if 0
 		if (digit)
@@ -1530,6 +1532,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 						memset(&dsp->f, 0, sizeof(dsp->f));
 						dsp->f.frametype = AST_FRAME_DTMF_END;
 						dsp->f.subclass = dsp->thinkdigit;
+						dsp->began = 0;
 						FIX_INF(af);
 						if (chan)
 							ast_queue_frame(chan, af);
@@ -1537,11 +1540,16 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					} else {
 						dsp->thinkdigit = digit;
 						memset(&dsp->f, 0, sizeof(dsp->f));
-						dsp->f.frametype = AST_FRAME_DTMF_BEGIN;
-						dsp->f.subclass = dsp->thinkdigit;
+						if (!dsp->began)
+						{
+							dsp->f.frametype = AST_FRAME_DTMF_BEGIN;
+							dsp->f.subclass = dsp->thinkdigit;
+						} 
+						dsp->began = 1;
 						FIX_INF(af);
 						if (chan)
 							ast_queue_frame(chan, af);
+
 						ast_frfree(af);
 					}
 					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
@@ -1553,6 +1561,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 						dsp->f.frametype = AST_FRAME_DTMF_END;
 						dsp->f.subclass = dsp->thinkdigit;
 						dsp->thinkdigit = 0;
+						dsp->began = 0;
 					} else {
 						dsp->f.frametype = AST_FRAME_DTMF;
 						dsp->f.subclass = 'u';
@@ -1570,6 +1579,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 			/* Only check when there is *not* a hit... */
 			if (dsp->digitmode & DSP_DIGITMODE_MF) {
 				if (dsp->td.mf.current_digits) {
+					dsp->began = 0;
 					memset(&dsp->f, 0, sizeof(dsp->f));
 					dsp->f.frametype = AST_FRAME_DTMF;
 					dsp->f.subclass = dsp->td.mf.digits[0];
@@ -1584,6 +1594,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 				}
 			} else {
 				if (dsp->td.dtmf.current_digits) {
+					dsp->began = 0;
 					memset(&dsp->f, 0, sizeof(dsp->f));
 					dsp->f.frametype = AST_FRAME_DTMF_END;
 					dsp->f.subclass = dsp->td.dtmf.digits[0];
