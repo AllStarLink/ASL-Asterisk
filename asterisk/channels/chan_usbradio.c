@@ -625,6 +625,8 @@ struct chan_usbradio_pvt {
 	int readerrs;
 	char hasusb;
 	char usbass;
+	struct timeval tonetime;
+	int toneflag;
 };
 
 // maw add additional defaults !!!
@@ -2410,8 +2412,23 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 			return(f1);
 		}
 		if (f1->frametype == AST_FRAME_DTMF_END)
-			ast_log(LOG_NOTICE,"Got DTMF char %c\n",f1->subclass);
-		return(f1);
+		{
+			f1->len = ast_tvdiff_ms(ast_tvnow(),o->tonetime);
+			ast_log(LOG_NOTICE,"Got DTMF char %c duration %ld ms\n",f1->subclass,f1->len);
+			o->toneflag  = 0;
+		} else {
+			if (o->toneflag)
+			{
+				ast_frfree(f1);
+				f1 = NULL;
+			}
+			else
+			{
+				o->tonetime = ast_tvnow();
+				o->toneflag = 1;
+			}
+		}
+		if (f1) return(f1);
 	    }
 	}
         if ( o->pmrChan->b.txCtcssReady )
@@ -3957,6 +3974,13 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 	}
 
 	o->debuglevel=0;
+
+	if (o->rxsdtype != SD_XPMR)
+	{
+		o->rxctcssfreqs[0] = 0;
+		o->txctcssfreqs[0] = 0;
+		o->txctcssdefault[0] = 0;
+	}
 
 	if (o == &usbradio_default)		/* we are done with the default */
 		return NULL;
