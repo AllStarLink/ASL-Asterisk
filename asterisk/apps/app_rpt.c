@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.210 11/29/2009 
+ *  version 0.211 2/14/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -338,6 +338,9 @@
 
 #define EL_DB_ROOT "echolink"
 
+#define	DEFAULT_LITZ_TIME 3000
+#define	DEFAULT_LITZ_CHAR "0"
+
 /*
  * DAQ subsystem
  */
@@ -471,7 +474,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.210  11/29/2009";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.211  02/14/2010";
 
 static char *app = "Rpt";
 
@@ -980,6 +983,9 @@ static struct rpt
 		int rxburstfreq;
 		int rxbursttime;
 		int rxburstthreshold;
+		int litztime;
+		char *litzchar;
+		char *litzcmd;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1095,6 +1101,9 @@ static struct rpt
 	char sleepreq;
 	char sleep;
 	int  sleeptimer;
+#ifndef	OLD_ASTERISK
+	struct timeval lastdtmftime;
+#endif
 	tone_detect_state_t burst_tone_state;
 #ifdef OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1819,6 +1828,7 @@ static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int
 static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 /*
 * Function table
@@ -1835,7 +1845,8 @@ static struct function_table_tag function_table[] = {
 	{"playback", function_playback},
 	{"localplay", function_localplay},
 	{"meter", function_meter},
-	{"userout", function_userout}
+	{"userout", function_userout},
+	{"cmd", function_cmd}
 
 
 } ;
@@ -3584,6 +3595,33 @@ static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int 
 }
 
 
+/*
+*  Execute shell command
+*/
+
+static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+	char *cp;
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+		ast_log(LOG_NOTICE, "cmd param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	
+	if (param) {
+		cp = ast_malloc(strlen(param) + 10);
+		if (!cp)
+		{
+			ast_log(LOG_NOTICE,"Unable to alloc");
+			return DC_ERROR;
+		}
+		memset(cp,0,strlen(param) + 10);
+		sprintf(cp,"%s &",param);
+		ast_safe_system(cp);
+		free(cp);
+	}
+	return DC_COMPLETE;
+}
 
 
 /*
@@ -4925,6 +4963,14 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"rxburstthreshold");
 	if (val) rpt_vars[n].p.rxburstthreshold = atoi(val);
 	else rpt_vars[n].p.rxburstthreshold = DEFAULT_RXBURST_THRESHOLD;
+	val = (char *) ast_variable_retrieve(cfg,this,"litztime");
+	if (val) rpt_vars[n].p.litztime = atoi(val);
+	else rpt_vars[n].p.litztime = DEFAULT_LITZ_TIME;
+	val = (char *) ast_variable_retrieve(cfg,this,"litzchar");
+	if (!val) val = DEFAULT_LITZ_CHAR;
+	rpt_vars[n].p.litzchar = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"litzcmd");
+	rpt_vars[n].p.litzcmd = val;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -9222,7 +9268,6 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	rpt_mutex_unlock(&myrpt->lock);
 	return 0;
 }
-
 
 
 /*
@@ -16032,6 +16077,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			time_t myt;
 
 			if (myrpt->monstream) ast_closestream(myrpt->monstream);
+			myrpt->monstream = 0;
 			if (myrpt->p.archivedir)
 			{
 				long blocksleft;
@@ -16775,6 +16821,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					else
 						ast_write(myrpt->pchannel,f1);
 					ast_frfree(f1);
+					if (myrpt->monstream && (myrpt->p.duplex < 2))
+						ast_writestream(myrpt->monstream,f1);
 				}
 			}
 #ifndef	OLD_ASTERISK
@@ -16785,12 +16833,32 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				if (myrpt->lastf2)
 					memset(myrpt->lastf2->data,0,myrpt->lastf2->datalen);
 				dtmfed = 1;
+				myrpt->lastdtmftime = ast_tvnow();
 			}
 #endif
 			else if (f->frametype == AST_FRAME_DTMF)
 			{
 				c = (char) f->subclass; /* get DTMF char */
 				ast_frfree(f);
+#ifndef	OLD_ASTERISK
+				x = ast_tvdiff_ms(ast_tvnow(),myrpt->lastdtmftime);
+				if ((myrpt->p.litzcmd) && (x >= myrpt->p.litztime) &&
+					strchr(myrpt->p.litzchar,c))
+				{
+					ast_log(LOG_NOTICE,"Doing litz command %s on node %s\n",myrpt->p.litzcmd,myrpt->name);
+					rpt_mutex_lock(&myrpt->lock);
+					if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myrpt->p.litzcmd))
+					{
+						rpt_mutex_unlock(&myrpt->lock);
+						continue;
+					}
+					myrpt->macrotimer = MACROTIME;
+					strncat(myrpt->macrobuf,myrpt->p.litzcmd,MAXMACRO - 1);
+					rpt_mutex_unlock(&myrpt->lock);
+
+					continue;
+				}			
+#endif
 				if (myrpt->lastf1)
 					memset(myrpt->lastf1->data,0,myrpt->lastf1->datalen);
 				if (myrpt->lastf2)
@@ -16827,6 +16895,27 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					}
 					if (myrpt->p.archivedir)
 					{
+						if (myrpt->p.duplex < 2)
+						{
+							char myfname[100],mydate[100];
+							long blocksleft;
+							time_t myt;
+
+							time(&myt);
+							strftime(mydate,sizeof(mydate) - 1,"%Y%m%d%H%M%S",
+							localtime(&myt));
+							sprintf(myfname,"%s/%s/%s",myrpt->p.archivedir,
+								myrpt->name,mydate);
+							if (myrpt->p.monminblocks)
+							{
+								blocksleft = diskavail(myrpt);
+								if (blocksleft >= myrpt->p.monminblocks)
+								{
+									myrpt->monstream = ast_writefile(myfname,"wav49",
+										"app_rpt Air Archive",O_CREAT | O_APPEND,0,0600);
+								}
+							}
+						}
 						donodelog(myrpt,"RXKEY,MAIN");
 					}
 					myrpt->localoverride = 0;
@@ -16917,6 +17006,11 @@ char tmpstr[300],lstr[MAXLINKLIST];
 					myrpt->localoverride = 0;
 					time(&myrpt->lastkeyedtime);
 					myrpt->keyposttimer = KEYPOSTSHORTTIME;
+					if (myrpt->monstream && (myrpt->p.duplex < 2))
+					{
+						ast_closestream(myrpt->monstream);
+						myrpt->monstream = NULL;
+					}
 					if (myrpt->p.archivedir)
 					{
 						donodelog(myrpt,"RXUNKEY,MAIN");
@@ -17561,7 +17655,8 @@ char tmpstr[300],lstr[MAXLINKLIST];
 				int x1;
 				float fac,fsamp;
 
-				if (myrpt->monstream) 
+				if (((myrpt->p.duplex > 1) || (myrpt->txkeyed)) &&
+				    (myrpt->monstream))
 					ast_writestream(myrpt->monstream,f);
 
 				fs = ast_frdup(f);
