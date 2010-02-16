@@ -2766,7 +2766,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	if( !(pChan->smode==SMODE_DCS||pChan->smode==SMODE_LSD) )
 	{
 	 
-	if( pChan->txPttIn && pChan->txState==CHAN_TXSTATE_IDLE )
+	if( pChan->txPttIn && (pChan->txState==CHAN_TXSTATE_IDLE ))
 	{
 		TRACEC(1,("txPttIn==1 from CHAN_TXSTATE_IDLE && !SMODE_LSD. codeindex=%i  %i \n",
 			pChan->rxCtcss->decode, pChan->rxCtcssMap[pChan->rxCtcss->decode] ));
@@ -3003,7 +3003,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		return 0;
 	}
 
-	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled )
+	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled && (!pChan->b.txCtcssOff))
 	{
 		pChan->spsSigGen0->sigProc(pChan->spsSigGen0);
 	}
