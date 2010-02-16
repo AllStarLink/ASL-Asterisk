@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.211 2/14/2010
+ *  version 0.213 2/15/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -115,6 +115,10 @@
  *  53 - Wake up from sleep
  *  54 - Go to sleep
  *  55 - Parrot Once if parrot mode is disabled
+ *  56 - Rx CTCSS Enable
+ *  57 - Rx CTCSS Disable
+ *  58 - Tx CTCSS On Input only Enable
+ *  59 - Tx CTCSS On Input only Disable
  *
  *
  * ilink cmds:
@@ -474,7 +478,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.211  02/14/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.213  02/15/2010";
 
 static char *app = "Rpt";
 
@@ -986,6 +990,7 @@ static struct rpt
 		int litztime;
 		char *litzchar;
 		char *litzcmd;
+		int itxctcss;		
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1014,6 +1019,7 @@ static struct rpt
 	char parrotstate;
 	char parrotonce;
 	char linkactivityflag;
+	char lastitx;
 	int  parrottimer;
 	unsigned int parrotcnt;
 	int telemmode;
@@ -4971,6 +4977,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.litzchar = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"litzcmd");
 	rpt_vars[n].p.litzcmd = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"itxctcss");
+	if (val) rpt_vars[n].p.itxctcss = ast_true(val);
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -9846,7 +9854,7 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
-	char string[16];
+	char string[50];
 	char paramcopy[500];
 	int  argc;
 	char *argv[101],*cp;
@@ -10321,6 +10329,57 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 		case 55: /* Parrot Once if parrot mode is disabled */
 			if(!myrpt->p.parrotmode)
 				myrpt->parrotonce = 1;
+			return DC_COMPLETE;		
+		case 56: /* RX CTCSS Enable */
+			if ((strncasecmp(myrpt->rxchannel->name,"zap/", 4) == 0) || 
+			    (strncasecmp(myrpt->rxchannel->name,"dahdi/", 6) == 0))
+			{
+				struct zt_radio_param r;
+
+				memset(&r,0,sizeof(struct zt_radio_param));
+				r.radpar = ZT_RADPAR_IGNORECT;
+				r.data = 0;
+				ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&r);
+			}
+			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
+			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))
+			{
+				ast_sendtext(myrpt->rxchannel,"RXCTCSS 1");
+
+			}
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "RXPLENA");
+			return DC_COMPLETE;		
+		case 57: /* RX CTCSS Disable */
+			if ((strncasecmp(myrpt->rxchannel->name,"zap/", 4) == 0) || 
+			    (strncasecmp(myrpt->rxchannel->name,"dahdi/", 6) == 0))
+			{
+				struct zt_radio_param r;
+
+				memset(&r,0,sizeof(struct zt_radio_param));
+				r.radpar = ZT_RADPAR_IGNORECT;
+				r.data = 1;
+				ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&r);
+			}
+
+			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
+			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))
+			{
+				ast_sendtext(myrpt->rxchannel,"RXCTCSS 0");
+
+			}
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "RXPLDIS");
+			return DC_COMPLETE;		
+		case 58: /* TX CTCSS on input only Enable */
+			myrpt->p.itxctcss = 1;
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "TXIPLENA");
+			return DC_COMPLETE;		
+		case 59: /* TX CTCSS on input only Disable */
+			myrpt->p.itxctcss = 0;
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "TXIPLDIS");
 			return DC_COMPLETE;		
 	}	
 	return DC_INDETERMINATE;
@@ -16203,6 +16262,32 @@ char tmpstr[300],lstr[MAXLINKLIST];
 			}
 			l = l->next;
 		}
+		x = myrpt->remrx || myrpt->localtx || myrpt->callmode || myrpt->parrotstate;
+		if (x != myrpt->lastitx)
+		{
+			char str[16];
+			
+			myrpt->lastitx = x;
+			if (myrpt->p.itxctcss)
+			{
+				if ((strncasecmp(myrpt->rxchannel->name,"zap/", 4) == 0) || 
+				    (strncasecmp(myrpt->rxchannel->name,"dahdi/", 6) == 0))
+				{
+					struct zt_radio_param r;
+
+					memset(&r,0,sizeof(struct zt_radio_param));
+					r.radpar = ZT_RADPAR_NOENCODE;
+					r.data = 0;
+					ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&r);
+				}
+				if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
+				    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))
+				{
+					sprintf(str,"TXCTCSS %d",!(!x));
+					ast_sendtext(myrpt->rxchannel,str);
+				}
+			}
+		}
 		n = 0;
 		cs[n++] = myrpt->rxchannel;
 		cs[n++] = myrpt->pchannel;
@@ -18943,6 +19028,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	myrpt->tele.prev = &myrpt->tele;
 	myrpt->newkey = 0;
 	myrpt->iaxkey = 0;
+	myrpt->lastitx = !myrpt->lastitx;
 	rpt_mutex_unlock(&myrpt->lock);
 	ast_set_write_format(chan, AST_FORMAT_SLINEAR);
 	ast_set_read_format(chan, AST_FORMAT_SLINEAR);
