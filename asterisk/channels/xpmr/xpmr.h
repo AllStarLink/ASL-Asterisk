@@ -842,6 +842,7 @@ typedef struct	t_pmr_chan
 
 		unsigned txCtcssInhibit:1;
 		unsigned txCtcssReady:1;
+		unsigned txCtcssOff:1;
 
 		unsigned rxkeyed:1;
 		unsigned rxhalted:1;
