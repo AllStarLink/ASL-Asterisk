@@ -580,6 +580,8 @@ struct chan_usbradio_pvt {
 
 	int   	set_txfreq;			 				// in Hz
 	int     set_rxfreq;
+
+	int	rxctcssoverride;
 	// 		end remote operation info
 
 	int	   	rxmixerset;	   	
@@ -1919,6 +1921,25 @@ static int usbradio_text(struct ast_channel *c, const char *text)
         return 0;
     }
 	
+    if (strcmp(cmd,"RXCTCSS")==0)
+    {
+	u8 x;
+	x = strtod(rxs,NULL);
+	o->rxctcssoverride = !x;
+        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio RXCTCSS cmd: %s\n",text);
+	return 0;		
+    }
+
+    if (strcmp(cmd,"TXCTCSS")==0)
+    {
+	u8 x;
+	x = strtod(rxs,NULL);
+	if (o && o->pmrChan)
+		o->pmrChan->b.txCtcssOff=!x;
+        if(o->debuglevel) ast_log(LOG_NOTICE,"parse usbradio TXCTCSS cmd: %s\n",text);
+	return 0;		
+    }
+
     if (cnt < 6)
     {
 	    ast_log(LOG_ERROR,"Cannot parse usbradio text: %s\n",text);
@@ -2338,6 +2359,8 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 	}
 	#endif
 
+
+	if (o->rxctcssoverride) sd = 1;
 	if ( cd && sd )
 	{
 		//if(!o->rxkeyed)o->pmrChan->dd.b.doitnow=1;
