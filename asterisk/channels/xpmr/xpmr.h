@@ -519,6 +519,7 @@ typedef struct t_pmr_sps
 		unsigned settling:1;
 		unsigned syncing:1;
 		unsigned dirty:1;
+		unsigned mute:1;
 	}b;
 
 	i16  cleared;		// output buffer cleared
