@@ -1235,6 +1235,7 @@ i16	SigGen(t_pmr_sps *mySps)
 		mySps->option=0;
 		mySps->state=0;
 		mySps->enabled=0;
+		mySps->b.mute=0;
 		for(i=0;i<mySps->nSamples;i++)
 			mySps->sink[(i*numChanOut)+selChanOut]=0;
 		return(0);
@@ -1275,6 +1276,8 @@ i16	SigGen(t_pmr_sps *mySps)
 		}
 
 		if(mySps->source)accum+=mySps->source[i];
+
+		if(mySps->b.mute) accum = 0;
 
 		mySps->sink[(i*numChanOut)+selChanOut]=accum;
 
@@ -3003,8 +3006,9 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		return 0;
 	}
 
-	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled && (!pChan->b.txCtcssOff))
+	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled)
 	{
+		pChan->spsSigGen0->b.mute = pChan->b.txCtcssOff;
 		pChan->spsSigGen0->sigProc(pChan->spsSigGen0);
 	}
 
