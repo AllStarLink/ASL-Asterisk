@@ -984,6 +984,7 @@ static int hid_device_mklist(void)
     FILE *fp;
 
     ast_mutex_lock(&usb_list_lock);
+    if (usb_device_list) ast_free(usb_device_list);
     usb_device_list = ast_malloc(2);
     if (!usb_device_list) 
     {
