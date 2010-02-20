@@ -1773,10 +1773,10 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->rxCtcssDecodeEnable=1;
 	}
 
-	if(pChan->txMod){
-		pChan->txPreEmpEnable=1;
+	if(pChan->txMod)
 		pChan->txLimiterEnable=1;
-	}
+	if(pChan->txMod > 1)
+		pChan->txPreEmpEnable=1;
 
 	pChan->dd.option=9;
 	dedrift(pChan);
