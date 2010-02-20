@@ -208,6 +208,7 @@ START_CONFIG
 	; ctcssfrom=dsp       ;no,usb,dsp
 
 	; rxdemod=flat            ; input type from radio: no,speaker,flat
+	; txlimonly=no            ; output is limited, but not pre-emphasised
 	; txprelim=yes            ; output is pre-emphasised and limited
 	; txtoctype=no            ; no,phase,notone
 
@@ -539,6 +540,7 @@ struct chan_usbradio_pvt {
 	char	txtoctype;
 
 	char    txprelim;
+	char    txlimonly;
 	float	txctcssgain;
 	char 	txmixa;
 	char 	txmixb;
@@ -1328,6 +1330,8 @@ static void *hidthread(void *arg)
 			tChan.rxCdType=o->rxcdtype;
 			tChan.rxSqVoxAdj=o->rxsqvoxadj;
 
+			if (o->txlimonly) 
+				tChan.txMod = 1;
 			if (o->txprelim) 
 				tChan.txMod = 2;
 
@@ -3761,6 +3765,7 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 	pd(o->b.rxpolarity);
 	pd(o->b.txpolarity);
 
+	pd(o->txlimonly);
 	pd(o->txprelim);
 	pd(o->txmixa);
 	pd(o->txmixb);
@@ -3954,6 +3959,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_BOOL("txcpusaver",o->txcpusaver)
 			M_BOOL("invertptt",o->invertptt)
 			M_F("rxdemod",store_rxdemod(o,(char *)v->value))
+			M_BOOL("txlimonly",o->txlimonly);
 			M_BOOL("txprelim",o->txprelim);
 			M_F("txmixa",store_txmixa(o,(char *)v->value))
 			M_F("txmixb",store_txmixb(o,(char *)v->value))
@@ -4091,6 +4097,8 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 		tChan.rxSqVoxAdj=o->rxsqvoxadj;
 		tChan.rxSquelchDelay=o->rxsquelchdelay;
 
+		if (o->txlimonly) 
+			tChan.txMod = 1;
 		if (o->txprelim) 
 			tChan.txMod = 2;
 
