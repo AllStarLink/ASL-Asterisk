@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.213 2/15/2010
+ *  version 0.214 2/28/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -478,7 +478,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.213  02/15/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.214  02/28/2010";
 
 static char *app = "Rpt";
 
@@ -8395,9 +8395,11 @@ struct rpt_link *l;
 	switch(mode)
 	{
 	    case REMDISC:
-		mylink = (struct rpt_link *) data;
+ 		mylink = (struct rpt_link *) data;
 		if ((!mylink) || (mylink->name[0] == '0')) return;
-		if ((!mylink->gott) && (!mylink->isremote)) return;
+		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
+		    strncasecmp(mylink->chan->name,"echolink",8) &&
+			strncasecmp(mylink->chan->name,"irlp",4)) return;
 		break;
 	    case VARCMD:
 		if (myrpt->telemmode < 2) return; 
