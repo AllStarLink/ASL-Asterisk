@@ -4008,8 +4008,6 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 	if (o->rxsdtype != SD_XPMR)
 	{
 		o->rxctcssfreqs[0] = 0;
-		o->txctcssfreqs[0] = 0;
-		o->txctcssdefault[0] = 0;
 	}
 
 	if (o == &usbradio_default)		/* we are done with the default */
