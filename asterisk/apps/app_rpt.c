@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.214 2/28/2010
+ *  version 0.215 3/3/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -478,7 +478,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.214  02/28/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.215  03/03/2010";
 
 static char *app = "Rpt";
 
@@ -569,6 +569,7 @@ static char *remote_rig_ft897="ft897";
 static char *remote_rig_rbi="rbi";
 static char *remote_rig_kenwood="kenwood";
 static char *remote_rig_tm271="tm271";
+static char *remote_rig_tmd700="tmd700";
 static char *remote_rig_ic706="ic706";
 static char *remote_rig_rtx150="rtx150";
 static char *remote_rig_rtx450="rtx450";
@@ -1814,6 +1815,7 @@ static int set_ft950(struct rpt *myrpt);
 static int set_ic706(struct rpt *myrpt);
 static int setkenwood(struct rpt *myrpt);
 static int set_tm271(struct rpt *myrpt);
+static int set_tmd700(struct rpt *myrpt);
 static int setrbi_check(struct rpt *myrpt);
 static int setxpmr(struct rpt *myrpt, int dotx);
 
@@ -7696,6 +7698,11 @@ struct zt_params par;
 					(par.rxisoffhook || (myrpt->tele.next != &myrpt->tele));
 			}
 		}
+		else if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
+		{
+			res = set_tmd700(myrpt);
+			setxpmr(myrpt,0);
+		}
 
 		ast_mutex_unlock(&myrpt->remlock);
 		if (!res)
@@ -11454,13 +11461,13 @@ static int sendkenwood(struct rpt *myrpt,char *txstr, char *rxstr)
 {
 int	i;
 
-	if (debug) printf("Send to kenwood: %s\n",txstr);
+	if (debug)  printf("Send to kenwood: %s\n",txstr);
 	i = serial_remote_io(myrpt, (unsigned char *)txstr, strlen(txstr), 
 		(unsigned char *)rxstr,RAD_SERIAL_BUFLEN - 1,3);
 	if (i < 0) return -1;
 	if ((i > 0) && (rxstr[i - 1] == '\r'))
 		rxstr[i-- - 1] = 0;
-	if (debug) printf("Got from kenwood: %s\n",rxstr);
+	if (debug)  printf("Got from kenwood: %s\n",rxstr);
 	return(i);
 }
 
@@ -11805,6 +11812,53 @@ int powers[] = {2,1,0};
 	sprintf(txstr,"RBN %c\r",band2);
 	if (sendrxkenwood(myrpt,txstr,rxstr,"RBN") < 0) return -1;
 	sprintf(txstr,"PC %c,%d\r",band1,powers[(int)myrpt->powerlevel]);
+	if (sendrxkenwood(myrpt,txstr,rxstr,"PC") < 0) return -1;
+	return 0;
+}
+
+static int set_tmd700(struct rpt *myrpt)
+{
+char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
+char mhz[MAXREMSTR],offset[20],decimals[MAXREMSTR];
+int myrxpl;
+	
+// foop
+
+int offsets[] = {0,2,1};
+int powers[] = {2,1,0};
+int band;
+
+	if (sendrxkenwood(myrpt,"BC 0,0\r",rxstr,"BC") < 0) return -1;
+	split_freq(mhz, decimals, myrpt->freq);
+	if (atoi(mhz) > 400)
+	{
+		band = 8;
+		strcpy(offset,"005000000");
+	}
+	else
+	{
+		band = 2;
+		strcpy(offset,"000600000");
+	}
+	strcpy(freq,"000000");
+	strncpy(freq,decimals,strlen(decimals));
+	myrxpl = myrpt->rxplon;
+	if (IS_XPMR(myrpt)) myrxpl = 0;
+	sprintf(txstr,"VW %d,%05d%s,0,%d,0,%d,%d,0,%02d,0010,%02d,%s,0\r",
+		band,atoi(mhz),freq,offsets[(int)myrpt->offset],
+		(myrpt->txplon != 0),myrxpl,
+		kenwood_pltocode(myrpt->txpl),kenwood_pltocode(myrpt->rxpl),
+		offset);
+	if (sendrxkenwood(myrpt,txstr,rxstr,"VW") < 0) return -1;
+	if (sendrxkenwood(myrpt,"VMC 0,0\r",rxstr,"VMC") < 0) return -1;
+	sprintf(txstr,"RBN\r");
+	if (sendrxkenwood(myrpt,txstr,rxstr,"RBN") < 0) return -1;
+	sprintf(txstr,"RBN %d\r",band);
+	if (strncmp(rxstr,txstr,5))
+	{
+		if (sendrxkenwood(myrpt,txstr,rxstr,"RBN") < 0) return -1;
+	}
+	sprintf(txstr,"PC 0,%d\r",powers[(int)myrpt->powerlevel]);
 	if (sendrxkenwood(myrpt,txstr,rxstr,"PC") < 0) return -1;
 	return 0;
 }
@@ -13773,6 +13827,11 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
 		res = 0;
 	}
+	if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
+	{
+		rpt_telemetry(myrpt,SETREMOTE,NULL);
+		res = 0;
+	}
 	else if(!strcmp(myrpt->remoterig, remote_rig_rbi))
 	{
 		res = setrbi_check(myrpt);
@@ -13822,6 +13881,8 @@ static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
 	else if(!strcmp(myrpt->remoterig, remote_rig_rbi))
 		return check_freq_rbi(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
+		return check_freq_kenwood(m, d, defmode);
+	else if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
 		return check_freq_kenwood(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_tm271))
 		return check_freq_tm271(m, d, defmode);
@@ -14313,6 +14374,7 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 				goto invalid_freq;
 			}
 
+			rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
 
 invalid_freq:
