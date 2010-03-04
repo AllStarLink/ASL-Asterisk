@@ -199,6 +199,7 @@ START_CONFIG
 	; hdwtype=0               ; 0=limey, 1=sph
 
 	; rxboost=0          ; no rx gain boost
+	; txboost=0		; no tx gain boost
 	; rxctcssrelax=1        ; reduce talkoff from radios w/o CTCSS Tx HPF
 	; rxctcssfreqs=100.0,123.0      ; list of rx ctcss freq in floating point. must be in table
 	; txctcssfreqs=100.0,123.0      ; list tx ctcss freq, any frequency permitted
@@ -588,6 +589,7 @@ struct chan_usbradio_pvt {
 
 	int	   	rxmixerset;	   	
 	int 	rxboostset;
+	int	txboostset;
 	float	rxvoiceadj;
 	float	rxctcssadj;
 	int 	txmixaset;
@@ -1177,7 +1179,7 @@ static struct chan_usbradio_pvt *find_desc(char *dev)
 	if (!o)
 	{
 		ast_log(LOG_WARNING, "could not find <%s>\n", dev ? dev : "--no-device--");
-		pthread_exit(0);
+		return NULL;
 	}
 
 	return o;
@@ -1359,6 +1361,7 @@ static void *hidthread(void *arg)
 			tChan.area=o->area;
 			tChan.ukey=o->ukey;
 			tChan.name=o->name;
+			tChan.b.txboost = o->txboostset;
 
 			o->pmrChan=createPmrChannel(&tChan,FRAME_SIZE);
 										 
@@ -1574,7 +1577,7 @@ static char *ast_ext_ctx(const char *src, char **ext, char **ctx)
 {
 	struct chan_usbradio_pvt *o = find_desc(usbradio_active);
 
-	if (ext == NULL || ctx == NULL)
+	if (o == NULL || ext == NULL || ctx == NULL)
 		return NULL;			/* error */
 
 	*ext = *ctx = NULL;
@@ -3022,12 +3025,13 @@ static int radio_active(int fd, int argc, char *argv[])
                 if (o == NULL)
                         ast_cli(fd, "No device [%s] exists\n", argv[2]);
                 else
-				{
-					struct chan_usbradio_pvt *ao;
-					for (ao = usbradio_default.next; ao && ao->name ; ao = ao->next)ao->pmrChan->b.radioactive=0;
-                    usbradio_active = o->name;
-				    o->pmrChan->b.radioactive=1;
-				}
+		{
+			struct chan_usbradio_pvt *ao;
+			for (ao = usbradio_default.next; ao && ao->name ; ao = ao->next)
+				ao->pmrChan->b.radioactive=0;
+	                usbradio_active = o->name;
+			o->pmrChan->b.radioactive=1;
+		}
         }
         return RESULT_SUCCESS;
 }
@@ -3745,6 +3749,7 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 
 	pd(o->rxmixerset);
 	pd(o->rxboostset);
+	pd(o->txboostset);
 
 	pf(o->rxvoiceadj);
 	pf(o->rxctcssadj);
@@ -3843,6 +3848,7 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 
 	pd(p->tracetype);
 	pd(p->b.radioactive);
+	pd(p->b.txboost);
 
 	return;
 }
@@ -3976,6 +3982,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_UINT("txfreq",o->txfreq)
 			M_F("rxgain",store_rxgain(o,(char *)v->value))
  			M_BOOL("rxboost",o->rxboostset)
+ 			M_BOOL("txboost",o->txboostset)
 			M_UINT("rxctcssrelax",o->rxctcssrelax)
 			M_F("txtoctype",store_txtoctype(o,(char *)v->value))
 			M_UINT("hdwtype",o->hdwtype)
@@ -4008,6 +4015,15 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 	if (o->rxsdtype != SD_XPMR)
 	{
 		o->rxctcssfreqs[0] = 0;
+	}
+
+	if ((o->txmixa == TX_OUT_COMPOSITE) && (o->txmixb == TX_OUT_VOICE))
+	{
+		ast_log(LOG_WARNING,"Invalid Configuration: Can not have B channel be Voice with A channel being Composite!!\n");
+	}
+	if ((o->txmixb == TX_OUT_COMPOSITE) && (o->txmixa == TX_OUT_VOICE))
+	{
+		ast_log(LOG_WARNING,"Invalid Configuration: Can not have A channel be Voice with B channel being Composite!!\n");
 	}
 
 	if (o == &usbradio_default)		/* we are done with the default */
@@ -4115,6 +4131,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 		tChan.b.lsdrxpolarity=o->b.lsdrxpolarity;
 		tChan.b.lsdtxpolarity=o->b.lsdtxpolarity;
 
+		tChan.b.txboost=o->txboostset;
 		tChan.tracetype=o->tracetype;
 		tChan.tracelevel=o->tracelevel;
 
