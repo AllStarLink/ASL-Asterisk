@@ -1306,6 +1306,7 @@ i16 pmrMixer(t_pmr_sps *mySps)
 	pChan=mySps->parentChan;
 	TRACEF(5,("pmrMixer()\n"));
 
+
 	input     = mySps->source;
 	inputB    = mySps->sourceB;
 	output    = mySps->sink;
@@ -1326,9 +1327,15 @@ i16 pmrMixer(t_pmr_sps *mySps)
 
 	for(i=0;i<npoints;i++)
 	{
-		accum = ((input[i]*inputGain)/M_Q8) +
+		if (inputB)
+		{
+			accum = ((input[i]*inputGain)/M_Q8) +
 				((inputB[i]*inputGainB)/M_Q8);
-
+		}
+		else
+		{
+			accum = (input[i]*inputGain)/M_Q8;
+		}
 		accum=(accum*outputGain)/M_Q8;
 		output[i]=accum;
 
@@ -1665,7 +1672,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 {
 	i16 i, *inputTmp;
 	t_pmr_chan 	*pChan;
-	t_pmr_sps  	*pSps;
+	t_pmr_sps  	*pSps;;
 	t_dec_ctcss	*pDecCtcss;
 
 	TRACEJ(1,("createPmrChannel(%p,%i)\n",tChan,numSamples));
@@ -1743,6 +1750,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->b.dcstxpolarity=tChan->b.dcstxpolarity;
 		pChan->b.lsdrxpolarity=tChan->b.lsdrxpolarity;
 		pChan->b.lsdtxpolarity=tChan->b.lsdtxpolarity;
+		pChan->b.txboost=tChan->b.txboost;
 
 		pChan->txsettletime=tChan->txsettletime;
 		pChan->tracelevel=tChan->tracelevel;
@@ -2336,6 +2344,27 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		inputTmp=pSps->sink;
 		pChan->ptxCtcssAdjust=&pSps->inputGainB;
 	}
+	else
+	{
+		if (pChan->b.txboost)
+		{
+			if(pSps==NULL)
+				pSps=pChan->spsTx=createPmrSps(pChan);
+			else
+				pSps=pSps->nextSps=createPmrSps(pChan);
+			pSps->source=inputTmp;
+			pSps->sourceB=NULL;
+			pSps->sink=pChan->pTxComposite;
+			pSps->sigProc=pmrMixer;
+			pSps->enabled=1;
+			pSps->nSamples=pChan->nSamplesTx;
+			pSps->inputGain=2*M_Q8;
+			pSps->inputGainB=0;
+			pSps->outputGain=1*M_Q8;
+			pSps->setpt=0;
+			inputTmp=pSps->sink;
+		}
+	}
 
 	// Chan A Upsampler and Filter
 	if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
@@ -2354,11 +2383,11 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	}
 	else if(pChan->txMixA==TX_OUT_VOICE)
 	{
-		pSps->source=pChan->pTxHpf;
+		pSps->source=inputTmp;
 	}
 	else if (pChan->txMixA==TX_OUT_AUX)
 	{
-		pSps->source=inputTmp;
+		pSps->source=pChan->pTxHpf;
 	}
 	else
 	{
