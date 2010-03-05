@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.215 3/3/2010
+ *  version 0.216 3/4/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -478,7 +478,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.215  03/03/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.216  03/04/2010";
 
 static char *app = "Rpt";
 
@@ -1058,6 +1058,7 @@ static struct rpt
 	char lastlinknode[MAXNODESTR];
 	char savednodes[MAXNODESTR];
 	int stopgen;
+	int remstopgen;
 	char patchfarenddisconnect;
 	char patchnoct;
 	char patchquiet;
@@ -8334,6 +8335,7 @@ struct zt_params par;
 		    	imdone = 1;
 			}
 		myrpt->stopgen = 0;
+		if (myrpt->remote && (myrpt->remstopgen < 0)) myrpt->remstopgen = 1;
 		break;
 	    default:
 	    	break;
@@ -9903,6 +9905,21 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			{
 				myrpt->stopgen = 0;
 				rpt_telemetry(myrpt, TEST_TONE, NULL);
+			}
+			if (!myrpt->remote) return DC_COMPLETE;
+			if (myrpt->remstopgen < 0)
+			{
+				myrpt->remstopgen = 1;
+			}
+			else
+			{
+				if (myrpt->remstopgen) break;
+				myrpt->remstopgen = -1;
+			        if ( ast_tonepair_start(myrpt->txchannel, 1004.0, 0, 99999999, 7200.0))
+				{
+					myrpt->remstopgen = 0;
+					break;
+				}
 			}
 			return DC_COMPLETE;
 
@@ -19334,6 +19351,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		rem_rx = (remkeyed && (!setting)) || (myrpt->tele.next != &myrpt->tele);
 		if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 			rem_totx |= myrpt->tunerequest;
+		if (myrpt->remstopgen < 0) rem_totx = 1;
 		//
 	    if((debug > 6) && rem_totx) {
 	    	ast_log(LOG_NOTICE,"Set rem_totx=%i.  dtmf_local_timer=%i phone_mode=%i keyed=%i tunerequest=%i\n",rem_totx,myrpt->dtmf_local_timer,phone_mode,keyed,myrpt->tunerequest);
@@ -19575,10 +19593,14 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				}
 				if (f1)
 				{
-					if (phone_mode)
-						ast_write(myrpt->txchannel,f1);
-					else
-						ast_write(myrpt->txchannel,f);
+					if (!myrpt->remstopgen)
+					{
+						if (phone_mode)
+							ast_write(myrpt->txchannel,f1);
+						else
+							ast_write(myrpt->txchannel,f);
+					} 
+						
 					ast_frfree(f1);
 				}
 			}
@@ -19653,6 +19675,11 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			{
 				int myreming = 0;
 
+				if (myrpt->remstopgen > 0)
+				{
+					ast_tonepair_stop(myrpt->txchannel);
+					myrpt->remstopgen = 0;
+				}
 				if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
 					myreming = reming;
 
