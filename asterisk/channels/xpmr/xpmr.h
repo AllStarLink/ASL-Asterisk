@@ -852,6 +852,7 @@ typedef struct	t_pmr_chan
 		unsigned pptp_p2:1;
 		unsigned tuning:1;
 		unsigned pttwas:1;
+		unsigned txboost:1;
 	}b;
 
 	i16 *pRxDemod;				// buffers
