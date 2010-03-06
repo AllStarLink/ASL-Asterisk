@@ -204,6 +204,7 @@ START_CONFIG
 	; rxctcssfreqs=100.0,123.0      ; list of rx ctcss freq in floating point. must be in table
 	; txctcssfreqs=100.0,123.0      ; list tx ctcss freq, any frequency permitted
 	; txctcssdefault=100.0      ; default tx ctcss freq, any frequency permitted
+	; rxctcssoverride=0	; default condition to not require rx CTCSS
 
 	; carrierfrom=dsp     ;no,usb,usbinvert,dsp,vox
 	; ctcssfrom=dsp       ;no,usb,dsp
@@ -3978,6 +3979,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_STR("txctcssdefault",o->txctcssdefault)
 			M_STR("rxctcssfreqs",o->rxctcssfreqs)
 			M_STR("txctcssfreqs",o->txctcssfreqs)
+			M_BOOL("rxctcssoverride",o->rxctcssoverride);
 			M_UINT("rxfreq",o->rxfreq)
 			M_UINT("txfreq",o->txfreq)
 			M_F("rxgain",store_rxgain(o,(char *)v->value))
