@@ -758,6 +758,8 @@ typedef struct	t_pmr_chan
 
 	i16 spsIndex;
 
+	i16 lastrxdecode;
+
 	t_pmr_sps *spsMeasure;		// measurement block
 
 	t_pmr_sps *spsRx;			// 1st signal processing struct
