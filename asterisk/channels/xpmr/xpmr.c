@@ -1789,6 +1789,8 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pChan->dd.option=9;
 	dedrift(pChan);
 
+	pChan->lastrxdecode = CTCSS_NULL;
+
 	TRACEF(1,("calloc buffers \n"));
 
 	pChan->pRxDemod 	= calloc(numSamples,2);
@@ -2786,7 +2788,35 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		}
 		pChan->smodetimer=pChan->smodetime;
 	}
+	if(pChan->smode==SMODE_CTCSS)
+	{
+		if(pChan->rxCtcss->decode != pChan->lastrxdecode)
+		{
+			pChan->lastrxdecode = pChan->rxCtcss->decode;
+			f = 0;
+			if(pChan->rxCtcss->decode>CTCSS_NULL)
+			{
+				if(pChan->rxCtcssMap[pChan->rxCtcss->decode]!=CTCSS_RXONLY)
+				{
+					f=freq_ctcss[pChan->rxCtcssMap[pChan->rxCtcss->decode]];
+				}
+			}
+			else
+			{
+				f=pChan->txctcssdefault_value;	
+			}
+			if (f && pChan->spsSigGen0->freq != f*10)
+			{
+				pChan->spsSigGen0->freq=f*10;
+				pChan->spsSigGen0->option=1;
+			}
+		}
+	}
+	else
+	{
+		pChan->lastrxdecode = CTCSS_NULL;
 
+	}
 	#ifdef HAVE_XPMRX
 	xpmrx(pChan,XXO_LSDCTL);
 	#endif
@@ -2797,14 +2827,13 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	hit=0;
 	if( !(pChan->smode==SMODE_DCS||pChan->smode==SMODE_LSD) )
 	{
-	 
+
 	if( pChan->txPttIn && (pChan->txState==CHAN_TXSTATE_IDLE ))
 	{
 		TRACEC(1,("txPttIn==1 from CHAN_TXSTATE_IDLE && !SMODE_LSD. codeindex=%i  %i \n",
 			pChan->rxCtcss->decode, pChan->rxCtcssMap[pChan->rxCtcss->decode] ));
 		pChan->dd.b.doitnow=1;
 		pChan->spsSigGen0->freq=0;
-
 	    if(pChan->smode==SMODE_CTCSS && !pChan->b.txCtcssInhibit)
 		{
 			if(pChan->rxCtcss->decode>CTCSS_NULL)
