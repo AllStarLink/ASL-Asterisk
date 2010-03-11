@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.216 3/4/2010
+ *  version 0.217 3/10/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -56,6 +56,7 @@
  *  1 - Force ID (global)
  *  2 - Give Time of Day (global)
  *  3 - Give software Version (global)
+ *  4 - Give GPS location info
  *  11 - Force ID (local only)
  *  12 - Give Time of Day (local only)
  *
@@ -290,6 +291,10 @@
 #define	EXTNODEFILE "/var/lib/asterisk/rpt_extnodes"
 #define	NODENAMES "rpt/nodenames"
 #define	PARROTFILE "/tmp/parrot_%s_%u"
+#define	GPSFILE "/tmp/gps.dat"
+
+#define	GPS_VALID_SECS 60
+#define	GPS_UPDATE_SECS 30
 
 #define	PARROTTIME 1000
 
@@ -372,7 +377,8 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	MEMNOTFOUND, INVFREQ, REMMODE, REMLOGIN, REMXXX, REMSHORTSTATUS,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
-	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE};
+	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE,
+	STATS_GPS,STATS_GPS_LEGACY};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -478,7 +484,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.216  03/04/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.217  03/10/2010";
 
 static char *app = "Rpt";
 
@@ -992,6 +998,7 @@ static struct rpt
 		char *litzchar;
 		char *litzcmd;
 		int itxctcss;		
+		int gpsfeet;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1109,6 +1116,7 @@ static struct rpt
 	char sleepreq;
 	char sleep;
 	int  sleeptimer;
+	time_t lastgpstime;
 #ifndef	OLD_ASTERISK
 	struct timeval lastdtmftime;
 #endif
@@ -3784,6 +3792,8 @@ int	nonlocals;
                 while(tlist != &myrpt->tele)
 		{
                         if ((tlist->mode == PLAYBACK) || 
+			    (tlist->mode == STATS_GPS_LEGACY) ||
+			      (tlist->mode == ID1) ||
 				(tlist->mode == TEST_TONE)) nonlocals++;
 			tlist = tlist->next;
 		}
@@ -4425,6 +4435,7 @@ struct rpt_link *l;
 		l->linklisttimer = LINKLISTSHORTTIME;
 	}
 	myrpt->linkposttimer = LINKPOSTSHORTTIME;
+	myrpt->lastgpstime = 0;
 	return;
 }
 static void dodispgm(struct rpt *myrpt,char *them)
@@ -4982,6 +4993,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.litzcmd = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"itxctcss");
 	if (val) rpt_vars[n].p.itxctcss = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg,this,"gpsfeet");
+	if (val) rpt_vars[n].p.gpsfeet = ast_true(val);
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -6740,8 +6753,9 @@ static int split_freq(char *mhz, char *decimals, char *freq);
 
 static void handle_varcmd_tele(struct rpt *myrpt,struct ast_channel *mychannel,char *varcmd)
 {
-char	*strs[100],*p;
-int	i,n,res,vmajor,vminor;
+char	*strs[100],*p,buf[100],c;
+int	i,j,k,n,res,vmajor,vminor;
+float	f;
 time_t	t;
 unsigned int t1;
 struct	tm localtm;
@@ -6894,6 +6908,80 @@ struct	tm localtm;
 			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		return;
 	}		
+	if (!strcasecmp(strs[0],"STATS_GPS"))
+	{
+		if (n < 5) return;
+	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+		if (saynode(myrpt,mychannel,strs[1]) == -1) return;
+		if (sayfile(mychannel,"location") == -1) return;
+		c = *(strs[2] + strlen(strs[2]) - 1);
+		*(strs[2] + strlen(strs[2]) - 1) = 0;
+		if (sscanf(strs[2],"%2d%d.%d",&i,&j,&k) != 3) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"degrees") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) return;
+		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"minutes") == -1) return;
+		if (sayfile(mychannel,(c == 'N') ? "north" : "south") == -1) return;
+		if (sayfile(mychannel,"rpt/latitude") == -1) return;
+		c = *(strs[3] + strlen(strs[3]) - 1);
+		*(strs[3] + strlen(strs[3]) - 1) = 0;
+		if (sscanf(strs[3],"%3d%d.%d",&i,&j,&k) != 3) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"degrees") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) return;
+		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"minutes") == -1) return;
+		if (sayfile(mychannel,(c == 'E') ? "east" : "west") == -1) return;
+		if (sayfile(mychannel,"rpt/longitude") == -1) return;
+		if (!*strs[4]) return;
+		c = *(strs[4] + strlen(strs[4]) - 1);
+		*(strs[4] + strlen(strs[4]) - 1) = 0;
+		if (sscanf(strs[4],"%f",&f) != 1) return;
+		if (myrpt->p.gpsfeet)
+		{
+			if (c == 'M') f *= 3.2808399;
+		}
+		else
+		{
+			if (c != 'M') f /= 3.2808399;
+		}			
+		sprintf(buf,"%0.1f",f);
+		if (sscanf(buf,"%d.%d",&i,&j) != 2) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,(myrpt->p.gpsfeet) ? "feet" : "meters") == -1) return;
+		if (saycharstr(mychannel,"AMSL") == -1) return;
+		ast_stopstream(mychannel);	
+		return;
+	}
 	if (!strcasecmp(strs[0],"ARB_ALPHA"))
 	{
 		if (n < 2) return;
@@ -6982,19 +7070,21 @@ struct	rpt_link *l,*l1,linkbase;
 struct	ast_channel *mychannel;
 int id_malloc, vmajor, vminor, m;
 char *p,*ct,*ct_copy,*ident, *nodename,*cp;
-time_t t;
+time_t t,was;
 #ifdef	NEW_ASTERISK
 struct ast_tm localtm;
 #else
 struct tm localtm;
 #endif
 char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
-int	i,ns,rbimode;
-char mhz[MAXREMSTR];
-char decimals[MAXREMSTR];
-char	mystr[200];
+int	i,j,k,ns,rbimode;
+unsigned int u;
+char mhz[MAXREMSTR],decimals[MAXREMSTR],mystr[200];
+char	lat[100],lon[100],elev[100],c;
+FILE	*fp;
+float	f;
+struct stat mystat;
 struct zt_params par;
-
 
 	/* get a pointer to myrpt */
 	myrpt = mytele->rpt;
@@ -7090,7 +7180,8 @@ struct zt_params par;
 	/* If the telemetry is only intended for a local audience, */
 	/* only connect the ID audio to the local tx conference so */
 	/* linked systems can't hear it */
-	ci.confno = (((mytele->mode == ID1) || (mytele->mode == PLAYBACK) || (mytele->mode == TEST_TONE)) ? 
+	ci.confno = (((mytele->mode == ID1) || (mytele->mode == PLAYBACK) || 
+	    (mytele->mode == TEST_TONE) || (mytele->mode == STATS_GPS_LEGACY)) ? 
 		myrpt->conf : myrpt->txconf);
 	ci.confmode = ZT_CONF_CONFANN;
 	/* first put the channel on the conference in announce mode */
@@ -8276,6 +8367,89 @@ struct zt_params par;
 			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		imdone = 1;
 	    	break;
+	    case STATS_GPS:
+	    case STATS_GPS_LEGACY:
+		fp = fopen(GPSFILE,"r");
+		if (!fp) break;
+		if (fstat(fileno(fp),&mystat) == -1) break;
+		if (mystat.st_size >= 100) break;
+		elev[0] = 0;
+		if (fscanf(fp,"%u %s %s %s",&u,lat,lon,elev) < 3) break;
+		fclose(fp);
+		was = (time_t) u;
+		time(&t);
+		if ((was + GPS_VALID_SECS) < t) break;
+	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+		if (saynode(myrpt,mychannel,myrpt->name) == -1) break;
+		if (sayfile(mychannel,"location") == -1) break;
+		c = lat[strlen(lat) - 1];
+		lat[strlen(lat) - 1] = 0;
+		if (sscanf(lat,"%2d%d.%d",&i,&j,&k) != 3) break;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"degrees") == -1) break;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) break;
+		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"minutes") == -1) break;
+		if (sayfile(mychannel,(c == 'N') ? "north" : "south") == -1) break;
+		if (sayfile(mychannel,"rpt/latitude") == -1) break;
+		c = lon[strlen(lon) - 1];
+		lon[strlen(lon) - 1] = 0;
+		if (sscanf(lon,"%3d%d.%d",&i,&j,&k) != 3) break;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"degrees") == -1) break;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) break;
+		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,"minutes") == -1) break;
+		if (sayfile(mychannel,(c == 'E') ? "east" : "west") == -1) break;
+		if (sayfile(mychannel,"rpt/longitude") == -1) break;
+		if (!elev[0]) break;
+		c = elev[strlen(elev) - 1];
+		elev[strlen(elev) - 1] = 0;
+		if (sscanf(elev,"%f",&f) != 1) break;
+		if (myrpt->p.gpsfeet)
+		{
+			if (c == 'M') f *= 3.2808399;
+		}
+		else
+		{
+			if (c != 'M') f /= 3.2808399;
+		}			
+		sprintf(mystr,"%0.1f",f);
+		if (sscanf(mystr,"%d.%d",&i,&j) != 2) break;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,".") == -1) break;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);	
+		if (sayfile(mychannel,(myrpt->p.gpsfeet) ? "feet" : "meters") == -1) break;
+		if (saycharstr(mychannel,"AMSL") == -1) break;
+		ast_stopstream(mychannel);	
+		imdone = 1;
+		break;
 	    case ARB_ALPHA:
 	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
 	    	if(mytele->param)
@@ -8393,10 +8567,12 @@ struct rpt_tele *tele;
 struct rpt_link *mylink = NULL;
 int res,vmajor,vminor,i;
 pthread_attr_t attr;
-char *v1, *v2,mystr[300],*p,haslink;
-time_t	t;
+char *v1, *v2,mystr[300],*p,haslink,lat[100],lon[100],elev[100];
+time_t	t,was;
+unsigned int k;
+FILE *fp;
+struct stat mystat;
 struct rpt_link *l;
-
 
 	if(debug >= 6)
 		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
@@ -8517,6 +8693,21 @@ struct rpt_link *l;
 			if(sscanf(p, "version %d.%d", &vmajor, &vminor) != 2)
 				return;
 			sprintf(mystr,"STATS_VERSION,%d.%d",vmajor,vminor);
+			send_tele_link(myrpt,mystr);
+			return;
+		    case STATS_GPS:
+			fp = fopen(GPSFILE,"r");
+			if (!fp) break;
+			if (fstat(fileno(fp),&mystat) == -1) break;
+			if (mystat.st_size >= 100) break;
+			elev[0] = 0;
+			if (fscanf(fp,"%u %s %s %s",&k,lat,lon,elev) < 3) break;
+			fclose(fp);
+			was = (time_t) k;
+			time(&t);
+			if ((was + GPS_VALID_SECS) < t) break;
+			sprintf(mystr,"STATS_GPS,%s,%s,%s,%s",myrpt->name,
+				lat,lon,elev);
 			send_tele_link(myrpt,mystr);
 			return;
 		    case ARB_ALPHA:
@@ -9744,7 +9935,7 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 		return DC_ERROR;
 
 	if(debug)
-		printf("@@@@ status param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+ 		printf("@@@@ status param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
 	
 	switch(myatoi(param)){
 		case 1: /* System ID */
@@ -9757,6 +9948,14 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 		case 3: /* app_rpt.c version */
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, STATS_VERSION, NULL);
+			return DC_COMPLETE;
+		case 4: /* GPS data */
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, STATS_GPS, NULL);
+			return DC_COMPLETE;
+		case 5: /* GPS data announced locally */
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, STATS_GPS_LEGACY, NULL);
 			return DC_COMPLETE;
 		case 11: /* System ID (local only)*/
 		    rpt_telemetry(myrpt, ID , NULL);
@@ -10546,6 +10745,28 @@ struct	ast_frame wf;
 		mylink->iaxkey = 1;
                 return;
         }
+	if (tmp[0] == 'G') /* got GPS data */
+	{
+		/* re-distriutee it to attached nodes */
+		l = myrpt->links.next;
+		/* otherwise, send it to all of em */
+		while(l != &myrpt->links)
+		{
+			/* dont send back from where it came */
+			if ((l == mylink) || (!strcmp(l->name,mylink->name)))
+			{
+				l = l->next;
+				continue;
+			}
+			/* send, but not to src */
+			if (strcmp(l->name,src)) {
+				wf.data = str;
+				if (l->chan) rpt_qwrite(l,&wf); 
+			}
+			l = l->next;
+		}
+		return;
+	}
 	if (tmp[0] == 'L')
 	{
 		rpt_mutex_lock(&myrpt->lock);
@@ -11839,8 +12060,6 @@ char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],decimals[MAXREMSTR];
 int myrxpl;
 	
-// foop
-
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
 int band;
@@ -15387,12 +15606,15 @@ struct	rpt *myrpt = (struct rpt *)this;
 char *tele,*idtalkover,c,myfirst,*p;
 int ms = MSWAIT,i,lasttx=0,val,identqueued,othertelemqueued;
 int tailmessagequeued,ctqueued,dtmfed,lastmyrx,localmsgqueued;
+unsigned int u;
+FILE *fp;
+struct stat mystat;
 struct ast_channel *who;
 ZT_CONFINFO ci;  /* conference info */
-time_t	t;
+time_t	t,was;
 struct rpt_link *l,*m;
 struct rpt_tele *telem;
-char tmpstr[300],lstr[MAXLINKLIST];
+char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 
 	if (myrpt->p.archivedir) mkdir(myrpt->p.archivedir,0600);
@@ -15850,6 +16072,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		if (ast_safe_sleep(myrpt->rxchannel,50) == -1) ms = -1;
 	lastmyrx = 0;
 	myfirst = 0;
+	myrpt->lastitx = -1;
 	myrpt->ready = 1;	
 	while (ms >= 0)
 	{
@@ -15956,6 +16179,30 @@ char tmpstr[300],lstr[MAXLINKLIST];
 		if (ast_check_hangup(myrpt->txpchannel)) break;
 		if (myrpt->zaptxchannel && ast_check_hangup(myrpt->zaptxchannel)) break;
 
+		time(&t);
+		while(t >= (myrpt->lastgpstime + GPS_UPDATE_SECS))
+		{
+			myrpt->lastgpstime = t;
+			fp = fopen(GPSFILE,"r");
+			if (!fp) break;
+			if (fstat(fileno(fp),&mystat) == -1) break;
+			if (mystat.st_size >= 100) break;
+			elev[0] = 0;
+			if (fscanf(fp,"%u %s %s %s",&u,lat,lon,elev) < 3) break;
+			fclose(fp);
+			was = (time_t) u;
+			if ((was + GPS_VALID_SECS) < t) break;
+			sprintf(tmpstr,"G %s %s %s %s",
+				myrpt->name,lat,lon,elev);
+			rpt_mutex_lock(&myrpt->lock);
+			l = myrpt->links.next;
+			while(l != &myrpt->links)
+			{
+				if (l->chan) ast_sendtext(l->chan,tmpstr);
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+		}
 		/* @@@@@@@ LOCK @@@@@@@ */
 		rpt_mutex_lock(&myrpt->lock);
 
@@ -16358,7 +16605,7 @@ char tmpstr[300],lstr[MAXLINKLIST];
 
 					memset(&r,0,sizeof(struct zt_radio_param));
 					r.radpar = ZT_RADPAR_NOENCODE;
-					r.data = 0;
+					r.data = !x;
 					ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&r);
 				}
 				if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
