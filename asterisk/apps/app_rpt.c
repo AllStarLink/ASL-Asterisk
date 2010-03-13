@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.217 3/10/2010
+ *  version 0.218 3/12/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -484,7 +484,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.217  03/10/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.218  03/12/2010";
 
 static char *app = "Rpt";
 
@@ -6926,11 +6926,7 @@ struct	tm localtm;
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);	
-		if (saycharstr(mychannel,".") == -1) return;
-		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,strs[2] + 4) == -1) return;
 		if (sayfile(mychannel,"minutes") == -1) return;
 		if (sayfile(mychannel,(c == 'N') ? "north" : "south") == -1) return;
 		if (sayfile(mychannel,"rpt/latitude") == -1) return;
@@ -6946,11 +6942,7 @@ struct	tm localtm;
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);	
-		if (saycharstr(mychannel,".") == -1) return;
-		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,strs[3] + 5) == -1) return;
 		if (sayfile(mychannel,"minutes") == -1) return;
 		if (sayfile(mychannel,(c == 'E') ? "east" : "west") == -1) return;
 		if (sayfile(mychannel,"rpt/longitude") == -1) return;
@@ -8394,11 +8386,7 @@ struct zt_params par;
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);	
-		if (saycharstr(mychannel,".") == -1) break;
-		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,lat + 4) == -1) break;
 		if (sayfile(mychannel,"minutes") == -1) break;
 		if (sayfile(mychannel,(c == 'N') ? "north" : "south") == -1) break;
 		if (sayfile(mychannel,"rpt/latitude") == -1) break;
@@ -8414,11 +8402,7 @@ struct zt_params par;
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);	
-		if (saycharstr(mychannel,".") == -1) break;
-		res = ast_say_number(mychannel, k, "", mychannel->language, (char *) NULL);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		ast_stopstream(mychannel);	
+		if (saycharstr(mychannel,lon + 5) == -1) break;
 		if (sayfile(mychannel,"minutes") == -1) break;
 		if (sayfile(mychannel,(c == 'E') ? "east" : "west") == -1) break;
 		if (sayfile(mychannel,"rpt/longitude") == -1) break;
