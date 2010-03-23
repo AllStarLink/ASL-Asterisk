@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.218 3/12/2010
+ *  version 0.219 3/22/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -190,14 +190,6 @@
 	<defaultenabled>no</defaultenabled>
  ***/
 
-/* Un-comment the following to include support for MDC-1200 digital tone
-   signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c" */
-
-/* Un-comment the following to include support for notch filters in the
-   rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
-/* #include "rpt_notch.c" */
-
 /* maximum digits in DTMF buffer, and seconds after * for DTMF command timeout */
 
 #ifdef OLD_ASTERISK
@@ -286,6 +278,7 @@
 #define TELEMETRY "telemetry"
 #define MORSE "morse"
 #define	TONEMACRO "tonemacro"
+#define	MDCMACRO "mdcmacro"
 #define	FUNCCHAR '*'
 #define	ENDCHAR '#'
 #define	EXTNODEFILE "/var/lib/asterisk/rpt_extnodes"
@@ -478,13 +471,21 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 #endif
 
+/* Un-comment the following to include support for MDC-1200 digital tone
+   signalling protocol (using KA6SQG's GPL'ed implementation) */
+#include "mdc_decode.c"
+
+/* Un-comment the following to include support for notch filters in the
+   rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
+/* #include "rpt_notch.c" */
+
 
 /* Start a tone-list going */
 int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist, int interruptible);
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.218  03/12/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.219  03/22/2010";
 
 static char *app = "Rpt";
 
@@ -935,6 +936,7 @@ static struct rpt
 		char	*memory;
 		char	*macro;
 		char	*tonemacro;
+		char	*mdcmacro;
 		char	*startupmacro;
 		int iobase;
 		char *ioport;
@@ -1151,6 +1153,7 @@ static struct rpt
 #ifdef	_MDC_DECODE_H_
 	mdc_decoder_t *mdc;
 	unsigned short lastunit;
+	char lastmdc[32];
 #endif
 	struct rpt_cmd_struct cmdAction;
 } rpt_vars[MAXRPTS];	
@@ -4193,6 +4196,34 @@ char	str[200];
 	return;
 }
 
+static void mdc1200_cmd(struct rpt *myrpt, char *data)
+{
+	char busy,*myval;
+
+	busy = 0;
+	if (strcmp(data,myrpt->lastmdc))
+	{
+		myval = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->p.mdcmacro, data);
+		if (myval) 
+		{
+			if (debug) ast_log(LOG_NOTICE,"MDCMacro %s doing %s on node %s\n",data,myval,myrpt->name);
+			rpt_mutex_lock(&myrpt->lock);
+			if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myval))
+			{
+				rpt_mutex_unlock(&myrpt->lock);
+				busy=1;
+			}
+			if(!busy)
+			{
+				myrpt->macrotimer = MACROTIME;
+				strncat(myrpt->macrobuf,myval,MAXMACRO - 1);
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+		}
+	 	if (!busy) strcpy(myrpt->lastmdc,data);
+	}
+	return;
+}
 #endif
 
 static char func_xlat(struct rpt *myrpt,char c,struct rpt_xlat *xlat)
@@ -4849,6 +4880,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"tonemacro");
 	if (!val) val = TONEMACRO;
 	rpt_vars[n].p.tonemacro = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"mdcmacro");
+	if (!val) val = MDCMACRO;
+	rpt_vars[n].p.mdcmacro = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"startup_macro");
 	if (val) rpt_vars[n].p.startupmacro = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"iobase");
@@ -9730,6 +9764,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			myrpt->lastunit = 0xd00d; 
 			mdc1200_notify(myrpt,NULL,myrpt->lastunit);
 			mdc1200_send(myrpt,myrpt->lastunit);
+			mdc1200_cmd(myrpt,"d00d");
 			break;
 #endif
 
@@ -17149,22 +17184,26 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				n = mdc_decoder_process_samples(myrpt->mdc,ubuf,f->datalen / 2);
 				if (n == 1)
 				{
-						unsigned char op,arg;
-						unsigned short unitID;
 
-						mdc_decoder_get_packet(myrpt->mdc,&op,&arg,&unitID);
-						if (debug > 2)
-						{
-							ast_log(LOG_NOTICE,"Got (single-length) packet:\n");
-							ast_log(LOG_NOTICE,"op: %02x, arg: %02x, UnitID: %04x\n",
-								op & 255,arg & 255,unitID);
-						}
-						if ((op == 1) && (arg == 0))
-						{
-							myrpt->lastunit = unitID;
-							mdc1200_notify(myrpt,NULL,myrpt->lastunit);
-							mdc1200_send(myrpt,myrpt->lastunit);
-						}
+					unsigned char op,arg;
+					unsigned short unitID;
+					char ustr[10];
+
+					mdc_decoder_get_packet(myrpt->mdc,&op,&arg,&unitID);
+					if (debug > 2)
+					{
+						ast_log(LOG_NOTICE,"Got (single-length) packet:\n");
+						ast_log(LOG_NOTICE,"op: %02x, arg: %02x, UnitID: %04x\n",
+							op & 255,arg & 255,unitID);
+					}
+					if ((op == 1) && (arg == 0))
+					{
+						myrpt->lastunit = unitID;
+						mdc1200_notify(myrpt,NULL,myrpt->lastunit);
+						mdc1200_send(myrpt,myrpt->lastunit);
+						sprintf(ustr,"%04x",unitID);
+						mdc1200_cmd(myrpt,ustr);
+					}
 				}
 				if ((debug > 2) && (i == 2))
 				{
@@ -17218,7 +17257,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					else
 						ast_write(myrpt->pchannel,f1);
 					ast_frfree(f1);
-					if (myrpt->monstream && (myrpt->p.duplex < 2))
+					if (myrpt->monstream && (myrpt->p.duplex < 2) &&
+					    (!myrpt->txkeyed) && myrpt->keyed)
 						ast_writestream(myrpt->monstream,f1);
 				}
 			}
