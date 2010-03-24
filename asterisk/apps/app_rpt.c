@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.219 3/22/2010
+ *  version 0.220 3/23/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -473,7 +473,7 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support for MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "mdc_decode.c"
+/* #include "mdc_decode.c" */
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
@@ -485,7 +485,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.219  03/22/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.220  03/23/2010";
 
 static char *app = "Rpt";
 
