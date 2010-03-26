@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.220 3/23/2010
+ *  version 0.221 3/25/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -267,6 +267,9 @@
 #define	DEFAULT_RXBURST_TIME 250 
 #define	DEFAULT_RXBURST_THRESHOLD 16
 
+#define	DEFAULT_SPLIT_2M 600
+#define	DEFAULT_SPLIT_70CM 5000
+
 #define TONE_SAMPLE_RATE 8000
 #define TONE_SAMPLES_IN_FRAME 160
 
@@ -485,7 +488,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.220  03/23/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.221  03/25/2010";
 
 static char *app = "Rpt";
 
@@ -1001,6 +1004,8 @@ static struct rpt
 		char *litzcmd;
 		int itxctcss;		
 		int gpsfeet;
+		int default_split_2m;
+		int default_split_70cm;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1055,6 +1060,7 @@ static struct rpt
 	char mydtmf;
 	char exten[AST_MAX_EXTENSION];
 	char freq[MAXREMSTR],rxpl[MAXREMSTR],txpl[MAXREMSTR];
+	int  splitkhz;
 	char offset;
 	char powerlevel;
 	char txplon;
@@ -3857,9 +3863,9 @@ static int linkcount(struct rpt *myrpt)
  * -1 if channel not found,
  *  1 if parse error
  */
-static int retreive_memory(struct rpt *myrpt, char *memory)
+static int retrieve_memory(struct rpt *myrpt, char *memory)
 {
-	char tmp[30], *s, *s1, *val;
+	char tmp[30], *s, *s1, *s2, *val;
 
 	if (debug)ast_log(LOG_NOTICE, "memory=%s block=%s\n",memory,myrpt->p.memory);
 
@@ -3878,6 +3884,9 @@ static int retreive_memory(struct rpt *myrpt, char *memory)
 	if (!s1)
 		return 1;
 	*s1++ = 0;
+	s2 = strchr(s1,',');
+	if (!s2) s2 = s1;
+	else *s2++ = 0;
 	strncpy(myrpt->freq, tmp, sizeof(myrpt->freq) - 1);
 	strncpy(myrpt->rxpl, s, sizeof(myrpt->rxpl) - 1);
 	strncpy(myrpt->txpl, s, sizeof(myrpt->rxpl) - 1);
@@ -3885,8 +3894,10 @@ static int retreive_memory(struct rpt *myrpt, char *memory)
 	myrpt->offset = REM_SIMPLEX;
 	myrpt->powerlevel = REM_MEDPWR;
 	myrpt->txplon = myrpt->rxplon = 0;
-	while(*s1){
-		switch(*s1++){
+	myrpt->splitkhz = 0;
+	if (s2 != s1) myrpt->splitkhz = atoi(s1);
+	while(*s2){
+		switch(*s2++){
 			case 'A':
 			case 'a':
 				strcpy(myrpt->rxpl, "100.0");
@@ -5029,6 +5040,12 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	if (val) rpt_vars[n].p.itxctcss = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg,this,"gpsfeet");
 	if (val) rpt_vars[n].p.gpsfeet = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg,this,"split2m");
+	if (val) rpt_vars[n].p.default_split_2m = atoi(val);
+	else rpt_vars[n].p.default_split_2m = DEFAULT_SPLIT_2M;
+	val = (char *) ast_variable_retrieve(cfg,this,"split70cm");
+	if (val) rpt_vars[n].p.default_split_70cm = atoi(val);
+	else rpt_vars[n].p.default_split_70cm = DEFAULT_SPLIT_70CM;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -5118,15 +5135,15 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"sleeptime");
 	if (val) rpt_vars[n].p.sleeptime = atoi(val);
 	else rpt_vars[n].p.sleeptime = SLEEPTIME;
-	/* retreive the stanza name for the control states if there is one */
+	/* retrieve the stanza name for the control states if there is one */
 	val = (char *) ast_variable_retrieve(cfg,this,"controlstates");
 	rpt_vars[n].p.csstanzaname = val;
 		
-	/* retreive the stanza name for the scheduler if there is one */
+	/* retrieve the stanza name for the scheduler if there is one */
 	val = (char *) ast_variable_retrieve(cfg,this,"scheduler");
 	rpt_vars[n].p.skedstanzaname = val;
 
-	/* retreive the stanza name for the txlimits */
+	/* retrieve the stanza name for the txlimits */
 	val = (char *) ast_variable_retrieve(cfg,this,"txlimits");
 	rpt_vars[n].p.txlimitsstanzaname = val;
 
@@ -10318,7 +10335,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 					return DC_ERROR;
 			}
 	    
-			r = retreive_memory(myrpt, digitbuf);
+			r = retrieve_memory(myrpt, digitbuf);
 			if (r < 0){
 				rpt_telemetry(myrpt,MEMNOTFOUND,NULL);
 				return DC_COMPLETE;
@@ -12035,27 +12052,29 @@ static int setkenwood(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],band,decimals[MAXREMSTR],band1,band2;
-int myrxpl;
+int myrxpl,mysplit;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
 
 	if (sendrxkenwood(myrpt,"VMC 0,0\r",rxstr,"VMC") < 0) return -1;
 	split_freq(mhz, decimals, myrpt->freq);
+	mysplit = myrpt->splitkhz;
 	if (atoi(mhz) > 400)
 	{
 		band = '6';
 		band1 = '1';
 		band2 = '5';
-		strcpy(offset,"005000000");
+		if (!mysplit) mysplit = myrpt->p.default_split_70cm;
 	}
 	else
 	{
 		band = '2';
 		band1 = '0';
 		band2 = '2';
-		strcpy(offset,"000600000");
+		if (!mysplit) mysplit = myrpt->p.default_split_2m;
 	}
+	sprintf(offset,"%06d000",mysplit);
 	strcpy(freq,"000000");
 	strncpy(freq,decimals,strlen(decimals));
 	myrxpl = myrpt->rxplon;
@@ -12077,7 +12096,7 @@ static int set_tmd700(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],decimals[MAXREMSTR];
-int myrxpl;
+int myrxpl,mysplit;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
@@ -12085,16 +12104,18 @@ int band;
 
 	if (sendrxkenwood(myrpt,"BC 0,0\r",rxstr,"BC") < 0) return -1;
 	split_freq(mhz, decimals, myrpt->freq);
+	mysplit = myrpt->splitkhz;
 	if (atoi(mhz) > 400)
 	{
 		band = 8;
-		strcpy(offset,"005000000");
+		if (!mysplit) mysplit = myrpt->p.default_split_70cm;
 	}
 	else
 	{
 		band = 2;
-		strcpy(offset,"000600000");
+		if (!mysplit) mysplit = myrpt->p.default_split_2m;
 	}
+	sprintf(offset,"%06d",mysplit);
 	strcpy(freq,"000000");
 	strncpy(freq,decimals,strlen(decimals));
 	myrxpl = myrpt->rxplon;
@@ -12122,6 +12143,7 @@ static int set_tm271(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],decimals[MAXREMSTR];
+int  mysplit;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
@@ -12130,9 +12152,14 @@ int powers[] = {2,1,0};
 	strcpy(freq,"000000");
 	strncpy(freq,decimals,strlen(decimals));
 
-	sprintf(txstr,"VF %04d%s,0,%d,0,%d,0,0,%02d,00,000,00600000,0,0\r",
+	if (!myrpt->splitkhz)
+		mysplit = myrpt->p.default_split_2m;
+	else 
+		mysplit = myrpt->splitkhz;
+
+	sprintf(txstr,"VF %04d%s,0,%d,0,%d,0,0,%02d,00,000,%05d000,0,0\r",
 		atoi(mhz),freq,offsets[(int)myrpt->offset],
-		(myrpt->txplon != 0),tm271_pltocode(myrpt->txpl));
+		(myrpt->txplon != 0),tm271_pltocode(myrpt->txpl),mysplit);
 
 	if (sendrxkenwood(myrpt,txstr,rxstr,"VF") < 0) return -1;
 	if (sendrxkenwood(myrpt,"VM 0\r",rxstr,"VM") < 0) return -1;
@@ -12237,7 +12264,7 @@ int	band,txoffset = 0,txpower = 0,rxpl;
 static int setrtx(struct rpt *myrpt)
 {
 char tmp[MAXREMSTR] = "",*s,rigstr[200],pwr,res = 0;
-int	band,txoffset = 0,txpower = 0,rxpl,txpl;
+int	band,txoffset = 0,txpower = 0,rxpl,txpl,mysplit;
 float ofac;
 double txfreq;
 
@@ -12328,15 +12355,20 @@ double txfreq;
 
 	res = setrtx_check(myrpt);
 	if (res < 0) return res;
-	ofac = 0.0;
-	if (myrpt->offset == REM_MINUS) ofac = -1.0;
-	if (myrpt->offset == REM_PLUS) ofac = 1.0;
+	mysplit = myrpt->splitkhz;
+	if (!mysplit) 
+	{
+		if (!strcmp(myrpt->remoterig,remote_rig_rtx450))
+			mysplit = myrpt->p.default_split_70cm;
+		else
+			mysplit = myrpt->p.default_split_2m;
+	}
+	if (myrpt->offset != REM_SIMPLEX)
+		ofac = ((float) mysplit) / 1000.0;
+	else ofac = 0.0;
+	if (myrpt->offset == REM_MINUS) ofac = -ofac;
 
-	if (!strcmp(myrpt->remoterig,remote_rig_rtx450))
-		txfreq = atof(myrpt->freq) +  (ofac * 5.0);
-	else
-		txfreq = atof(myrpt->freq) +  (ofac * 0.6);
-
+	txfreq = atof(myrpt->freq) +  ofac;
 	pwr = 'L';
 	if (myrpt->powerlevel == REM_HIPWR) pwr = 'H';
 	if (!res)
@@ -12846,7 +12878,34 @@ static int simple_command_ft897(struct rpt *myrpt, char command)
 static int set_offset_ft897(struct rpt *myrpt, char offset)
 {
 	unsigned char cmdstr[5];
-	
+	int mysplit,res;
+	char mhz[MAXREMSTR],decimal[MAXREMSTR];
+
+	if(split_freq(mhz, decimal, myrpt->freq))
+		return -1; 
+
+	mysplit = myrpt->splitkhz * 1000;
+	if (!mysplit)
+	{
+		if (atoi(mhz) > 400) 
+			mysplit = myrpt->p.default_split_70cm * 1000;
+		else 
+			mysplit = myrpt->p.default_split_2m * 1000;
+	}
+
+	memset(cmdstr, 0, 5);
+
+	if(debug > 6)
+		ast_log(LOG_NOTICE,"split=%i\n",mysplit * 1000);
+
+	cmdstr[0] = (mysplit / 10000000) +  ((mysplit % 10000000) / 1000000);
+	cmdstr[1] = (((mysplit % 1000000) / 100000) << 4) + ((mysplit % 100000) / 10000);
+	cmdstr[2] = (((mysplit % 10000) / 1000) << 4) + ((mysplit % 1000) / 100);
+	cmdstr[3] = ((mysplit % 10) << 4) + ((mysplit % 100) / 10);
+	cmdstr[4] = 0xf9;						/* command */
+	res = serial_remote_io(myrpt, cmdstr, 5, NULL, 0, 0);
+	if (res) return res;	
+
 	memset(cmdstr, 0, 5);
 
 	switch(offset){
@@ -13732,6 +13791,38 @@ static int set_freq_ic706(struct rpt *myrpt, char *newfreq)
 static int set_offset_ic706(struct rpt *myrpt, char offset)
 {
 	unsigned char c;
+	int mysplit,res;
+	char mhz[MAXREMSTR],decimal[MAXREMSTR];
+	unsigned char cmdstr[10];
+
+	if(split_freq(mhz, decimal, myrpt->freq))
+		return -1; 
+
+	mysplit = myrpt->splitkhz * 10;
+	if (!mysplit)
+	{
+		if (atoi(mhz) > 400) 
+			mysplit = myrpt->p.default_split_70cm * 10;
+		else 
+			mysplit = myrpt->p.default_split_2m * 10;
+	}
+
+	if(debug > 6)
+		ast_log(LOG_NOTICE,"split=%i\n",mysplit * 100);
+
+	/* The ic-706 likes packed BCD data */
+
+	cmdstr[0] = cmdstr[1] = 0xfe;
+	cmdstr[2] = myrpt->p.civaddr;
+	cmdstr[3] = 0xe0;
+	cmdstr[4] = 0x0d;
+	cmdstr[5] = ((mysplit % 10) << 4) + ((mysplit % 100) / 10);
+	cmdstr[6] = (((mysplit % 10000) / 1000) << 4) + ((mysplit % 1000) / 100);
+	cmdstr[7] = ((mysplit / 100000) << 4) + ((mysplit % 100000) / 10000);
+	cmdstr[8] = 0xfd;
+
+	res = civ_cmd(myrpt,cmdstr,9);
+	if (res) return res;
 
 	if(debug > 6)
 		ast_log(LOG_NOTICE,"offset=%i\n",offset);
@@ -14398,7 +14489,7 @@ static int get_mem_set(struct rpt *myrpt, char *digitbuf)
 {
 	int res=0;
 	if(debug)ast_log(LOG_NOTICE," digitbuf=%s\n", digitbuf);
-	res = retreive_memory(myrpt, digitbuf);
+	res = retrieve_memory(myrpt, digitbuf);
 	if(!res)res=setrem(myrpt);	
 	if(debug)ast_log(LOG_NOTICE," freq=%s  res=%i\n", myrpt->freq, res);
 	return res;
@@ -18359,9 +18450,10 @@ char *this,*val;
 		/* if is a remote, dont start one for it */
 		if (rpt_vars[i].remote)
 		{
-			if(retreive_memory(&rpt_vars[i],"init")){ /* Try to retreive initial memory channel */
+			if(retrieve_memory(&rpt_vars[i],"init")){ /* Try to retrieve initial memory channel */
 				if (!strcmp(rpt_vars[i].remoterig,remote_rig_rtx450))
 					strncpy(rpt_vars[i].freq, "446.500", sizeof(rpt_vars[i].freq) - 1);
+					
 				else
 					strncpy(rpt_vars[i].freq, "146.580", sizeof(rpt_vars[i].freq) - 1);
 				strncpy(rpt_vars[i].rxpl, "100.0", sizeof(rpt_vars[i].rxpl) - 1);
@@ -18370,13 +18462,14 @@ char *this,*val;
 				rpt_vars[i].remmode = REM_MODE_FM;
 				rpt_vars[i].offset = REM_SIMPLEX;
 				rpt_vars[i].powerlevel = REM_LOWPWR;
+				rpt_vars[i].splitkhz = 0;
 			}
 			continue;
 		}
 		else /* is a normal repeater */
 		{
 		    rpt_vars[i].p.memory = rpt_vars[i].name;
-			if(retreive_memory(&rpt_vars[i],"radiofreq")){ /* Try to retreive initial memory channel */
+			if(retrieve_memory(&rpt_vars[i],"radiofreq")){ /* Try to retrieve initial memory channel */
 				if (!strcmp(rpt_vars[i].remoterig,remote_rig_rtx450))
 					strncpy(rpt_vars[i].freq, "446.500", sizeof(rpt_vars[i].freq) - 1);
 				else if (!strcmp(rpt_vars[i].remoterig,remote_rig_rtx150))
@@ -18387,6 +18480,7 @@ char *this,*val;
 				rpt_vars[i].remmode = REM_MODE_FM;
 				rpt_vars[i].offset = REM_SIMPLEX;
 				rpt_vars[i].powerlevel = REM_LOWPWR;
+				rpt_vars[i].splitkhz = 0;
 			}
 			ast_log(LOG_NOTICE,"Normal Repeater Init  %s  %s  %s\n",rpt_vars[i].name, rpt_vars[i].remoterig, rpt_vars[i].freq);
 		}
