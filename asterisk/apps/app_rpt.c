@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.223 3/28/2010
+ *  version 0.224 3/28/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -120,6 +120,7 @@
  *  57 - Rx CTCSS Disable
  *  58 - Tx CTCSS On Input only Enable
  *  59 - Tx CTCSS On Input only Disable
+ *  60 - Send MDC-1200 Burst (specify UnitID)
  *
  *
  * ilink cmds:
@@ -374,7 +375,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
 	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE,
-	STATS_GPS,STATS_GPS_LEGACY};
+	STATS_GPS,STATS_GPS_LEGACY, MDC1200};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -474,21 +475,49 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 #endif
 
-/* Un-comment the following to include support for MDC-1200 digital tone
+/* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
 /* #include "mdc_decode.c" */
+
+/* Un-comment the following to include support encoding of MDC-1200 digital tone
+   signalling protocol (using KA6SQG's GPL'ed implementation) */
+/* #include "mdc_encode.c" */
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
 /* #include "rpt_notch.c" */
 
 
+#ifdef	_MDC_ENCODE_H_
+
+#define	MDCGEN_BUFSIZE 2000
+
+struct mdcgen_pvt
+{
+	mdc_encoder_t *mdc;
+	int origwfmt;
+	struct ast_frame f;
+	char buf[(MDCGEN_BUFSIZE * 2) + AST_FRIENDLY_OFFSET];
+	unsigned char cbuf[MDCGEN_BUFSIZE];
+} ;
+
+struct mdcparams
+{
+	short UnitID;
+
+} ;
+
+static int mdc1200gen(struct ast_channel *chan, short UnitID);
+static int mdc1200gen_start(struct ast_channel *chan, short UnitID);
+
+#endif
+
 /* Start a tone-list going */
 int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist, int interruptible);
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.223  03/28/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.224  03/28/2010";
 
 static char *app = "Rpt";
 
@@ -7209,7 +7238,8 @@ struct zt_params par;
 	rpt_mutex_lock(&myrpt->lock);
 	mytele->chan = mychannel;
 	while (myrpt->active_telem && 
-	    (myrpt->active_telem->mode == PAGE))
+	    ((myrpt->active_telem->mode == PAGE) || (
+		myrpt->active_telem->mode == MDC1200)))
 	{
                 rpt_mutex_unlock(&myrpt->lock);
 		usleep(100000);
@@ -7350,6 +7380,21 @@ struct zt_params par;
 		}
 		imdone = 1;
 		break;
+#ifdef	_MDC_ENCODE_H_
+	    case MDC1200:
+		wait_interval(myrpt, DLY_TELEM,  mychannel);
+		res = mdc1200gen_start(myrpt->txchannel,mytele->submode);
+		while(myrpt->txchannel->generatordata)
+		{
+			if(ast_safe_sleep(myrpt->txchannel, 50))
+			{
+				res = -1;
+				break;
+			}
+		}
+		imdone = 1;
+		break;
+#endif
 	    case UNKEY:
 	    case LOCUNKEY:
 		if(myrpt->patchnoct && myrpt->callmode){ /* If no CT during patch configured, then don't send one */
@@ -8845,7 +8890,7 @@ struct rpt_link *l;
 		strncpy(tele->param, (char *) data, TELEPARAMSIZE - 1);
 		tele->param[TELEPARAMSIZE - 1] = 0;
 	}
-	if ((mode == REMXXX) || (mode == PAGE)) tele->submode = (int) data;
+	if ((mode == REMXXX) || (mode == PAGE) || (mode == MDC1200)) tele->submode = (int) data;
 	insque((struct qelem *)tele, (struct qelem *)myrpt->tele.next);
 	rpt_mutex_unlock(&myrpt->lock);
         pthread_attr_init(&attr);
@@ -10680,6 +10725,12 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, ARB_ALPHA, (void *) "TXIPLDIS");
 			return DC_COMPLETE;		
+#ifdef	_MDC_ENCODE_H_
+		case 60: /* play MDC1200 burst */
+			if (argc < 2) break;
+			rpt_telemetry(myrpt,MDC1200,(void *)strtol(argv[1],NULL,16));
+			return DC_COMPLETE;
+#endif
 	}	
 	return DC_INDETERMINATE;
 }
@@ -21175,6 +21226,150 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 
 #endif
 
+#ifdef	_MDC_ENCODE_H_
+
+static char *mdc_app = "MDC1200Gen";
+static char *mdc_synopsis = "MDC1200 Generator";
+static char *mdc_descrip = "  MDC1200Gen(UnitID):  Generates MDC-1200\n"
+"  burst for given UnitID\n\n";
+
+static void mdcgen_release(struct ast_channel *chan, void *params)
+{
+	struct mdcgen_pvt *ps = params;
+	if (chan) {
+		ast_set_write_format(chan, ps->origwfmt);
+	}
+	if (!ps) return;
+	if (ps->mdc) free(ps->mdc);
+	ast_free(ps);
+	return;
+}
+
+static void * mdcgen_alloc(struct ast_channel *chan, void *params)
+{
+	struct mdcgen_pvt *ps;
+	struct mdcparams *p = (struct mdcparams *)params;
+
+	if (!(ps = ast_calloc(1, sizeof(*ps))))
+		return NULL;
+	ps->origwfmt = chan->writeformat;
+	ps->mdc = mdc_encoder_new(8000);
+	if (!ps->mdc)
+	{
+		ast_log(LOG_ERROR,"Unable to make new MDC encoder!!\n");
+		ast_free(ps);
+		return NULL;
+	}
+	mdc_encoder_set_packet(ps->mdc,1,0,p->UnitID);
+	if (ast_set_write_format(chan, AST_FORMAT_SLINEAR)) {
+		ast_log(LOG_ERROR, "Unable to set '%s' to signed linear format (write)\n", chan->name);
+		ast_free(ps);
+		return NULL;
+	}
+	return ps;
+}
+
+static int mdcgen_generator(struct ast_channel *chan, void *data, int len, int samples)
+{
+	struct mdcgen_pvt *ps = data;
+	short s,*sp;
+	int i,n;
+
+	if (!samples) return 1;
+	if (samples > sizeof(ps->cbuf)) return -1;
+	if (samples < 0) samples = 160;
+	n = mdc_encoder_get_samples(ps->mdc,ps->cbuf,samples);
+	if (n < 1) return 1;
+	sp = (short *)(ps->buf + AST_FRIENDLY_OFFSET);
+	for(i = 0; i < n; i++)
+	{
+		s = ((short)ps->cbuf[i]) - 128;
+		*sp++ = s * 81;
+	}
+	ps->f.frametype = AST_FRAME_VOICE;
+	ps->f.subclass = AST_FORMAT_SLINEAR;
+	ps->f.datalen = n * 2;
+	ps->f.samples = n;
+	ps->f.offset = AST_FRIENDLY_OFFSET;
+	ps->f.data = ps->buf + AST_FRIENDLY_OFFSET;
+	ps->f.delivery.tv_sec = 0;
+	ps->f.delivery.tv_usec = 0;
+	ast_write(chan, &ps->f);
+	return 0;
+}
+	
+static struct ast_generator mdcgen = {
+	alloc: mdcgen_alloc,
+	release: mdcgen_release,
+	generate: mdcgen_generator,
+};
+
+static int mdc1200gen_start(struct ast_channel *chan, short UnitID)
+{
+	struct mdcparams p;
+
+	memset(&p,0,sizeof(p));
+	p.UnitID = UnitID;
+	if (ast_activate_generator(chan, &mdcgen, &p)) {
+		return -1;
+	}
+	return 0;
+}
+
+static int mdc1200gen(struct ast_channel *chan, short UnitID)
+{
+
+int	res;
+struct ast_frame *f;
+
+	res = mdc1200gen_start(chan,UnitID);
+	if (res) return res;
+
+	while (chan->generatordata)
+	{
+		if (ast_check_hangup(chan)) return -1;
+		res = ast_waitfor(chan, 100);
+		if (res <= 0) return -1;
+		f = ast_read(chan);
+		if (f)
+			ast_frfree(f);
+		else
+			return -1;
+	}
+	return 0;
+}
+
+static int mdcgen_exec(struct ast_channel *chan, void *data)
+{
+	struct ast_module_user *u;
+	char *tmp;
+	int res;
+	short unitid;
+
+	AST_DECLARE_APP_ARGS(args,
+		AST_APP_ARG(unit);
+		AST_APP_ARG(parms);
+	);
+	
+	if (ast_strlen_zero(data)) {
+		ast_log(LOG_WARNING, "MDC1200 requires an argument (filename)\n");
+		return -1;
+	}
+
+	tmp = ast_strdup(data);
+	u = ast_module_user_add(chan);
+	AST_STANDARD_APP_ARGS(args, tmp);
+	unitid = (short) strtol(args.unit,NULL,16) & 0xffff;
+	res = mdc1200gen(chan, unitid);
+	free(tmp);
+	ast_module_user_remove(u);
+	return res;
+}
+
+
+#endif
+
+
 #ifdef	OLD_ASTERISK
 int unload_module()
 #else
@@ -21195,6 +21390,9 @@ static int unload_module(void)
                 ast_mutex_destroy(&rpt_vars[i].remlock);
 	}
 	res = ast_unregister_application(app);
+#ifdef	_MDC_ENCODE_H_
+	res |= ast_unregister_application(app);
+#endif
 
 #ifdef	NEW_ASTERISK
 	ast_cli_unregister_multiple(rpt_cli,sizeof(rpt_cli) / 
@@ -21277,9 +21475,13 @@ static int load_module(void)
 #ifndef OLD_ASTERISK
 	res |= ast_manager_register("RptLocalNodes", 0, manager_rpt_local_nodes, "List local node numbers");
 	res |= ast_manager_register("RptStatus", 0, manager_rpt_status, "Return Rpt Status for CGI");
-
 #endif
 	res |= ast_register_application(app, rpt_exec, synopsis, descrip);
+
+#ifdef	_MDC_ENCODE_H_
+	res |= ast_register_application(mdc_app, mdcgen_exec, mdc_synopsis, mdc_descrip);
+#endif
+
 	return res;
 }
 
@@ -21315,7 +21517,6 @@ int	n;
 
 
 #ifndef	OLD_ASTERISK
-/* STD_MOD(MOD_1, reload, NULL, NULL); */
 AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Radio Repeater/Remote Base Application",
 		.load = load_module,
 		.unload = unload_module,
