@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.222 3/27/2010
+ *  version 0.223 3/28/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -488,7 +488,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.222  03/27/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.223  03/28/2010";
 
 static char *app = "Rpt";
 
@@ -908,6 +908,9 @@ static struct rpt
 	char *remoterig;
 	struct	rpt_chan_stat chan_stat[NRPTSTAT];
 	unsigned int scram;
+#ifdef	_MDC_DECODE_H_
+	mdc_decoder_t *mdc;
+#endif
 
 	struct {
 		char *ourcontext;
@@ -1160,7 +1163,6 @@ static struct rpt
 	} filters[MAXFILTERS];
 #endif
 #ifdef	_MDC_DECODE_H_
-	mdc_decoder_t *mdc;
 	unsigned short lastunit;
 	char lastmdc[32];
 #endif
@@ -8009,7 +8011,6 @@ struct zt_params par;
 			imdone = 1;
 			break;
 		}
-		/* @@@@@ tune */
 		set_mode_ft897(myrpt, REM_MODE_AM);
 		simple_command_ft897(myrpt, 8);
 		if(play_tone(mychannel, 800, 6000, 8192) == -1) break;
@@ -17747,13 +17748,13 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					char ustr[10];
 
 					mdc_decoder_get_packet(myrpt->mdc,&op,&arg,&unitID);
-					if (debug > 2)
+					if (option_verbose)
 					{
-						ast_log(LOG_NOTICE,"Got (single-length) packet:\n");
-						ast_log(LOG_NOTICE,"op: %02x, arg: %02x, UnitID: %04x\n",
+						ast_verbose("Got MDC-1200 (single-length) packet on node %s:\n",myrpt->name);
+						ast_verbose("op: %02x, arg: %02x, UnitID: %04x\n",
 							op & 255,arg & 255,unitID);
 					}
-					if ((op == 1) && (arg == 0))
+					if ((op == 1) && ((arg == 0) || (arg == 0x80)))
 					{
 						myrpt->lastunit = unitID;
 						mdc1200_notify(myrpt,NULL,myrpt->lastunit);
@@ -17762,18 +17763,21 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						mdc1200_cmd(myrpt,ustr);
 					}
 				}
-				if ((debug > 2) && (i == 2))
+				if (i == 2)
 				{
 					unsigned char op,arg,ex1,ex2,ex3,ex4;
 					unsigned short unitID;
 
 					mdc_decoder_get_double_packet(myrpt->mdc,&op,&arg,&unitID,
 						&ex1,&ex2,&ex3,&ex4);
-					ast_log(LOG_NOTICE,"Got (double-length) packet:\n");
-					ast_log(LOG_NOTICE,"op: %02x, arg: %02x, UnitID: %04x\n",
-						op & 255,arg & 255,unitID);
-					ast_log(LOG_NOTICE,"ex1: %02x, ex2: %02x, ex3: %02x, ex4: %02x\n",
-						ex1 & 255, ex2 & 255, ex3 & 255, ex4 & 255);
+					if (option_verbose)
+					{
+						ast_verbose("Got MDC-1200 (double-length) packet on node %s:\n",myrpt->name);
+						ast_verbose("op: %02x, arg: %02x, UnitID: %04x\n",
+							op & 255,arg & 255,unitID);
+						ast_verbose("ex1: %02x, ex2: %02x, ex3: %02x, ex4: %02x\n",
+							ex1 & 255, ex2 & 255, ex3 & 255, ex4 & 255);
+					}
 				}
 #endif
 #ifdef	__RPT_NOTCH
