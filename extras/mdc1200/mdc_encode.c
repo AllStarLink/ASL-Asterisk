@@ -110,6 +110,8 @@ mdc_encoder_t * mdc_encoder_new(int sampleRate)
 }
 
 
+#ifndef	_MDC_DECODE_H_
+
 static unsigned long _flip(unsigned long crc, int bitnum)
 {
         unsigned long i, j=1, crcout=0;
@@ -151,6 +153,8 @@ static unsigned long docrc(unsigned char* p, int len) {
 
         return(crc);
 }
+
+#endif
 
 static unsigned char * _enc_leader(unsigned char *data)
 {
