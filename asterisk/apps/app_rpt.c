@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.224 3/28/2010
+ *  version 0.225 3/28/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -120,7 +120,16 @@
  *  57 - Rx CTCSS Disable
  *  58 - Tx CTCSS On Input only Enable
  *  59 - Tx CTCSS On Input only Disable
- *  60 - Send MDC-1200 Burst (specify UnitID)
+ *  60 - Send MDC-1200 Burst (cop,60,type,UnitID[,DestID,SubCode])
+ *     Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call 
+ *     (SelCall or Alert), or 'SX' for STS (ststus), where X is 0-F.
+ *     DestID and subcode are only specified for  the 'C' type message.
+ *     UnitID is the local systems UnitID. DestID is the MDC1200 ID of
+ *     the radio being called, and the subcodes are as follows: 
+ *          Subcode '8205' is Voice Selective Call for Spectra ('Call')
+ *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
+ *             Astro-Saber('Call')
+ *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
  *
  *
  * ilink cmds:
@@ -448,6 +457,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #endif
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fnmatch.h>
 
 #include "asterisk/utils.h"
 #include "asterisk/lock.h"
@@ -477,7 +487,7 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c" */
+/* #include "mdc_decode.c"  */
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
@@ -503,12 +513,14 @@ struct mdcgen_pvt
 
 struct mdcparams
 {
-	short UnitID;
-
+	char	type[10];
+	short	UnitID;
+	short	DestID;
+	short	subcode;
 } ;
 
-static int mdc1200gen(struct ast_channel *chan, short UnitID);
-static int mdc1200gen_start(struct ast_channel *chan, short UnitID);
+static int mdc1200gen(struct ast_channel *chan, char *type, short UnitID, short destID, short subcode);
+static int mdc1200gen_start(struct ast_channel *chan, char *type, short UnitID, short destID, short subcode);
 
 #endif
 
@@ -517,7 +529,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.224  03/28/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.225  03/28/2010";
 
 static char *app = "Rpt";
 
@@ -1404,6 +1416,24 @@ pthread_t id;
 #define rpt_mutex_unlock(x) ast_mutex_unlock(x)
 
 #endif  /* APP_RPT_LOCK_DEBUG */
+
+#ifdef	_MDC_DECODE_H_
+static const char *my_variable_match(const struct ast_config *config, const char *category, const char *variable)
+{
+	struct ast_variable *v;
+
+	if (category)
+	{
+		for (v = ast_variable_browse(config, category); v; v = v->next)
+		{
+			if (!fnmatch(v->name,variable,FNM_CASEFOLD | FNM_NOESCAPE))
+				return v->value;
+		}
+
+	}
+	return NULL;
+}
+#endif
 
 /*
 * Return 1 if rig is multimode capable
@@ -4196,30 +4226,30 @@ static int openserial(struct rpt *myrpt,char *fname)
 	return(fd);	
 }
 
-static void mdc1200_notify(struct rpt *myrpt,char *fromnode, unsigned int unit)
+static void mdc1200_notify(struct rpt *myrpt,char *fromnode, char *data)
 {
 	if (!fromnode)
 	{
-		ast_verbose("Got MDC-1200 ID %04X from local system (%s)\n",
-			unit,myrpt->name);
+		ast_verbose("Got MDC-1200 data %s from local system (%s)\n",
+			data,myrpt->name);
 	}
 	else
 	{
-		ast_verbose("Got MDC-1200 ID %04X from node %s (%s)\n",
-			unit,fromnode,myrpt->name);
+		ast_verbose("Got MDC-1200 data %s from node %s (%s)\n",
+			data,fromnode,myrpt->name);
 	}
 }
 
 #ifdef	_MDC_DECODE_H_
 
-static void mdc1200_send(struct rpt *myrpt, unsigned int unit)
+static void mdc1200_send(struct rpt *myrpt, char *data)
 {
 struct rpt_link *l;
 struct	ast_frame wf;
 char	str[200];
 
 
-	sprintf(str,"I %s %04X",myrpt->name,unit);
+	sprintf(str,"I %s %s",myrpt->name,data);
 
 	wf.frametype = AST_FRAME_TEXT;
 	wf.subclass = 0;
@@ -4251,27 +4281,25 @@ static void mdc1200_cmd(struct rpt *myrpt, char *data)
 	char busy,*myval;
 
 	busy = 0;
-	if (strcmp(data,myrpt->lastmdc))
+	if ((data[0] == 'I') && (!strcmp(data,myrpt->lastmdc))) return;
+	myval = (char *) my_variable_match(myrpt->cfg, myrpt->p.mdcmacro, data);
+	if (myval) 
 	{
-		myval = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->p.mdcmacro, data);
-		if (myval) 
+		if (option_verbose) ast_verbose("MDCMacro for %s doing %s on node %s\n",data,myval,myrpt->name);
+		rpt_mutex_lock(&myrpt->lock);
+		if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myval))
 		{
-			if (debug) ast_log(LOG_NOTICE,"MDCMacro %s doing %s on node %s\n",data,myval,myrpt->name);
-			rpt_mutex_lock(&myrpt->lock);
-			if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myval))
-			{
-				rpt_mutex_unlock(&myrpt->lock);
-				busy=1;
-			}
-			if(!busy)
-			{
-				myrpt->macrotimer = MACROTIME;
-				strncat(myrpt->macrobuf,myval,MAXMACRO - 1);
-			}
 			rpt_mutex_unlock(&myrpt->lock);
+			busy=1;
 		}
-	 	if (!busy) strcpy(myrpt->lastmdc,data);
+		if(!busy)
+		{
+			myrpt->macrotimer = MACROTIME;
+			strncat(myrpt->macrobuf,myval,MAXMACRO - 1);
+		}
+		rpt_mutex_unlock(&myrpt->lock);
 	}
+ 	if ((data[0] == 'I') && (!busy)) strcpy(myrpt->lastmdc,data);
 	return;
 }
 #endif
@@ -7171,6 +7199,9 @@ FILE	*fp;
 float	f;
 struct stat mystat;
 struct zt_params par;
+#ifdef	_MDC_ENCODE_H_
+struct	mdcparams *mdcp;
+#endif
 
 	/* get a pointer to myrpt */
 	myrpt = mytele->rpt;
@@ -7383,13 +7414,18 @@ struct zt_params par;
 #ifdef	_MDC_ENCODE_H_
 	    case MDC1200:
 		wait_interval(myrpt, DLY_TELEM,  mychannel);
-		res = mdc1200gen_start(myrpt->txchannel,mytele->submode);
-		while(myrpt->txchannel->generatordata)
+		mdcp = (struct mdcparams *)mytele->submode;
+		if (mdcp)
 		{
-			if(ast_safe_sleep(myrpt->txchannel, 50))
+			res = mdc1200gen_start(myrpt->txchannel,mdcp->type,mdcp->UnitID,mdcp->DestID,mdcp->subcode);
+			ast_free(mdcp);
+			while(myrpt->txchannel->generatordata)
 			{
-				res = -1;
-				break;
+				if(ast_safe_sleep(myrpt->txchannel, 50))
+				{
+					res = -1;
+					break;
+				}
 			}
 		}
 		imdone = 1;
@@ -9855,10 +9891,10 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 
 #ifdef	_MDC_DECODE_H_
 		case 8:
-			myrpt->lastunit = 0xd00d; 
-			mdc1200_notify(myrpt,NULL,myrpt->lastunit);
-			mdc1200_send(myrpt,myrpt->lastunit);
-			mdc1200_cmd(myrpt,"d00d");
+			myrpt->lastunit = 0xd00d;
+			mdc1200_cmd(myrpt,"ID00D");
+			mdc1200_notify(myrpt,NULL,"ID00D");
+			mdc1200_send(myrpt,"ID00D");
 			break;
 #endif
 
@@ -10188,6 +10224,9 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 	int  argc;
 	char *argv[101],*cp;
 	int i, j, k, r, src;
+#ifdef	_MDC_ENCODE_H_
+	struct mdcparams *mdcp;
+#endif
 
 	if(!param)
 		return DC_ERROR;
@@ -10727,8 +10766,19 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			return DC_COMPLETE;		
 #ifdef	_MDC_ENCODE_H_
 		case 60: /* play MDC1200 burst */
-			if (argc < 2) break;
-			rpt_telemetry(myrpt,MDC1200,(void *)strtol(argv[1],NULL,16));
+			if (argc < 3) break;
+			mdcp = ast_calloc(1,sizeof(struct mdcparams));
+			if (!mdcp) return DC_ERROR;
+			memset(mdcp,0,sizeof(mdcp));
+			if (*argv[1] == 'C')
+			{
+				if (argc < 5) return DC_ERROR;
+				mdcp->DestID = (short) strtol(argv[3],NULL,16);
+				mdcp->subcode = (short) strtol(argv[4],NULL,16);
+			}
+			strncpy(mdcp->type,argv[1],sizeof(mdcp->type) - 1);
+			mdcp->UnitID = (short) strtol(argv[1],NULL,16);
+			rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
 			return DC_COMPLETE;
 #endif
 	}	
@@ -11099,12 +11149,12 @@ struct	ast_frame wf;
 	}
 	if (tmp[0] == 'I')
 	{
-		if (sscanf(tmp,"%s %s %x",cmd,src,&seq) != 3)
+		if (sscanf(tmp,"%s %s %s",cmd,src,dest) != 3)
 		{
 			ast_log(LOG_WARNING, "Unable to parse ident string %s\n",str);
 			return;
 		}
-		mdc1200_notify(myrpt,src,seq);
+		mdc1200_notify(myrpt,src,dest);
 		strcpy(dest,"*");
 	}
 	else
@@ -15697,12 +15747,12 @@ int	seq,res;
 #ifndef	DO_NOT_NOTIFY_MDC1200_ON_REMOTE_BASES
 	if (tmp[0] == 'I')
 	{
-		if (sscanf(tmp,"%s %s %x",cmd,src,&seq) != 3)
+		if (sscanf(tmp,"%s %s %s",cmd,src,dest) != 3)
 		{
 			ast_log(LOG_WARNING, "Unable to parse ident string %s\n",str);
 			return 0;
 		}
-		mdc1200_notify(myrpt,src,seq);
+		mdc1200_notify(myrpt,src,dest);
 		return 0;
 	}
 #endif
@@ -17805,12 +17855,31 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						ast_verbose("op: %02x, arg: %02x, UnitID: %04x\n",
 							op & 255,arg & 255,unitID);
 					}
+					/* if for PTT ID */
 					if ((op == 1) && ((arg == 0) || (arg == 0x80)))
 					{
 						myrpt->lastunit = unitID;
-						mdc1200_notify(myrpt,NULL,myrpt->lastunit);
-						mdc1200_send(myrpt,myrpt->lastunit);
-						sprintf(ustr,"%04x",unitID);
+						sprintf(ustr,"I%04X",unitID);
+						mdc1200_notify(myrpt,NULL,ustr);
+						mdc1200_send(myrpt,ustr);
+						mdc1200_cmd(myrpt,ustr);
+					}
+					/* if for EMERGENCY */
+					if ((op == 0) && ((arg == 0x81) || (arg == 0x80)))
+					{
+						myrpt->lastunit = unitID;
+						sprintf(ustr,"E%04X",unitID);
+						mdc1200_notify(myrpt,NULL,ustr);
+						mdc1200_send(myrpt,ustr);
+						mdc1200_cmd(myrpt,ustr);
+					}
+					/* if for STS (status)  */
+					if (op == 0x46)
+					{
+						myrpt->lastunit = unitID;
+						sprintf(ustr,"S%04X-%X",unitID,arg & 0xf);
+						mdc1200_notify(myrpt,NULL,ustr);
+						mdc1200_send(myrpt,ustr);
 						mdc1200_cmd(myrpt,ustr);
 					}
 				}
@@ -17818,6 +17887,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				{
 					unsigned char op,arg,ex1,ex2,ex3,ex4;
 					unsigned short unitID;
+					char ustr[20];
 
 					mdc_decoder_get_double_packet(myrpt->mdc,&op,&arg,&unitID,
 						&ex1,&ex2,&ex3,&ex4);
@@ -17828,6 +17898,14 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							op & 255,arg & 255,unitID);
 						ast_verbose("ex1: %02x, ex2: %02x, ex3: %02x, ex4: %02x\n",
 							ex1 & 255, ex2 & 255, ex3 & 255, ex4 & 255);
+					}
+					/* if for SelCall or Alert */
+					if ((op == 0x35) && (arg = 0x89))
+					{
+						/* if is Alert */
+						if (ex1 & 1) sprintf(ustr,"A%02X%02X-%04X",ex3 & 255,ex4 & 255,unitID);
+						/* otherwise is selcall */
+						else  sprintf(ustr,"S%02X%02X-%04X",ex3 & 255,ex4 & 255,unitID);
 					}
 				}
 #endif
@@ -21230,8 +21308,17 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 
 static char *mdc_app = "MDC1200Gen";
 static char *mdc_synopsis = "MDC1200 Generator";
-static char *mdc_descrip = "  MDC1200Gen(UnitID):  Generates MDC-1200\n"
-"  burst for given UnitID\n\n";
+static char *mdc_descrip = "  MDC1200Gen(Type|UnitID[|DestID|SubCode]):  Generates MDC-1200\n"
+"  burst for given UnitID. Type is 'I' for PttID, 'E' for\n"
+"  Emergency, and 'C' for Call (SelCall or Alert), or 'SX' for STS\n"
+"  (status), where X is 0-F (indicating the status code). DestID and\n"
+"  subcode are only specified for the 'C' type message. DestID is\n"
+"  The MDC1200 ID of the radio being called, and the subcodes are\n"
+"  as follows: \n\n"
+"     Subcode '8205' is Voice Selective Call for Spectra ('Call')\n"
+"     Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or \n"
+"          Astro-Saber('Call')\n"
+"     Subcode '810D' is Call Alert (like Maxtrac 'CA')\\n\n";
 
 static void mdcgen_release(struct ast_channel *chan, void *params)
 {
@@ -21260,7 +21347,29 @@ static void * mdcgen_alloc(struct ast_channel *chan, void *params)
 		ast_free(ps);
 		return NULL;
 	}
-	mdc_encoder_set_packet(ps->mdc,1,0,p->UnitID);
+	if (p->type[0] == 'I')
+	{
+		mdc_encoder_set_packet(ps->mdc,1,0x80,p->UnitID);
+	}
+	else if (p->type[0] == 'E')
+	{
+		mdc_encoder_set_packet(ps->mdc,0,0x80,p->UnitID);
+	}
+	else if (p->type[0] == 'S')
+	{
+		mdc_encoder_set_packet(ps->mdc,0x46,p->type[1] - '0',p->UnitID);
+	}
+	else if (p->type[0] == 'C')
+	{
+		mdc_encoder_set_double_packet(ps->mdc,0x35,0x89,p->DestID,p->subcode >> 8,
+			p->subcode & 0xff,p->UnitID >> 8,p->UnitID & 0xff);
+	}
+	else
+	{
+		ast_log(LOG_ERROR, "Dont know MDC encode type '%s'\n", p->type);
+		ast_free(ps);
+		return NULL;	
+	}
 	if (ast_set_write_format(chan, AST_FORMAT_SLINEAR)) {
 		ast_log(LOG_ERROR, "Unable to set '%s' to signed linear format (write)\n", chan->name);
 		ast_free(ps);
@@ -21304,25 +21413,28 @@ static struct ast_generator mdcgen = {
 	generate: mdcgen_generator,
 };
 
-static int mdc1200gen_start(struct ast_channel *chan, short UnitID)
+static int mdc1200gen_start(struct ast_channel *chan, char *type, short UnitID, short destID, short subcode)
 {
 	struct mdcparams p;
 
 	memset(&p,0,sizeof(p));
+	strncpy(p.type, type, sizeof(p.type) - 1);
 	p.UnitID = UnitID;
+	p.DestID = destID;
+	p.subcode = subcode;
 	if (ast_activate_generator(chan, &mdcgen, &p)) {
 		return -1;
 	}
 	return 0;
 }
 
-static int mdc1200gen(struct ast_channel *chan, short UnitID)
+static int mdc1200gen(struct ast_channel *chan, char *type, short UnitID, short destID, short subcode)
 {
 
 int	res;
 struct ast_frame *f;
 
-	res = mdc1200gen_start(chan,UnitID);
+	res = mdc1200gen_start(chan,type,UnitID,destID,subcode);
 	if (res) return res;
 
 	while (chan->generatordata)
@@ -21344,23 +21456,46 @@ static int mdcgen_exec(struct ast_channel *chan, void *data)
 	struct ast_module_user *u;
 	char *tmp;
 	int res;
-	short unitid;
+	short unitid,destid,subcode;
 
 	AST_DECLARE_APP_ARGS(args,
+		AST_APP_ARG(type);
 		AST_APP_ARG(unit);
-		AST_APP_ARG(parms);
+		AST_APP_ARG(destid);
+		AST_APP_ARG(subcode);
 	);
 	
 	if (ast_strlen_zero(data)) {
-		ast_log(LOG_WARNING, "MDC1200 requires an argument (filename)\n");
+		ast_log(LOG_WARNING, "MDC1200 requires an arguments!!\n");
 		return -1;
 	}
 
 	tmp = ast_strdup(data);
-	u = ast_module_user_add(chan);
 	AST_STANDARD_APP_ARGS(args, tmp);
+
+	if ((!args.type) || (!args.unit))
+	{
+		ast_log(LOG_WARNING, "MDC1200 requires type and unitid to be specified!!\n");
+		ast_free(tmp);
+		return -1;
+	}
+
+	destid = 0;
+	subcode = 0;
+	if (args.type[0] == 'C') 
+	{
+		if ((!args.destid) || (!args.subcode))
+		{
+			ast_log(LOG_WARNING, "MDC1200(C) requires destid and subtype to be specified!!\n");
+			ast_free(tmp);
+			return -1;
+		}
+		destid = (short) strtol(args.destid,NULL,16);
+		subcode = (short) strtol(args.subcode,NULL,16);
+	}
+	u = ast_module_user_add(chan);
 	unitid = (short) strtol(args.unit,NULL,16) & 0xffff;
-	res = mdc1200gen(chan, unitid);
+	res = mdc1200gen(chan, args.type, unitid, destid, subcode);
 	free(tmp);
 	ast_module_user_remove(u);
 	return res;
