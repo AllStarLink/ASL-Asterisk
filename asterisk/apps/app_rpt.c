@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.225 3/28/2010
+ *  version 0.226 3/29/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -529,7 +529,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.225  03/28/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.226  03/29/2010";
 
 static char *app = "Rpt";
 
@@ -599,6 +599,8 @@ static char remdtmfstr[] = "0123456789*#ABCD";
 enum {TOP_TOP,TOP_WON,WON_BEFREAD,BEFREAD_AFTERREAD};
 
 int max_chan_stat [] = {22000,1000,22000,100,22000,2000,22000};
+
+int nullfd = -1;
 
 #define NRPTSTAT 7
 
@@ -17883,7 +17885,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						mdc1200_cmd(myrpt,ustr);
 					}
 				}
-				if (i == 2)
+				if (n == 2)
 				{
 					unsigned char op,arg,ex1,ex2,ex3,ex4;
 					unsigned short unitID;
@@ -19209,13 +19211,12 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	struct	rpt_link *l;
 	ZT_CONFINFO ci;  /* conference info */
 	ZT_PARAMS par;
-	int ms,elap,nullfd,n1,myrx;
+	int ms,elap,n1,myrx;
 	time_t t,last_timeout_warning;
 	struct	zt_radio_param z;
 	struct rpt_tele *telem;
 	int	numlinks;
 
-	nullfd = open("/dev/null",O_RDWR);
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "Rpt requires an argument (system node)\n");
 		return -1;
@@ -20761,7 +20762,6 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	while(myrpt->tele.next != &myrpt->tele) usleep(50000);
 	sprintf(tmp,"mixmonitor stop %s",chan->name);
 	ast_cli_command(nullfd,tmp);
-	close(nullfd);
 	rpt_mutex_lock(&myrpt->lock);
 	myrpt->hfscanmode = 0;
 	myrpt->hfscanstatus = 0;
@@ -21551,6 +21551,7 @@ static int unload_module(void)
 	res |= ast_manager_unregister("RptLocalNodes");
 	res |= ast_manager_unregister("RptStatus");
 #endif
+	close(nullfd);
 	return res;
 }
 
@@ -21582,6 +21583,12 @@ static int load_module(void)
 	{
 		ast_log(LOG_ERROR,"Zaptel version %s must at least level RPT_%c to operate\n",
 			zv.version,REQUIRED_ZAPTEL_VERSION);
+		return -1;
+	}
+	nullfd = open("/dev/null",O_RDWR);
+	if (nullfd == -1)
+	{
+		ast_log(LOG_ERROR,"Can not open /dev/null\n");
 		return -1;
 	}
 	ast_pthread_create(&rpt_master_thread,NULL,rpt_master,NULL);
