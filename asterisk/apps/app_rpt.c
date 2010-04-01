@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.226 3/29/2010
+ *  version 0.227 3/31/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -529,7 +529,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.226  03/29/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.227  03/31/2010";
 
 static char *app = "Rpt";
 
@@ -12349,7 +12349,7 @@ int band;
 		band = 2;
 		if (!mysplit) mysplit = myrpt->p.default_split_2m;
 	}
-	sprintf(offset,"%06d",mysplit);
+	sprintf(offset,"%06d000",mysplit);
 	strcpy(freq,"000000");
 	strncpy(freq,decimals,strlen(decimals));
 	myrxpl = myrpt->rxplon;
@@ -14778,7 +14778,7 @@ static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return check_freq_ft897(m, d, defmode);
-	if(!strcmp(myrpt->remoterig, remote_rig_ft100))
+	else if(!strcmp(myrpt->remoterig, remote_rig_ft100))
 		return check_freq_ft100(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_ft950))
 		return check_freq_ft950(m, d, defmode);
