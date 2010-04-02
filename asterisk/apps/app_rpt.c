@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.227 3/31/2010
+ *  version 0.228 4/1/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -529,7 +529,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.227  03/31/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.228  4/1/2010";
 
 static char *app = "Rpt";
 
@@ -1450,6 +1450,20 @@ static int multimode_capable(struct rpt *myrpt)
 	if(!strcmp(myrpt->remoterig, remote_rig_ft950))
 		return 1;
 	if(!strcmp(myrpt->remoterig, remote_rig_ic706))
+		return 1;
+	return 0;
+}	
+/*
+* Return 1 if rig is narrow capable
+*/
+
+static int narrow_capable(struct rpt *myrpt)
+{
+	if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_tm271))
 		return 1;
 	return 0;
 }	
@@ -8112,7 +8126,15 @@ struct	mdcparams *mdcp;
 			res = sayfile(mychannel,"rpt/frequency");
 		if(!res)
 			res = split_freq(mhz, decimals, myrpt->freq);
-		if (!multimode_capable(myrpt)) decimals[3] = 0;
+		if (!multimode_capable(myrpt)) 
+		{
+			if (decimals[4] == '0') 
+			{
+				decimals[4] = 0;
+				if (decimals[3] == '0') decimals[3] = 0;
+			}
+			decimals[5] = 0;
+		}
 		if(!res){
 			m = atoi(mhz);
 			if(m < 100)
@@ -11749,6 +11771,9 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 	struct zt_radio_param prm;
 	char c;
 
+#ifdef	FAKE_SERIAL_RESPONSE
+	printf("String output was %s:\n",txbuf);
+#endif
 	 if(debug) {
 	    ast_log(LOG_NOTICE, "ioport=%s baud=%d iofd=0x%x\n",myrpt->p.ioport,myrpt->p.iospeed,myrpt->iofd);
 		printf("String output was %s:\n",txbuf);
@@ -11784,8 +11809,13 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
                         j = serial_rxready(myrpt->iofd,1000);
                         if (j < 1)
                         {
+#ifdef	FAKE_SERIAL_RESPONSE
+				strcpy((char *)rxbuf,(char *)txbuf);
+				return(strlen((char *)rxbuf));
+#else
                                 ast_log(LOG_WARNING,"Serial device not responding on node %s\n",myrpt->name);
                                 return(j);
+#endif
                         }
 			j = read(myrpt->iofd,&c,1);
 			if (j < 1) 
@@ -12286,7 +12316,7 @@ static int setkenwood(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],band,decimals[MAXREMSTR],band1,band2;
-int myrxpl,mysplit;
+int myrxpl,mysplit,step;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
@@ -12313,8 +12343,10 @@ int powers[] = {2,1,0};
 	strncpy(freq,decimals,strlen(decimals));
 	myrxpl = myrpt->rxplon;
 	if (IS_XPMR(myrpt)) myrxpl = 0;
-	sprintf(txstr,"VW %c,%05d%s,0,%d,0,%d,%d,,%02d,,%02d,%s\r",
-		band,atoi(mhz),freq,offsets[(int)myrpt->offset],
+	step = 0;
+	if ((decimals[3] != '0') || (decimals[4] != '0')) step = 1;
+	sprintf(txstr,"VW %c,%05d%s,%d,%d,0,%d,%d,,%02d,,%02d,%s\r",
+		band,atoi(mhz),freq,step,offsets[(int)myrpt->offset],
 		(myrpt->txplon != 0),myrxpl,
 		kenwood_pltocode(myrpt->txpl),kenwood_pltocode(myrpt->rxpl),
 		offset);
@@ -12330,7 +12362,7 @@ static int set_tmd700(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],decimals[MAXREMSTR];
-int myrxpl,mysplit;
+int myrxpl,mysplit,step;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
@@ -12352,10 +12384,12 @@ int band;
 	sprintf(offset,"%06d000",mysplit);
 	strcpy(freq,"000000");
 	strncpy(freq,decimals,strlen(decimals));
+	step = 0;
+	if ((decimals[3] != '0') || (decimals[4] != '0')) step = 1;
 	myrxpl = myrpt->rxplon;
 	if (IS_XPMR(myrpt)) myrxpl = 0;
-	sprintf(txstr,"VW %d,%05d%s,0,%d,0,%d,%d,0,%02d,0010,%02d,%s,0\r",
-		band,atoi(mhz),freq,offsets[(int)myrpt->offset],
+	sprintf(txstr,"VW %d,%05d%s,%d,%d,0,%d,%d,0,%02d,0010,%02d,%s,0\r",
+		band,atoi(mhz),freq,step,offsets[(int)myrpt->offset],
 		(myrpt->txplon != 0),myrxpl,
 		kenwood_pltocode(myrpt->txpl),kenwood_pltocode(myrpt->rxpl),
 		offset);
@@ -12377,7 +12411,7 @@ static int set_tm271(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],decimals[MAXREMSTR];
-int  mysplit;
+int  mysplit,step;
 	
 int offsets[] = {0,2,1};
 int powers[] = {2,1,0};
@@ -12391,8 +12425,10 @@ int powers[] = {2,1,0};
 	else 
 		mysplit = myrpt->splitkhz;
 
-	sprintf(txstr,"VF %04d%s,0,%d,0,%d,0,0,%02d,00,000,%05d000,0,0\r",
-		atoi(mhz),freq,offsets[(int)myrpt->offset],
+	step = 0;
+	if ((decimals[3] != '0') || (decimals[4] != '0')) step = 1;
+	sprintf(txstr,"VF %04d%s,%d,%d,0,%d,0,0,%02d,00,000,%05d000,0,0\r",
+		atoi(mhz),freq,step,offsets[(int)myrpt->offset],
 		(myrpt->txplon != 0),tm271_pltocode(myrpt->txpl),mysplit);
 
 	if (sendrxkenwood(myrpt,txstr,rxstr,"VF") < 0) return -1;
@@ -15175,8 +15211,10 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 					goto invalid_freq; /* &^@#! */
  			}
 			else{
-				if((j > 2) || (l > 4) || (k > 3))
+				if((j > 2) || (l > 4) || (k > 5))
 					goto invalid_freq; /* &^@#! */
+				if ((!narrow_capable(myrpt)) &&
+					(k > 3)) goto invalid_freq;
 			}
 
 			/* Wait for M+*K+* */
@@ -15205,7 +15243,9 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 					break;
 					
 				case 3:
-					if(!multimode){
+					if((!narrow_capable(myrpt)) &&
+					  (!multimode))
+					{
 						if((s2[2] != '0')&&(s2[2] != '5'))
 							goto invalid_freq;
 					}
@@ -19064,7 +19104,7 @@ char *this,*val;
 					strncpy(rpt_vars[i].freq, "446.500", sizeof(rpt_vars[i].freq) - 1);
 					
 				else
-					strncpy(rpt_vars[i].freq, "146.580", sizeof(rpt_vars[i].freq) - 1);
+					strncpy(rpt_vars[i].freq, "145.000", sizeof(rpt_vars[i].freq) - 1);
 				strncpy(rpt_vars[i].rxpl, "100.0", sizeof(rpt_vars[i].rxpl) - 1);
 
 				strncpy(rpt_vars[i].txpl, "100.0", sizeof(rpt_vars[i].txpl) - 1);
