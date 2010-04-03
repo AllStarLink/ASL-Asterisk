@@ -5281,12 +5281,12 @@ static int dahdi_indicate(struct ast_channel *chan, int condition, const void *d
 				ast_moh_stop(chan);
 			break;
 		case AST_CONTROL_RADIO_KEY:
-			if (p->radio) 
+			if (p->radio && p->sig)
 			    res =  dahdi_set_hook(p->subs[index].dfd, DAHDI_OFFHOOK);
 			res = 0;
 			break;
 		case AST_CONTROL_RADIO_UNKEY:
-			if (p->radio)
+			if (p->radio && p->sig)
 			    res =  dahdi_set_hook(p->subs[index].dfd, DAHDI_RINGOFF);
 			res = 0;
 			break;
