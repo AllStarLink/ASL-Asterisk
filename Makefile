@@ -50,7 +50,7 @@ llastate/rpt-sounds-installed:
 	cp -a sounds/* /var/lib/asterisk/sounds
 	touch llastate/rpt-sounds-installed
 
-llastate/id_file:
+llastate/id_file: llastate
 	-mkdir -p /etc/asterisk
 	-cp id.gsm /etc/asterisk
 	touch llastate/id_file
