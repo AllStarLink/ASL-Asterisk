@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.228 4/1/2010
+ *  version 0.229 4/2/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -529,7 +529,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.228  4/1/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.229  4/2/2010";
 
 static char *app = "Rpt";
 
@@ -3241,13 +3241,13 @@ static void daq_init(struct ast_config *cfg)
 	t_next = &daq.hw;
 	var = ast_variable_browse(cfg,"daq-list");
 	while(var){
-		const char *p;
+		char *p;
 		if(strncmp("device",var->name,6)){
 			ast_log(LOG_WARNING,"Error in daq_entries stanza on line %d\n", var->lineno);
 			break;
 		}
 		strncpy(s,var->value,sizeof(s)); /* Make copy of device entry */
-		if(!(p = ast_variable_retrieve(cfg,s,"hwtype"))){
+		if(!(p = (char *) ast_variable_retrieve(cfg,s,"hwtype"))){
 			ast_log(LOG_WARNING,"hwtype variable required for %s stanza\n", s);
 			break;
 		}
@@ -3255,7 +3255,7 @@ static void daq_init(struct ast_config *cfg)
 			ast_log(LOG_WARNING,"Type must be uchameleon for %s stanza\n", s);
 			break;
 		}
-                if(!(p = ast_variable_retrieve(cfg,s,"devnode"))){
+                if(!(p = (char *) ast_variable_retrieve(cfg,s,"devnode"))){
                         ast_log(LOG_WARNING,"devnode variable required for %s stanza\n", s);
                         break;
                 }
@@ -17442,7 +17442,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 			if (l->lasttx != l->lasttx1)
 			{
-				voxinit_link(l,!l->lasttx);
+				if ((!l->phonemode) || (!l->phonevox)) voxinit_link(l,!l->lasttx);
 				l->lasttx1 = l->lasttx;
 			}
 			myrx = l->lastrealrx;
