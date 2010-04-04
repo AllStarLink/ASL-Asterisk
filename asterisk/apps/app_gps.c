@@ -30,6 +30,109 @@
 /*** MODULEINFO
  ***/
 
+/* The following are the recognized APRS icon codes: 
+
+NOTE: Since the semicolon (';') is recognized by the
+Asterisk config subsystem as a comment, we use the
+question-mark ('?') instead when we want to specify
+a 'portable tent'.
+
+
+! - 3 vert bars (EMERGENCY)
+" - RAIN
+# - DIGI
+
+$ - SUN (always yellow)
+% - DX CLUSTER
+& - HF GATEway
+' - AIRCRAFT (small)
+( - CLOUDY
+) - Hump
+* - SNOW
++ - Cross
+, - reverse L shape
+
+- - QTH
+. - X
+/ - Dot
+0-9 Numerial Boxes
+: - FIRE
+? - Portable tent (note different then standard ';')
+< - Advisory flag
+= - RAILROAD ENGINE
+> - CAR (SSID-9)
+
+@ - HURRICANE or tropical storm
+A - reserved
+B - Blowing Snow  (also BBS)
+C - reserved
+D - Drizzle
+E - Smoke
+F - Freezing rain
+G - Snow Shower
+H - Haze
+
+I - Rain Shower   (Also TCP-IP)
+J - Lightening
+K - School
+L - Lighthouse
+M - MacAPRS
+N - Navigation Buoy
+O - BALLOON
+P - Police
+Q - QUAKE
+
+R - RECREATIONAL VEHICLE
+S - Space/Satellite
+T - THUNDERSTORM
+U - BUS
+V - VORTAC Nav Aid
+W - National WX Service Site
+X - HELO  (SSID-5)
+Y - YACHT (sail SSID-6)
+Z - UNIX X-APRS
+
+[ - RUNNER
+\ - TRIANGLE   (DF)
+] - BOX with X (PBBS's)
+^ - LARGE AIRCRAFT
+_ - WEATHER SURFACE CONDITIONS (always blue)
+` - Satellite Ground Station
+a - AMBULANCE
+b - BIKE
+c - DX spot by callsign
+
+d - Dual Garage (Fire dept)
+e - SLEET
+f - FIRE TRUCK
+g - GALE FLAGS
+h - HOSPITAL
+i - IOTA (islands on the air)
+j - JEEP (SSID-12)
+k - TRUCK (SSID-14)
+l - AREAS (box,circle,line,triangle) See below
+
+m - MILEPOST (box displays 2 letters if in {35})
+n - small triangle
+o - small circle
+p - PARTLY CLOUDY
+q - GRID SQUARE (4 digit.  Not shown below 128 miles)
+r - ANTENNA
+s - SHIP (pwr boat SSID-8)
+t - TORNADO
+u - TRUCK (18 wheeler)
+
+v - VAN (SSID-15)
+w - FLOODING(water)
+x - diamond (NODE)
+y - YAGI @ QTH
+z - WinAPRS
+{ - FOG
+| - reserved (Stream Switch)
+} - diamond 
+~ - reserved (Stream Switch)
+
+*/
 
 #include "asterisk.h"
 
@@ -74,6 +177,7 @@
 #define	GPS_DEFAULT_COMMENT "Asterisk app_rpt server"
 #define	GPS_DEFAULT_COMPORT "/dev/ttyS0"
 #define	GPS_DEFAULT_BAUDRATE B4800
+#define	GPS_DEFAULT_ICON '>' /* car */
 #define	GPS_WORK_FILE "/tmp/gps.tmp"
 #define	GPS_DATA_FILE "/tmp/gps.dat"
 #define	GPS_UPDATE_SECS 30
@@ -89,7 +193,7 @@ static char *descrip = "Interfaces app_rpt to a NMEA 0183 (GGA records) complian
 
 static  pthread_t gps_thread = 0;
 static int run_forever = 1;
-static char *call,*password,*server,*port,*comment,*comport;
+static char *call,*password,*server,*port,*comment,*comport,icon;
 static int baudrate;
 static int debug = 0;
 
@@ -248,6 +352,7 @@ struct sockaddr_in servaddr;
 
 	while(run_forever)
 	{
+
 		res = getserial(fd,buf,sizeof(buf) - 1);
 		if (res < 0)
 		{
@@ -362,8 +467,8 @@ struct sockaddr_in servaddr;
 			continue;
 		}
 		if (debug) ast_log(LOG_NOTICE,"sent packet: %s",buf);
-		sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s-%s\n",
-			call,basecall,lat,lon,comment);
+		sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%c%s\n",
+			call,basecall,lat,lon,icon,comment);
 		if (send(sockfd,buf,strlen(buf),0) < 0)
 		{
 			ast_log(LOG_WARNING, "Can not send signon to server\n");
@@ -469,6 +574,9 @@ int load_module(void)
 	} else baudrate = GPS_DEFAULT_BAUDRATE;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"debug");	
 	if (val) debug = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg,ctg,"icon");	
+	if (val && *val) icon = *val; else icon = GPS_DEFAULT_ICON;
+	if (icon == '?') icon = ';';  /* allow for entry of portable tent */
 
 	if ((!call) || (!password))
 	{
