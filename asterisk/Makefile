@@ -69,6 +69,17 @@ export TINFO_DIR
 export GTK2_LIB
 export GTK2_INCLUDE
 
+# determine number of processors in system
+JN=$(shell cat /proc/cpuinfo | grep processor | wc -l)
+#
+# if we have the number of processors, make an appropriate flag for Make
+# so that we can use our resources most efficiently. The -jN flag
+# tells Make to process N files at a time.
+#
+ifneq ($(JN),0)
+   MAKEJ=-j$(JN)
+endif
+
 # even though we could use '-include makeopts' here, use a wildcard
 # lookup anyway, so that make won't try to build makeopts if it doesn't
 # exist (other rules will force it to be built if needed)
@@ -279,7 +290,7 @@ ifeq ($(OSARCH),SunOS)
   SOLINK=-shared -fpic -L/usr/local/ssl/lib -lrt
 endif
 
-SUBMAKE=$(MAKE) --quiet --no-print-directory
+SUBMAKE=$(MAKE) $(MAKEJ) --quiet --no-print-directory
 
 # This is used when generating the doxygen documentation
 ifneq ($(DOT),:)
@@ -341,10 +352,10 @@ $(SUBDIRS): include/asterisk/version.h include/asterisk/buildopts.h defaults.h m
 main: $(filter-out main,$(MOD_SUBDIRS))
 
 $(MOD_SUBDIRS):
-	@ASTCFLAGS="$(MOD_SUBDIR_CFLAGS) $(ASTCFLAGS)" ASTLDFLAGS="$(ASTLDFLAGS)" AST_LIBS="$(AST_LIBS)" $(MAKE) --no-builtin-rules -C $@ SUBDIR=$@ all
+	@ASTCFLAGS="$(MOD_SUBDIR_CFLAGS) $(ASTCFLAGS)" ASTLDFLAGS="$(ASTLDFLAGS)" AST_LIBS="$(AST_LIBS)" $(MAKE) $(MAKEJ) --no-builtin-rules -C $@ SUBDIR=$@ all
 
 $(OTHER_SUBDIRS):
-	@ASTCFLAGS="$(OTHER_SUBDIR_CFLAGS) $(ASTCFLAGS)" ASTLDFLAGS="$(ASTLDFLAGS)" AUDIO_LIBS="$(AUDIO_LIBS)" $(MAKE) --no-builtin-rules -C $@ SUBDIR=$@ all
+	@ASTCFLAGS="$(OTHER_SUBDIR_CFLAGS) $(ASTCFLAGS)" ASTLDFLAGS="$(ASTLDFLAGS)" AUDIO_LIBS="$(AUDIO_LIBS)" $(MAKE) $(MAKEJ) --no-builtin-rules -C $@ SUBDIR=$@ all
 
 defaults.h: makeopts
 	@build_tools/make_defaults_h > $@.tmp
