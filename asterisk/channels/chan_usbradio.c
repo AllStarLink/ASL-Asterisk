@@ -3391,7 +3391,7 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 	usleep(200000);
 
 	ast_cli(fd,"DONE tries=%i, setting=%i, meas=%i, sqnoise=%i\n",tries,
-		(setting * 1000) / o->micmax,meas,measnoise);
+		((setting * 1000) + (o->micmax / 2)) / o->micmax,meas,measnoise);
 
 	if( meas<(target-tolerance) || meas>(target+tolerance) ){
 		success=0;
@@ -3399,7 +3399,7 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 	}else{
 		success=1;
 		ast_cli(fd,"INFO: RX INPUT ADJUST SUCCESS.\n");
-		o->rxmixerset=(setting * 1000) / o->micmax;
+		o->rxmixerset=((setting * 1000) + (o->micmax / 2)) / o->micmax;
 
 		if(o->rxcdtype==CD_XPMR_NOISE)
 		{
@@ -3850,6 +3850,7 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 	pd(p->tracetype);
 	pd(p->b.radioactive);
 	pd(p->b.txboost);
+	pd(p->b.txCtcssOff);
 
 	return;
 }
