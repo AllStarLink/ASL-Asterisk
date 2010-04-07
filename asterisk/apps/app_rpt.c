@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.230 4/6/2010
+ *  version 0.231 4/7/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.230  4/6/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.231  4/7/2010";
 
 static char *app = "Rpt";
 
@@ -1042,6 +1042,7 @@ static struct rpt
 		char eannmode; /* {NONE,NODE,CALL,BOTH} */
 		char *discpgm;
 		char *connpgm;
+		char *mdclog;
 		char nolocallinkct;
 		char nounkeyct;
 		char holdofftelem;
@@ -4269,10 +4270,41 @@ char	*val;
 
 static void mdc1200_notify(struct rpt *myrpt,char *fromnode, char *data)
 {
+	FILE *fp;
+	char str[50];
+	struct flock fl;
+	time_t	t;
+
 	if (!fromnode)
 	{
 		ast_verbose("Got MDC-1200 data %s from local system (%s)\n",
 			data,myrpt->name);
+		if (myrpt->p.mdclog) 
+		{
+			fp = fopen(myrpt->p.mdclog,"a");
+			if (!fp)
+			{
+				ast_log(LOG_ERROR,"Cannot open MDC1200 log file %s\n",myrpt->p.mdclog);
+				return;
+			}
+			fl.l_type = F_WRLCK;
+			fl.l_whence = SEEK_SET;
+			fl.l_start = 0;
+			fl.l_len = 0;
+			fl.l_pid = pthread_self();
+			if (fcntl(fileno(fp),F_SETLKW,&fl) == -1)
+			{
+				ast_log(LOG_ERROR,"Cannot get lock on MDC1200 log file %s\n",myrpt->p.mdclog);			
+				fclose(fp);
+				return;
+			}
+			time(&t);
+			strftime(str,sizeof(str) - 1,"%Y%m%d%H%M%S",localtime(&t));
+			fprintf(fp,"%s %s %s\n",str ,myrpt->name,data);
+			fl.l_type = F_UNLCK;
+			fcntl(fileno(fp),F_SETLK,&fl);
+			fclose(fp);
+		}
 	}
 	else
 	{
@@ -4289,6 +4321,8 @@ struct rpt_link *l;
 struct	ast_frame wf;
 char	str[200];
 
+
+	if (!myrpt->keyed) return;
 
 	sprintf(str,"I %s %s",myrpt->name,data);
 
@@ -4336,6 +4370,7 @@ static void mdc1200_cmd(struct rpt *myrpt, char *data)
 			}
 			return;
 		}
+		if (!myrpt->keyed) return;
 		rpt_mutex_lock(&myrpt->lock);
 		if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myval))
 		{
@@ -5123,6 +5158,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.discpgm = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
 	rpt_vars[n].p.connpgm = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"mdclog");
+	rpt_vars[n].p.mdclog = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"lnkactenable");
 	if (val) rpt_vars[n].p.lnkactenable = ast_true(val);
 	rpt_vars[n].p.lnkacttime = retrieve_astcfgint(&rpt_vars[n],this, "lnkacttime", -120, 90000, 0);	/* Enforce a min max including zero */
@@ -17974,6 +18011,10 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					}
 				}
 #ifdef	_MDC_DECODE_H_
+				if (!myrpt->reallykeyed)
+				{
+					memset(f->data,0,f->datalen);
+				}
 				sp = (short *) f->data;
 				/* convert block to unsigned char */
 				for(n = 0; n < f->datalen / 2; n++)
@@ -18046,6 +18087,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						if (ex1 & 1) sprintf(ustr,"A%02X%02X-%04X",ex3 & 255,ex4 & 255,unitID);
 						/* otherwise is selcall */
 						else  sprintf(ustr,"S%02X%02X-%04X",ex3 & 255,ex4 & 255,unitID);
+						mdc1200_notify(myrpt,NULL,ustr);
+						mdc1200_send(myrpt,ustr);
+						mdc1200_cmd(myrpt,ustr);
 					}
 				}
 #endif
