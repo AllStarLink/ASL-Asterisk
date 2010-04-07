@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.229 4/2/2010
+ *  version 0.230 4/6/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -57,6 +57,7 @@
  *  2 - Give Time of Day (global)
  *  3 - Give software Version (global)
  *  4 - Give GPS location info
+ *  5 - Last (dtmf) user
  *  11 - Force ID (local only)
  *  12 - Give Time of Day (local only)
  *
@@ -130,7 +131,6 @@
  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
- *
  *
  * ilink cmds:
  *
@@ -292,6 +292,7 @@
 #define MORSE "morse"
 #define	TONEMACRO "tonemacro"
 #define	MDCMACRO "mdcmacro"
+#define	DTMFKEYS "dtmfkeys"
 #define	FUNCCHAR '*'
 #define	ENDCHAR '#'
 #define	EXTNODEFILE "/var/lib/asterisk/rpt_extnodes"
@@ -384,7 +385,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
 	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE,
-	STATS_GPS,STATS_GPS_LEGACY, MDC1200};
+	STATS_GPS,STATS_GPS_LEGACY, MDC1200, LASTUSER};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -487,7 +488,7 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c"  */
+/* #include "mdc_decode.c" */
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
@@ -495,7 +496,7 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
-/* #include "rpt_notch.c" */
+/* #include "rpt_notch.c"  */
 
 
 #ifdef	_MDC_ENCODE_H_
@@ -529,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.229  4/2/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.230  4/6/2010";
 
 static char *app = "Rpt";
 
@@ -972,6 +973,7 @@ static struct rpt
 		char *extnodefile;
 		char *lnkactmacro;
 		char *lnkacttimerwarn;
+		char *dtmfkeys;
 		int hangtime;
 		int althangtime;
 		int totime;
@@ -1054,6 +1056,7 @@ static struct rpt
 		int gpsfeet;
 		int default_split_2m;
 		int default_split_70cm;
+		int dtmfkey;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1170,8 +1173,12 @@ static struct rpt
 	char ready;
 	char lastrxburst;
 	char reallykeyed;
+	char dtmfkeyed;
+	char dtmfkeybuf[MAXDTMF];
 	char sleepreq;
 	char sleep;
+	char lastdtmfuser[MAXNODESTR];
+	char curdtmfuser[MAXNODESTR];
 	int  sleeptimer;
 	time_t lastgpstime;
 #ifndef	OLD_ASTERISK
@@ -4242,6 +4249,24 @@ static int openserial(struct rpt *myrpt,char *fname)
 	return(fd);	
 }
 
+static void local_dtmfkey_helper(struct rpt *myrpt,char c)
+{
+int	i;
+char	*val;
+
+	i = strlen(myrpt->dtmfkeybuf);
+	if (i >= (sizeof(myrpt->dtmfkeybuf) - 1)) return;
+	myrpt->dtmfkeybuf[i++] = c;
+	myrpt->dtmfkeybuf[i] = 0;
+	val = (char *) ast_variable_retrieve(myrpt->cfg, 
+		myrpt->p.dtmfkeys,myrpt->dtmfkeybuf);
+	if (!val) return;
+	strncpy(myrpt->curdtmfuser,val,MAXNODESTR - 1);
+	myrpt->dtmfkeyed = 1;
+	myrpt->dtmfkeybuf[0] = 0;
+	return;
+}
+
 static void mdc1200_notify(struct rpt *myrpt,char *fromnode, char *data)
 {
 	if (!fromnode)
@@ -4295,6 +4320,7 @@ char	str[200];
 static void mdc1200_cmd(struct rpt *myrpt, char *data)
 {
 	char busy,*myval;
+	int i;
 
 	busy = 0;
 	if ((data[0] == 'I') && (!strcmp(data,myrpt->lastmdc))) return;
@@ -4302,6 +4328,14 @@ static void mdc1200_cmd(struct rpt *myrpt, char *data)
 	if (myval) 
 	{
 		if (option_verbose) ast_verbose("MDCMacro for %s doing %s on node %s\n",data,myval,myrpt->name);
+		if ((*myval == 'K') || (*myval == 'k'))
+		{
+			if (!myrpt->keyed)
+			{
+				for(i = 1; myval[i]; i++) local_dtmfkey_helper(myrpt,myval[i]);
+			}
+			return;
+		}
 		rpt_mutex_lock(&myrpt->lock);
 		if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myval))
 		{
@@ -4931,9 +4965,11 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"hangtime");
 	if (val) rpt_vars[n].p.hangtime = atoi(val);
 		else rpt_vars[n].p.hangtime = HANGTIME;
+	if (rpt_vars[n].p.hangtime < 1) rpt_vars[n].p.hangtime = 1;
 	val = (char *) ast_variable_retrieve(cfg,this,"althangtime");
 	if (val) rpt_vars[n].p.althangtime = atoi(val);
 		else rpt_vars[n].p.althangtime = HANGTIME;
+	if (rpt_vars[n].p.althangtime < 1) rpt_vars[n].p.althangtime = 1;
 	val = (char *) ast_variable_retrieve(cfg,this,"totime");
 	if (val) rpt_vars[n].p.totime = atoi(val);
 		else rpt_vars[n].p.totime = TOTIME;
@@ -5129,6 +5165,11 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"split70cm");
 	if (val) rpt_vars[n].p.default_split_70cm = atoi(val);
 	else rpt_vars[n].p.default_split_70cm = DEFAULT_SPLIT_70CM;
+	val = (char *) ast_variable_retrieve(cfg,this,"dtmfkey");
+	if (val) rpt_vars[n].p.dtmfkey = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg,this,"dtmfkeys");
+	if (!val) val = DTMFKEYS;
+	rpt_vars[n].p.dtmfkeys = val;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -7165,6 +7206,16 @@ struct	tm localtm;
 		saynode(myrpt,mychannel,strs[1]);
 		return;
 	}
+	if (!strcasecmp(strs[0],"LASTUSER"))
+	{
+		if (n < 2) return;
+		wait_interval(myrpt, DLY_TELEM, mychannel);
+		sayphoneticstr(mychannel,strs[1]);
+		if (n < 3) return;
+		sayfile(mychannel,"and");
+		sayphoneticstr(mychannel,strs[2]);
+		return;
+	}
 	if (!strcasecmp(strs[0],"STATUS"))
 	{
 		if (n < 3) return;
@@ -7183,6 +7234,9 @@ struct	tm localtm;
 			else if (*strs[i] == 'R') sayfile(mychannel,"rpt/monitor");
 			else sayfile(mychannel,"rpt/connecting");
 		}
+
+
+
 		return;
 	}
 	ast_log(LOG_WARNING,"Got unknown link telemetry command: %s\n",strs[0]);
@@ -8320,6 +8374,20 @@ struct	mdcparams *mdcp;
 		}			
 		imdone = 1;
 		break;
+	    case LASTUSER:		
+		if (myrpt->curdtmfuser[0])
+		{
+			sayphoneticstr(mychannel,myrpt->curdtmfuser);
+		}			
+		if (myrpt->lastdtmfuser[0] && 
+			strcmp(myrpt->lastdtmfuser,myrpt->curdtmfuser))
+		{
+			if (myrpt->curdtmfuser[0])
+				sayfile(mychannel,"and");
+			sayphoneticstr(mychannel,myrpt->lastdtmfuser);
+		}			
+		imdone = 1;
+		break;
 	    case FULLSTATUS:
 		rpt_mutex_lock(&myrpt->lock);
 		/* get all the nodes */
@@ -8895,6 +8963,21 @@ struct rpt_link *l;
 		    case LASTNODEKEY:
 			if (!myrpt->lastnodewhichkeyedusup[0]) return;
 			sprintf(mystr,"LASTNODEKEY,%s",myrpt->lastnodewhichkeyedusup);
+			send_tele_link(myrpt,mystr);
+			return;
+		    case LASTUSER:
+			if ((!myrpt->lastdtmfuser[0]) && (!myrpt->curdtmfuser[0])) return;
+			else if (myrpt->lastdtmfuser[0] && (!myrpt->curdtmfuser[0]))
+				sprintf(mystr,"LASTUSER,%s",myrpt->lastdtmfuser);
+			else if ((!myrpt->lastdtmfuser[0]) && myrpt->curdtmfuser[0])
+				sprintf(mystr,"LASTUSER,%s",myrpt->curdtmfuser);
+			else 
+			{
+				if (strcmp(myrpt->curdtmfuser,myrpt->lastdtmfuser))
+					sprintf(mystr,"LASTUSER,%s,%s",myrpt->curdtmfuser,myrpt->lastdtmfuser);
+				else
+					sprintf(mystr,"LASTUSER,%s",myrpt->curdtmfuser);
+			}
 			send_tele_link(myrpt,mystr);
 			return;
 		    case STATUS:
@@ -9912,7 +9995,6 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			rpt_telemetry(myrpt, LASTNODEKEY, NULL);
 			break;
 
-
 #ifdef	_MDC_DECODE_H_
 		case 8:
 			myrpt->lastunit = 0xd00d;
@@ -10132,16 +10214,20 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, STATS_GPS, NULL);
 			return DC_COMPLETE;
-		case 5: /* GPS data announced locally */
+		case 5: /* Identify last node which keyed us up */
+			rpt_telem_select(myrpt,command_source,mylink);
+			rpt_telemetry(myrpt, LASTUSER, NULL);
+			return DC_COMPLETE;
+		case 11: /* System ID (local only)*/
+			rpt_telemetry(myrpt, ID , NULL);
+			return DC_COMPLETE;
+	        case 12: /* System Time (local only)*/
+			rpt_telemetry(myrpt, STATS_TIME_LOCAL, NULL);
+			return DC_COMPLETE;
+		case 99: /* GPS data announced locally */
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, STATS_GPS_LEGACY, NULL);
 			return DC_COMPLETE;
-		case 11: /* System ID (local only)*/
-		    rpt_telemetry(myrpt, ID , NULL);
-            return DC_COMPLETE;
-        case 12: /* System Time (local only)*/
-            rpt_telemetry(myrpt, STATS_TIME_LOCAL, NULL);
-            return DC_COMPLETE;
 		default:
 			return DC_ERROR;
 	}
@@ -10801,7 +10887,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				mdcp->subcode = (short) strtol(argv[4],NULL,16);
 			}
 			strncpy(mdcp->type,argv[1],sizeof(mdcp->type) - 1);
-			mdcp->UnitID = (short) strtol(argv[1],NULL,16);
+			mdcp->UnitID = (short) strtol(argv[2],NULL,16);
 			rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
 			return DC_COMPLETE;
 #endif
@@ -17870,10 +17956,22 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						myrpt->lastrxburst = i;
 					}
 				}
-				if ((!myrpt->localtx) && /* (!myrpt->p.linktolink) && */
-				    (!myrpt->localoverride))
+				if (myrpt->p.dtmfkey)
 				{
-					memset(f->data,0,f->datalen);
+					if ((!myrpt->reallykeyed) || myrpt->keyed)
+					{
+						myrpt->dtmfkeyed = 0;
+						myrpt->dtmfkeybuf[0] = 0;
+					}
+					if (myrpt->reallykeyed && myrpt->dtmfkeyed && (!myrpt->keyed))
+					{
+						myrpt->dtmfkeyed = 0;
+						myrpt->dtmfkeybuf[0] = 0;
+						myrpt->linkactivitytimer = 0;
+						myrpt->keyed = 1;
+						time(&myrpt->lastkeyedtime);
+						myrpt->keyposttimer = KEYPOSTSHORTTIME;
+					}
 				}
 #ifdef	_MDC_DECODE_H_
 				sp = (short *) f->data;
@@ -17955,6 +18053,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				/* apply inbound filters, if any */
 				rpt_filter(myrpt,f->data,f->datalen / 2);
 #endif
+				if ((!myrpt->localtx) && /* (!myrpt->p.linktolink) && */
+				    (!myrpt->localoverride))
+				{
+					memset(f->data,0,f->datalen);
+				}
 
 				if (ioctl(myrpt->zaprxchannel->fds[0], ZT_GETCONFMUTE, &ismuted) == -1)
 				{
@@ -18033,7 +18136,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (myrpt->lastf2)
 					memset(myrpt->lastf2->data,0,myrpt->lastf2->datalen);
 				dtmfed = 1;
-				if ((!myrpt->keyed) && (!myrpt->localoverride)) continue;
+				if ((!myrpt->keyed) && (!myrpt->localoverride)) 
+				{
+					if (myrpt->p.dtmfkey) local_dtmfkey_helper(myrpt,c);
+					continue;
+				}
 				c = func_xlat(myrpt,c,&myrpt->p.inxlat);
 				if (c) local_dtmf_helper(myrpt,c);
 				continue;
@@ -18054,7 +18161,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						if (debug >= 6)
 							ast_log(LOG_NOTICE,"**** rx key\n"); 
 						myrpt->reallykeyed = 1;
-						if (!myrpt->p.rxburstfreq)
+						myrpt->dtmfkeybuf[0] = 0;
+						myrpt->curdtmfuser[0] = 0;
+						if ((!myrpt->p.rxburstfreq) && (!myrpt->p.dtmfkey))
 						{
 							myrpt->linkactivitytimer = 0;
 							myrpt->keyed = 1;
@@ -18175,6 +18284,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					myrpt->localoverride = 0;
 					time(&myrpt->lastkeyedtime);
 					myrpt->keyposttimer = KEYPOSTSHORTTIME;
+					myrpt->lastdtmfuser[0] = 0;
+					strcpy(myrpt->lastdtmfuser,myrpt->curdtmfuser);
+					myrpt->curdtmfuser[0] = 0;
 					if (myrpt->monstream && (myrpt->p.duplex < 2))
 					{
 						ast_closestream(myrpt->monstream);
