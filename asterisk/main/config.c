@@ -628,7 +628,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 	char *cur = buf;
 	struct ast_variable *v;
 	char cmd[512], exec_file[512];
-	int object, do_exec, do_include;
+	int object, do_exec, do_include, did_include;
 
 	/* Actually parse the entry */
 	if (cur[0] == '[') {
@@ -709,7 +709,9 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 				c = NULL;
 		} else 
 			c = NULL;
-		do_include = !strcasecmp(cur, "include");
+		do_include = 0;
+		if (!strcasecmp(cur, "include")) do_include = 1;
+		else if (!strcasecmp(cur, "includeifexists")) do_include = 2;
 		if(!do_include)
 			do_exec = !strcasecmp(cur, "exec");
 		else
@@ -741,10 +743,10 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 				} else
 					exec_file[0] = '\0';
 				/* A #include */
-				do_include = ast_config_internal_load(cur, cfg, withcomments) ? 1 : 0;
+				did_include = ast_config_internal_load(cur, cfg, withcomments) ? 1 : 0;
 				if(!ast_strlen_zero(exec_file))
 					unlink(exec_file);
-				if (!do_include) {
+				if ((!did_include) && (do_include < 2)) {
 					ast_log(LOG_ERROR, "*********************************************************\n");
 					ast_log(LOG_ERROR, "*********** YOU SHOULD REALLY READ THIS ERROR ***********\n");
 					ast_log(LOG_ERROR, "Future versions of Asterisk will treat a #include of a "
