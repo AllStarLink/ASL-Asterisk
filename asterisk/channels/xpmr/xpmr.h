@@ -58,7 +58,7 @@
 #ifdef	CHAN_USBRADIO
 #define XPMR_DEBUG0		1
 #define XPMR_TRACE		1
-#define TRACEO(level,a) { if ( o->tracelevel >= level ) {printf a;} }
+#define TRACEO(level,a) { if ( o && (o->tracelevel >= level) ) {printf a;} }
 #else
 #define XPMR_DEBUG0		1
 #define XPMR_TRACE		1
