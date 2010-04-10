@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.231 4/7/2010
+ *  version 0.232 4/10/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -396,7 +396,7 @@ enum {DC_INDETERMINATE, DC_REQ_FLUSH, DC_ERROR, DC_COMPLETE, DC_COMPLETEQUIET, D
 
 enum {SOURCE_RPT, SOURCE_LNK, SOURCE_RMT, SOURCE_PHONE, SOURCE_DPHONE, SOURCE_ALT};
 
-enum {DLY_TELEM, DLY_ID, DLY_UNKEY, DLY_CALLTERM, DLY_COMP, DLY_LINKUNKEY, DLY_PARROT};
+enum {DLY_TELEM, DLY_ID, DLY_UNKEY, DLY_CALLTERM, DLY_COMP, DLY_LINKUNKEY, DLY_PARROT, DLY_MDC1200};
 
 enum {REM_MODE_FM,REM_MODE_USB,REM_MODE_LSB,REM_MODE_AM};
 
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.231  4/7/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.232  4/10/2010";
 
 static char *app = "Rpt";
 
@@ -4387,6 +4387,27 @@ static void mdc1200_cmd(struct rpt *myrpt, char *data)
  	if ((data[0] == 'I') && (!busy)) strcpy(myrpt->lastmdc,data);
 	return;
 }
+
+#ifdef	_MDC_ENCODE_H_
+
+static void mdc1200_ack_status(struct rpt *myrpt, short UnitID)
+{
+struct	mdcparams *mdcp;
+
+	mdcp = ast_calloc(1,sizeof(struct mdcparams));
+	if (!mdcp)
+	{
+		ast_log(LOG_ERROR,"Cannot alloc!!\n");
+		return;
+	}
+	memset(mdcp,0,sizeof(mdcp));
+	mdcp->type[0] = 'A';
+	mdcp->UnitID = UnitID;
+	rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
+	return;
+}
+
+#endif
 #endif
 
 static char func_xlat(struct rpt *myrpt,char c,struct rpt_xlat *xlat)
@@ -6926,7 +6947,12 @@ static int get_wait_interval(struct rpt *myrpt, int type)
                         else
                                 interval = 200;
                         break;
-                                                                                                                  
+                case DLY_MDC1200:
+                        if(wait_times)
+                                interval = retrieve_astcfgint(myrpt,wait_times_save, "mdc1200wait",500,5000,200);
+                        else
+                                interval = 200;
+                        break;
                 default:
 			interval = 0;
 			break;
@@ -7064,6 +7090,7 @@ struct	tm localtm;
 	{
 
 		if (n < 2) return;			
+		wait_interval(myrpt, DLY_TELEM, mychannel);
 		res = saynode(myrpt,mychannel,strs[1]);
 		if (!res) 
 		   sayfile(mychannel, "rpt/connection_failed");
@@ -7073,6 +7100,7 @@ struct	tm localtm;
 	{
 
 		if (n < 2) return;			
+		wait_interval(myrpt, DLY_TELEM, mychannel);
 		res = saynode(myrpt,mychannel,strs[1]);
 		if (!res) 
 		   sayfile(mychannel, "rpt/remote_disc");
@@ -7520,10 +7548,13 @@ struct	mdcparams *mdcp;
 		break;
 #ifdef	_MDC_ENCODE_H_
 	    case MDC1200:
-		wait_interval(myrpt, DLY_TELEM,  mychannel);
 		mdcp = (struct mdcparams *)mytele->submode;
 		if (mdcp)
 		{
+			if (mdcp->type[0] != 'A')
+				wait_interval(myrpt, DLY_TELEM,  mychannel);
+			else
+				wait_interval(myrpt, DLY_MDC1200,  mychannel);
 			res = mdc1200gen_start(myrpt->txchannel,mdcp->type,mdcp->UnitID,mdcp->DestID,mdcp->subcode);
 			ast_free(mdcp);
 			while(myrpt->txchannel->generatordata)
@@ -18059,6 +18090,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						myrpt->lastunit = unitID;
 						sprintf(ustr,"S%04X-%X",unitID,arg & 0xf);
+#ifdef	_MDC_ENCODE_H_
+						mdc1200_ack_status(myrpt,unitID);
+#endif
 						mdc1200_notify(myrpt,NULL,ustr);
 						mdc1200_send(myrpt,ustr);
 						mdc1200_cmd(myrpt,ustr);
@@ -21559,6 +21593,10 @@ static void * mdcgen_alloc(struct ast_channel *chan, void *params)
 	{
 		mdc_encoder_set_double_packet(ps->mdc,0x35,0x89,p->DestID,p->subcode >> 8,
 			p->subcode & 0xff,p->UnitID >> 8,p->UnitID & 0xff);
+	}
+	else if (p->type[0] == 'A')
+	{
+		mdc_encoder_set_packet(ps->mdc,0x23,0,p->UnitID);
 	}
 	else
 	{
