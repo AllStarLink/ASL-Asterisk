@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.232 4/10/2010
+ *  version 0.233 4/12/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.232  4/10/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.233  4/12/2010";
 
 static char *app = "Rpt";
 
@@ -991,6 +991,8 @@ static struct rpt
 		char	*tonemacro;
 		char	*mdcmacro;
 		char	*startupmacro;
+		char	*morse;
+		char	*telemetry;
 		int iobase;
 		char *ioport;
 		int iospeed;
@@ -5060,6 +5062,12 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"memory");
 	if (!val) val = MEMORY;
 	rpt_vars[n].p.memory = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"morse");
+	if (!val) val = MORSE;
+	rpt_vars[n].p.morse = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"telemetry");
+	if (!val) val = TELEMETRY;
+	rpt_vars[n].p.telemetry = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"macro");
 	if (!val) val = MACRO;
 	rpt_vars[n].p.macro = val;
@@ -6787,16 +6795,15 @@ static int telem_any(struct rpt *myrpt,struct ast_channel *chan, char *entry)
 	static int morseampl;
 	static int morseidfreq = 0;
 	static int morseidampl;
-	static char mcat[] = MORSE;
 	
 	res = 0;
 	
 	if(!morseidfreq){ /* Get the morse parameters if not already loaded */
-		morsespeed = retrieve_astcfgint(myrpt, mcat, "speed", 5, 20, 20);
-        	morsefreq = retrieve_astcfgint(myrpt, mcat, "frequency", 300, 3000, 800);
-        	morseampl = retrieve_astcfgint(myrpt, mcat, "amplitude", 200, 8192, 4096);
-		morseidampl = retrieve_astcfgint(myrpt, mcat, "idamplitude", 200, 8192, 2048);
-		morseidfreq = retrieve_astcfgint(myrpt, mcat, "idfrequency", 300, 3000, 330);	
+		morsespeed = retrieve_astcfgint(myrpt, myrpt->p.morse, "speed", 5, 20, 20);
+        	morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
+        	morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
+		morseidampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "idamplitude", 200, 8192, 2048);
+		morseidfreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "idfrequency", 300, 3000, 330);	
 	}
 	
 	/* Is it a file, or a tone sequence? */
@@ -6847,7 +6854,7 @@ static int telem_lookup(struct rpt *myrpt,struct ast_channel *chan, char *node, 
 	entry = NULL;
 	
 	/* Retrieve the section name for telemetry from the node section */
-	telemetry = (char *) ast_variable_retrieve(myrpt->cfg, node, TELEMETRY);
+	telemetry = (char *) ast_variable_retrieve(myrpt->cfg, node, myrpt->p.telemetry);
 	if(telemetry ){
 		telemetry_save = ast_strdup(telemetry);
 		if(!telemetry_save){
