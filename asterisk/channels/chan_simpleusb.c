@@ -281,7 +281,7 @@ END_CONFIG
  */
 
 #define FRAME_SIZE	160
-#define	QUEUE_SIZE	3
+#define	QUEUE_SIZE	5
 
 #if defined(__FreeBSD__)
 #define	FRAGS	0x8
