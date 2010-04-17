@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.234 4/17/2010
+ *  version 0.235 4/17/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.234  4/17/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.235  4/17/2010";
 
 static char *app = "Rpt";
 
@@ -1133,6 +1133,7 @@ static struct rpt
 	char patchquiet;
 	char patchvoxalways;
 	char patchcontext[MAXPATCHCONTEXT];
+	char patchexten[AST_MAX_EXTENSION];
 	int patchdialtime;
 	int macro_longest;
 	int phone_longestfunc;
@@ -9198,7 +9199,8 @@ struct ast_channel *mychannel,*genchannel;
 		pthread_exit(NULL);
 	}
 	/* start dialtone if patchquiet is 0. Special patch modes don't send dial tone */
-	if ((!myrpt->patchquiet) && (tone_zone_play_tone(genchannel->fds[0],ZT_TONE_DIALTONE) < 0))
+	if ((!myrpt->patchquiet) && (!myrpt->patchexten[0]) 
+		&& (tone_zone_play_tone(genchannel->fds[0],ZT_TONE_DIALTONE) < 0))
 	{
 		ast_log(LOG_WARNING, "Cannot start dialtone\n");
 		ast_hangup(mychannel);
@@ -9213,6 +9215,11 @@ struct ast_channel *mychannel,*genchannel;
 	myrpt->calldigittimer = 0;
 	aborted = 0;
 
+	if (myrpt->patchexten[0])
+	{
+		strcpy(myrpt->exten,myrpt->patchexten);
+		myrpt->callmode = 2;
+	}
 	while ((myrpt->callmode == 1) || (myrpt->callmode == 4))
 	{
 		if((myrpt->patchdialtime)&&(myrpt->callmode == 1)&&(myrpt->cidx != lastcidx)){
@@ -10143,6 +10150,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 	"noct",
 	"quiet",
 	"voxalways",
+	"exten",
 	NULL
 	};
 		
@@ -10160,6 +10168,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 		myrpt->patchquiet = 0;
 		myrpt->patchvoxalways = 0;
 		strncpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT);
+		memset(myrpt->patchexten, 0, sizeof(myrpt->patchexten));
 
 		if(param){
 			/* Process parameter list */
@@ -10198,7 +10207,11 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 					case 6: /* voxalways */
 						myrpt->patchvoxalways = atoi(value);
 						break;
-				 					
+
+					case 7: /* exten */
+						strncpy(myrpt->patchexten, value, AST_MAX_EXTENSION - 1) ;
+						break;
+
 					default:
 						break;
 				}
