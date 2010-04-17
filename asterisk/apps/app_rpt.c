@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.233 4/12/2010
+ *  version 0.234 4/17/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.233  4/12/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.234  4/17/2010";
 
 static char *app = "Rpt";
 
@@ -6958,7 +6958,7 @@ static int get_wait_interval(struct rpt *myrpt, int type)
                         if(wait_times)
                                 interval = retrieve_astcfgint(myrpt,wait_times_save, "mdc1200wait",500,5000,200);
                         else
-                                interval = 200;
+                                interval = 350;
                         break;
                 default:
 			interval = 0;
