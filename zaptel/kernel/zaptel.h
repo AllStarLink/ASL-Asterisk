@@ -2092,6 +2092,11 @@ struct zt_radio_param {
 
 #define	ZT_RADPAR_TXGAIN 21 /* Audio (Out from system) Tx Gain */ 
 
+#define ZT_RADPAR_CTCSSACQUIRETIME 22 /* CTCSS Aquire time */
+#define ZT_RADPAR_CTCSSTALKOFFTIME 23 /* CTCSS Talk off time */
+
+
+
 struct torisa_debug {
 	unsigned int txerrors;
 	unsigned int irqcount;

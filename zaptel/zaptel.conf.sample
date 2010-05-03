@@ -262,8 +262,11 @@ defaultzone=us
 #
 # Invert COR signal {y,n}
 #invertcor=y
-# Set the external tone mode; yes, no, internal {y,n,i}
-#exttone=y
+# Set the external tone mode; yes, no, inverted external  {y,n,i}
+# exttone=y		# High true External CTCSS on UIOB
+# exttone=i		# Low true External CTCSS on UIOB
+# exttone=n		# Use internal MX828 decoder on Quad Radio PCI card
+#			# (not recommended)
 #
 # Now apply the configuration to the specified channels:
 #

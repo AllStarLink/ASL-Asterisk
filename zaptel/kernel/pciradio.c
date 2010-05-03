@@ -107,9 +107,6 @@ With driver:	303826  (1.5 %)
 #define RAD_CTCSS_ACQUIRE_TIME 10
 #define RAD_CTCSS_TALKOFF_TIME 1000
 
-#define ZT_RADPAR_CTCSSACQUIRETIME 18 /* DEBUG only, this belongs in zaptel.h */
-#define ZT_RADPAR_CTCSSTALKOFFTIME 19 /* DEBUG only, this belongs in zaptel.h */
-
 /*
 * MX828 Commands
 */
