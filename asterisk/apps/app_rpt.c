@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.235 4/17/2010
+ *  version 0.236 5/9/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.235  4/17/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.236  5/9/2010";
 
 static char *app = "Rpt";
 
@@ -3871,7 +3871,8 @@ static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 	if (!mylink) return(0);
 	if (!mylink->chan) return(0);
 	/* if doesnt qual as a foreign link */
-	if ((mylink->name[0] != '0') && (!mylink->phonemode) &&
+	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
+	    (!mylink->phonemode) &&
 	    strncasecmp(mylink->chan->name,"echolink",8) &&
 		strncasecmp(mylink->chan->name,"irlp",4)) return(0);
 	if ((myrpt->p.duplex < 2) && (myrpt->tele.next == &myrpt->tele)) return(0);
@@ -3905,7 +3906,8 @@ int	nonlocals;
 	}
 	if ((!myrpt->p.duplex) || (!nonlocals)) return(0);
 	/* if doesnt qual as a foreign link */
-	if ((mylink->name[0] != '0') && (!mylink->phonemode) &&
+	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
+	    (!mylink->phonemode) &&
 	    strncasecmp(mylink->chan->name,"echolink",8) &&
 		strncasecmp(mylink->chan->name,"irlp",4)) return(1);
 	if (mylink->linkmode < 2) return(0);
@@ -8881,9 +8883,10 @@ static void rpt_telemetry(struct rpt *myrpt,int mode, void *data)
 {
 struct rpt_tele *tele;
 struct rpt_link *mylink = NULL;
-int res,vmajor,vminor,i;
+int res,vmajor,vminor,i,ns;
 pthread_attr_t attr;
 char *v1, *v2,mystr[300],*p,haslink,lat[100],lon[100],elev[100];
+char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
 time_t	t,was;
 unsigned int k;
 FILE *fp;
@@ -8899,7 +8902,7 @@ struct rpt_link *l;
  		mylink = (struct rpt_link *) data;
 		if ((!mylink) || (mylink->name[0] == '0')) return;
 		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
-		    strncasecmp(mylink->chan->name,"echolink",8) &&
+		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8) &&
 			strncasecmp(mylink->chan->name,"irlp",4)) return;
 		break;
 	    case VARCMD:
@@ -9078,6 +9081,35 @@ struct rpt_link *l;
 				l = l->next;
 			}
 			rpt_mutex_unlock(&myrpt->lock);
+			send_tele_link(myrpt,mystr);
+			return;
+		    case FULLSTATUS:
+			rpt_mutex_lock(&myrpt->lock);
+			sprintf(mystr,"STATUS,%s,%d",myrpt->name,myrpt->callmode);
+			/* get all the nodes */
+			__mklinklist(myrpt,NULL,lbuf);
+			rpt_mutex_unlock(&myrpt->lock);
+			/* parse em */
+			ns = finddelim(lbuf,strs,MAXLINKLIST);
+			/* sort em */
+			if (ns) qsort((void *)strs,ns,sizeof(char *),mycompar);
+			/* go thru all the nodes in list */
+			for(i = 0; i < ns; i++)
+			{
+				char s,m = 'T';
+
+				/* if a mode spec at first, handle it */
+				if ((*strs[i] < '0') || (*strs[i] > '9'))
+				{
+					m = *strs[i];
+					strs[i]++;
+				}
+				s = 'T';
+				if (m == 'R') s = 'R';
+				if (m == 'C') s = 'C';
+				snprintf(mystr + strlen(mystr),sizeof(mystr),",%c%s",
+					s,strs[i]);
+			}
 			send_tele_link(myrpt,mystr);
 			return;
 		}
@@ -10034,7 +10066,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
                         /* loop through all links */
                         while(l != &myrpt->links){
 				struct	ast_frame wf;
-                                if (l->name[0] == '0') /* Skip any IAXRPT monitoring */
+                                if ((l->name[0] <= '0') || (l->name[0] > '9'))  /* Skip any IAXRPT monitoring */
                                 {
                                         l = l->next;
                                         continue;
@@ -10726,7 +10758,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                 case 36: /* Link Output Enable */
 			if (!mylink) return DC_ERROR;
 			src = 0;
-			if (mylink->name[0] == '0') src = LINKMODE_GUI;
+			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
 			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
@@ -10741,7 +10773,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                 case 37: /* Link Output Disable */
 			if (!mylink) return DC_ERROR;
 			src = 0;
-			if (mylink->name[0] == '0') src = LINKMODE_GUI;
+			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
 			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
@@ -10756,7 +10788,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                 case 38: /* Gui Link Output Follow */
 			if (!mylink) return DC_ERROR;
 			src = 0;
-			if (mylink->name[0] == '0') src = LINKMODE_GUI;
+			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
 			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
@@ -10771,7 +10803,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
                 case 39: /* Link Output Demand*/
 			if (!mylink) return DC_ERROR;
 			src = 0;
-			if (mylink->name[0] == '0') src = LINKMODE_GUI;
+			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
 			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
@@ -17104,7 +17136,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		{
 			if (l->lastrx){
 				myrpt->remrx = 1;
-				if(l->name[0] != '0') /* Ignore '0' nodes */
+				if ((l->name[0] > '0') && (l->name[0] <= '9')) /* Ignore '0' nodes */
 					strcpy(myrpt->lastnodewhichkeyedusup, l->name); /* Note the node which is doing the key up */
 			}
 			l = l->next;
@@ -17743,7 +17775,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (l->chan) ast_hangup(l->chan);
 				l->chan = 0;
 				rpt_mutex_unlock(&myrpt->lock);
-				if ((l->name[0] != '0') && (!l->isremote))
+				if ((l->name[0] > '0') && (l->name[0] <= '9') && (!l->isremote))
 				{
 					if (attempt_reconnect(myrpt,l) == -1)
 					{
@@ -18597,7 +18629,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						if ((!l->disced) && (!l->outbound))
 						{
-							if ((l->name[0] == '0') || l->isremote)
+							if ((l->name[0] <= '0') || (l->name[0] > '9') || l->isremote)
 								l->disctime = 1;
 							else
 								l->disctime = DISC_TIME;
@@ -18900,7 +18932,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						{
 							if ((!l->outbound) && (!l->disced))
 							{
-								if ((l->name[0] == '0') || l->isremote)
+								if ((l->name[0] <= '0') || (l->name[0] > '9') || l->isremote)
 									l->disctime = 1;
 								else
 									l->disctime = DISC_TIME;
@@ -19795,8 +19827,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_log(LOG_WARNING, "Link IP address cannot be determined!!\n");
 			return -1;
 		}
-		
-		ast_callerid_parse(chan->cid.cid_num,&b,&b1);
+		b = chan->cid.cid_name;
+		b1 = chan->cid.cid_num;		
 		ast_shrink_phone_number(b1);
 		if (!strcmp(myrpt->name,b1))
 		{
@@ -19898,14 +19930,17 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_log(LOG_WARNING, "Doesnt have callerid on %s\n",tmp);
 			return -1;
 		}
-
-		ast_callerid_parse(chan->cid.cid_num,&b,&b1);
+		b = chan->cid.cid_name;
+		b1 = chan->cid.cid_num;
 		ast_shrink_phone_number(b1);
 		if (!strcmp(myrpt->name,b1))
 		{
 			ast_log(LOG_WARNING, "Trying to link to self!!\n");
 			return -1;
 		}
+		/* if is an IAX client */
+		if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+			b1 = b;
 		rpt_mutex_lock(&myrpt->lock);
 		l = myrpt->links.next;
 		/* try to find this one in queue */
@@ -19960,9 +19995,14 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		l->newkeytimer = NEWKEYTIME;
 		l->newkey = 0;
 		l->iaxkey = 0;
+#ifdef POOPY
+		if ((!phone_mode) && (l->name[0] > '0') && (l->name[0] <= '9') &&
+#else
 		if ((!phone_mode) && (l->name[0] != '0') &&
+#endif
 		    strncasecmp(chan->name,"echolink",8) &&
 			strncasecmp(chan->name,"irlp",4)) l->newkey = 2;
+		if (l->name[0] > '9') l->newkeytimer = 0;
 		voxinit_link(l,1);
 		if (!strncasecmp(chan->name,"echolink",8)) 
 			init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
@@ -20002,9 +20042,17 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		insque((struct qelem *)l,(struct qelem *)myrpt->links.next);
 		__kickshort(myrpt);
 		rpt_mutex_unlock(&myrpt->lock);
-		if (chan->_state != AST_STATE_UP) {
+		if (chan->_state != AST_STATE_UP)
+		{
 			ast_answer(chan);
-			if (!phone_mode) send_newkey(chan);
+			if (l->name[0] > '9')
+			{
+				if (ast_safe_sleep(chan,500) == -1) return -1;
+			}
+			else
+			{
+				if (!phone_mode) send_newkey(chan);
+			}
 		}
 		if (myrpt->p.archivedir)
 		{
@@ -20017,7 +20065,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			donodelog(myrpt,str);
 		}
 		doconpgm(myrpt,l->name);
-		if (!phone_mode) send_newkey(chan);
+		if ((!phone_mode) && (l->name[0] <=  '9'))
+			send_newkey(chan);
 		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
 		    (!strncasecmp(l->chan->name,"irlp",4)))
 			rpt_telemetry(myrpt,CONNECTED,l);
@@ -20392,10 +20441,15 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
 		{
 			b1 = "0";
+			b = NULL;
 		} else {
-			ast_callerid_parse(chan->cid.cid_num,&b,&b1);
+			b = chan->cid.cid_name;
+			b1 = chan->cid.cid_num;
 			ast_shrink_phone_number(b1);
 		}
+		/* if is an IAX client */
+		if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+			b1 = b;
 		sprintf(mycmd,"CONNECT,%s",b1);
 		donodelog(myrpt,mycmd);
 		doconpgm(myrpt,b1);
