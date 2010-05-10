@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.236 5/9/2010
+ *  version 0.237 5/10/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.236  5/9/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.237  5/10/2010";
 
 static char *app = "Rpt";
 
@@ -19484,7 +19484,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	struct localuser *u;
 #endif
 	char tmp[256], keyed = 0,keyed1 = 0;
-	char *options,*stringp,*tele,c,*altp,*memp;
+	char *options,*stringp,*callstr,*tele,c,*altp,*memp;
 	char sx[320],*sy,myfirst;
 	struct	rpt *myrpt;
 	struct ast_frame *f,*f1,*f2;
@@ -19535,7 +19535,9 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	stringp=tmp;
 	strsep(&stringp, "|");
 	options = stringp;
-
+	strsep(&stringp,"|");
+	callstr = stringp;
+	
 //	ast_log(LOG_NOTICE,"options=%s \n",options);
 //	if(memp>0)ast_log(LOG_NOTICE,"memp=%s \n",memp);
 //	if(altp>0)ast_log(LOG_NOTICE,"altp=%s \n",altp);
@@ -19930,17 +19932,26 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_log(LOG_WARNING, "Doesnt have callerid on %s\n",tmp);
 			return -1;
 		}
-		b = chan->cid.cid_name;
-		b1 = chan->cid.cid_num;
-		ast_shrink_phone_number(b1);
+		if (phone_mode) 
+		{
+			b1 = "0";
+			b = NULL;
+			if (callstr) b1 = callstr;
+		}
+		else 
+		{
+			b = chan->cid.cid_name;
+			b1 = chan->cid.cid_num;
+			ast_shrink_phone_number(b1);
+			/* if is an IAX client */
+			if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+				b1 = b;
+		}
 		if (!strcmp(myrpt->name,b1))
 		{
 			ast_log(LOG_WARNING, "Trying to link to self!!\n");
 			return -1;
 		}
-		/* if is an IAX client */
-		if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
-			b1 = b;
 		rpt_mutex_lock(&myrpt->lock);
 		l = myrpt->links.next;
 		/* try to find this one in queue */
