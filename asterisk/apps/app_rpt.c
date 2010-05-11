@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.237 5/10/2010
+ *  version 0.238 5/10/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.237  5/10/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.238  5/10/2010";
 
 static char *app = "Rpt";
 
@@ -20079,7 +20079,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if ((!phone_mode) && (l->name[0] <=  '9'))
 			send_newkey(chan);
 		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
-		    (!strncasecmp(l->chan->name,"irlp",4)))
+		    (!strncasecmp(l->chan->name,"irlp",4)) ||
+		      (l->name[0] > '9'))
 			rpt_telemetry(myrpt,CONNECTED,l);
 		return AST_PBX_KEEPALIVE;
 	}
