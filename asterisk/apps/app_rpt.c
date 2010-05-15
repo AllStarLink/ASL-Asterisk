@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.238 5/10/2010
+ *  version 0.239 5/15/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.238  5/10/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.239  5/15/2010";
 
 static char *app = "Rpt";
 
@@ -1060,6 +1060,7 @@ static struct rpt
 		int default_split_2m;
 		int default_split_70cm;
 		int dtmfkey;
+		char dias;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -5347,6 +5348,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		rpt_vars[n].p.iospeed = B4800;
 	if (!strcasecmp(rpt_vars[n].remoterig,remote_rig_ft897))
 		rpt_vars[n].p.iospeed = B4800;
+	val = (char *) ast_variable_retrieve(cfg,this,"dias");
+	if (val) rpt_vars[n].p.dias = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg,this,"iospeed");
 	if (val)
 	{
@@ -11990,7 +11993,8 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 
 	if (myrpt->iofd >= 0)  /* if to do out a serial port */
 	{
-		if(!strcmp(myrpt->remoterig, remote_rig_tm271))
+		if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
+		   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
 		{
 			for(i = 0; i < txbytes; i++)
 			{
@@ -12115,6 +12119,7 @@ int	i;
 	if (debug)  printf("Send to kenwood: %s\n",txstr);
 	i = serial_remote_io(myrpt, (unsigned char *)txstr, strlen(txstr), 
 		(unsigned char *)rxstr,RAD_SERIAL_BUFLEN - 1,3);
+	usleep(50000);
 	if (i < 0) return -1;
 	if ((i > 0) && (rxstr[i - 1] == '\r'))
 		rxstr[i-- - 1] = 0;
@@ -17276,7 +17281,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				myrpt->p.hangtime;
 		}
 		/* if in 1/2 or 3/4 duplex, give rx priority */
-		if ((myrpt->p.duplex < 2) && (myrpt->keyed) && (!myrpt->p.linktolink)) totx = 0;
+		if ((myrpt->p.duplex < 2) && (myrpt->keyed) && (!myrpt->p.linktolink) && (!myrpt->p.dias)) totx = 0;
 		/* Disable the local transmitter if we are timed out */
 		totx = totx && myrpt->totimer;
 		/* if timed-out and not said already, say it */
@@ -17383,7 +17388,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		myrpt->txrealkeyed = totx;
 		totx = totx || (!AST_LIST_EMPTY(&myrpt->txq));
 		/* if in 1/2 or 3/4 duplex, give rx priority */
-		if ((myrpt->p.duplex < 2) && (!myrpt->p.linktolink) && (myrpt->keyed)) totx = 0;
+		if ((myrpt->p.duplex < 2) && (!myrpt->p.linktolink) && (!myrpt->p.dias) && (myrpt->keyed)) totx = 0;
 		if (totx && (!lasttx))
 		{
 			char mydate[100],myfname[100];
