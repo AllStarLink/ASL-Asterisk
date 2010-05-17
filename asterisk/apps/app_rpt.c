@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.239 5/15/2010
+ *  version 0.240 5/16/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.239  5/15/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.240  5/16/2010";
 
 static char *app = "Rpt";
 
@@ -11993,6 +11993,7 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 
 	if (myrpt->iofd >= 0)  /* if to do out a serial port */
 	{
+		serial_rxflush(myrpt->iofd,20);
 		if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
 		   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
 		{
