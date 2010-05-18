@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.240 5/16/2010
+ *  version 0.241 5/18/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.240  5/16/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.241  5/18/2010";
 
 static char *app = "Rpt";
 
@@ -12059,7 +12059,10 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 	if (ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_GETPARAM,&prm) == -1) return -1;
 	olddata = prm.data;
         prm.radpar = ZT_RADPAR_REMMODE;
-        if (asciiflag & 1)  prm.data = ZT_RADPAR_REM_SERIAL_ASCII;
+        if ((asciiflag & 1) &&
+	   strcmp(myrpt->remoterig, remote_rig_tm271) &&
+	      strcmp(myrpt->remoterig, remote_rig_kenwood))
+		  prm.data = ZT_RADPAR_REM_SERIAL_ASCII;
         else prm.data = ZT_RADPAR_REM_SERIAL;
 	if (ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&prm) == -1) return -1;
 	if (asciiflag & 2)
@@ -12068,10 +12071,36 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 		if (ioctl(myrpt->zaprxchannel->fds[0],ZT_HOOK,&i) == -1) return -1;
 		usleep(100000);
 	}
-        prm.radpar = ZT_RADPAR_REMCOMMAND;
-        prm.data = rxmaxbytes;
-        memcpy(prm.buf,txbuf,txbytes);
-        prm.index = txbytes;
+	if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
+	   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
+	{
+		for(i = 0; i < txbytes - 1; i++)
+		{
+			
+		        prm.radpar = ZT_RADPAR_REMCOMMAND;
+		        prm.data = 0;
+		       	prm.buf[0] = txbuf[i];
+		        prm.index = 1;
+			if (ioctl(myrpt->zaprxchannel->fds[0],
+				ZT_RADIO_SETPARAM,&prm) == -1) return -1;
+			usleep(6666);
+		}
+        	prm.radpar = ZT_RADPAR_REMMODE;
+	        if (asciiflag & 1)  prm.data = ZT_RADPAR_REM_SERIAL_ASCII;
+	        else prm.data = ZT_RADPAR_REM_SERIAL;
+		if (ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&prm) == -1) return -1;
+	        prm.radpar = ZT_RADPAR_REMCOMMAND;
+	        prm.data = rxmaxbytes;
+	       	prm.buf[0] = txbuf[i];
+	        prm.index = 1;
+	}
+	else
+	{
+	        prm.radpar = ZT_RADPAR_REMCOMMAND;
+	        prm.data = rxmaxbytes;
+	        memcpy(prm.buf,txbuf,txbytes);
+	        prm.index = txbytes;
+	}
 	if (ioctl(myrpt->zaprxchannel->fds[0],ZT_RADIO_SETPARAM,&prm) == -1) return -1;
         if (rxbuf)
         {
