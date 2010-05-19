@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.241 5/18/2010
+ *  version 0.242 5/18/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -385,7 +385,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
 	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE,
-	STATS_GPS,STATS_GPS_LEGACY, MDC1200, LASTUSER};
+	STATS_GPS,STATS_GPS_LEGACY, MDC1200, LASTUSER, REMCOMPLETE};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -530,7 +530,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.241  5/18/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.242  5/18/2010";
 
 static char *app = "Rpt";
 
@@ -1719,7 +1719,8 @@ static struct telem_defaults tele_defs[] = {
 	{"remotemon","|t(1600,0,75,2048)"},
 	{"remotetx","|t(2000,0,75,2048)(0,0,75,0)(1600,0,75,2048)"},
 	{"cmdmode","|t(900,904,200,2048)"},
-	{"functcomplete","|t(1000,0,100,2048)(0,0,100,0)(1000,0,100,2048)"}
+	{"functcomplete","|t(1000,0,100,2048)(0,0,100,0)(1000,0,100,2048)"},
+	{"remcomplete","|t(650,0,100,2048)(0,0,100,0)(650,0,100,2048)(0,0,100,0)(650,0,100,2048)"}
 } ;
 
 static inline void goertzel_sample(goertzel_state_t *s, short sample)
@@ -7427,7 +7428,8 @@ struct	mdcparams *mdcp;
 	rpt_mutex_unlock(&myrpt->lock);
 	while((mytele->mode != SETREMOTE) && (mytele->mode != UNKEY) &&
 	    (mytele->mode != LINKUNKEY) && (mytele->mode != LOCUNKEY) &&
-		(mytele->mode != COMPLETE) && (mytele->mode != REMGO))
+		(mytele->mode != COMPLETE) && (mytele->mode != REMGO) && 
+		    (mytele->mode != REMCOMPLETE))
 	{	
                 rpt_mutex_lock(&myrpt->lock);
 		if ((!myrpt->active_telem) &&
@@ -7529,6 +7531,11 @@ struct	mdcparams *mdcp;
 		/* wait a little bit */
 		wait_interval(myrpt, DLY_TELEM, mychannel);
 		res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		break;
+	    case REMCOMPLETE:
+		/* wait a little bit */
+		wait_interval(myrpt, DLY_TELEM, mychannel);
+		res = telem_lookup(myrpt,mychannel, myrpt->name, "remcomplete");
 		break;
 	    case MACRO_NOTFOUND:
 		/* wait a little bit */
@@ -8092,6 +8099,9 @@ struct	mdcparams *mdcp;
 		ast_mutex_unlock(&myrpt->remlock);
 		if (!res)
 		{
+			if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
+			   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
+				telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 			imdone = 1;
 			break;
 		}
@@ -8191,8 +8201,12 @@ struct	mdcparams *mdcp;
 		    default:
 			res = -1;
 		}
-		wait_interval(myrpt, DLY_COMP, mychannel);
-		if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		if (strcmp(myrpt->remoterig, remote_rig_tm271) &&
+		   strcmp(myrpt->remoterig, remote_rig_kenwood))
+		{
+			wait_interval(myrpt, DLY_COMP, mychannel);
+			if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		}
 		break;
 	    case SCAN:
 		ast_mutex_lock(&myrpt->remlock);
@@ -15562,8 +15576,6 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 				strncpy(myrpt->freq, savestr, sizeof(myrpt->freq) - 1);
 				goto invalid_freq;
 			}
-
-			rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
 
 invalid_freq:
@@ -16064,7 +16076,11 @@ int	seq,res;
 	res = handle_remote_dtmf_digit(myrpt,c, NULL, 0);
 	if (res != 1)
 		return res;
-	rpt_telemetry(myrpt,COMPLETE,NULL);
+	if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
+	   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
+		rpt_telemetry(myrpt,REMCOMPLETE,NULL);
+	else
+		rpt_telemetry(myrpt,COMPLETE,NULL);
 	return 0;
 }
 
@@ -16105,7 +16121,11 @@ int	res;
 	res = handle_remote_dtmf_digit(myrpt,c,keyed, phonemode);
 	if (res != 1)
 		return res;
-	rpt_telemetry(myrpt,COMPLETE,NULL);
+	if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
+	   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
+		rpt_telemetry(myrpt,REMCOMPLETE,NULL);
+	else
+		rpt_telemetry(myrpt,COMPLETE,NULL);
 	return 0;
 }
 
