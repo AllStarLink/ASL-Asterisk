@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.242 5/18/2010
+ *  version 0.243 5/20/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -140,6 +140,9 @@
  *  4 - Enter command mode on specified link
  *  5 - System status
  *  6 - Disconnect all links
+ *  7 - Last Node to Key Up
+ *  8 - MDC test (for diag purposes)
+ *  9 - Send Text Message (9,<destnodeno or 0 (for all)>,Message Text, etc.
  *  11 - Disconnect a previously permanently connected link
  *  12 - Permanently connect specified link -- monitor only
  *  13 - Permanently connect specified link -- tranceive
@@ -282,6 +285,8 @@
 
 #define TONE_SAMPLE_RATE 8000
 #define TONE_SAMPLES_IN_FRAME 160
+
+#define	MAX_TEXTMSG_SIZE 160
 
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
@@ -530,7 +535,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.242  5/18/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.243  5/20/2010";
 
 static char *app = "Rpt";
 
@@ -1582,6 +1587,8 @@ static int rpt_do_restart(int fd, int argc, char *argv[]);
 static int rpt_do_playback(int fd, int argc, char *argv[]);
 static int rpt_do_localplay(int fd, int argc, char *argv[]);
 static int rpt_do_irlpplay(int fd, int argc, char *argv[]);
+static int rpt_do_sendall(int fd, int argc, char *argv[]);
+static int rpt_do_sendtext(int fd, int argc, char *argv[]);
 static int rpt_do_fun(int fd, int argc, char *argv[]);
 static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
@@ -1630,6 +1637,14 @@ static char localplay_usage[] =
 static char irlpplay_usage[] =
 "Usage: rpt irlpplay <nodename> <sound_file_base_name>\n"
 "       Send an Audio File to a node, do not send to other connected nodes (local)\n";
+
+static char sendtext_usage[] =
+"Usage: rpt sendtext <nodename> <destnodename> <Text Message>\n"
+"       Send a Text message to all specified node\n";
+
+static char sendall_usage[] =
+"Usage: rpt sendall <nodename> <Text Message>\n"
+"       Send a Text message to all connected nodes\n";
 
 
 static char fun_usage[] =
@@ -1686,6 +1701,15 @@ static struct ast_cli_entry  cli_localplay =
 static struct ast_cli_entry  cli_irlpplay =
         { { "rpt", "irlpplay" }, rpt_do_irlpplay,
                 "Play Back an Audio File Locally", irlpplay_usage };
+
+static struct ast_cli_entry  cli_sendtext =
+        { { "rpt", "sendtext" }, rpt_do_sendtext,
+                "Send a Text message to specific node", sendtext_usage };
+
+
+static struct ast_cli_entry  cli_sendall =
+        { { "rpt", "sendall" }, rpt_do_sendall,
+                "Send a Text message to all", sendall_usage };
 
 
 static struct ast_cli_entry  cli_fun =
@@ -4543,6 +4567,14 @@ static int finddelim(char *str, char *strp[], int limit)
 	return explode_string(str, strp, limit, DELIMCHR, QUOTECHR);
 }
 
+static char *string_toupper(char *str)
+{
+int	i;
+
+	for(i = 0; str[i]; i++)
+		if (islower(str[i])) str[i] = toupper(str[i]);
+	return str;
+}
 
 /*
 	send asterisk frame text message on the current tx channel
@@ -6124,6 +6156,85 @@ static int rpt_do_irlpplay(int fd, int argc, char *argv[])
                         rpt_telemetry(myrpt,LOCALPLAY,argv[3]);
                 }
         }
+        return RESULT_SUCCESS;
+}
+
+static int rpt_do_sendtext(int fd, int argc, char *argv[])
+{
+        int     i;
+	struct	rpt_link *l;
+	char str[MAX_TEXTMSG_SIZE];
+
+        if (argc < 5) return RESULT_SHOWUSAGE;
+
+	string_toupper(argv[2]);
+	string_toupper(argv[3]);
+	snprintf(str,sizeof(str) - 1,"M %s %s ",argv[2],argv[3]);
+	for(i = 4; i < argc; i++)
+	{
+		if (i > 3) strncat(str," ",sizeof(str) - 1);
+		strncat(str,argv[i],sizeof(str) - 1);
+	}	
+        for(i = 0; i < nrpts; i++)
+	{
+                if(!strcmp(argv[2], rpt_vars[i].name))
+		{
+                        struct rpt *myrpt = &rpt_vars[i];
+			rpt_mutex_lock(&myrpt->lock);
+			l = myrpt->links.next;
+			/* otherwise, send it to all of em */
+			while(l != &myrpt->links)
+			{
+				if (l->name[0] == '0') 
+				{
+					l = l->next;
+					continue;
+				}
+				if (l->chan) ast_sendtext(l->chan,str);
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+		}
+	}
+        return RESULT_SUCCESS;
+}
+
+static int rpt_do_sendall(int fd, int argc, char *argv[])
+{
+        int     i;
+	struct	rpt_link *l;
+	char str[MAX_TEXTMSG_SIZE];
+
+        if (argc < 4) return RESULT_SHOWUSAGE;
+
+	string_toupper(argv[2]);
+	snprintf(str,sizeof(str) - 1,"M %s 0 ",argv[2]);
+	for(i = 3; i < argc; i++)
+	{
+		if (i > 3) strncat(str," ",sizeof(str) - 1);
+		strncat(str,argv[i],sizeof(str) - 1);
+	}	
+        for(i = 0; i < nrpts; i++)
+	{
+                if(!strcmp(argv[2], rpt_vars[i].name))
+		{
+                        struct rpt *myrpt = &rpt_vars[i];
+			rpt_mutex_lock(&myrpt->lock);
+			l = myrpt->links.next;
+			/* otherwise, send it to all of em */
+			while(l != &myrpt->links)
+			{
+				if (l->name[0] == '0') 
+				{
+					l = l->next;
+					continue;
+				}
+				if (l->chan) ast_sendtext(l->chan,str);
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+		}
+	}
         return RESULT_SUCCESS;
 }
 
@@ -10134,6 +10245,32 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			mdc1200_send(myrpt,"ID00D");
 			break;
 #endif
+		case 9: /* Send Text Message */
+			if (!param) break;
+			s1 = strchr(param,',');
+			if (!s1) break;
+			*s1 = 0;
+			s2 = strchr(s1 + 1,',');
+			if (!s2) break;
+			*s2 = 0;
+			snprintf(tmp,MAX_TEXTMSG_SIZE - 1,"M %s %s %s",
+				myrpt->name,s1 + 1,s2 + 1);
+			rpt_mutex_lock(&myrpt->lock);
+			l = myrpt->links.next;
+			/* otherwise, send it to all of em */
+			while(l != &myrpt->links)
+			{
+				if (l->name[0] == '0') 
+				{
+					l = l->next;
+					continue;
+				}
+				if (l->chan) ast_sendtext(l->chan,tmp);
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+                        rpt_telemetry(myrpt, COMPLETE, NULL);
+			return DC_COMPLETE;
 
 		case 16: /* Restore links disconnected with "disconnect all links" command */
 			strcpy(tmp, myrpt->savednodes); /* Make a copy */
@@ -11125,7 +11262,7 @@ static void handle_link_data(struct rpt *myrpt, struct rpt_link *mylink,
 	char *str)
 {
 char	tmp[512],tmp1[512],cmd[300] = "",dest[300],src[300],c;
-int	i,seq, res, ts;
+int	i,seq, res, ts, rest;
 struct rpt_link *l;
 struct	ast_frame wf;
 
@@ -11197,6 +11334,61 @@ struct	ast_frame wf;
 		rpt_mutex_unlock(&myrpt->lock);
 		if (debug > 6) ast_log(LOG_NOTICE,"@@@@ node %s recieved node list %s from node %s\n",
 			myrpt->name,tmp,mylink->name);
+		return;
+	}
+	if (tmp[0] == 'M')
+	{
+		rest = 0;
+		if (sscanf(tmp,"%s %s %s %n",cmd,src,dest,&rest) < 3)
+		{
+			ast_log(LOG_WARNING, "Unable to parse message string %s\n",str);
+			return;
+		}
+		if (!rest) return;
+		if (strlen(tmp + rest) < 2) return;
+		/* if is from me, ignore */
+		if (!strcmp(src,myrpt->name)) return;
+		/* if is for one of my nodes, dont do too much! */
+	        for(i = 0; i < nrpts; i++)
+		{
+	                if(!strcmp(dest, rpt_vars[i].name))
+			{
+				ast_verbose("Private Text Message for %s From %s: %s\n",
+					rpt_vars[i].name,src,tmp + rest);
+				ast_log(LOG_EVENT,"Node %s Got Private Text Message From Node %s: %s\n",
+					rpt_vars[i].name,src,tmp + rest);
+				return;
+			}
+		}
+		/* if is for everyone, at least log it */
+		if (!strcmp(dest,"0"))
+		{
+			ast_verbose("Text Message From %s: %s\n",src,tmp + rest);
+			ast_log(LOG_EVENT,"Node %s Got Text Message From Node %s: %s\n",
+				myrpt->name,src,tmp + rest);
+		}
+		l = myrpt->links.next;
+		/* otherwise, send it to all of em */
+		while(l != &myrpt->links)
+		{
+			if (l->name[0] == '0') 
+			{
+				l = l->next;
+				continue;
+			}
+			/* dont send back from where it came */
+			if ((l == mylink) || (!strcmp(l->name,mylink->name)))
+			{
+				l = l->next;
+				continue;
+			}
+			/* send, but not to src */
+			if (strcmp(l->name,src)) {
+				wf.data = str;
+				if (l->chan) rpt_qwrite(l,&wf); 
+			}
+			l = l->next;
+		}
 		return;
 	}
 	if (tmp[0] == 'T')
@@ -21985,6 +22177,8 @@ static int load_module(void)
 	ast_cli_register(&cli_playback);
 	ast_cli_register(&cli_localplay);
 	ast_cli_register(&cli_irlpplay);
+	ast_cli_register(&cli_sendtext);
+	ast_cli_register(&cli_sendall);
 	ast_cli_register(&cli_fun);
 	ast_cli_register(&cli_fun1);
 	res = ast_cli_register(&cli_cmd);
@@ -22040,6 +22234,3 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Radio Repeater/Remote Ba
 		.reload = reload,
 	       );
 #endif
-
-
-
