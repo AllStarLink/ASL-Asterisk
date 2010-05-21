@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.243 5/20/2010
+ *  version 0.244 5/21/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -535,7 +535,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.243  5/20/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.244  5/21/2010";
 
 static char *app = "Rpt";
 
@@ -19086,7 +19086,14 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 #endif
 				if (f->frametype == AST_FRAME_TEXT)
 				{
-					handle_link_data(myrpt,l,f->data);
+					char *tstr = ast_malloc(f->datalen + 1);
+					if (tstr) 
+					{
+						memcpy(tstr,f->data,f->datalen);
+						tstr[f->datalen] = 0;
+						handle_link_data(myrpt,l,tstr);
+						ast_free(tstr);
+					}
 				}
 				if (f->frametype == AST_FRAME_DTMF)
 				{
@@ -21167,13 +21174,20 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 			if (f->frametype == AST_FRAME_TEXT)
 			{
-				if (handle_remote_data(myrpt,f->data) == -1)
+				char *tstr = ast_malloc(f->datalen + 1);
+				if (tstr) 
 				{
-					if (debug) printf("@@@@ rpt:Hung Up\n");
-					ast_frfree(f);
-					break;
+					memcpy(tstr,f->data,f->datalen);
+					tstr[f->datalen] = 0;
+					if (handle_remote_data(myrpt,tstr) == -1)
+					{
+						if (debug) printf("@@@@ rpt:Hung Up\n");
+						ast_frfree(f);
+						break;
+					}
+					ast_free(tstr);
 				}
-			}
+			}	
 			if (f->frametype == AST_FRAME_CONTROL)
 			{
 				if (f->subclass == AST_CONTROL_HANGUP)
