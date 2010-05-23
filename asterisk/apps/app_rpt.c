@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.244 5/21/2010
+ *  version 0.245 5/23/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -535,7 +535,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.244  5/21/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.245  5/23/2010";
 
 static char *app = "Rpt";
 
@@ -20206,32 +20206,39 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_log(LOG_WARNING, "Trying to link to self!!\n");
 			return -1;
 		}
-		rpt_mutex_lock(&myrpt->lock);
-		l = myrpt->links.next;
-		/* try to find this one in queue */
-		while(l != &myrpt->links)
+		for(i = 0; b1[i]; i++)
 		{
-			if (l->name[0] == '0') 
-			{
-				l = l->next;
-				continue;
-			}
-			/* if found matching string */
-			if (!strcmp(l->name,b1)) break;
-			l = l->next;
+			if (!isdigit(b1[i])) break;
 		}
-		/* if found */
-		if (l != &myrpt->links) 
+		if (!b1[i]) /* if not a call-based node number */
 		{
-			l->killme = 1;
-			l->retries = l->max_retries + 1;
-			l->disced = 2;
-			reconnects = l->reconnects;
-			reconnects++;
-                        rpt_mutex_unlock(&myrpt->lock);
-			usleep(500000);	
-		} else 
-			rpt_mutex_unlock(&myrpt->lock);
+			rpt_mutex_lock(&myrpt->lock);
+			l = myrpt->links.next;
+			/* try to find this one in queue */
+			while(l != &myrpt->links)
+			{
+				if (l->name[0] == '0') 
+				{
+					l = l->next;
+					continue;
+				}
+				/* if found matching string */
+				if (!strcmp(l->name,b1)) break;
+				l = l->next;
+			}
+			/* if found */
+			if (l != &myrpt->links) 
+			{
+				l->killme = 1;
+				l->retries = l->max_retries + 1;
+				l->disced = 2;
+				reconnects = l->reconnects;
+				reconnects++;
+	                        rpt_mutex_unlock(&myrpt->lock);
+				usleep(500000);	
+			} else 
+				rpt_mutex_unlock(&myrpt->lock);
+		}
 		/* establish call in tranceive mode */
 		l = ast_malloc(sizeof(struct rpt_link));
 		if (!l)
@@ -20260,11 +20267,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		l->newkeytimer = NEWKEYTIME;
 		l->newkey = 0;
 		l->iaxkey = 0;
-#ifdef POOPY
-		if ((!phone_mode) && (l->name[0] > '0') && (l->name[0] <= '9') &&
-#else
 		if ((!phone_mode) && (l->name[0] != '0') &&
-#endif
 		    strncasecmp(chan->name,"echolink",8) &&
 			strncasecmp(chan->name,"irlp",4)) l->newkey = 2;
 		if (l->name[0] > '9') l->newkeytimer = 0;
