@@ -29,7 +29,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 52506 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -516,27 +516,33 @@ enum jb_return_code jb_put(jitterbuf *jb, void *data, const enum jb_frame_type t
 
 	jb_dbg2("jb_put(%x,%x,%ld,%ld,%ld)\n", jb, data, ms, ts, now);
 
-	jb->info.frames_in++;
+	numts = 0;
+	if (jb->frames)
+		numts = jb->frames->prev->ts - jb->frames->ts;
 
-	if (jb->frames && jb->dropem) 
+	if (numts >= jb->info.conf.max_jitterbuf) {
+		if (!jb->dropem) {
+			ast_log(LOG_DEBUG, "Attempting to exceed Jitterbuf max %ld timeslots\n",
+				jb->info.conf.max_jitterbuf);
+			jb->dropem = 1;
+		}
+		jb->info.frames_dropped++;
 		return JB_DROP;
-	jb->dropem = 0;
+	} else {
+		jb->dropem = 0;
+	}
 
 	if (type == JB_TYPE_VOICE) {
 		/* presently, I'm only adding VOICE frames to history and drift calculations; mostly because with the
 		 * IAX integrations, I'm sending retransmitted control frames with their awkward timestamps through */
-		if (history_put(jb,ts,now,ms))
+		if (history_put(jb,ts,now,ms)) {
+			jb->info.frames_dropped++;
 			return JB_DROP;
+		}
 	}
-	numts = 0;
-	if (jb->frames)
-		numts = jb->frames->prev->ts - jb->frames->ts;
-	if (numts >= jb->info.conf.max_jitterbuf) {
-		ast_log(LOG_DEBUG, "Attempting to exceed Jitterbuf max %ld timeslots\n",
-			jb->info.conf.max_jitterbuf);
-		jb->dropem = 1;
-		return JB_DROP;
-	}
+
+	jb->info.frames_in++;
+
 	/* if put into head of queue, caller needs to reschedule */
 	if (queue_put(jb,data,type,ms,ts)) {
 		return JB_SCHED;
@@ -565,7 +571,7 @@ static enum jb_return_code _jb_get(jitterbuf *jb, jb_frame *frameout, long now, 
 
 	/* if a hard clamp was requested, use it */
 	if ((jb->info.conf.max_jitterbuf) && ((jb->info.target - jb->info.min) > jb->info.conf.max_jitterbuf)) {
-		jb_dbg("clamping target from %d to %d\n", (jb->info.target - jb->info.min), jb->info.conf.max_jitterbuf);
+		jb_dbg("clamping target from %ld to %ld\n", (jb->info.target - jb->info.min), jb->info.conf.max_jitterbuf);
 		jb->info.target = jb->info.min + jb->info.conf.max_jitterbuf;
 	}
 

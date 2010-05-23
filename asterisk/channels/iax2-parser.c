@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -398,6 +398,61 @@ static void dump_ies(unsigned char *iedata, int len)
 		len -= (2 + ielen);
 	}
 	outputf("\n");
+}
+
+void iax_frame_subclass2str(int subclass, char *str, size_t len)
+{
+	static const size_t copylen = 8;
+	const char *iaxs[] = {
+		"(0?)   ",
+		"NEW    ",
+		"PING   ",
+		"PONG   ",
+		"ACK    ",
+		"HANGUP ",
+		"REJECT ",
+		"ACCEPT ",
+		"AUTHREQ",
+		"AUTHREP",
+		"INVAL  ",
+		"LAGRQ  ",
+		"LAGRP  ",
+		"REGREQ ",
+		"REGAUTH",
+		"REGACK ",
+		"REGREJ ",
+		"REGREL ",
+		"VNAK   ",
+		"DPREQ  ",
+		"DPREP  ",
+		"DIAL   ",
+		"TXREQ  ",
+		"TXCNT  ",
+		"TXACC  ",
+		"TXREADY",
+		"TXREL  ",
+		"TXREJ  ",
+		"QUELCH ",
+		"UNQULCH",
+		"POKE   ",
+		"PAGE   ",
+		"MWI    ",
+		"UNSPRTD",
+		"TRANSFR",
+		"PROVISN",
+		"FWDWNLD",
+		"FWDATA ",
+		"TXMEDIA",
+		"RTKEY  ",
+		"CTOKEN ",
+	};
+	if ((copylen > len) || !subclass || (subclass < 0)) {
+		str[0] = '\0';
+	} else if (subclass < ARRAY_LEN(iaxs)) {
+		ast_copy_string(str, iaxs[subclass], len);
+	} else {
+		ast_copy_string(str, "Unknown", len);
+	}
 }
 
 void iax_showframe(struct iax_frame *f, struct ast_iax2_full_hdr *fhi, int rx, struct sockaddr_in *sin, int datalen)
@@ -905,6 +960,12 @@ int iax_parse_ies(struct iax_ies *ies, unsigned char *data, int datalen)
 			} else {
 				ies->rr_ooo = ntohl(get_unaligned_uint32(data + 2));
 			}
+			break;
+		case IAX_IE_CALLTOKEN:
+			if (len) {
+				ies->calltokendata = (unsigned char *) data + 2;
+			}
+			ies->calltoken = 1;
 			break;
 		default:
 			snprintf(tmp, (int)sizeof(tmp), "Ignoring unknown information element '%s' (%d) of length %d\n", iax_ie2str(ie), ie, len);
