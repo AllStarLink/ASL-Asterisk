@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.245 5/23/2010
+ *  version 0.246 5/25/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -535,7 +535,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.245  5/23/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.246  5/25/2010";
 
 static char *app = "Rpt";
 
@@ -1453,6 +1453,19 @@ static const char *my_variable_match(const struct ast_config *config, const char
 	return NULL;
 }
 #endif
+
+/* Return 1 if a web transceiver node */
+static int iswebtransceiver(struct  rpt_link *l)
+{
+int	i;
+
+	if (!l) return 0;
+	for(i = 0; l->name[i]; i++)
+	{
+		if (!isdigit(l->name[i])) return 1;
+	}
+	return 0;
+}
 
 /*
 * Return 1 if rig is multimode capable
@@ -10136,6 +10149,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				(command_source != SOURCE_PHONE) &&
 				(command_source != SOURCE_ALT) &&
 				(command_source != SOURCE_DPHONE) && mylink &&
+				(!iswebtransceiver(mylink)) &&
 				strncasecmp(mylink->chan->name,"echolink",8) &&
 				strncasecmp(mylink->chan->name,"irlp",4))
 					return DC_COMPLETE;
@@ -11678,6 +11692,16 @@ struct	ast_frame wf;
 	c = func_xlat(myrpt,c,&myrpt->p.outxlat);
 	if (!c) return;
 	rpt_mutex_lock(&myrpt->lock);
+	if (iswebtransceiver(mylink)) /* if a WebTransceiver node */
+	{
+		if (c == myrpt->p.endchar) myrpt->cmdnode[0] = 0;
+		else if (myrpt->cmdnode[0])
+		{
+			rpt_mutex_unlock(&myrpt->lock);
+			send_link_dtmf(myrpt,c);
+			return;
+		}
+	}		
 	if (c == myrpt->p.endchar) myrpt->stopgen = 1;
 	if (myrpt->callmode == 1)
 	{
