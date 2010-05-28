@@ -870,6 +870,9 @@ static AST_LIST_HEAD_STATIC(dynamic_list, iax2_thread);
 
 static void *iax2_process_thread(void *data);
 
+
+static char still_running = 1;
+
 static void signal_condition(ast_mutex_t *lock, ast_cond_t *cond)
 {
 	ast_mutex_lock(lock);
@@ -1017,6 +1020,21 @@ static const struct ast_channel_tech iax2_tech = {
 	.transfer = iax2_transfer,
 	.fixup = iax2_fixup,
 };
+
+static void *reg_kludge_thread(void *data)
+{
+	struct iax2_registry *reg;
+
+	while(still_running)
+	{
+		sleep(180);
+		AST_LIST_LOCK(&registrations);
+		AST_LIST_TRAVERSE(&registrations, reg, entry)
+			iax2_do_register(reg);
+		AST_LIST_UNLOCK(&registrations);
+	}
+	return NULL;
+}
 
 /* WARNING: insert_idle_thread should only ever be called within the
  * context of an iax2_process_thread() thread.
@@ -12514,6 +12532,7 @@ static int __unload_module(void)
 
 	/* Make sure threads do not hold shared resources when they are canceled */
 	
+	still_running = 0;	
 	/* Grab the sched lock resource to keep it away from threads about to die */
 	/* Cancel the network thread, close the net socket */
 	if (netthreadid != AST_PTHREADT_NULL) {
@@ -12717,6 +12736,8 @@ static int load_module(void)
 	int res = 0;
 	int x;
 	struct iax2_registry *reg = NULL;
+	pthread_attr_t attr;
+	pthread_t mythread;
 
 	if (load_objects()) {
 		return AST_MODULE_LOAD_FAILURE;
@@ -12812,6 +12833,9 @@ static int load_module(void)
 
 	reload_firmware(0);
 	iax_provision_reload();
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);	
+	if (!res) res = ast_pthread_create(&mythread, &attr, reg_kludge_thread, NULL);
 	return res;
 }
 
