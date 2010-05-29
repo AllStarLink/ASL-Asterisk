@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.246 5/25/2010
+ *  version 0.247 5/29/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -141,13 +141,16 @@
  *  5 - System status
  *  6 - Disconnect all links
  *  7 - Last Node to Key Up
- *  8 - MDC test (for diag purposes)
+ *  8 - Connect specified link -- local monitor only
  *  9 - Send Text Message (9,<destnodeno or 0 (for all)>,Message Text, etc.
  *  11 - Disconnect a previously permanently connected link
  *  12 - Permanently connect specified link -- monitor only
  *  13 - Permanently connect specified link -- tranceive
  *  15 - Full system status (all nodes)
  *  16 - Reconnect links disconnected with "disconnect all links"
+ *  17 - MDC test (for diag purposes)
+ *  18 - Permanently Connect specified link -- local monitor only
+
  *  200 thru 215 - (Send DTMF 0-9,*,#,A-D) (200=0, 201=1, 210=*, etc)
  *
  * remote cmds:
@@ -535,7 +538,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.246  5/25/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.247  5/29/2010";
 
 static char *app = "Rpt";
 
@@ -4654,6 +4657,7 @@ int	i,spos;
 	{
 		/* if is not a real link, ignore it */
 		if (l->name[0] == '0') continue;
+		if (l->mode > 1) continue; /* dont report local modes */
 		/* dont count our stuff */
 		if (l == mylink) continue;
 		if (mylink && (!strcmp(l->name,mylink->name))) continue;
@@ -7435,11 +7439,9 @@ struct	tm localtm;
 			saynode(myrpt,mychannel,strs[i] + 1);
 			if (*strs[i] == 'T') sayfile(mychannel,"rpt/tranceive");
 			else if (*strs[i] == 'R') sayfile(mychannel,"rpt/monitor");
+			else if (*strs[i] == 'L') sayfile(mychannel,"rpt/localmonitor");
 			else sayfile(mychannel,"rpt/connecting");
 		}
-
-
-
 		return;
 	}
 	ast_log(LOG_WARNING,"Got unknown link telemetry command: %s\n",strs[0]);
@@ -7824,7 +7826,7 @@ struct	mdcparams *mdcp;
 					}
 					if (w) haslink = 1;
 				} else haslink = 1;
-				if (l->mode) {
+				if (l->mode == 1) {
 					hastx++;
 					if (l->isremote) hasremote++;
 				}
@@ -8564,6 +8566,7 @@ struct	mdcparams *mdcp;
 			res = saynode(myrpt,mychannel,l->name);
 			s = "rpt/tranceive";
 			if (!l->mode) s = "rpt/monitor";
+			if (l->mode > 1) s = "rpt/localmonitor";
 			if (!l->thisconnected) s = "rpt/connecting";
 			res = ast_streamfile(mychannel, s, mychannel->language);
 			if (!res) 
@@ -9216,6 +9219,7 @@ struct rpt_link *l;
 				}
 				s = 'T';
 				if (!l->mode) s = 'R';
+				if (l->mode > 1) s = 'L';
 				if (!l->thisconnected) s = 'C';
 				snprintf(mystr + strlen(mystr),sizeof(mystr),",%c%s",
 					s,l->name);
@@ -9705,7 +9709,7 @@ struct	rpt_link *l;
 	while(l != &myrpt->links)
 	{
 		wf.data = str;
-		if (l->chan && l->mode) rpt_qwrite(l,&wf);
+		if (l->chan && (l->mode == 1)) rpt_qwrite(l,&wf);
 		l = l->next;
 	}
 	rpt_telemetry(myrpt,VARCMD,cmd);
@@ -9961,7 +9965,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 #endif
 	/* make a conference for the tx */
 	ci.chan = 0;
-	ci.confno = myrpt->conf;
+	ci.confno = ((l->mode > 1) ? myrpt->txconf : myrpt->conf);
 	ci.confmode = ZT_CONF_CONF | ZT_CONF_LISTENER | ZT_CONF_TALKER;
 	/* first put the channel on the conference in proper mode */
 	if (ioctl(l->pchan->fds[0], ZT_SETCONF, &ci) == -1)
@@ -10110,11 +10114,15 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 		case 3: /* Link transceive */
 		case 12: /* Link Monitor permanent */
 		case 13: /* Link transceive permanent */
+		case 8: /* Link Monitor Local Only */
+		case 18: /* Link Monitor Local Only permanent */
 			if ((digitbuf[0] == '0') && (myrpt->lastlinknode[0]))
 				strcpy(digitbuf,myrpt->lastlinknode);
+			r = atoi(param);
 			/* Attempt connection  */
-			perma = (atoi(param) > 10) ? 1 : 0;
-			mode = (atoi(param) & 1) ? 1 : 0;
+			perma = (r > 10) ? 1 : 0;
+			mode = (r & 1) ? 1 : 0;
+			if ((r == 8) || (r == 18)) mode = 2;
 			r = connect_link(myrpt, digitbuf, mode, perma);
 			switch(r){
 				case -2: /* Attempt to connect to self */
@@ -10208,13 +10216,17 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
                         /* loop through all links */
                         while(l != &myrpt->links){
 				struct	ast_frame wf;
+				char c1;
                                 if ((l->name[0] <= '0') || (l->name[0] > '9'))  /* Skip any IAXRPT monitoring */
                                 {
                                         l = l->next;
                                         continue;
                                 }
+				if (l->mode == 1) c1 = 'X';
+				else if (l->mode > 1) c1 = 'L';
+				else c1 = 'M';
 				/* Make a string of disconnected nodes for possible restoration */
-				sprintf(tmp,"%c%c%s",(l->mode) ? 'X' : 'M',(l->perma) ? 'P':'T',l->name);
+				sprintf(tmp,"%c%c%s",c1,(l->perma) ? 'P':'T',l->name);
 				if(strlen(tmp) + strlen(myrpt->savednodes) + 1 < MAXNODESTR){ 
 					if(myrpt->savednodes[0])
 						strcat(myrpt->savednodes, ",");
@@ -10291,7 +10303,9 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			finddelim(tmp, strs, MAXLINKLIST); /* convert into substrings */
 			for(i = 0; tmp[0] && strs[i] != NULL && i < MAXLINKLIST; i++){
 				s1 = strs[i];
-				mode = (s1[0] == 'X') ? 1 : 0;
+				if (s1[0] == 'X') mode = 1;
+				else if (s1[0] == 'L') mode = 2;
+				else mode = 0;
 				perma = (s1[1] == 'P') ? 1 : 0;
 				connect_link(myrpt, s1 + 2, mode, perma); /* Try to reconnect */
 			}
@@ -18152,6 +18166,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (l->name[0] == '0') continue;
 				lst = 'T';
 				if (!l->mode) lst = 'R';
+				if (l->mode > 1) lst = 'L';
 				if (!l->thisconnected) lst = 'C';
 				if (nstr) strcat(str,",");
 				sprintf(str + strlen(str),"%c%s",lst,l->name);
@@ -18835,8 +18850,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			m = myrpt->links.next;
 			while(m != &myrpt->links)
 			{
-				/* if not us, count it */
-				if ((m != l) && (m->lastrx)) remrx = 1;
+				/* if not us, and not localonly count it */
+				if ((m != l) && (m->lastrx) && (m->mode < 2)) remrx = 1;
 				m = m->next;
 			}
 			rpt_mutex_unlock(&myrpt->lock);
@@ -18857,7 +18872,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					mycalltx = mycalltx && ((!myrpt->voxtostate) && myrpt->wasvox);
 #endif
 				totx = (((l->isremote) ? (remnomute) : 
-					myrpt->localtx || mycalltx) || remrx) && l->mode;
+					myrpt->localtx || mycalltx) || remrx) && (l->mode == 1);
 
 				/* foop */
 				if ((!l->lastrx) && altlink(myrpt,l)) totx = myrpt->txkeyed;
@@ -19149,8 +19164,10 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							{
 								char str[100];
 
-								if (l->mode)
+								if (l->mode == 1)
 									sprintf(str,"LINKTRX,%s",l->name);
+								else if (l->mode > 1)
+									sprintf(str,"LINKLOCALMONITOR,%s",l->name);
 								else
 									sprintf(str,"LINKMONITOR,%s",l->name);
 								donodelog(myrpt,str);
