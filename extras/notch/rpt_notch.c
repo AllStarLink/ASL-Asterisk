@@ -88,7 +88,9 @@ inline complex sqr(complex z)
 #define VERSION	    "4.6"
 #undef	PI
 #define PI	    3.14159265358979323846  /* Microsoft C++ does not define M_PI ! */
+#ifndef	TWOPI
 #define TWOPI	    (2.0 * PI)
+#endif
 #define EPS	    1e-10
 #define MAXORDER    10
 #define MAXPZ	    512	    /* .ge. 2*MAXORDER, to allow for doubling of poles in BP filter;

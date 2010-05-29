@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.247 5/29/2010
+ *  version 0.248 5/29/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -235,10 +235,6 @@
 #define	AUTHTELLTIME 7000
 #define	AUTHTXTIME 1000
 #define	AUTHLOGOUTTIME 25000
-
-#ifdef	__RPT_NOTCH
-#define	MAXFILTERS 10
-#endif
 
 #define	DISC_TIME 10000  /* report disc after 10 seconds of no connect */
 #define	MAX_RETRIES 5
@@ -504,8 +500,12 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
-/* #include "rpt_notch.c"  */
+/* #include "rpt_notch.c" */
 
+
+#ifdef	__RPT_NOTCH
+#define	MAXFILTERS 10
+#endif
 
 #ifdef	_MDC_ENCODE_H_
 
@@ -538,7 +538,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.247  5/29/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.248  5/29/2010";
 
 static char *app = "Rpt";
 
@@ -10264,7 +10264,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			break;
 
 #ifdef	_MDC_DECODE_H_
-		case 8:
+		case 17:
 			myrpt->lastunit = 0xd00d;
 			mdc1200_cmd(myrpt,"ID00D");
 			mdc1200_notify(myrpt,NULL,"ID00D");
