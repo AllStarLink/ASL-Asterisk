@@ -1023,15 +1023,10 @@ static const struct ast_channel_tech iax2_tech = {
 
 static void *reg_kludge_thread(void *data)
 {
-	struct iax2_registry *reg;
-
 	while(still_running)
 	{
-		sleep(180);
-		AST_LIST_LOCK(&registrations);
-		AST_LIST_TRAVERSE(&registrations, reg, entry)
-			iax2_do_register(reg);
-		AST_LIST_UNLOCK(&registrations);
+		sleep(60);
+		reload_config();
 	}
 	return NULL;
 }
