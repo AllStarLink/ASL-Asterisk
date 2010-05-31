@@ -171,3 +171,14 @@ genconfig:	/usr/include/linux
 	-$(MAKE) -C asterisk install DEBUG=
 
 
+upgrade-acid:
+        (cd zaptel; ./configure)
+        (MAKELEVEL=0; $(MAKE) -C zaptel install)
+        $(MAKE) -C libpri install
+        -rm -rf /usr/lib/asterisk/modules/*
+        (cd asterisk; ./configure CXX=gcc)
+        -$(MAKE) -C asterisk install
+        mkdir -p /var/lib/asterisk/sounds/rpt
+        cp -a sounds/* /var/lib/asterisk/sounds
+
+
