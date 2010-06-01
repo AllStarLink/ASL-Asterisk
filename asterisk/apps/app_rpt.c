@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.248 5/29/2010
+ *  version 0.249 6/1/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -538,7 +538,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.248  5/29/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.249 6/1/2010";
 
 static char *app = "Rpt";
 
@@ -981,6 +981,7 @@ static struct rpt
 		char *extnodefile;
 		char *lnkactmacro;
 		char *lnkacttimerwarn;
+		char *rptinactmacro;
 		char *dtmfkeys;
 		int hangtime;
 		int althangtime;
@@ -990,6 +991,7 @@ static struct rpt
 		int tailsquashedtime;
 		int sleeptime;
 		int lnkacttime;
+		int rptinacttime;
 		int duplex;
 		int politeid;
 		char *tailmessages[500];
@@ -1097,6 +1099,7 @@ static struct rpt
 	char parrotstate;
 	char parrotonce;
 	char linkactivityflag;
+	char rptinactwaskeyedflag;
 	char lastitx;
 	int  parrottimer;
 	unsigned int parrotcnt;
@@ -1112,6 +1115,7 @@ static struct rpt
 	int calldigittimer;
 	int tailtimer,totimer,idtimer,txconf,conf,callmode,cidx,scantimer,tmsgtimer,skedtimer,linkactivitytimer;
 	int mustid,tailid;
+	int rptinacttimer;
 	int tailevent;
 	int telemrefcount;
 	int dtmfidx,rem_dtmfidx;
@@ -5252,6 +5256,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.lnkacttimerwarn = val;
 	val = (char *) ast_variable_retrieve(cfg, this, "nolocallinkct");
 	rpt_vars[n].p.nolocallinkct = ast_true(val);
+	rpt_vars[n].p.rptinacttime = retrieve_astcfgint(&rpt_vars[n],this, "rptinacttime", -120, 90000, 0);	/* Enforce a min max including zero */
+	val = (char *) ast_variable_retrieve(cfg, this, "rptinactmacro");
+	rpt_vars[n].p.rptinactmacro = val;
 	val = (char *) ast_variable_retrieve(cfg, this, "nounkeyct");
 	rpt_vars[n].p.nounkeyct = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg, this, "holdofftelem");
@@ -16696,7 +16703,7 @@ static void do_scheduler(struct rpt *myrpt)
 			}
 			else{
 				if(debug > 4)
-					ast_log(LOG_NOTICE, "Executing activity timer macro %s\n", myrpt->p.lnkactmacro);
+					ast_log(LOG_NOTICE, "Executing link activity timer macro %s\n", myrpt->p.lnkactmacro);
 				myrpt->macrotimer = MACROTIME;
 				strncat(myrpt->macrobuf,myrpt->p.lnkactmacro, MAXMACRO - 1);
 			}
@@ -16704,7 +16711,26 @@ static void do_scheduler(struct rpt *myrpt)
 			myrpt->linkactivityflag = 0;
 		}
 	}
-
+	/* Service repeater inactivity timer */
+	if(myrpt->p.rptinacttime && myrpt->rptinactwaskeyedflag){
+		if(myrpt->rptinacttimer < myrpt->p.rptinacttime)
+			myrpt->rptinacttimer++;
+		else{
+			myrpt->rptinacttimer = 0;
+			myrpt->rptinactwaskeyedflag = 0;
+			if ((MAXMACRO - strlen(myrpt->macrobuf)) < strlen(myrpt->p.rptinactmacro)){
+				ast_log(LOG_WARNING, "Rpt inactivity timer could not execute macro %s: Macro buffer full\n",
+					myrpt->p.rptinactmacro);
+			}
+			else {
+				if(debug > 4)
+					ast_log(LOG_NOTICE, "Executing rpt inactivity timer macro %s\n", myrpt->p.rptinactmacro);
+				myrpt->macrotimer = MACROTIME;
+				strncat(myrpt->macrobuf, myrpt->p.rptinactmacro, MAXMACRO -1);
+			}
+		}
+	}
+			
 	rpt_localtime(&myrpt->curtv.tv_sec, &tmnow);
 
 	/* If midnight, then reset all daily statistics */
@@ -17255,8 +17281,10 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->lastdtmfcommand[0] = '\0';
 	voxinit_rpt(myrpt,1);
 	myrpt->wasvox = 0;
-	myrpt->linkactivityflag = 0;
+	myrpt->linkactivityflag = 0;	
 	myrpt->linkactivitytimer = 0;
+	myrpt->rptinactwaskeyedflag = 0;
+	myrpt->rptinacttimer = 0;
 	if (myrpt->p.rxburstfreq)
 	{
 		tone_detect_init(&myrpt->burst_tone_state,myrpt->p.rxburstfreq,
@@ -17313,6 +17341,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			ast_log(LOG_NOTICE,"myrpt->tailevent = %d\n",myrpt->tailevent);
 			ast_log(LOG_NOTICE,"myrpt->linkactivitytimer = %d\n",myrpt->linkactivitytimer);
 			ast_log(LOG_NOTICE,"myrpt->linkactivityflag = %d\n",(int) myrpt->linkactivityflag);
+			ast_log(LOG_NOTICE,"myrpt->rptinacttimer = %d\n",myrpt->rptinacttimer);
+			ast_log(LOG_NOTICE,"myrpt->rptinactwaskeyedflag = %d\n",(int) myrpt->rptinactwaskeyedflag);
 			ast_log(LOG_NOTICE,"myrpt->p.s[myrpt->p.sysstate_cur].sleepena = %d\n",myrpt->p.s[myrpt->p.sysstate_cur].sleepena);
 			ast_log(LOG_NOTICE,"myrpt->sleeptimer = %d\n",(int) myrpt->sleeptimer);
 			ast_log(LOG_NOTICE,"myrpt->sleep = %d\n",(int) myrpt->sleep);
@@ -17450,6 +17480,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		/* Create a "must_id" flag for the cleanup ID */		
 		if(myrpt->p.idtime) /* ID time must be non-zero */
 			myrpt->mustid |= (myrpt->idtimer) && (myrpt->keyed || myrpt->remrx) ;
+		if(myrpt->keyed || myrpt->remrx){
+			/* Set the inactivity was keyed flag and reset its timer */
+			myrpt->rptinactwaskeyedflag = 1;
+			myrpt->rptinacttimer = 0;
+		}
 		/* Build a fresh totx from myrpt->keyed and autopatch activated */
 		/* If full duplex, add local tx to totx */
 
@@ -17488,6 +17523,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		{
 			totx = totx || myrpt->localtx;
 		}
+
 		/* Traverse the telemetry list to see what's queued */
 		identqueued = 0;
 		localmsgqueued = 0;
@@ -17559,6 +17595,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			myrpt->tailtimer = myrpt->p.s[myrpt->p.sysstate_cur].alternatetail ?
 				myrpt->p.althangtime : /* Initialize tail timer */
 				myrpt->p.hangtime;
+
 		}
 		/* if in 1/2 or 3/4 duplex, give rx priority */
 		if ((myrpt->p.duplex < 2) && (myrpt->keyed) && (!myrpt->p.linktolink) && (!myrpt->p.dias)) totx = 0;
