@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.249 6/1/2010
+ *  version 0.250 6/2/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -287,6 +287,8 @@
 
 #define	MAX_TEXTMSG_SIZE 160
 
+#define	MAX_EXTNODEFILES 50
+
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
 #define MEMORY "memory"
@@ -538,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.249 6/1/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.250 6/2/2010";
 
 static char *app = "Rpt";
 
@@ -978,7 +980,9 @@ static struct rpt
 		char *alt_functions;
 		char *nodes;
 		char *extnodes;
-		char *extnodefile;
+		char *extnodefiles[MAX_EXTNODEFILES];
+		int  extnodefilesn;
+		char *patchconnect;
 		char *lnkactmacro;
 		char *lnkacttimerwarn;
 		char *rptinactmacro;
@@ -4795,7 +4799,7 @@ static char *node_lookup(struct rpt *myrpt,char *digitbuf)
 {
 
 char *val;
-int longestnode,j;
+int longestnode,i,j;
 struct stat mystat;
 static struct ast_config *ourcfg = NULL;
 struct ast_variable *vp;
@@ -4804,8 +4808,7 @@ struct ast_variable *vp;
 	val = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->p.nodes, digitbuf);
 	if (val) return(val);
 	ast_mutex_lock(&nodelookuplock);
-	/* if file does not exist */
-	if (stat(myrpt->p.extnodefile,&mystat) == -1)
+	if (!myrpt->p.extnodefilesn) 
 	{
 		if (ourcfg) ast_config_destroy(ourcfg);
 		ourcfg = NULL;
@@ -4813,18 +4816,6 @@ struct ast_variable *vp;
 		return(NULL);
 	}
 	if (ourcfg) ast_config_destroy(ourcfg);
-#ifdef	NEW_ASTERISK
-	ourcfg = ast_config_load(myrpt->p.extnodefile,config_flags);
-#else
-	ourcfg = ast_config_load(myrpt->p.extnodefile);
-#endif
-	/* if file not there, just bail */
-	if (!ourcfg)
-	{
-		ast_mutex_unlock(&nodelookuplock);
-		return(NULL);
-	}
-
 	/* determine longest node length again */		
 	longestnode = 0;
 	vp = ast_variable_browse(myrpt->cfg, myrpt->p.nodes);
@@ -4834,18 +4825,34 @@ struct ast_variable *vp;
 			longestnode = j;
 		vp = vp->next;
 	}
-	vp = ast_variable_browse(ourcfg, myrpt->p.extnodes);
-	while(vp){
-		j = strlen(vp->name);
-		if (j > longestnode)
-			longestnode = j;
-		vp = vp->next;
-	}
-
-	myrpt->longestnode = longestnode;
 	val = NULL;
-	if (ourcfg)
-		val = (char *) ast_variable_retrieve(ourcfg, myrpt->p.extnodes, digitbuf);
+	for(i = 0; i < myrpt->p.extnodefilesn; i++)
+	{
+		/* if file does not exist */
+		if (stat(myrpt->p.extnodefiles[i],&mystat) == -1) continue;
+#ifdef	NEW_ASTERISK
+		ourcfg = ast_config_load(myrpt->p.extnodefiles[i],config_flags);
+#else
+		ourcfg = ast_config_load(myrpt->p.extnodefiles[i]);
+#endif
+		/* if file not there, try next */
+		if (!ourcfg) continue;
+		vp = ast_variable_browse(ourcfg, myrpt->p.extnodes);
+		while(vp){
+			j = strlen(vp->name);
+			if (j > longestnode)
+				longestnode = j;
+			vp = vp->next;
+		}
+
+		if (!val) val = (char *) ast_variable_retrieve(ourcfg, myrpt->p.extnodes, digitbuf);
+	}
+	myrpt->longestnode = longestnode;
+        if (!val)
+        {
+                if (ourcfg) ast_config_destroy(ourcfg);
+                ourcfg = NULL;
+        }
 	ast_mutex_unlock(&nodelookuplock);
 	return(val);
 }
@@ -5186,7 +5193,10 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.extnodes = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"extnodefile");
 	if (!val) val = EXTNODEFILE;
-	rpt_vars[n].p.extnodefile = val;
+	rpt_vars[n].p.extnodefilesn = 
+	    explode_string(val,rpt_vars[n].p.extnodefiles,MAX_EXTNODEFILES,',',0);
+	val = (char *) ast_variable_retrieve(cfg,this,"patchconnect");
+	rpt_vars[n].p.patchconnect = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"archivedir");
 	if (val) rpt_vars[n].p.archivedir = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"authlevel");
@@ -9316,8 +9326,8 @@ static void *rpt_call(void *this)
 ZT_CONFINFO ci;  /* conference info */
 struct	rpt *myrpt = (struct rpt *)this;
 int	res;
-int stopped,congstarted,dialtimer,lastcidx,aborted;
-struct ast_channel *mychannel,*genchannel;
+int stopped,congstarted,dialtimer,lastcidx,aborted,sentpatchconnect;
+struct ast_channel *mychannel,*genchannel,*c;
 
 	myrpt->mydtmf = 0;
 	/* allocate a pseudo-channel thru asterisk */
@@ -9551,6 +9561,7 @@ struct ast_channel *mychannel,*genchannel;
 		myrpt->callmode = 0;
 		pthread_exit(NULL);
 	}
+	sentpatchconnect = 0;
 	while(myrpt->callmode)
 	{
 		if ((!mychannel->pbx) && (myrpt->callmode != 4))
@@ -9575,13 +9586,20 @@ struct ast_channel *mychannel,*genchannel;
 				rpt_mutex_lock(&myrpt->lock);
 			}
 		}
+		c = ast_bridged_channel(mychannel);
+		if (c && c->_state == AST_STATE_UP)
+		if ((!sentpatchconnect) &&
+			myrpt->p.patchconnect && 
+			c && (c->_state == AST_STATE_UP))
+		{
+			sentpatchconnect = 1;			
+			rpt_telemetry(myrpt,PLAYBACK,myrpt->p.patchconnect);
+		}
 		if (myrpt->mydtmf)
 		{
-			struct ast_channel *c;
 			struct ast_frame wf = {AST_FRAME_DTMF, } ;
 
 			wf.subclass = myrpt->mydtmf;
-			c = ast_bridged_channel(mychannel);
 			if (c && c->_state == AST_STATE_UP)
 			{
 				rpt_mutex_unlock(&myrpt->lock);
