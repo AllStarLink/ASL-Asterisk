@@ -2895,7 +2895,7 @@ static void reload_firmware(int unload)
 				if (de->d_name[0] != '.') {
 					snprintf(fn, sizeof(fn), "%s/%s", dir, de->d_name);
 					if (!try_firmware(fn)) {
-						if (option_verbose > 1)
+						if (option_verbose > 4)
 							ast_verbose(VERBOSE_PREFIX_2 "Loaded firmware '%s'\n", de->d_name);
 					}
 				}
@@ -7305,7 +7305,8 @@ static int iax2_ack_registry(struct iax_ies *ies, struct sockaddr_in *sin, int c
 			else
 				snprintf(msgstatus, sizeof(msgstatus), " with no messages waiting\n");
 			snprintf(ourip, sizeof(ourip), "%s:%d", ast_inet_ntoa(reg->us.sin_addr), ntohs(reg->us.sin_port));
-			ast_verbose(VERBOSE_PREFIX_3 "Registered IAX2 to '%s', who sees us as %s%s\n", ast_inet_ntoa(sin->sin_addr), ourip, msgstatus);
+			if (option_verbose > 4)
+				ast_verbose(VERBOSE_PREFIX_3 "Registered IAX2 to '%s', who sees us as %s%s\n", ast_inet_ntoa(sin->sin_addr), ourip, msgstatus);
 		}
 		manager_event(EVENT_FLAG_SYSTEM, "Registry", "ChannelDriver: IAX2\r\nDomain: %s\r\nStatus: Registered\r\n", ast_inet_ntoa(sin->sin_addr));
 	}
@@ -11428,8 +11429,10 @@ static int set_config(const char *config_file, int reload)
 	}
 	while(v) {
 		if (!strcasecmp(v->name, "bindport")){ 
-			if (reload)
-				ast_log(LOG_NOTICE, "Ignoring bindport on reload\n");
+			if (reload) {
+				if (option_verbose > 4)
+					ast_log(LOG_WARNING, "Ignoring bindport on reload\n");
+			}
 			else
 				portno = atoi(v->value);
 		} else if (!strcasecmp(v->name, "pingtime")) 
@@ -11488,7 +11491,8 @@ static int set_config(const char *config_file, int reload)
 			min_reg_expire = atoi(v->value);
 		else if (!strcasecmp(v->name, "bindaddr")) {
 			if (reload) {
-				ast_log(LOG_NOTICE, "Ignoring bindaddr on reload\n");
+				if (option_verbose > 4) 
+					ast_log(LOG_WARNING, "Ignoring bindaddr on reload\n");
 			} else {
 				if (!(ns = ast_netsock_bind(netsock, io, v->value, portno, tos, socket_read, NULL))) {
 					ast_log(LOG_WARNING, "Unable apply binding to '%s' at line %d\n", v->value, v->lineno);

@@ -672,6 +672,7 @@ static int  mult_calc(int value);
 static void mixer_write(struct chan_usbradio_pvt *o);
 static void tune_rxinput(int fd, struct chan_usbradio_pvt *o);
 static void tune_rxvoice(int fd, struct chan_usbradio_pvt *o);
+static void tune_rxdisplay(int fd, struct chan_usbradio_pvt *o);
 static void tune_rxctcss(int fd, struct chan_usbradio_pvt *o);
 static void tune_txoutput(struct chan_usbradio_pvt *o, int value, int fd);
 static void tune_write(struct chan_usbradio_pvt *o);
@@ -2446,7 +2447,8 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		if (f1->frametype == AST_FRAME_DTMF_END)
 		{
 			f1->len = ast_tvdiff_ms(ast_tvnow(),o->tonetime);
-			ast_log(LOG_NOTICE,"Got DTMF char %c duration %ld ms\n",f1->subclass,f1->len);
+			if (option_verbose)
+				ast_log(LOG_NOTICE,"Got DTMF char %c duration %ld ms\n",f1->subclass,f1->len);
 			o->toneflag  = 0;
 		} else {
 			if (o->toneflag)
@@ -2754,6 +2756,23 @@ static int radio_tune(int fd, int argc, char *argv[])
 	if (!strcasecmp(argv[2],"rxnoise")) tune_rxinput(fd,o);
 	else if (!strcasecmp(argv[2],"rxvoice")) tune_rxvoice(fd,o);
 	else if (!strcasecmp(argv[2],"rxtone")) tune_rxctcss(fd,o);
+	else if (!strcasecmp(argv[2],"display")) tune_rxdisplay(fd,o);
+	else if (!strcasecmp(argv[2],"rxadj")) {
+		i = 0;
+
+		if (argc == 3)
+		{
+			ast_cli(fd,"Current rx voice setting is %d\n",(int)(o->rxvoiceadj * 1000.0));
+		}
+		else
+		{
+			i = atoi(argv[3]);
+			if ((i < 0) || (i > 999)) return RESULT_SHOWUSAGE;
+		 	o->rxvoiceadj=(float)i / 1000.0;
+			*(o->pmrChan->prxVoiceAdjust)=o->rxvoiceadj * M_Q8;
+			ast_cli(fd,"Changed rx voice setting to %d\n",i);
+		}
+	}
 	else if (!strcasecmp(argv[2],"rxsquelch"))
 	{
 		if (argc == 3)
@@ -3427,6 +3446,67 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o)
 }
 /*
 */
+static void tune_rxdisplay(int fd, struct chan_usbradio_pvt *o)
+{
+	int i,j,waskeyed,oldverbose,meas,ncols = 75;
+	char str[256];
+	fd_set fds;
+	struct timeval tv;
+
+	oldverbose = option_verbose;
+	option_verbose = 0;
+
+	ast_cli(fd,"RX VOICE DISPLAY:\n");
+	ast_cli(fd,"                             v -- 3KHz        v -- 5KHz\n");
+
+	if(!o->pmrChan->spsMeasure)
+		ast_cli(fd,"ERROR: NO MEASURE BLOCK.\n");
+
+	if(!o->pmrChan->spsMeasure->source || !o->pmrChan->prxVoiceAdjust )
+		ast_cli(fd,"ERROR: NO SOURCE OR MEASURE SETTING.\n");
+
+	o->pmrChan->spsMeasure->source=o->pmrChan->spsRxOut->sink;
+
+	o->pmrChan->spsMeasure->enabled=1;
+	o->pmrChan->spsMeasure->discfactor=1000;
+
+	waskeyed = !o->rxkeyed;
+	for(;;)
+	{
+	    	o->pmrChan->spsMeasure->amax = 
+			o->pmrChan->spsMeasure->amin = 0;
+		FD_ZERO(&fds);
+		FD_SET(fd,&fds);
+		tv.tv_usec = 100000;
+		tv.tv_sec = 0;
+		i = select(fd + 1,&fds,NULL,NULL,&tv);
+		if (i > 0) break;
+		if (o->rxkeyed != waskeyed)
+		{
+			for(j = 0; j < ncols; j++) str[j] = ' ';
+			str[j] = 0;
+			ast_cli(fd," %s \r",str);
+		}
+		waskeyed = o->rxkeyed;
+		if (!o->rxkeyed) continue;
+		meas = o->pmrChan->spsMeasure->apeak;
+		for(j = 0; j < ncols; j++)
+		{
+			int thresh = (meas * ncols) / 16384;
+			if (j < thresh) str[j] = '=';
+			else if (j == thresh) str[j] = '>';
+			else str[j] = ' ';
+		}
+		str[j] = 0;
+		ast_cli(fd,"|%s|\r",str);
+	}
+	for(j = 0; j < ncols; j++) str[j] = ' ';
+	str[j] = 0;
+	ast_cli(fd," %s \r\nDONE\n",str);
+	o->pmrChan->spsMeasure->enabled=0;
+	option_verbose = oldverbose;
+}
+
 static void tune_rxvoice(int fd, struct chan_usbradio_pvt *o)
 {
 	const int target=7200;	 			// peak

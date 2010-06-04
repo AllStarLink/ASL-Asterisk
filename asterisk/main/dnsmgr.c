@@ -131,7 +131,7 @@ int ast_dnsmgr_lookup(const char *name, struct in_addr *result, struct ast_dnsmg
 	if (*dnsmgr && !strcasecmp((*dnsmgr)->name, name))
 		return 0;
 
-	if (option_verbose > 3)
+	if (option_verbose > 4)
 		ast_verbose(VERBOSE_PREFIX_4 "doing dnsmgr_lookup for '%s'\n", name);
 
 	/* if it's actually an IP address and not a name,

@@ -879,21 +879,21 @@ static struct ast_config *config_text_file_load(const char *database, const char
 			ast_log(LOG_WARNING, "'%s' is not a regular file, ignoring\n", fn);
 			continue;
 		}
-		if (option_verbose > 1) {
+		if (option_verbose > 4) {
 			ast_verbose(VERBOSE_PREFIX_2 "Parsing '%s': ", fn);
 			fflush(stdout);
 		}
 		if (!(f = fopen(fn, "r"))) {
 			if (option_debug)
 				ast_log(LOG_DEBUG, "No file to parse: %s\n", fn);
-			if (option_verbose > 1)
+			if (option_verbose > 4)
 				ast_verbose( "Not found (%s)\n", strerror(errno));
 			continue;
 		}
 		count++;
 		if (option_debug)
 			ast_log(LOG_DEBUG, "Parsing %s\n", fn);
-		if (option_verbose > 1)
+		if (option_verbose > 4)
 			ast_verbose("Found\n");
 		while(!feof(f)) {
 			lineno++;
