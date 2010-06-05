@@ -130,7 +130,7 @@ chan_usbradio.o: chan_usbradio.c xpmr/xpmr.c xpmr/xpmr.h xpmr/xpmr_coef.h xpmr/s
 
 chan_usbradio.so: LIBS+=-lusb -lasound
 
-chan_simpleusb.o: chan_usbradio.c xpmr/xpmr.c xpmr/xpmr.h xpmr/xpmr_coef.h xpmr/sinetabx.h busy.h ringtone.h
+chan_simpleusb.o: chan_simpleusb.c busy.h ringtone.h
 
 chan_simpleusb.so: LIBS+=-lusb -lasound
 
