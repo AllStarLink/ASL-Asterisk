@@ -2515,7 +2515,7 @@ static int __find_callno(unsigned short callno, unsigned short dcallno, struct s
 			/* since we ran out of space, remove the peercnt
 			 * entry we added earlier */
 			peercnt_remove_by_addr(sin);
-			ast_log(LOG_WARNING, "No more space\n");
+			if (option_verbose > 4) ast_log(LOG_WARNING, "No more space\n");
 			return 0;
 		}
 		x = callno_entry->callno;
@@ -10160,7 +10160,7 @@ static int iax2_do_register(struct iax2_registry *reg)
 			ast_log(LOG_DEBUG, "Allocate call number\n");
 		reg->callno = find_callno_locked(0, 0, &reg->addr, NEW_FORCE, defaultsockfd, 0);
 		if (reg->callno < 1) {
-			ast_log(LOG_WARNING, "Unable to create call for registration\n");
+			if (option_verbose > 4) ast_log(LOG_WARNING, "Unable to create call for registration\n");
 			return -1;
 		} else if (option_debug)
 			ast_log(LOG_DEBUG, "Registration created on call %d\n", reg->callno);
