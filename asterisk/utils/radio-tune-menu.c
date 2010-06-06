@@ -28,6 +28,22 @@
 #include <fcntl.h>
 #include <string.h>
 #include <ctype.h>
+#include <signal.h>
+#include <errno.h>  
+
+static void ourhandler(int sig)
+{
+	signal(sig,ourhandler);
+	return;
+}
+
+
+static int qcompar(const void *a, const void *b)
+{
+char **sa = (char **)a,**sb =(char **)b;
+
+	return(strcmp(*sa,*sb));
+}
 
 /*
 * Break up a delimited string into a table of substrings
@@ -185,10 +201,20 @@ char	c;
 		do 
 		{
 			j = waitfds(fd,-1,100);
-			if (j == -1) return(0);
+			if (j == -1) 
+			{
+				if (errno != EINTR) return(0);
+				j = 0;
+			}
 		}
 		while (!j);
-		if (read(fd,&c,1) < 1) break;
+		j = read(fd,&c,1);
+		if (j == 0) break;
+		if (j == -1)
+		{
+			if (errno == EINTR) continue;
+			break;
+		}
 		if (c == '\n') break;
 		if (str) str[i] = c;
 	}
@@ -230,7 +256,8 @@ char	str[256];
 		w = waitfds(fileno(stdin),fd,100);
 		if (w == -1) 
 		{
-			perror("Error prcessing response from Asterisk");
+			if (errno == EINTR) continue;
+			perror("Error processing response from Asterisk");
 			return(-1);
 		}
 		if (!w) continue;
@@ -269,6 +296,7 @@ char	str[100],buf[256],*strs[100];
 		fprintf(stderr,"Error parsing USB device information\n");
 		return;
 	}
+	qsort(strs,n,sizeof(char *),qcompar);
 	printf("Please select from the following USB devices:\n");
 	for (x = 0; x < n; x++)
 	{
@@ -486,15 +514,16 @@ int main(int argc, char *argv[])
 int	flatrx = 0,txhasctcss = 0,keying = 0;
 char	str[256];
 
-	/* get device parameters from Asterisk */
-	if (astgetline("radio tune menu-support 0",str,sizeof(str) - 1)) exit(255);
-	if (sscanf(str,"%d,%d",&flatrx,&txhasctcss) != 2)
-	{
-		fprintf(stderr,"Error parsing device parameters\n");
-		exit(255);
-	}
+	signal(SIGCHLD,ourhandler);
 	for(;;)
 	{
+		/* get device parameters from Asterisk */
+		if (astgetline("radio tune menu-support 0",str,sizeof(str) - 1)) exit(255);
+		if (sscanf(str,"%d,%d",&flatrx,&txhasctcss) != 2)
+		{
+			fprintf(stderr,"Error parsing device parameters\n");
+			exit(255);
+		}
 		printf("\n");
 		/* print selected USB device */
 		if (astgetresp("radio active")) break;

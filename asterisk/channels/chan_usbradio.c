@@ -3559,7 +3559,10 @@ static void _menu_rxvoice(int fd, struct chan_usbradio_pvt *o, char *str)
 
 	if (!str[0])
 	{
-		ast_cli(fd,"Current Rx voice setting: %d\n",(int)((o->rxvoiceadj * 200.0) + .5));
+		if (o->rxdemod == RX_AUDIO_FLAT)
+			ast_cli(fd,"Current Rx voice setting: %d\n",(int)((o->rxvoiceadj * 200.0) + .5));
+		else
+			ast_cli(fd,"Current Rx voice setting: %d\n",o->rxmixerset);
 		return;
 	}
 	for(x = 0; str[x]; x++)
@@ -3578,7 +3581,8 @@ static void _menu_rxvoice(int fd, struct chan_usbradio_pvt *o, char *str)
 	else
 	{
 		o->rxmixerset = i;
-		setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,i,0);
+		setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,
+			o->rxmixerset * o->micmax / 1000,0);
 		setamixer(o->devicenum,MIXER_PARAM_MIC_BOOST,o->rxboostset,0);
 		/* get interval step size */
 		f = 1000.0 / (float) o->micmax;
