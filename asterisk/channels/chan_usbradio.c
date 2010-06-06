@@ -3558,7 +3558,7 @@ static void _menu_rxvoice(int fd, struct chan_usbradio_pvt *o, char *str)
 
 	if (!str[0])
 	{
-		ast_cli(fd,"Current Rx voice setting: %d\n",(int)((o->rxvoiceadj * 1000.0) + .5));
+		ast_cli(fd,"Current Rx voice setting: %d\n",(int)((o->rxvoiceadj * 200.0) + .5));
 		return;
 	}
 	for(x = 0; str[x]; x++)
@@ -3572,7 +3572,7 @@ static void _menu_rxvoice(int fd, struct chan_usbradio_pvt *o, char *str)
 	}
 	if (o->rxdemod == RX_AUDIO_FLAT)
 	{
-	 	o->rxvoiceadj=(float)i / 1000.0;
+	 	o->rxvoiceadj=(float)i / 200.0;
 	}
 	else
 	{
