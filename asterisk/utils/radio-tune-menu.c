@@ -30,10 +30,14 @@
 #include <ctype.h>
 #include <signal.h>
 #include <errno.h>  
+#include <sys/wait.h>
 
 static void ourhandler(int sig)
 {
+int	i;
+
 	signal(sig,ourhandler);
+	while(waitpid(-1, &i, WNOHANG) > 0);
 	return;
 }
 
@@ -258,6 +262,7 @@ char	str[256];
 		{
 			if (errno == EINTR) continue;
 			perror("Error processing response from Asterisk");
+			close(fd);
 			return(-1);
 		}
 		if (!w) continue;
@@ -277,6 +282,7 @@ char	str[256];
 			continue;
 		}
 	}
+	close(fd);
 	return(0);
 }
 
