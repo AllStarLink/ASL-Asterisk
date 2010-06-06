@@ -3501,7 +3501,7 @@ static void do_rxdisplay(int fd, struct chan_usbradio_pvt *o)
 	char str[256];
 
 	ast_cli(fd,"RX VOICE DISPLAY:\n");
-	ast_cli(fd,"                             v -- 3KHz        v -- 5KHz\n");
+	ast_cli(fd,"                                 v -- 3KHz        v -- 5KHz\n");
 
 	if(!o->pmrChan->spsMeasure) 
 	{
