@@ -524,15 +524,18 @@ char	str[256];
 			menu_selectusb();
 			break;
 		    case '2':
+			if (!flatrx) break;
 			if (astgetresp("radio tune menu-support a")) exit(255);
 			break;
 		    case '3':
 			menu_rxvoice();
 			break;
 		    case '4':
+			if (!flatrx) break;
 			if (astgetresp("radio tune menu-support d")) exit(255);
 			break;
 		    case '5':
+			if (!flatrx) break;
 			menu_rxsquelch();
 			break;
 		    case '6':
@@ -542,9 +545,11 @@ char	str[256];
 			menu_auxvoice();
 			break;
 		    case '8':
+			if (!txhasctcss) break;
 			menu_txtone();
 			break;
 		    case '9':
+			if (!flatrx) break;
 			if (astgetresp("radio tune menu-support i")) exit(255);
 			break;
 		    case 'p':
