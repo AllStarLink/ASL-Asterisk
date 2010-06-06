@@ -160,7 +160,7 @@ int	i,r;
 	r = select(i + 1,&fds,NULL,NULL,&tv);
 	if (r < 1) return(r);
 	if (FD_ISSET(fd1,&fds)) return(fd1 + 1);
-	if (FD_ISSET(fd2,&fds)) return(fd2 + 1);
+	if ((fd2 > 0) && (FD_ISSET(fd2,&fds))) return(fd2 + 1);
 	return(0);	
 }
 
