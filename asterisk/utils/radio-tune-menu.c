@@ -372,7 +372,7 @@ int	i,x;
 	return;
 }
 
-static void menu_txvoice(void)
+static void menu_txvoice(int keying)
 {
 char	str[100];
 int	i,x;
@@ -382,7 +382,7 @@ int	i,x;
 	if (fgets(str,sizeof(str) - 1,stdin) == NULL)
 	{
 		printf("Tx Voice Level setting not changed\n");
-		astgetresp("radio tune menu-support fK");
+		if (keying) astgetresp("radio tune menu-support fK");
 		return;
 	}
 	if (str[0] && (str[strlen(str) - 1] == '\n'))
@@ -390,7 +390,7 @@ int	i,x;
 	if (!str[0])
 	{
 		printf("Tx Voice Level setting not changed\n");
-		astgetresp("radio tune menu-support fK");
+		if (keying) astgetresp("radio tune menu-support fK");
 		return;
 	}
 	for(x = 0; str[x]; x++)
@@ -402,7 +402,10 @@ int	i,x;
 		printf("Entry Error, Tx Voice Level setting not changed\n");
 		return;
 	}
-	sprintf(str,"radio tune menu-support fK%d",i);
+	if (keying)
+		sprintf(str,"radio tune menu-support fK%d",i);
+	else
+		sprintf(str,"radio tune menu-support f%d",i);
 	astgetresp(str);
 	return;
 }
@@ -440,7 +443,7 @@ int	i,x;
 	return;
 }
 
-static void menu_txtone(void)
+static void menu_txtone(int keying)
 {
 char	str[100];
 int	i,x;
@@ -450,7 +453,7 @@ int	i,x;
 	if (fgets(str,sizeof(str) - 1,stdin) == NULL)
 	{
 		printf("Tx CTCSS Modulation Level setting not changed\n");
-		astgetresp("radio tune menu-support hK");
+		if (keying) astgetresp("radio tune menu-support hK");
 		return;
 	}
 	if (str[0] && (str[strlen(str) - 1] == '\n'))
@@ -458,7 +461,7 @@ int	i,x;
 	if (!str[0])
 	{
 		printf("Tx CTCSS Modulation Level setting not changed\n");
-		astgetresp("radio tune menu-support hK");
+		if (keying) astgetresp("radio tune menu-support hK");
 		return;
 	}
 	for(x = 0; str[x]; x++)
@@ -470,14 +473,17 @@ int	i,x;
 		printf("Entry Error, Tx CTCSS Modulation Level setting not changed\n");
 		return;
 	}
-	sprintf(str,"radio tune menu-support hK%d",i);
+	if (keying)
+		sprintf(str,"radio tune menu-support hK%d",i);
+	else
+		sprintf(str,"radio tune menu-support h%d",i);
 	astgetresp(str);
 	return;
 }
 
 int main(int argc, char *argv[])
 {
-int	flatrx = 0,txhasctcss = 0;
+int	flatrx = 0,txhasctcss = 0,keying = 0;
 char	str[256];
 
 	/* get device parameters from Asterisk */
@@ -500,14 +506,25 @@ char	str[256];
 		else printf("4) Does not apply to thie USB device configuration\n");
 		if (flatrx) printf("5) Set Rx Squelch Level\n");
 		else printf("5) Does not apply to thie USB device configuration\n");
-		printf("6) Set Transmit Voice Level and send test tone (no CTCSS)\n");
+		if (keying)
+			printf("6) Set Transmit Voice Level and send test tone (no CTCSS)\n");
+		else
+			printf("6) Set Transmit Voice Level\n");
 		printf("7) Set Transmit Aux Voice Level\n");
-		if (txhasctcss) printf("8) Set Transmit CTCSS Level and send CTCSS tone\n");
+		if (txhasctcss)
+		{
+			if (keying)
+				printf("8) Set Transmit CTCSS Level and send CTCSS tone\n");
+			else
+				printf("8) Set Transmit CTCSS Level\n");
+		}
 		else printf("8) Does not apply to thie USB device configuration\n");
 		if (flatrx) printf("9) Auto-Detect Rx Voice Level Value (with carrier + 1KHz @ 3KHz Dev)\n");
 		else printf("9) Does not apply to thie USB device configuration\n");
 		printf("P) Print Current Parameter Values\n");
 		printf("S) Save Current Parameter Values\n");
+		printf("T) Toggle Transmit Test Tone/Keying (currently %s)\n",
+			(keying) ? "Enabled" : "Disabled");
 		printf("0) Exit Menu\n");
 		printf("\nPlease enter your selection now: ");
 		if (fgets(str,sizeof(str) - 1,stdin) == NULL) break;
@@ -539,14 +556,14 @@ char	str[256];
 			menu_rxsquelch();
 			break;
 		    case '6':
-			menu_txvoice();
+			menu_txvoice(keying);
 			break;
 		    case '7':
 			menu_auxvoice();
 			break;
 		    case '8':
 			if (!txhasctcss) break;
-			menu_txtone();
+			menu_txtone(keying);
 			break;
 		    case '9':
 			if (!flatrx) break;
@@ -559,6 +576,12 @@ char	str[256];
 		    case 's':
 		    case 'S':
 			if (astgetresp("radio tune menu-support j")) exit(255);
+			break;
+		    case 't':
+		    case 'T':
+			keying = !keying;
+			printf("Transmit Test Tone/Keying is now %s\n",
+				(keying) ? "Enabled" : "Disabled");
 			break;
 		    default:
 			printf("Invalid Entry, try again\n");
