@@ -3479,6 +3479,7 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o, int setsql, int in
 			{
 				o->rxsquelchadj = normRssi + 150;
 				if (o->rxsquelchadj > 999) o->rxsquelchadj = 999;
+				*(o->pmrChan->prxSquelchAdjust)= ((999 - o->rxsquelchadj) * 32767) / 1000;
 				ast_cli(fd,"Rx Squelch set to %d (RSSI=%d).\n",o->rxsquelchadj,normRssi);
 			}
 			else 
