@@ -1323,15 +1323,17 @@ static void *hidthread(void *arg)
 			break;
 		}
 		o->usbass = 1;
-		ast_mutex_unlock(&usb_dev_lock);
-		o->micmax = amixer_max(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL);
-		o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL);
-
 		usb_dev = hid_device_init(o->devstr);
 		if (usb_dev == NULL) {
 			usleep(500000);
+			ast_mutex_unlock(&usb_dev_lock);
 			continue;
 		}
+		ast_mutex_unlock(&usb_dev_lock);
+
+		o->micmax = amixer_max(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL);
+		o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL);
+
 		usb_handle = usb_open(usb_dev);
 		if (usb_handle == NULL) {
 			usleep(500000);
@@ -1364,7 +1366,11 @@ static void *hidthread(void *arg)
 		traceusb1(("hidthread: Starting normally on %s!!\n",o->name));
 		lastrx = 0;
                 if (option_verbose > 1)
-                       ast_verbose(VERBOSE_PREFIX_2 "Set device %s to %s\n",o->devstr,o->name);
+		{
+			ast_mutex_lock(&usb_dev_lock);
+			ast_verbose(VERBOSE_PREFIX_2 "Set device %s to %s\n",o->devstr,o->name);
+			ast_mutex_unlock(&usb_dev_lock);
+		}
 		if(o->pmrChan==NULL)
 		{
 			t_pmr_chan tChan;
@@ -2818,6 +2824,84 @@ static int console_unkey(int fd, int argc, char *argv[])
 	return RESULT_SUCCESS;
 }
 
+static int usb_device_swap(int fd,char *other)
+{
+
+int	d;
+char	tmp[128];
+struct chan_usbradio_pvt *p = NULL,*o = find_desc(usbradio_active);
+
+	if (o == NULL) return -1;
+	if (!other) return -1;
+	p = find_desc(other);
+	if (p == NULL)
+	{
+		ast_cli(fd,"USB Device %s not found\n",other);
+		return -1;
+	}
+	if (p == o)
+	{
+		ast_cli(fd,"You cant swap active device with itself!!\n");
+		return -1;
+	}
+	ast_mutex_lock(&usb_dev_lock);
+	strcpy(tmp,p->devstr);
+	d = p->devicenum;
+	strcpy(p->devstr,o->devstr);
+	p->devicenum = o->devicenum;
+	strcpy(o->devstr,tmp);
+	o->devicenum = d;
+	o->hasusb = 0;
+	o->usbass = 0;
+	p->hasusb = 0;
+	o->usbass = 0;
+	ast_cli(fd,"USB Devices successfully swapped.\n");
+	ast_mutex_unlock(&usb_dev_lock);
+	return 0;
+}
+
+static void tune_flash(int fd, struct chan_usbradio_pvt *o, int intflag)
+{
+#define	NFLASH 3
+
+int	i;
+
+	if (fd > 0)
+		ast_cli(fd,"USB Device Flash starting on channel %s...\n",o->name);
+	for(i = 0; i < NFLASH; i++)
+	{
+		o->txtestkey=1;
+		o->pmrChan->txPttIn=1;
+		TxTestTone(o->pmrChan, 1);	  // generate 1KHz tone at 7200 peak
+		if ((fd > 0) && intflag)
+		{
+			if (happy_mswait(fd,1000,intflag))
+			{
+				o->pmrChan->txPttIn=0;
+				o->txtestkey=0;
+				break;
+			}
+		} else usleep(1000000);
+		TxTestTone(o->pmrChan, 0);
+		o->pmrChan->txPttIn=0;
+		o->txtestkey=0;
+		if (i == (NFLASH - 1)) break;
+		if ((fd > 0) && intflag)
+		{
+			if (happy_mswait(fd,1500,intflag))
+			{
+				o->pmrChan->txPttIn=0;
+				o->txtestkey=0;
+				break;
+			}
+		} else usleep(1500000);
+	}
+	if (fd > 0)
+		ast_cli(fd,"USB Device Flash ending on channel %s...\n",o->name);
+	o->pmrChan->txPttIn=0;
+	o->txtestkey=0;
+}
+
 static int radio_tune(int fd, int argc, char *argv[])
 {
 	struct chan_usbradio_pvt *o = find_desc(usbradio_active);
@@ -2829,7 +2913,9 @@ static int radio_tune(int fd, int argc, char *argv[])
 	if (argc == 2) /* just show stuff */
 	{
 		ast_cli(fd,"Active radio interface is [%s]\n",usbradio_active);
+		ast_mutex_lock(&usb_dev_lock);
 		ast_cli(fd,"Device String is %s\n",o->devstr);
+		ast_mutex_unlock(&usb_dev_lock);
  	  	ast_cli(fd,"Card is %i\n",usb_get_usbdev(o->devstr));
 		ast_cli(fd,"Output A is currently set to ");
 		if(o->txmixa==TX_OUT_COMPOSITE)ast_cli(fd,"composite.\n");
@@ -2854,6 +2940,20 @@ static int radio_tune(int fd, int argc, char *argv[])
 	o->pmrChan->b.tuning=1;
 
 	if (!strcasecmp(argv[2],"dump")) pmrdump(o);
+	else if (!strcasecmp(argv[2],"swap"))
+	{
+		if (argc > 3) 
+		{
+			usb_device_swap(fd,argv[3]);
+			return RESULT_SUCCESS;
+		}
+		return RESULT_SHOWUSAGE;
+	}
+	else if (!strcasecmp(argv[2],"menu-support"))
+	{
+		if (argc > 3) tune_menusupport(fd,o,argv[3]);
+		return RESULT_SUCCESS;
+	}
 
 	if (!o->hasusb)
 	{
@@ -2864,9 +2964,9 @@ static int radio_tune(int fd, int argc, char *argv[])
 	if (!strcasecmp(argv[2],"rxnoise")) tune_rxinput(fd,o,0,0);
 	else if (!strcasecmp(argv[2],"rxvoice")) tune_rxvoice(fd,o,0);
 	else if (!strcasecmp(argv[2],"rxtone")) tune_rxctcss(fd,o,0);
-	else if (!strcasecmp(argv[2],"menu-support"))
+	else if (!strcasecmp(argv[2],"flash"))
 	{
-		if (argc > 3) tune_menusupport(fd,o,argv[3]);
+		tune_flash(fd,o,0);
 	}
 	else if (!strcasecmp(argv[2],"rxsquelch"))
 	{
@@ -3131,9 +3231,11 @@ static int radio_active(int fd, int argc, char *argv[])
         else {
                 struct chan_usbradio_pvt *o;
                 if (strcmp(argv[2], "show") == 0) {
+			ast_mutex_lock(&usb_dev_lock);
                         for (o = usbradio_default.next; o; o = o->next)
                                 ast_cli(fd, "device [%s] exists as device=%s card=%d\n", 
 					o->name,o->devstr,usb_get_usbdev(o->devstr));
+			ast_mutex_unlock(&usb_dev_lock);
                         return RESULT_SUCCESS;
                 }
                 o = find_desc(argv[2]);
@@ -3672,7 +3774,9 @@ static void _menu_rxvoice(int fd, struct chan_usbradio_pvt *o, char *str)
 static void _menu_print(int fd, struct chan_usbradio_pvt *o)
 {
 	ast_cli(fd,"Active radio interface is [%s]\n",usbradio_active);
+	ast_mutex_lock(&usb_dev_lock);
 	ast_cli(fd,"Device String is %s\n",o->devstr);
+	ast_mutex_unlock(&usb_dev_lock);
   	ast_cli(fd,"Card is %i\n",usb_get_usbdev(o->devstr));
 	ast_cli(fd,"Output A is currently set to ");
 	if(o->txmixa==TX_OUT_COMPOSITE)ast_cli(fd,"composite.\n");
@@ -3915,31 +4019,86 @@ struct chan_usbradio_pvt *oy = NULL;
 	    case '2': /* print parameters */
 		_menu_print(fd,o);
 		break;
+	    case '3': /* return usb device name list except current */
+		for (x = 0,oy = usbradio_default.next; oy && oy->name ; oy = oy->next)
+		{
+			if (!strcmp(oy->name,o->name)) continue;
+			if (x) ast_cli(fd,",");
+			ast_cli(fd,"%s",oy->name);
+			x++;
+		}
+		ast_cli(fd,"\n");
+		break;
 	    case 'a':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		tune_rxinput(fd,o,1,1);
 		break;
 	    case 'b':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		do_rxdisplay(fd,o);
 		break;
 	    case 'c':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		_menu_rxvoice(fd, o, cmd + 1);
 		break;
 	    case 'd':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		tune_rxctcss(fd,o,1);
 		break;
 	    case 'e':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		_menu_rxsquelch(fd,o,cmd + 1);
 		break;
 	    case 'f':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		_menu_txvoice(fd,o,cmd + 1);
 		break;
 	    case 'g':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		_menu_auxvoice(fd,o,cmd + 1);
 		break;
 	    case 'h':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		_menu_txtone(fd,o,cmd + 1);
 		break;
 	    case 'i':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
 		tune_rxvoice(fd,o,1);
 		break;
 	    case 'j':
@@ -3955,6 +4114,14 @@ struct chan_usbradio_pvt *oy = NULL;
 		}
 		else
 			ast_cli(fd,"Echo Mode is currently %s\n",(o->echomode) ? "Enabled" : "Disabled");
+		break;
+	    case 'l':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		tune_flash(fd,o,1);
 		break;
 	    default:
 		ast_cli(fd,"Invalid Command\n");
@@ -4136,7 +4303,9 @@ static void tune_write(struct chan_usbradio_pvt *o)
 
 	fprintf(fp,"; name=%s\n",o->name);
 	fprintf(fp,"; devicenum=%i\n",o->devicenum);
+	ast_mutex_lock(&usb_dev_lock);
 	fprintf(fp,"devstr=%s\n",o->devstr);
+	ast_mutex_unlock(&usb_dev_lock);
 	fprintf(fp,"rxmixerset=%i\n",o->rxmixerset);
 	fprintf(fp,"txmixaset=%i\n",o->txmixaset);
 	fprintf(fp,"txmixbset=%i\n",o->txmixbset);
@@ -4297,7 +4466,9 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 	printf("\nodump()\n");
 
 	pd(o->devicenum);
+	ast_mutex_lock(&usb_dev_lock);
 	ps(o->devstr);
+	ast_mutex_unlock(&usb_dev_lock);
 
 	pd(o->micmax);
 	pd(o->spkrmax);

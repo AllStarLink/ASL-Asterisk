@@ -336,6 +336,56 @@ char	str[100],buf[256],*strs[100];
 	return;
 }
 
+static void menu_swapusb(void)
+{
+int	i,n,x;
+char	str[100],buf[256],*strs[100];
+
+	printf("\n");
+	/* print selected USB device */
+	if (astgetresp("radio active")) return;
+	/* get device list from Asterisk */
+	if (astgetline("radio tune menu-support 3",buf,sizeof(buf) - 1)) exit(255);
+	n = explode_string(buf,strs,100,',',0);
+	if ((n < 1) || (!*strs[0]))
+	{
+		fprintf(stderr,"No additional USB devices found\n");
+		return;
+	}
+	qsort(strs,n,sizeof(char *),qcompar);
+	printf("Please select from the following USB devices:\n");
+	for (x = 0; x < n; x++)
+	{
+		printf("%d) Device [%s]\n",x + 1,strs[x]);
+	}
+	printf("0) Exit Selection\n");
+	printf("Enter make your selection now: ");
+	if (fgets(str,sizeof(str) - 1,stdin) == NULL)
+	{
+		printf("USB device not changed\n");
+		return;
+	}
+	if (str[0] && (str[strlen(str) - 1] == '\n'))
+		str[strlen(str) - 1] = 0;
+	for(x = 0; str[x]; x++)
+	{
+		if (!isdigit(str[x])) break;
+	}
+	if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > n))
+	{
+		printf("Entry Error, USB device not swapped\n");
+		return;
+	}
+	if (i < 1)
+	{
+		printf("USB device not swapped\n");
+		return;
+	}
+	snprintf(str,sizeof(str) - 1,"radio tune swap %s",strs[i - 1]);
+	astgetresp(str);
+	return;
+}
+
 static void menu_rxvoice(void)
 {
 int	i,x;
@@ -557,10 +607,12 @@ char	str[256];
 		if (flatrx) printf("9) Auto-Detect Rx Voice Level Value (with carrier + 1KHz @ 3KHz Dev)\n");
 		else printf("9) Does not apply to thie USB device configuration\n");
 		printf("E) Toggle Echo Mode (currently %s)\n",(echomode) ? "Enabled" : "Disabled");
+		printf("F) Flash (Toggle PTT and Tone output several times)\n");
 		printf("P) Print Current Parameter Values\n");
-		printf("S) Save Current Parameter Values\n");
+		printf("S) Swap Current USB device with another USB device\n");
 		printf("T) Toggle Transmit Test Tone/Keying (currently %s)\n",
 			(keying) ? "Enabled" : "Disabled");
+		printf("W) Write (Save) Current Parameter Values\n");
 		printf("0) Exit Menu\n");
 		printf("\nPlease enter your selection now: ");
 		if (fgets(str,sizeof(str) - 1,stdin) == NULL) break;
@@ -616,12 +668,20 @@ char	str[256];
 				if (astgetresp("radio tune menu-support k1")) exit(255);
 			}
 			break;
+		    case 'f':
+		    case 'F':
+			if (astgetresp("radio tune menu-support l")) exit(255);
+			break;
 		    case 'p':
 		    case 'P':
 			if (astgetresp("radio tune menu-support 2")) exit(255);
 			break;
 		    case 's':
 		    case 'S':
+			menu_swapusb();
+			break;
+		    case 'w':
+		    case 'W':
 			if (astgetresp("radio tune menu-support j")) exit(255);
 			break;
 		    case 't':
