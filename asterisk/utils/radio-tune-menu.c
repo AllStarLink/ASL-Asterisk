@@ -517,7 +517,7 @@ int	i,x;
 
 int main(int argc, char *argv[])
 {
-int	flatrx = 0,txhasctcss = 0,keying = 0;
+int	flatrx = 0,txhasctcss = 0,keying = 0,echomode = 0;
 char	str[256];
 
 	signal(SIGCHLD,ourhandler);
@@ -525,7 +525,7 @@ char	str[256];
 	{
 		/* get device parameters from Asterisk */
 		if (astgetline("radio tune menu-support 0",str,sizeof(str) - 1)) exit(255);
-		if (sscanf(str,"%d,%d",&flatrx,&txhasctcss) != 2)
+		if (sscanf(str,"%d,%d,%d",&flatrx,&txhasctcss,&echomode) != 3)
 		{
 			fprintf(stderr,"Error parsing device parameters\n");
 			exit(255);
@@ -556,6 +556,7 @@ char	str[256];
 		else printf("8) Does not apply to thie USB device configuration\n");
 		if (flatrx) printf("9) Auto-Detect Rx Voice Level Value (with carrier + 1KHz @ 3KHz Dev)\n");
 		else printf("9) Does not apply to thie USB device configuration\n");
+		printf("E) Toggle Echo Mode (currently %s)\n",(echomode) ? "Enabled" : "Disabled");
 		printf("P) Print Current Parameter Values\n");
 		printf("S) Save Current Parameter Values\n");
 		printf("T) Toggle Transmit Test Tone/Keying (currently %s)\n",
@@ -603,6 +604,17 @@ char	str[256];
 		    case '9':
 			if (!flatrx) break;
 			if (astgetresp("radio tune menu-support i")) exit(255);
+			break;
+		    case 'e':
+		    case 'E':
+			if (echomode)
+			{
+				if (astgetresp("radio tune menu-support k0")) exit(255);
+			}
+			else
+			{
+				if (astgetresp("radio tune menu-support k1")) exit(255);
+			}
 			break;
 		    case 'p':
 		    case 'P':

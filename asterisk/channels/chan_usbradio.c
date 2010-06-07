@@ -54,6 +54,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <stdlib.h>
 #include <errno.h>
 #include <usb.h>
+#include <search.h>
 #include <alsa/asoundlib.h>
 
 //#define HAVE_XPMRX				1
@@ -88,6 +89,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	QUOTECHR 34
 
 #define	READERR_THRESHOLD 50
+
+#define	DEFAULT_ECHO_MAX 1000  /* 20 secs of echo buffer, max */
 
 #include "./xpmr/xpmr.h"
 #ifdef HAVE_XPMRX
@@ -401,6 +404,12 @@ static struct sound sounds[] = {
 
 #endif
 
+struct usbecho {
+struct qelem *q_forw;
+struct qelem *q_prev;
+short data[FRAME_SIZE];
+} ;
+
 /*
  * descriptor for one of our channels.
  * There is one used for 'default' values (from the [general] entry in
@@ -596,6 +605,12 @@ struct chan_usbradio_pvt {
 	int 	txmixaset;
 	int 	txmixbset;
 	int     txctcssadj;
+
+	int echomode;
+	int echoing;
+	ast_mutex_t	echolock;
+	struct qelem echoq;
+	int echomax;
 
 	int    	hdwtype;
 	int		hid_gpio_ctl;		
@@ -2115,7 +2130,7 @@ static int usbradio_write(struct ast_channel *c, struct ast_frame *f)
 
 	// maw just take the data from the network and save it for PmrRx processing
 
-	PmrTx(o->pmrChan,(i16*)f->data);
+	if (!o->echoing) PmrTx(o->pmrChan,(i16*)f->data);
 	
 	return 0;
 }
@@ -2159,6 +2174,38 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		}
                 return f;
         }
+
+	if (!o->echomode)
+	{
+		struct qelem *q;
+
+		ast_mutex_lock(&o->echolock);
+		o->echoing = 0;
+		while(o->echoq.q_forw != &o->echoq)
+		{
+			q = o->echoq.q_forw;
+			remque(q);
+			ast_free(q);
+		}
+		ast_mutex_unlock(&o->echolock);
+	}
+
+	if (o->echomode && (!o->rxkeyed))
+	{
+		struct usbecho *u;
+
+		ast_mutex_lock(&o->echolock);
+		/* if there is something in the queue */
+		if (o->echoq.q_forw != &o->echoq)
+		{
+			u = (struct usbecho *) o->echoq.q_forw;
+			remque((struct qelem *)u);
+			PmrTx(o->pmrChan,u->data);
+			ast_free(u);
+			o->echoing = 1;
+		} else o->echoing = 0;
+		ast_mutex_unlock(&o->echolock);
+	}
 
 	res = read(o->sounddev, o->usbradio_read_buf + o->readpos, 
 		sizeof(o->usbradio_read_buf) - o->readpos);
@@ -2207,7 +2254,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 	#endif
 
 	#if 1
-	if(o->txkeyed||o->txtestkey)
+	if(o->txkeyed || o->txtestkey || o->echoing)
 	{
 		if(!o->pmrChan->txPttIn)
 		{
@@ -2417,6 +2464,31 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		o->rxkeyed = 0;
 		o->rxoncnt = 0;
 	}
+
+	if (o->echomode && o->rxkeyed && (!o->echoing))
+	{
+		int x;
+		struct usbecho *u;
+
+		ast_mutex_lock(&o->echolock);
+		x = 0;
+		/* get count of frames */
+		for(u = (struct usbecho *) o->echoq.q_forw; 
+			u != (struct usbecho *) &o->echoq; u = (struct usbecho *)u->q_forw) x++;
+		if (x < o->echomax) 
+		{
+			u = (struct usbecho *) ast_malloc(sizeof(struct usbecho));
+			memset(u,0,sizeof(struct usbecho));
+			memcpy(u->data,(o->usbradio_read_buf_8k + AST_FRIENDLY_OFFSET),FRAME_SIZE * 2);
+			if (u == NULL)
+
+				ast_log(LOG_ERROR,"Cannot malloc\n");
+			else
+				insque((struct qelem *)u,o->echoq.q_back);
+		}
+		ast_mutex_unlock(&o->echolock);
+	}
+
 
 	// provide rx signal detect conditions
 	if (o->lastrx && (!o->rxkeyed))
@@ -2666,7 +2738,12 @@ static struct ast_channel *usbradio_new(struct chan_usbradio_pvt *o, char *ext, 
 		c->cid.cid_dnid = ast_strdup(ext);
 
 	o->owner = c;
+	o->echoq.q_forw = o->echoq.q_back = &o->echoq;
+	ast_mutex_init(&o->echolock);
 	ast_module_ref(ast_module_info->self);
+	o->echomax = DEFAULT_ECHO_MAX;
+	o->echomode = 0;
+	o->echoing = 0;
 	ast_jb_configure(c, &global_jbconf);
 	if (state != AST_STATE_DOWN) {
 		if (ast_pbx_start(c)) {
@@ -3115,7 +3192,6 @@ radio tune 6 3000		measured tx value
 */
 static char radio_tune_usage[] =
 	"Usage: radio tune <function>\n"
-	"       menu (very helpful)\n"
 	"       rxnoise\n"
 	"       rxvoice\n"
 	"       rxtone\n"
@@ -3826,7 +3902,7 @@ struct chan_usbradio_pvt *oy = NULL;
 	switch(cmd[0])
 	{
 	    case '0': /* return audio processing configuration */
-		ast_cli(fd,"%d,%d\n",flatrx,txhasctcss);
+		ast_cli(fd,"%d,%d,%d\n",flatrx,txhasctcss,o->echomode);
 		break;
 	    case '1': /* return usb device name list */
 		for (x = 0,oy = usbradio_default.next; oy && oy->name ; oy = oy->next, x++)
@@ -3869,6 +3945,16 @@ struct chan_usbradio_pvt *oy = NULL;
 	    case 'j':
 		tune_write(o);
 		ast_cli(fd,"Saved radio tuning settings to usbradio_tune_%s.conf\n",o->name);
+		break;
+	    case 'k':
+		if (cmd[1])
+		{
+			if (cmd[1] > '0') o->echomode = 1;
+			else o->echomode = 0;
+			ast_cli(fd,"Echo Mode changed to %s\n",(o->echomode) ? "Enabled" : "Disabled");
+		}
+		else
+			ast_cli(fd,"Echo Mode is currently %s\n",(o->echomode) ? "Enabled" : "Disabled");
 		break;
 	    default:
 		ast_cli(fd,"Invalid Command\n");
