@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.250 6/2/2010
+ *  version 0.251 6/9/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.250 6/2/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.251 6/9/2010";
 
 static char *app = "Rpt";
 
@@ -1075,6 +1075,7 @@ static struct rpt
 		int default_split_70cm;
 		int dtmfkey;
 		char dias;
+		char *outstreamcmd;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1202,6 +1203,8 @@ static struct rpt
 	char curdtmfuser[MAXNODESTR];
 	int  sleeptimer;
 	time_t lastgpstime;
+	int outstreampipe[2];
+	int outstreampid;
 #ifndef	OLD_ASTERISK
 	struct timeval lastdtmftime;
 #endif
@@ -4795,6 +4798,70 @@ unsigned int seq;
 	return;
 }
 
+static void startoutstream(struct rpt *myrpt)
+{
+char *str;
+char *strs[100];
+int	n;
+
+	if (!myrpt->p.outstreamcmd) return;
+	if (option_verbose > 2)
+		ast_verbose(VERBOSE_PREFIX_3 "app_rpt node %s starting output stream %s\n",
+			myrpt->name,myrpt->p.outstreamcmd);
+	str = ast_strdup(myrpt->p.outstreamcmd);
+	if (!str)
+	{
+		ast_log(LOG_ERROR,"Malloc Failed!\n");
+		return;
+	}
+	n = finddelim(str,strs,100);
+	if (n < 1) return;
+	if (pipe(myrpt->outstreampipe) == -1)
+	{
+		ast_log(LOG_ERROR,"pipe() failed!\n");
+		ast_free(str);
+		return;
+	}
+	if (fcntl(myrpt->outstreampipe[1],F_SETFL,O_NONBLOCK) == -1)
+	{
+		ast_log(LOG_ERROR,"Error: cannot set pipe to NONBLOCK");
+		ast_free(str);
+		return;
+	}
+	if (!(myrpt->outstreampid = fork()))
+	{
+		close(myrpt->outstreampipe[1]);
+		if (dup2(myrpt->outstreampipe[0],fileno(stdin)) == -1)
+		{
+			ast_log(LOG_ERROR,"Error: cannot dup2() stdin");
+			exit(0);
+		}
+		if (dup2(nullfd,fileno(stdout)) == -1)
+		{
+			ast_log(LOG_ERROR,"Error: cannot dup2() stdout");
+			exit(0);
+		}
+		if (dup2(nullfd,fileno(stderr)) == -1)
+		{
+			ast_log(LOG_ERROR,"Error: cannot dup2() stderr");
+			exit(0);
+		}
+		execv(strs[0],strs);
+		ast_log(LOG_ERROR, "exec of %s failed.\n", strs[0]);
+		perror("asterisk");
+		exit(0);
+	}
+	ast_free(str);
+	close(myrpt->outstreampipe[0]);
+	if (myrpt->outstreampid == -1)
+	{
+		ast_log(LOG_ERROR,"fork() failed!!\n");
+		close(myrpt->outstreampipe[1]);
+		return;
+	}
+	return;
+}
+
 static char *node_lookup(struct rpt *myrpt,char *digitbuf)
 {
 
@@ -5307,6 +5374,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"dtmfkeys");
 	if (!val) val = DTMFKEYS;
 	rpt_vars[n].p.dtmfkeys = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"outstreamcmd");
+	rpt_vars[n].p.outstreamcmd = val;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -17153,6 +17222,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	}
 	else
 	{
+
 		ci.confno = myrpt->txconf;
 		ci.confmode = ZT_CONF_CONFANNMON;
 	}
@@ -18563,9 +18633,16 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					else
 						ast_write(myrpt->pchannel,f1);
 					ast_frfree(f1);
-					if (myrpt->monstream && (myrpt->p.duplex < 2) &&
+					if ((myrpt->p.duplex < 2) && myrpt->monstream &&
 					    (!myrpt->txkeyed) && myrpt->keyed)
+					{
 						ast_writestream(myrpt->monstream,f1);
+					}
+					if ((myrpt->p.duplex < 2) && myrpt->keyed &&
+					    myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
+					{
+						write(myrpt->outstreampipe[1],f1->data,f1->datalen);
+					}
 				}
 			}
 #ifndef	OLD_ASTERISK
@@ -19424,10 +19501,16 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				int x1;
 				float fac,fsamp;
 
-				if (((myrpt->p.duplex > 1) || (myrpt->txkeyed)) &&
-				    (myrpt->monstream))
-					ast_writestream(myrpt->monstream,f);
-
+				if ((myrpt->p.duplex > 1) || (myrpt->txkeyed))
+				{
+					if (myrpt->monstream)
+						ast_writestream(myrpt->monstream,f);
+				}
+				if (((myrpt->p.duplex >= 2) || (!myrpt->keyed)) &&
+					myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
+				{
+					write(myrpt->outstreampipe[1],f->data,f->datalen);
+				}
 				fs = ast_frdup(f);
 				fac = 1.0;
 				if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
@@ -19604,6 +19687,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	rpt_mutex_unlock(&myrpt->lock);
 	if (debug) printf("@@@@ rpt:Hung up channel\n");
 	myrpt->rpt_thread = AST_PTHREADT_STOP;
+	if (myrpt->outstreampid) kill(myrpt->outstreampid,SIGTERM);
+	myrpt->outstreampid = 0;
 	pthread_exit(NULL); 
 	return NULL;
 }
@@ -19776,6 +19861,15 @@ char *this,*val;
 			}
 
 		}
+		for(i = 0; i < n; i++)
+		{ 
+			if (rpt_vars[i].remote) continue;
+			if (!rpt_vars[i].p.outstreamcmd) continue;
+			if (rpt_vars[i].outstreampid && 
+				(kill(rpt_vars[i].outstreampid,0) != -1)) continue;
+			rpt_vars[i].outstreampid = 0;
+			startoutstream(&rpt_vars[i]);
+		}			
 		for(;;)
 		{
 			struct nodelog *nodep;
