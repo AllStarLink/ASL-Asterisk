@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.251 6/9/2010
+ *  version 0.252 6/11/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.251 6/9/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.252 6/11/2010";
 
 static char *app = "Rpt";
 
@@ -9602,33 +9602,38 @@ struct ast_channel *mychannel,*genchannel,*c;
 	ci.confno = myrpt->conf;
 	ci.confmode = (myrpt->p.duplex == 2) ? ZT_CONF_CONFANNMON :
 		(ZT_CONF_CONF | ZT_CONF_LISTENER | ZT_CONF_TALKER);
-	/* first put the channel on the conference in announce mode */
-	if (ioctl(myrpt->pchannel->fds[0],ZT_SETCONF,&ci) == -1)
+	if (mychannel->pbx)
 	{
-		ast_log(LOG_WARNING, "Unable to set conference mode to Announce\n");
-		ast_hangup(mychannel);
-		ast_hangup(genchannel);
-		myrpt->callmode = 0;
-		pthread_exit(NULL);
-	}
-	/* get its channel number */
-	if (ioctl(mychannel->fds[0],ZT_CHANNO,&res) == -1)
-	{
-		ast_log(LOG_WARNING, "Unable to get autopatch channel number\n");
-		ast_hangup(mychannel);
-		myrpt->callmode = 0;
-		pthread_exit(NULL);
-	}
-	ci.chan = 0;
-	ci.confno = res;
-	ci.confmode = ZT_CONF_MONITOR;
-	/* put vox channel monitoring on the channel  */
-	if (ioctl(myrpt->voxchannel->fds[0],ZT_SETCONF,&ci) == -1)
-	{
-		ast_log(LOG_WARNING, "Unable to set conference mode to Announce\n");
-		ast_hangup(mychannel);
-		myrpt->callmode = 0;
-		pthread_exit(NULL);
+		/* first put the channel on the conference in announce mode */
+		if (ioctl(myrpt->pchannel->fds[0],ZT_SETCONF,&ci) == -1)
+		{
+			ast_log(LOG_WARNING, "Unable to set conference mode to Announce\n");
+			ast_hangup(mychannel);
+			ast_hangup(genchannel);
+			myrpt->callmode = 0;
+			rpt_mutex_unlock(&myrpt->lock);
+			pthread_exit(NULL);
+		}
+		/* get its channel number */
+		if (ioctl(mychannel->fds[0],ZT_CHANNO,&res) == -1)
+		{
+			ast_log(LOG_WARNING, "Unable to get autopatch channel number\n");
+			ast_hangup(mychannel);
+			myrpt->callmode = 0;
+			rpt_mutex_unlock(&myrpt->lock);
+			pthread_exit(NULL);
+		}
+		ci.chan = 0;
+		ci.confno = res;
+		ci.confmode = ZT_CONF_MONITOR;
+		/* put vox channel monitoring on the channel  */
+		if (ioctl(myrpt->voxchannel->fds[0],ZT_SETCONF,&ci) == -1)
+		{
+			ast_log(LOG_WARNING, "Unable to set conference mode to Announce\n");
+			ast_hangup(mychannel);
+			myrpt->callmode = 0;
+			pthread_exit(NULL);
+		}
 	}
 	sentpatchconnect = 0;
 	while(myrpt->callmode)
