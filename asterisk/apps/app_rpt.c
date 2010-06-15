@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.252 6/11/2010
+ *  version 0.253 6/14/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.252 6/11/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.253 6/14/2010";
 
 static char *app = "Rpt";
 
@@ -1595,7 +1595,71 @@ static int dovox(struct vox *v,short *buf,int bs)
 
 }
 
+static void rpt_forward(struct ast_channel *chan, char *dialstr, char *nodefrom)
+{
 
+struct ast_channel *dest,*w,*cs[2];
+struct ast_frame *f;
+int	ms;
+
+	dest = ast_request("IAX2", AST_FORMAT_SLINEAR, dialstr ,NULL);
+	if (!dest)
+	{
+		ast_log(LOG_ERROR,"Can not create channel for rpt_forward to IAX2/%s\n",dialstr);
+		return;
+	}
+	ast_set_read_format(chan, AST_FORMAT_SLINEAR);
+	ast_set_write_format(chan, AST_FORMAT_SLINEAR);
+	ast_set_read_format(dest, AST_FORMAT_SLINEAR);
+	ast_set_write_format(dest, AST_FORMAT_SLINEAR);
+	if (option_verbose > 2)
+		ast_verbose(VERBOSE_PREFIX_3 "rpt forwarding call from %s to %s on %s\n",
+			nodefrom,dialstr,dest->name);
+	ast_set_callerid(dest,nodefrom,NULL,nodefrom);
+        ast_call(dest,dialstr,999); 
+	cs[0] = chan;
+	cs[1] = dest;
+	for(;;)
+	{
+		if (ast_check_hangup(chan)) break;
+		if (ast_check_hangup(dest)) break;
+		ms = 100;
+		w = cs[0];
+		cs[0] = cs[1];
+		cs[1] = w;
+		w = ast_waitfor_n(cs,2,&ms);
+		if (!w) continue;
+		if (w == chan)
+		{
+			f = ast_read(chan);
+			if (!f) break;
+			if ((f->frametype == AST_FRAME_CONTROL) &&
+			    (f->subclass == AST_CONTROL_HANGUP))
+			{
+				ast_frfree(f);
+				break;
+			}
+			ast_write(dest,f);
+			ast_frfree(f);
+		}
+		if (w == dest)
+		{
+			f = ast_read(dest);
+			if (!f) break;
+			if ((f->frametype == AST_FRAME_CONTROL) &&
+			    (f->subclass == AST_CONTROL_HANGUP))
+			{
+				ast_frfree(f);
+				break;
+			}
+			ast_write(chan,f);
+			ast_frfree(f);
+		}
+
+	}
+	ast_hangup(dest);
+	return;
+}
 
 
 /*
@@ -4862,65 +4926,146 @@ int	n;
 	return;
 }
 
-static char *node_lookup(struct rpt *myrpt,char *digitbuf)
+static int node_lookup(struct rpt *myrpt,char *digitbuf,char *str, int strmax, int wilds)
 {
 
 char *val;
-int longestnode,i,j;
+int longestnode,i,j,found;
 struct stat mystat;
-static struct ast_config *ourcfg = NULL;
+struct ast_config *ourcfg;
 struct ast_variable *vp;
 
 	/* try to look it up locally first */
 	val = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->p.nodes, digitbuf);
-	if (val) return(val);
+	if (val)
+	{
+		if (str && strmax)
+			snprintf(str,strmax,val,digitbuf);
+		return(1);
+	}
+	if (wilds)
+	{
+		vp = ast_variable_browse(myrpt->cfg, myrpt->p.nodes);
+		while(vp)
+		{
+			if (ast_extension_match(vp->name, digitbuf))
+			{
+				if (str && strmax)
+					snprintf(str,strmax,vp->value,digitbuf);
+				return(1);
+			}
+			vp = vp->next;
+		}
+	}
 	ast_mutex_lock(&nodelookuplock);
 	if (!myrpt->p.extnodefilesn) 
 	{
-		if (ourcfg) ast_config_destroy(ourcfg);
-		ourcfg = NULL;
 		ast_mutex_unlock(&nodelookuplock);
-		return(NULL);
+		return(0);
 	}
-	if (ourcfg) ast_config_destroy(ourcfg);
 	/* determine longest node length again */		
 	longestnode = 0;
 	vp = ast_variable_browse(myrpt->cfg, myrpt->p.nodes);
-	while(vp){
+	while(vp)
+	{
 		j = strlen(vp->name);
+		if (*vp->name == '_') j--;
 		if (j > longestnode)
 			longestnode = j;
 		vp = vp->next;
 	}
-	val = NULL;
+	found = 0;
 	for(i = 0; i < myrpt->p.extnodefilesn; i++)
 	{
-		/* if file does not exist */
-		if (stat(myrpt->p.extnodefiles[i],&mystat) == -1) continue;
 #ifdef	NEW_ASTERISK
 		ourcfg = ast_config_load(myrpt->p.extnodefiles[i],config_flags);
 #else
 		ourcfg = ast_config_load(myrpt->p.extnodefiles[i]);
 #endif
+		/* if file does not exist */
+		if (stat(myrpt->p.extnodefiles[i],&mystat) == -1) continue;
 		/* if file not there, try next */
 		if (!ourcfg) continue;
 		vp = ast_variable_browse(ourcfg, myrpt->p.extnodes);
-		while(vp){
+		while(vp)
+		{
 			j = strlen(vp->name);
+			if (*vp->name == '_') j--;
 			if (j > longestnode)
 				longestnode = j;
 			vp = vp->next;
 		}
-
-		if (!val) val = (char *) ast_variable_retrieve(ourcfg, myrpt->p.extnodes, digitbuf);
+		if (!found)
+		{
+			val = (char *) ast_variable_retrieve(ourcfg, myrpt->p.extnodes, digitbuf);
+			if (val)
+			{
+				found = 1;
+				if (str && strmax)
+					snprintf(str,strmax,val,digitbuf);
+			}
+		}
+		ast_config_destroy(ourcfg);
 	}
 	myrpt->longestnode = longestnode;
+	ast_mutex_unlock(&nodelookuplock);
+	return(found);
+}
+
+static char *forward_node_lookup(struct rpt *myrpt,char *digitbuf, struct ast_config *cfg)
+{
+
+char *val,*efil,*enod,*strs[100];
+int i,n;
+struct stat mystat;
+static struct ast_config *ourcfg;
+
+	val = (char *) ast_variable_retrieve(cfg, "proxy", "extnodefile");
+	if (!val) val = EXTNODEFILE;
+	enod = (char *) ast_variable_retrieve(cfg, "proxy", "extnodes");
+	if (!enod) enod = EXTNODES;
+	ast_mutex_lock(&nodelookuplock);
+	efil = ast_strdup(val);
+	if (!efil) 
+	{
+		ast_config_destroy(ourcfg);
+		if (ourcfg) ast_config_destroy(ourcfg);
+		ourcfg = NULL;
+		ast_mutex_unlock(&nodelookuplock);
+		return NULL;
+	}
+	n = finddelim(efil,strs,100);
+	if (n < 1)
+	{
+		ast_free(efil);
+		ast_config_destroy(ourcfg);
+		if (ourcfg) ast_config_destroy(ourcfg);
+		ourcfg = NULL;
+		ast_mutex_unlock(&nodelookuplock);
+		return NULL;
+	}
+	if (ourcfg) ast_config_destroy(ourcfg);
+	val = NULL;
+	for(i = 0; i < n; i++)
+	{
+		/* if file does not exist */
+		if (stat(strs[i],&mystat) == -1) continue;
+#ifdef	NEW_ASTERISK
+		ourcfg = ast_config_load(strs[i],config_flags);
+#else
+		ourcfg = ast_config_load(strs[i]);
+#endif
+		/* if file not there, try next */
+		if (!ourcfg) continue;
+		if (!val) val = (char *) ast_variable_retrieve(ourcfg, enod, digitbuf);
+	}
         if (!val)
         {
                 if (ourcfg) ast_config_destroy(ourcfg);
                 ourcfg = NULL;
         }
 	ast_mutex_unlock(&nodelookuplock);
+	ast_free(efil);
 	return(val);
 }
 
@@ -9843,7 +9988,7 @@ static void send_old_newkey(struct ast_channel *chan)
 
 static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 {
-	char *val, *s, *s1, *s2, *tele,*cp;
+	char *s, *s1, *s2, *tele,*cp;
 	char lstr[MAXLINKLIST],*strs[MAXLINKLIST];
 	char tmp[300], deststr[300] = "",modechange = 0;
 	char sx[320],*sy;
@@ -9860,13 +10005,12 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	}
 	else if (node[0] != '3')
 	{
-		val = node_lookup(myrpt,node);
-		if (!val){
+		if (!node_lookup(myrpt,node,tmp,sizeof(tmp) - 1,1))
+		{
 			if(strlen(node) >= myrpt->longestnode)
 				return -1; /* No such node */
 			return 1; /* No match yet */
 		}
-		strncpy(tmp,val,sizeof(tmp) - 1);
 	}
 	else
 	{
@@ -10100,7 +10244,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 static int function_ilink(struct rpt *myrpt, char *param, char *digits, int command_source, struct rpt_link *mylink)
 {
 
-	char *val, *s, *s1, *s2;
+	char *s, *s1, *s2;
 	char tmp[300];
 	char digitbuf[MAXNODESTR],*strs[MAXLINKLIST];
 	char mode,perma;
@@ -10132,13 +10276,12 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			}
 			else if (digitbuf[0] != '3')
 			{
-				val = node_lookup(myrpt,digitbuf);
-				if (!val){
+				if (!node_lookup(myrpt,digitbuf,tmp,sizeof(tmp) - 1,1))
+				{
 					if(strlen(digitbuf) >= myrpt->longestnode)
 						return DC_ERROR;
 					break;
 				}
-				strncpy(tmp,val,sizeof(tmp) - 1);
 			}
 			else
 			{
@@ -10277,8 +10420,8 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			}
 			else if (digitbuf[0] != '3')
 			{
-				val = node_lookup(myrpt,digitbuf);
-				if (!val){
+				if (!node_lookup(myrpt,digitbuf,NULL,0,1))
+				{
 					if(strlen(digitbuf) >= myrpt->longestnode)
 						return DC_ERROR;
 					break;
@@ -16460,28 +16603,25 @@ int	res;
 
 static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 {
-	char *val, *s, *s1, *s2, *tele;
+	char *s, *s1, *s2, *tele;
 	char tmp[300], deststr[300] = "";
 	char sx[320],*sy;
 	struct ast_frame *f1;
 
 
-	val = node_lookup(myrpt,l->name);
-	if (!val)
+	if (!node_lookup(myrpt,l->name,tmp,sizeof(tmp) - 1,1))
 	{
 		fprintf(stderr,"attempt_reconnect: cannot find node %s\n",l->name);
 		return -1;
 	}
-
 	/* cannot apply to echolink */
-	if (!strncasecmp(val,"echolink",8)) return 0;
+	if (!strncasecmp(tmp,"echolink",8)) return 0;
 	/* nor to irlp */
-	if (!strncasecmp(val,"irlp",4)) return 0;
+	if (!strncasecmp(tmp,"irlp",4)) return 0;
 	rpt_mutex_lock(&myrpt->lock);
 	/* remove from queue */
 	remque((struct qelem *) l);
 	rpt_mutex_unlock(&myrpt->lock);
-	strncpy(tmp,val,sizeof(tmp) - 1);
 	s = tmp;
 	s1 = strsep(&s,",");
 	if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
@@ -20007,6 +20147,92 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 
 	if (myrpt == NULL)
 	{
+		char *val,*myadr,*mypfx,sx[320],*b1,*sy,*s,*s1,*s2,dstr[100],xstr[100];
+		struct ast_config *cfg;
+
+		val = NULL;
+		myadr = NULL;
+		b1 = chan->cid.cid_num;		
+		if (b1) ast_shrink_phone_number(b1);
+#ifdef	NEW_ASTERISK
+		cfg = ast_config_load("rpt.conf",config_flags);
+#else
+		cfg = ast_config_load("rpt.conf");
+#endif
+		if (cfg)
+		{
+			myadr = (char *) ast_variable_retrieve(cfg, "proxy", "ipaddr");
+			if (options && (*options == 'F'))
+			{
+				if (b1 && myadr) 
+				{
+					val = forward_node_lookup(myrpt,b1,cfg);
+					strncpy(xstr,val,sizeof(xstr) - 1);
+					s = xstr;
+					s1 = strsep(&s,",");
+					if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
+					{
+						sy = strchr(s1,'/');		
+						*sy = 0;
+						sprintf(sx,"%s:4569/%s",s1,sy + 1);
+						s1 = sx;
+					}
+					s2 = strsep(&s,",");
+					if (!s2)
+					{
+						ast_log(LOG_WARNING, "Sepcified node %s not in correct format!!\n",val);
+						ast_config_destroy(cfg);
+						return -1;
+					}
+					val = NULL;
+					if (!strcmp(s2,myadr))
+						val = forward_node_lookup(myrpt,tmp,cfg);
+				}
+
+			}
+			else
+			{
+				val = forward_node_lookup(myrpt,tmp,cfg);
+			}
+		}
+		if (b1 && (*b1 > '1') && val && myadr && cfg)
+		{
+			strncpy(xstr,val,sizeof(xstr) - 1);
+			s = xstr;
+			s1 = strsep(&s,",");
+			if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
+			{
+				sy = strchr(s1,'/');		
+				*sy = 0;
+				sprintf(sx,"%s:4569/%s",s1,sy + 1);
+				s1 = sx;
+			}
+			s2 = strsep(&s,",");
+			if (!s2)
+			{
+				ast_log(LOG_WARNING, "Sepcified node %s not in correct format!!\n",val);
+				ast_config_destroy(cfg);
+				return -1;
+			}
+			if (options && (*options == 'F'))
+			{
+				ast_config_destroy(cfg);
+				rpt_forward(chan,s1,b1);
+				return -1;
+			}
+			if (!strcmp(myadr,s2)) /* if we have it.. */
+			{
+				mypfx = (char *) ast_variable_retrieve(cfg, "proxy", "nodeprefix");
+				if (mypfx)
+					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s%s/%s",mypfx,tmp,tmp);
+				else
+					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s/%s",tmp,tmp);
+				ast_config_destroy(cfg);
+				rpt_forward(chan,dstr,b1);
+				return -1;
+			}
+			ast_config_destroy(cfg);
+		}				
 		pbx_builtin_setvar_helper(chan, "RPT_STAT_ERR", "NODE_NOT_FOUND");
 		ast_log(LOG_WARNING, "Cannot find specified system node %s\n",tmp);
 		return (priority_jump(NULL,chan));
@@ -20252,7 +20478,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
         struct ast_hostent ahp;
         struct hostent *hp;
         struct in_addr ia;
-        char hisip[100],nodeip[100],*val, *s, *s1, *s2, *s3, *b,*b1;
+        char hisip[100],nodeip[100], *s, *s1, *s2, *s3, *b,*b1;
 
 		/* look at callerid to see what node this comes from */
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
@@ -20295,13 +20521,11 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 
 
 		/* look for his reported node string */
-		val = node_lookup(myrpt,b1);
-		if (!val)
+		if (!node_lookup(myrpt,b1,tmp,sizeof(tmp) - 1,0))
 		{
 			ast_log(LOG_WARNING, "Reported node %s cannot be found!!\n",b1);
 			return -1;
 		}
-		strncpy(tmp,val,sizeof(tmp) - 1);
 		s = tmp;
 		s1 = strsep(&s,",");
 		if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
