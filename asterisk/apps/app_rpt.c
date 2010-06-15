@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.253 6/14/2010
+ *  version 0.254 6/15/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.253 6/14/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.254 6/15/2010";
 
 static char *app = "Rpt";
 
@@ -1605,8 +1605,13 @@ int	ms;
 	dest = ast_request("IAX2", AST_FORMAT_SLINEAR, dialstr ,NULL);
 	if (!dest)
 	{
-		ast_log(LOG_ERROR,"Can not create channel for rpt_forward to IAX2/%s\n",dialstr);
-		return;
+		if (ast_safe_sleep(chan,150) == -1) return;
+		dest = ast_request("IAX2", AST_FORMAT_SLINEAR, dialstr ,NULL);
+		if (!dest)
+		{
+			ast_log(LOG_ERROR,"Can not create channel for rpt_forward to IAX2/%s\n",dialstr);
+			return;
+		}
 	}
 	ast_set_read_format(chan, AST_FORMAT_SLINEAR);
 	ast_set_write_format(chan, AST_FORMAT_SLINEAR);
@@ -1615,7 +1620,7 @@ int	ms;
 	if (option_verbose > 2)
 		ast_verbose(VERBOSE_PREFIX_3 "rpt forwarding call from %s to %s on %s\n",
 			nodefrom,dialstr,dest->name);
-	ast_set_callerid(dest,nodefrom,NULL,nodefrom);
+	ast_set_callerid(dest,nodefrom,chan->cid.cid_name,nodefrom);
         ast_call(dest,dialstr,999); 
 	cs[0] = chan;
 	cs[1] = dest;
@@ -10157,6 +10162,11 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	else
 	{
 		l->chan = ast_request(deststr, AST_FORMAT_SLINEAR,tele,NULL);
+		if (!(l->chan))
+		{
+			usleep(150000);
+			l->chan = ast_request(deststr, AST_FORMAT_SLINEAR,tele,NULL);
+		}
 	}
 	if (l->chan){
 		ast_set_read_format(l->chan, AST_FORMAT_SLINEAR);
@@ -16645,6 +16655,11 @@ static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 	l->iaxkey = 0;
 	l->newkey = 0;
 	l->chan = ast_request(deststr, AST_FORMAT_SLINEAR, tele,NULL);
+	if (!(l->chan))
+	{
+		usleep(150000);
+		l->chan = ast_request(deststr, AST_FORMAT_SLINEAR, tele,NULL);
+	}
 	l->linkmode = 0;
 	l->lastrx1 = 0;
 	l->lastrealrx = 0;
@@ -20147,8 +20162,12 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 
 	if (myrpt == NULL)
 	{
-		char *val,*myadr,*mypfx,sx[320],*b1,*sy,*s,*s1,*s2,dstr[100],xstr[100];
+		char *val,*myadr,*mypfx,sx[320],*b1,*sy,*s,*s1,*s2,*s3,dstr[100];
+		char xstr[100],hisip[100],nodeip[100],tmp1[100];
 		struct ast_config *cfg;
+	        struct ast_hostent ahp;
+	        struct hostent *hp;
+	        struct in_addr ia;
 
 		val = NULL;
 		myadr = NULL;
@@ -20159,7 +20178,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #else
 		cfg = ast_config_load("rpt.conf");
 #endif
-		if (cfg)
+		if (cfg && ((!options) || (*options == 'X') || (*options == 'F')))
 		{
 			myadr = (char *) ast_variable_retrieve(cfg, "proxy", "ipaddr");
 			if (options && (*options == 'F'))
@@ -20195,9 +20214,99 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				val = forward_node_lookup(myrpt,tmp,cfg);
 			}
 		}
-		if (b1 && (*b1 > '1') && val && myadr && cfg)
+		if (b1 && val && myadr && cfg)
 		{
 			strncpy(xstr,val,sizeof(xstr) - 1);
+			if (!options)
+			{
+				if (*b1 < '1')
+				{
+					ast_log(LOG_WARNING, "Connect Attempt from invalid node number!!\n");
+					return -1;
+				}
+				/* get his IP from IAX2 module */
+				memset(hisip,0,sizeof(hisip));
+#ifdef ALLOW_LOCAL_CHANNELS
+			        /* set IP address if this is a local connection*/
+			        if (strncmp(chan->name,"Local",5)==0) {
+					strcpy(hisip,"127.0.0.1");
+			        } else {
+					pbx_substitute_variables_helper(chan,"${IAXPEER(CURRENTCHANNEL)}",hisip,sizeof(hisip) - 1);
+				}
+#else
+				pbx_substitute_variables_helper(chan,"${IAXPEER(CURRENTCHANNEL)}",hisip,sizeof(hisip) - 1);
+#endif
+				if (!hisip[0])
+				{
+					ast_log(LOG_WARNING, "Link IP address cannot be determined!!\n");
+					return -1;
+				}
+				/* look for his reported node string */
+				val = forward_node_lookup(myrpt,b1,cfg);
+				if (!val)
+				{
+					ast_log(LOG_WARNING, "Reported node %s cannot be found!!\n",b1);
+					return -1;
+				}
+				strncpy(tmp1,val,sizeof(tmp1) - 1);
+				s = tmp1;
+				s1 = strsep(&s,",");
+				if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
+				{
+					sy = strchr(s1,'/');		
+					*sy = 0;
+					sprintf(sx,"%s:4569/%s",s1,sy + 1);
+					s1 = sx;
+				}
+				s2 = strsep(&s,",");
+				if (!s2)
+				{
+					ast_log(LOG_WARNING, "Reported node %s not in correct format!!\n",b1);
+					return -1;
+				}
+		                if (strcmp(s2,"NONE")) {
+					hp = ast_gethostbyname(s2, &ahp);
+					if (!hp)
+					{
+						ast_log(LOG_WARNING, "Reported node %s, name %s cannot be found!!\n",b1,s2);
+						return -1;
+					}
+					memcpy(&ia,hp->h_addr,sizeof(in_addr_t));
+#ifdef	OLD_ASTERISK
+					ast_inet_ntoa(nodeip,sizeof(nodeip) - 1,ia);
+#else
+					strncpy(nodeip,ast_inet_ntoa(ia),sizeof(nodeip) - 1);
+#endif
+					s3 = strchr(hisip,':');
+					if (s3) *s3 = 0;
+					if (strcmp(hisip,nodeip))
+					{
+						s3 = strchr(s1,'@');
+						if (s3) s1 = s3 + 1;
+						s3 = strchr(s1,'/');
+						if (s3) *s3 = 0;
+						s3 = strchr(s1,':');
+						if (s3) *s3 = 0;
+						hp = ast_gethostbyname(s1, &ahp);
+						if (!hp)
+						{
+							ast_log(LOG_WARNING, "Reported node %s, name %s cannot be found!!\n",b1,s1);
+							return -1;
+						}
+						memcpy(&ia,hp->h_addr,sizeof(in_addr_t));
+#ifdef	OLD_ASTERISK
+						ast_inet_ntoa(nodeip,sizeof(nodeip) - 1,ia);
+#else
+						strncpy(nodeip,ast_inet_ntoa(ia),sizeof(nodeip) - 1);
+#endif
+						if (strcmp(hisip,nodeip))
+						{
+							ast_log(LOG_WARNING, "Node %s IP %s does not match link IP %s!!\n",b1,nodeip,hisip);
+							return -1;
+						}
+					}
+				}
+			}
 			s = xstr;
 			s1 = strsep(&s,",");
 			if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6))
@@ -20222,11 +20331,15 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 			if (!strcmp(myadr,s2)) /* if we have it.. */
 			{
+				char tmp2[100];
+
+				strcpy(tmp2,tmp);
+				if (options && callstr) snprintf(tmp2,sizeof(tmp2) - 1,"0%s%s",callstr,tmp);
 				mypfx = (char *) ast_variable_retrieve(cfg, "proxy", "nodeprefix");
 				if (mypfx)
-					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s%s/%s",mypfx,tmp,tmp);
+					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s%s/%s",mypfx,tmp,tmp2);
 				else
-					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s/%s",tmp,tmp);
+					snprintf(dstr,sizeof(dstr) - 1,"radio-proxy@%s/%s",tmp,tmp2);
 				ast_config_destroy(cfg);
 				rpt_forward(chan,dstr,b1);
 				return -1;
