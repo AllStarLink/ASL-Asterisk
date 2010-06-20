@@ -103,7 +103,25 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "iax2-provision.h"
 #include "jitterbuf.h"
 
+/* WB6NIL backport stuff */
+
+#define	DAHDI_FILE_TIMER "/dev/zap/timer"
+#define	DAHDI_FILE_PSEUDO "/dev/zap/pseudo"
+#define	AST_FORMAT_AUDIO_UNDEFINED 0
 #define	BAD_RADIO_HACK
+#define	ast_free_ptr ast_free
+#define ast_copy_ha(from_p, to_p) memcpy(to_p,from_p,sizeof(struct ast_ha));
+
+struct ast_ha {
+        /* Host access rule */
+        struct in_addr netaddr;
+        struct in_addr netmask;
+        int sense;
+        struct ast_ha *next;
+};
+
+
+
 
 /* Define SCHED_MULTITHREADED to run the scheduler in a special
    multithreaded mode. */
@@ -178,7 +196,7 @@ static int defaultsockfd = -1;
 int (*iax2_regfunk)(const char *username, int onoff) = NULL;
 
 /* Ethernet, etc */
-#define IAX_CAPABILITY_FULLBANDWIDTH 	0xFFFF
+#define IAX_CAPABILITY_FULLBANDWIDTH 	(0xFFFF & ~AST_FORMAT_AUDIO_UNDEFINED)
 /* T1, maybe ISDN */
 #define IAX_CAPABILITY_MEDBANDWIDTH 	(IAX_CAPABILITY_FULLBANDWIDTH & 	\
 					 ~AST_FORMAT_SLINEAR &			\
@@ -230,15 +248,6 @@ static pthread_t netthreadid = AST_PTHREADT_NULL;
 static pthread_t schedthreadid = AST_PTHREADT_NULL;
 AST_MUTEX_DEFINE_STATIC(sched_lock);
 static ast_cond_t sched_cond;
-
-struct ast_ha {
-        /* Host access rule */
-        struct in_addr netaddr;
-        struct in_addr netmask;
-        int sense;
-        struct ast_ha *next;
-};
-
 
 enum {
 	IAX_STATE_STARTED =			(1 << 0),
@@ -725,9 +734,9 @@ static struct ao2_container *callno_limits;
 /*! Table containing ip addresses not requiring calltoken validation */
 static struct ao2_container *calltoken_ignores;
 
-static uint16_t DEFAULT_MAXCALLNO_LIMIT = 65535;
+static uint16_t DEFAULT_MAXCALLNO_LIMIT = /* WB6NIL-START 2048 */ 65535 /* WB6NIL-END */;
 
-static uint16_t DEFAULT_MAXCALLNO_LIMIT_NONVAL = 65535;
+static uint16_t DEFAULT_MAXCALLNO_LIMIT_NONVAL = /* WB6NIL-START 8192 */ 65535 /* WB6NIL-END */;
 
 static uint16_t global_maxcallno;
 
@@ -869,9 +878,6 @@ static AST_LIST_HEAD_STATIC(active_list, iax2_thread);
 static AST_LIST_HEAD_STATIC(dynamic_list, iax2_thread);
 
 static void *iax2_process_thread(void *data);
-
-
-static char still_running = 1;
 
 static void signal_condition(ast_mutex_t *lock, ast_cond_t *cond)
 {
@@ -1020,16 +1026,6 @@ static const struct ast_channel_tech iax2_tech = {
 	.transfer = iax2_transfer,
 	.fixup = iax2_fixup,
 };
-
-static void *reg_kludge_thread(void *data)
-{
-	while(still_running)
-	{
-		sleep(60);
-		reload_config();
-	}
-	return NULL;
-}
 
 /* WARNING: insert_idle_thread should only ever be called within the
  * context of an iax2_process_thread() thread.
@@ -1894,8 +1890,7 @@ static int calltoken_required(struct sockaddr_in *sin, const char *name, int sub
 		(optional && (calltoken_required == CALLTOKEN_DEFAULT))) {
 		res = 0;
 	}
-
-	res = 0;
+	/* WB6NIL-START */ res = 0; /* WB6NIL-END */
 	return res;
 }
 
@@ -2129,7 +2124,7 @@ static void build_callno_limits(struct ast_variable *v)
 			continue;
 		}
 
-		memcpy(&tmp.ha,ha,sizeof(tmp.ha));
+		ast_copy_ha(ha, &tmp.ha);
 		/* find or create the addr_range */
 		if ((addr_range = ao2_find(callno_limits, &tmp, OBJ_POINTER))) {
 			ao2_lock(addr_range);
@@ -2140,7 +2135,7 @@ static void build_callno_limits(struct ast_variable *v)
 		}
 
 		/* copy over config data into addr_range object */
-		memcpy(&addr_range->ha,ha,sizeof(addr_range->ha)); /* this is safe because only one ha is possible for each limit */
+		ast_copy_ha(ha, &addr_range->ha); /* this is safe because only one ha is possible for each limit */
 		ast_free_ha(ha); /* cleanup the tmp ha */
 		addr_range->limit = limit;
 		addr_range->delme = 0;
@@ -2170,7 +2165,7 @@ static int add_calltoken_ignore(const char *addr)
 		return -1;
 	}
 
-	ha = ast_append_ha("permit", (char *) addr, NULL);
+	ha = ast_append_ha("permit", /* WB6NIL-START */ (char *) /* WB6NIL-END */ addr, NULL);
 
 	/* check for valid config information */
 	if (!ha) {
@@ -2178,7 +2173,7 @@ static int add_calltoken_ignore(const char *addr)
 		return -1;
 	}
 
-	memcpy(&tmp.ha,ha,sizeof(tmp.ha));
+	ast_copy_ha(ha, &tmp.ha);
 	/* find or create the addr_range */
 	if ((addr_range = ao2_find(calltoken_ignores, &tmp, OBJ_POINTER))) {
 		ao2_lock(addr_range);
@@ -2186,7 +2181,7 @@ static int add_calltoken_ignore(const char *addr)
 		ao2_unlock(addr_range);
 	} else if ((addr_range = ao2_alloc(sizeof(*addr_range), NULL))) {
 		/* copy over config data into addr_range object */
-		memcpy(&addr_range->ha,ha,sizeof(addr_range->ha)); /* this is safe because only one ha is possible */
+		ast_copy_ha(ha, &addr_range->ha); /* this is safe because only one ha is possible */
 		ao2_link(calltoken_ignores, addr_range);
 	} else {
 		ast_free_ha(ha);
@@ -2255,7 +2250,7 @@ static struct callno_entry *get_unused_callno(int trunk, int validated)
 
 	/* unlink the object from the container, taking over ownership
 	 * of the reference the container had to the object */
-	callno_entry = ao2_find((trunk ? callno_pool_trunk : callno_pool), NULL, OBJ_POINTER | OBJ_UNLINK);
+	callno_entry = ao2_find((trunk ? callno_pool_trunk : callno_pool), NULL, OBJ_POINTER | OBJ_UNLINK | OBJ_CONTINUE);
 
 	if (callno_entry) {
 		callno_entry->validated = validated;
@@ -2515,7 +2510,7 @@ static int __find_callno(unsigned short callno, unsigned short dcallno, struct s
 			/* since we ran out of space, remove the peercnt
 			 * entry we added earlier */
 			peercnt_remove_by_addr(sin);
-			if (option_verbose > 4) ast_log(LOG_WARNING, "No more space\n");
+			ast_log(LOG_WARNING, "No more space\n");
 			return 0;
 		}
 		x = callno_entry->callno;
@@ -2895,7 +2890,7 @@ static void reload_firmware(int unload)
 				if (de->d_name[0] != '.') {
 					snprintf(fn, sizeof(fn), "%s/%s", dir, de->d_name);
 					if (!try_firmware(fn)) {
-						if (option_verbose > 4)
+						if (option_verbose > 1)
 							ast_verbose(VERBOSE_PREFIX_2 "Loaded firmware '%s'\n", de->d_name);
 					}
 				}
@@ -7305,8 +7300,7 @@ static int iax2_ack_registry(struct iax_ies *ies, struct sockaddr_in *sin, int c
 			else
 				snprintf(msgstatus, sizeof(msgstatus), " with no messages waiting\n");
 			snprintf(ourip, sizeof(ourip), "%s:%d", ast_inet_ntoa(reg->us.sin_addr), ntohs(reg->us.sin_port));
-			if (option_verbose > 4)
-				ast_verbose(VERBOSE_PREFIX_3 "Registered IAX2 to '%s', who sees us as %s%s\n", ast_inet_ntoa(sin->sin_addr), ourip, msgstatus);
+			ast_verbose(VERBOSE_PREFIX_3 "Registered IAX2 to '%s', who sees us as %s%s\n", ast_inet_ntoa(sin->sin_addr), ourip, msgstatus);
 		}
 		manager_event(EVENT_FLAG_SYSTEM, "Registry", "ChannelDriver: IAX2\r\nDomain: %s\r\nStatus: Registered\r\n", ast_inet_ntoa(sin->sin_addr));
 	}
@@ -7322,6 +7316,8 @@ static int iax2_register(char *value, int lineno)
 	char *porta;
 	char *stringp=NULL;
 	
+	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG:IAX2 register called with %s\n",value);
+
 	if (!value)
 		return -1;
 	ast_copy_string(copy, value, sizeof(copy));
@@ -7374,7 +7370,7 @@ static void register_peer_exten(struct iax2_peer *peer, int onoff)
 			if (onoff) {
 				if (!ast_exists_extension(NULL, regcontext, ext, 1, NULL))
 					ast_add_extension(regcontext, 1, ext, 1, NULL, NULL,
-							  "Noop", ast_strdup(peer->name), ast_free, "IAX2");
+							  "Noop", ast_strdup(peer->name), ast_free_ptr, "IAX2");
 			} else
 				ast_context_remove_extension(regcontext, ext, 1, NULL);
 		}
@@ -7691,6 +7687,7 @@ static int registry_rerequest(struct iax_ies *ies, int callno, struct sockaddr_i
 	char challenge[256] = "";
 	int res;
 	int authmethods = 0;
+	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG: registry rereqquest\n");
 	if (ies->authmethods)
 		authmethods = ies->authmethods;
 	if (ies->username)
@@ -8325,6 +8322,7 @@ static int socket_read(int *id, int fd, short events, void *cbdata)
 			memcpy(&thread->ffinfo.sin, &thread->iosin, sizeof(thread->ffinfo.sin));
 			thread->ffinfo.type = fh->type;
 			thread->ffinfo.csub = fh->csub;
+			AST_LIST_INSERT_HEAD(&active_list, thread, list);
 		}
 		AST_LIST_UNLOCK(&active_list);
 	}
@@ -8618,14 +8616,15 @@ static int socket_process(struct iax2_thread *thread)
 		if ((ntohs(mh->callno) & IAX_FLAG_FULL) && ((f.frametype == AST_FRAME_IAX) && (f.subclass == IAX_COMMAND_ACK))) {
 			check_dcallno = 1;
 		}
-
+/* WB6NIL-START */
 /* The following hack is horrible, awful, and something quite temporary done
 to allow older versions of app_rpt and chan_iax2 not to cause systems to
 blow up, and will be removed as soon as possible */
-#ifdef	BAD_RADIO_HACK
-		if ((f.frametype == AST_FRAME_TEXT) ||
-			(f.frametype == AST_FRAME_CONTROL)) check_dcallno = 0;
+#ifdef  BAD_RADIO_HACK
+                if ((f.frametype == AST_FRAME_TEXT) ||
+                        (f.frametype == AST_FRAME_CONTROL)) check_dcallno = 0;
 #endif
+/* WB6NIL-END */
 		if (!(fr->callno = find_callno(ntohs(mh->callno) & ~IAX_FLAG_FULL, dcallno, &sin, new, fd, check_dcallno))) {
 			if (f.frametype == AST_FRAME_IAX && f.subclass == IAX_COMMAND_NEW) {
 				send_apathetic_reply(1, ntohs(fh->scallno), &sin, IAX_COMMAND_REJECT, ntohl(fh->ts), fh->iseqno + 1, fd, NULL);
@@ -10067,11 +10066,6 @@ static void *iax2_process_thread(void *data)
 		if (thread->iostate == IAX_IOSTATE_IDLE)
 			continue;
 
-		/* Add ourselves to the active list now */
-		AST_LIST_LOCK(&active_list);
-		AST_LIST_INSERT_HEAD(&active_list, thread, list);
-		AST_LIST_UNLOCK(&active_list);
-
 		/* See what we need to do */
 		switch(thread->iostate) {
 		case IAX_IOSTATE_READY:
@@ -10094,7 +10088,9 @@ static void *iax2_process_thread(void *data)
 		thread->curfunc[0]='\0';
 #endif		
 
-		/* Now... remove ourselves from the active list, and return to the idle list */
+		/* The network thread added us to the active_thread list when we were given
+		 * frames to process, Now that we are done, we must remove ourselves from
+		 * the active list, and return to the idle list */
 		AST_LIST_LOCK(&active_list);
 		AST_LIST_REMOVE(&active_list, thread, list);
 		AST_LIST_UNLOCK(&active_list);
@@ -10128,6 +10124,7 @@ static int iax2_do_register(struct iax2_registry *reg)
 	struct iax_ie_data ied;
 	if (option_debug && iaxdebug)
 		ast_log(LOG_DEBUG, "Sending registration request for '%s'\n", reg->username);
+	if (option_verbose) ast_log(LOG_WARNING, "REGISTER-LOG: Sending registration request for '%s'\n", reg->username);
 
 	if (reg->dnsmgr && 
 	    ((reg->regstate == REG_STATE_TIMEOUT) || !reg->addr.sin_addr.s_addr)) {
@@ -10160,7 +10157,7 @@ static int iax2_do_register(struct iax2_registry *reg)
 			ast_log(LOG_DEBUG, "Allocate call number\n");
 		reg->callno = find_callno_locked(0, 0, &reg->addr, NEW_FORCE, defaultsockfd, 0);
 		if (reg->callno < 1) {
-			if (option_verbose > 4) ast_log(LOG_WARNING, "Unable to create call for registration\n");
+			ast_log(LOG_WARNING, "Unable to create call for registration\n");
 			return -1;
 		} else if (option_debug)
 			ast_log(LOG_DEBUG, "Registration created on call %d\n", reg->callno);
@@ -11429,10 +11426,8 @@ static int set_config(const char *config_file, int reload)
 	}
 	while(v) {
 		if (!strcasecmp(v->name, "bindport")){ 
-			if (reload) {
-				if (option_verbose > 4)
-					ast_log(LOG_WARNING, "Ignoring bindport on reload\n");
-			}
+			if (reload)
+				ast_log(LOG_NOTICE, "Ignoring bindport on reload\n");
 			else
 				portno = atoi(v->value);
 		} else if (!strcasecmp(v->name, "pingtime")) 
@@ -11491,8 +11486,7 @@ static int set_config(const char *config_file, int reload)
 			min_reg_expire = atoi(v->value);
 		else if (!strcasecmp(v->name, "bindaddr")) {
 			if (reload) {
-				if (option_verbose > 4) 
-					ast_log(LOG_WARNING, "Ignoring bindaddr on reload\n");
+				ast_log(LOG_NOTICE, "Ignoring bindaddr on reload\n");
 			} else {
 				if (!(ns = ast_netsock_bind(netsock, io, v->value, portno, tos, socket_read, NULL))) {
 					ast_log(LOG_WARNING, "Unable apply binding to '%s' at line %d\n", v->value, v->lineno);
@@ -12531,7 +12525,6 @@ static int __unload_module(void)
 
 	/* Make sure threads do not hold shared resources when they are canceled */
 	
-	still_running = 0;	
 	/* Grab the sched lock resource to keep it away from threads about to die */
 	/* Cancel the network thread, close the net socket */
 	if (netthreadid != AST_PTHREADT_NULL) {
@@ -12735,8 +12728,6 @@ static int load_module(void)
 	int res = 0;
 	int x;
 	struct iax2_registry *reg = NULL;
-	pthread_attr_t attr;
-	pthread_t mythread;
 
 	if (load_objects()) {
 		return AST_MODULE_LOAD_FAILURE;
@@ -12751,10 +12742,10 @@ static int load_module(void)
 	
 #ifdef HAVE_DAHDI
 #ifdef DAHDI_TIMERACK
-	timingfd = open("/dev/zap/timer", O_RDWR);
+	timingfd = open(DAHDI_FILE_TIMER, O_RDWR);
 	if (timingfd < 0)
 #endif
-		timingfd = open("/dev/zap/pseudo", O_RDWR);
+		timingfd = open(DAHDI_FILE_PSEUDO, O_RDWR);
 	if (timingfd < 0) 
 		ast_log(LOG_WARNING, "Unable to open IAX timing interface: %s\n", strerror(errno));
 #endif
@@ -12832,9 +12823,6 @@ static int load_module(void)
 
 	reload_firmware(0);
 	iax_provision_reload();
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);	
-	if (!res) res = ast_pthread_create(&mythread, &attr, reg_kludge_thread, NULL);
 	return res;
 }
 
