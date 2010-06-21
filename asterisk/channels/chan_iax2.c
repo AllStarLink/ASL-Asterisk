@@ -10124,7 +10124,7 @@ static int iax2_do_register(struct iax2_registry *reg)
 	struct iax_ie_data ied;
 	if (option_debug && iaxdebug)
 		ast_log(LOG_DEBUG, "Sending registration request for '%s'\n", reg->username);
-	if (option_verbose) ast_log(LOG_WARNING, "REGISTER-LOG: Sending registration request for '%s'\n", reg->username);
+	if (option_verbose > 4) ast_log(LOG_WARNING, "REGISTER-LOG: Sending registration request for '%s'\n", reg->username);
 
 	if (reg->dnsmgr && 
 	    ((reg->regstate == REG_STATE_TIMEOUT) || !reg->addr.sin_addr.s_addr)) {
