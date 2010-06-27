@@ -489,6 +489,7 @@ struct chan_simpleusb_pvt {
 
 	int	rxboostset;
 	int	rxmixerset;
+	float	rxvoiceadj;
 	int 	txmixaset;
 	int 	txmixbset;
 
@@ -505,6 +506,7 @@ struct chan_simpleusb_pvt {
 	struct {
 	    unsigned rxcapraw:1;
 	    unsigned txcapraw:1;
+	    unsigned measure_enabled:1;
 	}b;
 	unsigned short eeprom[EEPROM_PHYSICAL_LEN];
 	char eepromctl;
@@ -514,6 +516,12 @@ struct chan_simpleusb_pvt {
 	int readerrs;
 	char hasusb;
 	char usbass;
+	int32_t discfactor;
+	int32_t discounterl;
+	int32_t discounteru;
+	int16_t amax;
+	int16_t amin;
+	int16_t apeak;
 };
 
 static struct chan_simpleusb_pvt simpleusb_default = {
@@ -1230,6 +1238,7 @@ static void *hidthread(void *arg)
 		ast_mutex_lock(&o->eepromlock);
 		if (o->wanteeprom) o->eepromctl = 1;
 		ast_mutex_unlock(&o->eepromlock);
+		mixer_write(o);
                 o->hasusb = 1;
 		while((!o->stophid) && o->hasusb)
 		{
@@ -1269,6 +1278,7 @@ static void *hidthread(void *arg)
 							o->txmixaset = 	o->eeprom[EEPROM_TXMIXASET];
 							o->txmixbset = o->eeprom[EEPROM_TXMIXBSET];
 							ast_log(LOG_NOTICE,"EEPROM Loaded on channel %s\n",o->name);
+							mixer_write(o);
 						}
 					}
 					else
@@ -2019,6 +2029,53 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
                         p[i] = x;
                 }
         }
+        if (o->rxvoiceadj > 1.0) {  /* scale and clip values */
+                int i, x;
+		float f1;
+                int16_t *p = (int16_t *) f->data;
+
+                for (i = 0; i < f->samples; i++) {
+			f1 = (float)p[i] * o->rxvoiceadj;
+			x = (int)f1;
+                        if (x > 32767)
+                                x = 32767;
+                        else if (x < -32768)
+                                x = -32768;
+                        p[i] = x;
+                }
+        }
+	if (o->b.measure_enabled)
+	{
+		int i;
+		int32_t accum;
+                int16_t *p = (int16_t *) f->data;
+
+		for(i = 0; i < f->samples; i++)
+		{
+			accum = p[i];
+			if (accum > o->amax)
+			{
+				o->amax = accum;
+				o->discounteru = o->discfactor;
+			}
+			else if (--o->discounteru <= 0)
+			{
+				o->discounteru = o->discfactor;
+				o->amax = (int32_t)((o->amax * 32700) / 32768);
+			}
+			if (accum < o->amin)
+			{
+				o->amin = accum;
+				o->discounterl = o->discfactor;
+			}
+			else if (--o->discounterl <= 0)
+			{
+				o->discounterl = o->discfactor;
+				o->amin= (int32_t)((o->amin * 32700) / 32768);
+			}
+		}
+		o->apeak = (int32_t)(o->amax - o->amin) / 2;
+	}
         f->offset = AST_FRIENDLY_OFFSET;
         return f;
 }
@@ -2230,6 +2287,63 @@ static int console_unkey(int fd, int argc, char *argv[])
 	return RESULT_SUCCESS;
 }
 
+static int rad_rxwait(int fd,int ms)
+{
+fd_set fds;
+struct timeval tv;
+
+	FD_ZERO(&fds);
+	FD_SET(fd,&fds);
+	tv.tv_usec = ms * 1000;
+	tv.tv_sec = 0;
+	return(select(fd + 1,&fds,NULL,NULL,&tv));
+}
+
+static void tune_rxdisplay(int fd, struct chan_simpleusb_pvt *o)
+{
+	int j,waskeyed,meas,ncols = 75,wasverbose;
+	char str[256];
+
+	ast_cli(fd,"RX VOICE DISPLAY:\n");
+	ast_cli(fd,"                                 v -- 3KHz        v -- 5KHz\n");
+
+	o->b.measure_enabled = 1;
+	o->discfactor = 1000;
+	o->discounterl = o->discounteru = 0;
+	wasverbose = option_verbose;
+	option_verbose = 0;
+
+	waskeyed = !o->rxkeyed;
+	for(;;)
+	{
+		o->amax = o->amin = 0;
+		if (rad_rxwait(fd,100)) break;
+		if (o->rxkeyed != waskeyed)
+		{
+			for(j = 0; j < ncols; j++) str[j] = ' ';
+			str[j] = 0;
+			ast_cli(fd," %s \r",str);
+		}
+		waskeyed = o->rxkeyed;
+		if (!o->rxkeyed) {
+			ast_cli(fd,"\r");
+			continue;
+		}
+		meas = o->apeak;
+		for(j = 0; j < ncols; j++)
+		{
+			int thresh = (meas * ncols) / 16384;
+			if (j < thresh) str[j] = '=';
+			else if (j == thresh) str[j] = '>';
+			else str[j] = ' ';
+		}
+		str[j] = 0;
+		ast_cli(fd,"|%s|\r",str);
+	}
+	o->b.measure_enabled = 0;
+	option_verbose = wasverbose;
+}
+
 static int radio_tune(int fd, int argc, char *argv[])
 {
 	struct chan_simpleusb_pvt *o = find_desc(simpleusb_active);
@@ -2269,6 +2383,9 @@ static int radio_tune(int fd, int argc, char *argv[])
 			ast_cli(fd,"Changed setting on RX Channel to %d\n",o->rxmixerset);
 			mixer_write(o);
 		}
+	}
+	else if (!strncasecmp(argv[2],"rxd",3)) {
+		tune_rxdisplay(fd,o);
 	}
 	else if (!strcasecmp(argv[2],"txa")) {
 		i = 0;
@@ -2412,6 +2529,7 @@ radio tune 6 3000		measured tx value
 static char radio_tune_usage[] =
 	"Usage: susb tune <function>\n"
 	"       rx [newsetting]\n"
+	"       rxdisplay\n"
 	"       txa [newsetting]\n"
 	"       txb [newsetting]\n"
 	"       save (settings to tuning file)\n"
@@ -2522,14 +2640,20 @@ static void tune_write(struct chan_simpleusb_pvt *o)
 //
 static void mixer_write(struct chan_simpleusb_pvt *o)
 {
+	int x;
+	float f,f1;
+
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,0,0);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
 	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
 	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL,
 		make_spkr_playback_value(o,o->txmixaset),
 		make_spkr_playback_value(o,o->txmixbset));
-	setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,
-		o->rxmixerset * o->micmax / 1000,0);
+	x =  o->rxmixerset * o->micmax / 1000;
+	setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,x,0);
+	/* get interval step size */
+	f = 1000.0 / (float) o->micmax;
+	o->rxvoiceadj = 1.0 + (modff(((float) o->rxmixerset) / f,&f1) * .187962);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_BOOST,o->rxboostset,0);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_SW,1,0);
 }
