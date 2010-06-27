@@ -2304,6 +2304,9 @@ static void tune_rxdisplay(int fd, struct chan_simpleusb_pvt *o)
 	int j,waskeyed,meas,ncols = 75,wasverbose;
 	char str[256];
 
+	for(j = 0; j < ncols; j++) str[j] = ' ';
+	str[j] = 0;
+	ast_cli(fd," %s \r",str);
 	ast_cli(fd,"RX VOICE DISPLAY:\n");
 	ast_cli(fd,"                                 v -- 3KHz        v -- 5KHz\n");
 
