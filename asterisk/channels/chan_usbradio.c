@@ -1502,6 +1502,9 @@ static void *hidthread(void *arg)
 			ast_log(LOG_WARNING,"Loaded parameters from %s for device %s .\n",fname,o->name);
 		} else ast_log(LOG_WARNING,"File %s not found, device %s using default parameters.\n",fname,o->name);
 
+		mixer_write(o);
+		mult_set(o);    
+		set_txctcss_level(o);
 		ast_mutex_lock(&o->eepromlock);
 		if (o->wanteeprom) o->eepromctl = 1;
 		ast_mutex_unlock(&o->eepromlock);
@@ -1550,6 +1553,9 @@ static void *hidthread(void *arg)
 							o->txctcssadj = o->eeprom[EEPROM_TXCTCSSADJ];
 							o->rxsquelchadj = o->eeprom[EEPROM_RXSQUELCHADJ];
 							ast_log(LOG_NOTICE,"EEPROM Loaded on channel %s\n",o->name);
+							mixer_write(o);
+							mult_set(o);    
+							set_txctcss_level(o);
 						}
 					}
 					else

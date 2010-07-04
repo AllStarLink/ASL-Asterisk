@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.254 6/15/2010
+ *  version 0.255 7/3/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -391,7 +391,7 @@ enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	REMLONGSTATUS, LOGINREQ, SCAN, SCANSTAT, TUNE, SETREMOTE, TOPKEY,
 	TIMEOUT_WARNING, ACT_TIMEOUT_WARNING, LINKUNKEY, UNAUTHTX, PARROT,
 	STATS_TIME_LOCAL, VARCMD, LOCUNKEY, METER, USEROUT, PAGE,
-	STATS_GPS,STATS_GPS_LEGACY, MDC1200, LASTUSER, REMCOMPLETE};
+	STATS_GPS,STATS_GPS_LEGACY, MDC1200, LASTUSER, REMCOMPLETE, PFXTONE};
 
 
 enum {REM_SIMPLEX,REM_MINUS,REM_PLUS};
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.254 6/15/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.255 7/3/2010";
 
 static char *app = "Rpt";
 
@@ -1076,6 +1076,7 @@ static struct rpt
 		int dtmfkey;
 		char dias;
 		char *outstreamcmd;
+		char dopfxtone;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1840,7 +1841,8 @@ static struct telem_defaults tele_defs[] = {
 	{"remotetx","|t(2000,0,75,2048)(0,0,75,0)(1600,0,75,2048)"},
 	{"cmdmode","|t(900,904,200,2048)"},
 	{"functcomplete","|t(1000,0,100,2048)(0,0,100,0)(1000,0,100,2048)"},
-	{"remcomplete","|t(650,0,100,2048)(0,0,100,0)(650,0,100,2048)(0,0,100,0)(650,0,100,2048)"}
+	{"remcomplete","|t(650,0,100,2048)(0,0,100,0)(650,0,100,2048)(0,0,100,0)(650,0,100,2048)"},
+	{"pfxtone","|t(350,440,30000,3072)"}
 } ;
 
 static inline void goertzel_sample(goertzel_state_t *s, short sample)
@@ -4021,7 +4023,7 @@ int	nonlocals;
 		{
                         if ((tlist->mode == PLAYBACK) || 
 			    (tlist->mode == STATS_GPS_LEGACY) ||
-			      (tlist->mode == ID1) ||
+			      (tlist->mode == ID1) || 
 				(tlist->mode == TEST_TONE)) nonlocals++;
 			tlist = tlist->next;
 		}
@@ -4195,6 +4197,21 @@ static void birdbath(struct rpt *myrpt)
 	while(telem != &myrpt->tele)
 	{
 		if (telem->mode == PARROT) ast_softhangup(telem->chan,AST_SOFTHANGUP_DEV);
+		telem = telem->next;
+	}
+	rpt_mutex_unlock(&myrpt->lock);
+}
+
+static void cancel_pfxtone(struct rpt *myrpt)
+{
+	struct rpt_tele *telem;
+	if(debug > 2)
+		ast_log(LOG_NOTICE, "cancel_pfxfone!!");
+	rpt_mutex_lock(&myrpt->lock);
+	telem = myrpt->tele.next;
+	while(telem != &myrpt->tele)
+	{
+		if (telem->mode == PFXTONE) ast_softhangup(telem->chan,AST_SOFTHANGUP_DEV);
 		telem = telem->next;
 	}
 	rpt_mutex_unlock(&myrpt->lock);
@@ -4845,7 +4862,12 @@ unsigned int seq;
 	astr = ast_strdup(myrpt->p.statpost_program);
 	if ((!str) || (!astr)) return;
 	n = finddelim(astr,astrs,100);
-	if (n < 1) return;
+	if (n < 1)
+	{
+		ast_free(str);
+		ast_free(astr);
+		return;
+	}
 	ast_mutex_lock(&myrpt->statpost_lock);
 	seq = ++myrpt->statpost_seqno;
 	ast_mutex_unlock(&myrpt->statpost_lock);
@@ -5603,6 +5625,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		if (i) strncpy(rpt_vars[n].p.inxlat.funccharseq,strs[0],MAXXLAT - 1);
 		if (i > 1) strncpy(rpt_vars[n].p.inxlat.endcharseq,strs[1],MAXXLAT - 1);
 		if (i > 2) strncpy(rpt_vars[n].p.inxlat.passchars,strs[2],MAXXLAT - 1);
+		if (i > 3) rpt_vars[n].p.dopfxtone = ast_true(strs[3]);
 	}
 	val = (char *) ast_variable_retrieve(cfg,this,"outxlat");
 	if (val) {
@@ -7810,7 +7833,7 @@ struct	mdcparams *mdcp;
 	/* If the telemetry is only intended for a local audience, */
 	/* only connect the ID audio to the local tx conference so */
 	/* linked systems can't hear it */
-	ci.confno = (((mytele->mode == ID1) || (mytele->mode == PLAYBACK) || 
+	ci.confno = (((mytele->mode == ID1) || (mytele->mode == PLAYBACK) ||
 	    (mytele->mode == TEST_TONE) || (mytele->mode == STATS_GPS_LEGACY)) ? 
 		myrpt->conf : myrpt->txconf);
 	ci.confmode = ZT_CONF_CONFANN;
@@ -9208,6 +9231,9 @@ struct	mdcparams *mdcp;
 			}
 		myrpt->stopgen = 0;
 		if (myrpt->remote && (myrpt->remstopgen < 0)) myrpt->remstopgen = 1;
+		break;
+	    case PFXTONE:
+		res = telem_lookup(myrpt,mychannel, myrpt->name, "pfxtone");
 		break;
 	    default:
 	    	break;
@@ -16769,6 +16795,8 @@ char	cmd[MAXDTMF+1] = "",c;
 	{
 		if ((!myrpt->inpadtest)&&(c == myrpt->p.funcchar))
 		{
+			if (myrpt->p.dopfxtone && (myrpt->dtmfidx == -1))
+				rpt_telemetry(myrpt,PFXTONE,NULL);
 			myrpt->dtmfidx = 0;
 			myrpt->dtmfbuf[myrpt->dtmfidx] = 0;
 			rpt_mutex_unlock(&myrpt->lock);
@@ -16778,6 +16806,7 @@ char	cmd[MAXDTMF+1] = "",c;
 		else if (((myrpt->inpadtest)||(c != myrpt->p.endchar)) && (myrpt->dtmfidx >= 0))
 		{
 			time(&myrpt->dtmf_time);
+			cancel_pfxtone(myrpt);
 			
 			if (myrpt->dtmfidx < MAXDTMF)
 			{
@@ -18020,6 +18049,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		/* if DTMF timeout */
 		if ((!myrpt->cmdnode[0]) && (myrpt->dtmfidx >= 0) && ((myrpt->dtmf_time + DTMF_TIMEOUT) < t))
 		{
+			cancel_pfxtone(myrpt);
 			myrpt->inpadtest = 0;
 			myrpt->dtmfidx = -1;
 			myrpt->dtmfbuf[0] = 0;
