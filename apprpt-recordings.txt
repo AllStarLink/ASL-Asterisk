@@ -1,0 +1,237 @@
+Recordings for Asterisk/app_rpt version 0.255 7/3/2010
+
+act-timeout-warning
+warning, inactivity timeout in ...
+
+alllinksdisconnected
+all links disconnected.
+
+alllinksrestored
+all links restored.
+
+autopatch_on
+autopatch on
+
+callproceeding
+connecting.
+
+callterminated
+call terminated.
+
+connected
+connected
+
+connecting
+connecting
+
+connection_failed
+connection tailed
+
+down
+down
+
+fast
+fast
+
+frequency
+frequency ...
+
+functioncomplete
+--NON-VOICE-SOUND--
+
+goodafternoon
+good afternoon
+
+goodevening
+good evening
+
+goodmorning
+good morning
+
+hipwr
+high power
+
+in-call
+incoming call on ...
+
+invalid-freq
+invalid frequency
+
+keyedfor
+keyed for ...
+
+latitude
+latitude
+
+localmonitor
+local monitor
+
+login
+please log in to node ...
+
+longitude
+longitude
+
+lopwr
+low power
+
+macro_busy
+macro busy
+
+macro_notfound
+macro not found
+
+medpwr
+medium power
+
+memory_notfound
+memory not found
+
+minus
+minus
+
+monitor
+monitor
+
+node
+node
+
+off
+off
+
+on
+on
+
+plus
+plus
+
+quick
+quick
+
+remote_already
+remote already in this mode
+
+remote_busy
+remote busy
+
+remote_cmd
+--NON-VOICE-SOUND--
+
+remote_disc
+disconnected
+
+remote_go
+--NON-VOICE-SOUND--
+
+remote_monitor
+--NON-VOICE-SOUND--
+
+remote_notfound
+no such remote
+
+remote_tx
+--NON-VOICE-SOUND--
+
+repeat_only
+repeat only
+
+revpatch-intro
+Please hold for a few moments, and your call will be connected if
+there is someone there to answer. Thank you.
+
+revpatch-noanswer
+We're sorry, but no one was available to answer your call at this time.
+
+rxpl
+PL decode
+
+seconds
+seconds
+
+simplex
+simplex
+
+sitenorm
+site normal
+
+slow
+slow
+
+stop
+stop
+
+thetemperatureis
+the temperature is ...
+
+thetimeis
+the time is ...
+
+thevoltageis
+the voltage is ...
+
+thewindis
+the wind is ...
+
+timeout
+timeout
+
+timeout-warning
+warning, system timeout in ...
+
+tranceive
+transceive
+
+txpl
+PL encode
+
+unauthtx
+unauthorized transmit frequency
+
+unkeyedfor
+unkeyed for
+
+up
+up
+
+version
+version ...
+
+The following recordings are for the Allstar Network Telephone Portal:
+
+allstar1
+Welcome to the Allstar Network Telephone Portal.
+
+allstar2
+Please enter the number of the node that you wish to connect to,
+followed by the pound sign.
+
+allstar3
+I'm sorry. We seem to be having trouble. Please try your call again.
+
+allstar4
+I'm sorry. That selection was invalid.
+
+allstar5
+Press 1 for Node access, and 2 for Reverse Autopatch.
+
+allstar6
+I'm sorry, but that mode is not supported on this node.
+
+allstar7
+Please enter your Allstar User Portal Secure PIN Number.
+
+allstar8
+I'm sorry. That PIN number is invalid.
+
+allstar9
+Press 1 for voice-operated access, and 2 for function-operated access.
+
+allstar10
+Please wait a moment while you're being connected.
+
+allstar11
+Please wait until someone on the radio answers the call. Until then,
+you will be on hold. Thanks.
+
+allstar12
+I'm sorry, but no one answered your call. Please try again soon. Thank you.
