@@ -146,7 +146,6 @@ $(SOUNDS_DIR) $(MOH_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr:
 	mkdir -p $@
 
 install: $(SOUNDS_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr $(MOH_DIR) $(CORE_SOUND_TAGS) $(EXTRA_SOUND_TAGS) $(MOH_TAGS)
-	find $(SOUNDS_DIR) -depth -name '*.gsm' -exec rm {} \;
 
 uninstall:
 	rm -rf $(SOUNDS_DIR)
