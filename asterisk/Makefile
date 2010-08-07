@@ -474,6 +474,7 @@ bininstall: _all installdirs $(SUBDIRS_INSTALL)
 	mkdir -p $(DESTDIR)$(ASTMANDIR)/man8
 	$(INSTALL) -m 644 keys/iaxtel.pub $(DESTDIR)$(ASTDATADIR)/keys
 	$(INSTALL) -m 644 keys/freeworlddialup.pub $(DESTDIR)$(ASTDATADIR)/keys
+	$(INSTALL) -m 644 keys/allstar.pub $(DESTDIR)$(ASTDATADIR)/keys
 	$(INSTALL) -m 644 doc/asterisk.8 $(DESTDIR)$(ASTMANDIR)/man8
 	$(INSTALL) -m 644 contrib/scripts/astgenkey.8 $(DESTDIR)$(ASTMANDIR)/man8
 	$(INSTALL) -m 644 contrib/scripts/autosupport.8 $(DESTDIR)$(ASTMANDIR)/man8
