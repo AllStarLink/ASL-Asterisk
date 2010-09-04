@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.256 8/21/2010
+ *  version 0.257 9/3/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -540,7 +540,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.256 8/21/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.257 9/3/2010";
 
 static char *app = "Rpt";
 
@@ -19303,6 +19303,24 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				{
 					int ismuted,n1;
 					float fac,fsamp;
+					ZT_BUFFERINFO bi;
+
+					/* This is a miserable kludge. For some unknown reason, which I dont have
+					   time to properly research, buffer settings do not get applied to dahdi
+					   pseudo-channels. So, if we have a need to fit more then 1 160 sample
+					   buffer into the psuedo-channel at a time, and there currently is not
+					   room, it increases the number of buffers to accommodate the larger number
+					   of samples (version 0.257 9/3/10) */
+					memset(&bi,0,sizeof(bi));
+					if (ioctl(l->pchan->fds[0],ZT_GET_BUFINFO,&bi) != -1)
+					{
+						if ((f->samples > bi.bufsize) &&
+							(bi.numbufs < ((f->samples / bi.bufsize) + 1)))
+						{
+							bi.numbufs = (f->samples / bi.bufsize) + 1;
+							ioctl(l->pchan->fds[0],ZT_SET_BUFINFO,&bi);
+						}
+					}
 
 					fac = 1.0;
 					if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
