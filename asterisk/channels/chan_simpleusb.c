@@ -146,6 +146,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	EEPROM_RXSQUELCHADJ	16
 
 #define	NTAPS 31
+#define	NTAPS_PL 3
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
 static struct ast_jb_conf default_jbconf =
@@ -476,6 +477,9 @@ struct chan_simpleusb_pvt {
 	short	flpt[NTAPS + 1];
 	short	flpr[NTAPS + 1];
 
+	float	hpx[NTAPS_PL + 1];
+	float	hpy[NTAPS_PL + 1];
+
 	char    rxcpusaver;
 	char    txcpusaver;
 
@@ -522,6 +526,7 @@ struct chan_simpleusb_pvt {
 	int16_t amax;
 	int16_t amin;
 	int16_t apeak;
+	int plfilter;
 };
 
 static struct chan_simpleusb_pvt simpleusb_default = {
@@ -611,6 +616,21 @@ static short lpass(short input,short *z)
     }
 
     return(accum >> 15);
+}
+
+/* IIR 3 pole High pass filter, 300 Hz corner with 0.5 db ripple */
+
+static short hpass(short input,float *xv,float *yv)
+{
+#define GAIN   1.280673652e+00
+
+        xv[0] = xv[1]; xv[1] = xv[2]; xv[2] = xv[3];
+        xv[3] = ((float)input) / GAIN;
+        yv[0] = yv[1]; yv[1] = yv[2]; yv[2] = yv[3];
+        yv[3] =   (xv[3] - xv[0]) + 3 * (xv[1] - xv[2])
+                     + (  0.5999763543 * yv[0]) + ( -2.1305919790 * yv[1])
+                     + (  2.5161440793 * yv[2]);
+        return((int)yv[3]);
 }
 
 /* lround for uClibc
@@ -1839,7 +1859,8 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
                 return f;
         }
 	#if DEBUG_CAPTURES == 1
-	if (o->b.rxcapraw && frxcapraw) fwrite(o->simpleusb_read_buf,1,res,frxcapraw);
+	if (o->b.rxcapraw && frxcapraw) 
+		fwrite(o->simpleusb_read_buf + o->readpos,1,res,frxcapraw);
 	#endif
 
         if (o->readerrs) ast_log(LOG_WARNING,"Nope, USB read channel [%s] wasn't stuck after all.\n",o->name);
@@ -1986,7 +2007,10 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		sp++;
 		(void)lpass(*sp++,o->flpr);
 		sp++;
-		*sp1++ = lpass(*sp++,o->flpr);
+		if (o->plfilter)
+			*sp1++ = hpass(lpass(*sp++,o->flpr),o->hpx,o->hpy);
+		else
+			*sp1++ = lpass(*sp++,o->flpr);
 		sp++;
 	}			
 	f->offset = AST_FRIENDLY_OFFSET;
@@ -2718,6 +2742,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_UINT("hdwtype",o->hdwtype)
 			M_UINT("eeprom",o->wanteeprom)
 			M_UINT("duplex",o->radioduplex)
+ 			M_BOOL("plfilter",o->plfilter)
 			M_END(;
 			);
 	}
