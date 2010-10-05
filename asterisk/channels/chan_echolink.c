@@ -1323,6 +1323,7 @@ static struct ast_frame  *el_xread(struct ast_channel *ast)
 {
 	struct el_pvt *p = ast->tech_pvt;
   
+	memset(&p->fr,0,sizeof(struct ast_frame));
         p->fr.frametype = 0;
         p->fr.subclass = 0;
         p->fr.datalen = 0;
@@ -1384,6 +1385,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			if (p->rxkey) p->rxkey = 1;
 		} else {		
 			if (!p->rxkey) {
+				memset(&fr,0,sizeof(fr));
 				fr.datalen = 0;
 				fr.samples = 0;
 				fr.frametype = AST_FRAME_CONTROL;
@@ -1402,6 +1404,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			memcpy(buf + AST_FRIENDLY_OFFSET,qpast->buf,GSM_FRAME_SIZE);
 			ast_free(qpast);
 
+			memset(&fr,0,sizeof(fr));
 			fr.datalen = GSM_FRAME_SIZE;
 			fr.samples = 160;
 			fr.frametype = AST_FRAME_VOICE;
@@ -1436,12 +1439,12 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 						x = 1;
 					}
 				}
-				ast_frfree(f1);
 			} 
 			if (!x) ast_queue_frame(ast,&fr);
 		}
 	}
 	if (p->rxkey == 1) {
+		memset(&fr,0,sizeof(fr));
 		fr.datalen = 0;
 		fr.samples = 0;
 		fr.frametype = AST_FRAME_CONTROL;
@@ -2331,6 +2334,7 @@ static void *el_reader(void *data)
 						if (!(*found_key)->p->firstheard)
 						{
 							(*found_key)->p->firstheard = 1;
+							memset(&fr,0,sizeof(fr));
 							fr.datalen = 0;
 							fr.samples = 0;
 							fr.frametype = AST_FRAME_CONTROL;
@@ -2454,6 +2458,7 @@ static void *el_reader(void *data)
 						if (!(*found_key)->p->firstheard)
 						{
 							(*found_key)->p->firstheard = 1;
+							memset(&fr,0,sizeof(fr));
 							fr.datalen = 0;
 							fr.samples = 0;
 							fr.frametype = AST_FRAME_CONTROL;
