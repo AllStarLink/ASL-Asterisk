@@ -3,9 +3,11 @@
  *   Decodes a specific format of 1200 BPS MSK data burst
  *   from input audio samples.
  *
+ * 4 October 2010 - fixed for 64-bit
+ *
  * Author: Matthew Kaufman (matthew@eeph.com)
  *
- * Copyright (c) 2005  Matthew Kaufman  All rights reserved.
+ * Copyright (c) 2005, 2010  Matthew Kaufman  All rights reserved.
  * 
  *  This file is part of Matthew Kaufman's MDC Encoder/Decoder Library
  *
@@ -69,9 +71,9 @@ static void _clearbits(mdc_decoder_t *decoder, int x)
 		decoder->bits[x][i] = 0;
 }
 
-static unsigned long _flip(unsigned long crc, int bitnum)
+static unsigned int _flip(unsigned int crc, int bitnum)
 {
-	unsigned long i, j=1, crcout=0;
+	unsigned int i, j=1, crcout=0;
 
 	for (i=1<<(bitnum-1); i; i>>=1)
 	{
@@ -82,15 +84,16 @@ static unsigned long _flip(unsigned long crc, int bitnum)
 	return (crcout);
 }
 
-static unsigned long docrc(unsigned char* p, int len) {
+static unsigned int docrc(unsigned char* p, int len) {
 
-	int i, j, c;
-	unsigned long bit;
-	unsigned long crc = 0x0000;
+	int i, j;
+	unsigned int c;
+	unsigned int bit;
+	unsigned int crc = 0x0000;
 
 	for (i=0; i<len; i++)
 	{
-		c = (unsigned long)*p++;
+		c = (unsigned int)*p++;
 		c = _flip(c, 8);
 
 		for (j=0x80; j; j>>=1)
@@ -118,8 +121,8 @@ static void _procbits(mdc_decoder_t *decoder, int x)
 	int lbc = 0;
 	int i, j, k;
 	unsigned char data[14];
-	unsigned long ccrc;
-	unsigned long rcrc;
+	unsigned int ccrc;
+	unsigned int rcrc;
 
 	for(i=0; i<16; i++)
 	{
@@ -203,7 +206,7 @@ static void _procbits(mdc_decoder_t *decoder, int x)
 }
 
 
-static int _onebits(long n)
+static int _onebits(unsigned int n)
 {
 	int i=0;
 	while(n)

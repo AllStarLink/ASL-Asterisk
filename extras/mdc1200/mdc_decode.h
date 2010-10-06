@@ -2,9 +2,11 @@
  * mdc_decode.h
  *  header for mdc_decode.c
  *
+ * 4 October 2010 - fixed for 64-bit
+ *
  * Author: Matthew Kaufman (matthew@eeph.com)
  *
- * Copyright (c) 2005  Matthew Kaufman  All rights reserved.
+ * Copyright (c) 2005, 2010  Matthew Kaufman  All rights reserved.
  * 
  *  This file is part of Matthew Kaufman's MDC Encoder/Decoder Library
  *
@@ -51,8 +53,8 @@ typedef struct {
 	int lastv;
 	int zc[MDC_ND];
 	int xorb[MDC_ND];
-	long synclow[MDC_ND];
-	long synchigh[MDC_ND];
+	unsigned int synclow[MDC_ND];
+	unsigned int synchigh[MDC_ND];
 	int shstate[MDC_ND];
 	int shcount[MDC_ND];
 	int bits[MDC_ND][112];
