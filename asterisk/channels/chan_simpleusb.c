@@ -47,6 +47,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <fcntl.h>
 #include <sys/time.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <errno.h>
 #include <usb.h>
 #include <alsa/asoundlib.h>
@@ -54,6 +55,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define DEBUG_CAPTURES	 		1
 
 #define RX_CAP_RAW_FILE			"/tmp/rx_cap_in.pcm"
+#define RX_CAP_COOKED_FILE		"/tmp/rx_cap_8k_in.pcm"
 #define TX_CAP_RAW_FILE			"/tmp/tx_cap_in.pcm"
 
 #define	MIXER_PARAM_MIC_PLAYBACK_SW "Mic Playback Switch"
@@ -146,7 +148,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	EEPROM_RXSQUELCHADJ	16
 
 #define	NTAPS 31
-#define	NTAPS_PL 3
+#define	NTAPS_PL 6
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
 static struct ast_jb_conf default_jbconf =
@@ -318,6 +320,7 @@ static char *config = "simpleusb.conf";	/* default config file */
 static char *config1 = "simpleusb_tune_%s.conf";    /* tune config file */
 
 static FILE *frxcapraw = NULL;
+static FILE *frxcapcooked = NULL;
 static FILE *ftxcapraw = NULL;
 
 static char *usb_device_list = NULL;
@@ -480,6 +483,8 @@ struct chan_simpleusb_pvt {
 	float	hpx[NTAPS_PL + 1];
 	float	hpy[NTAPS_PL + 1];
 
+	int32_t	destate;
+
 	char    rxcpusaver;
 	char    txcpusaver;
 
@@ -527,6 +532,7 @@ struct chan_simpleusb_pvt {
 	int16_t amin;
 	int16_t apeak;
 	int plfilter;
+	int deemphasis;
 };
 
 static struct chan_simpleusb_pvt simpleusb_default = {
@@ -618,9 +624,44 @@ static short lpass(short input,short *z)
     return(accum >> 15);
 }
 
+/* IIR 6 pole High pass filter, 300 Hz corner with 0.5 db ripple */
+
+#define GAIN1   1.745882764e+00
+
+static int16_t hpass6(int16_t input,float *xv,float *yv)
+{
+        xv[0] = xv[1]; xv[1] = xv[2]; xv[2] = xv[3]; xv[3] = xv[4]; xv[4] = xv[5]; xv[5] = xv[6];
+        xv[6] = ((float)input) / GAIN1;
+        yv[0] = yv[1]; yv[1] = yv[2]; yv[2] = yv[3]; yv[3] = yv[4]; yv[4] = yv[5]; yv[5] = yv[6];
+        yv[6] =   (xv[0] + xv[6]) - 6 * (xv[1] + xv[5]) + 15 * (xv[2] + xv[4])
+                     - 20 * xv[3]
+                     + ( -0.3491861578 * yv[0]) + (  2.3932556573 * yv[1])
+                     + ( -6.9905126572 * yv[2]) + ( 11.0685981760 * yv[3])
+                     + ( -9.9896695552 * yv[4]) + (  4.8664511065 * yv[5]);
+        return((int)yv[6]);
+}
+
+
+/* Perform standard 6db/octave de-emphasis */
+static int16_t deemph(int16_t input,int32_t *state)
+{
+
+int16_t coeff00 = 6878;
+int16_t coeff01 = 25889;
+int32_t accum; /* 32 bit accumulator */
+
+        accum = input;
+        /* YES! The parenthesis REALLY do help on this one! */
+        *state = accum + ((*state * coeff01) >> 15);
+        accum = (*state * coeff00);
+        /* adjust gain so that we have unity @ 1KHz */
+        return((accum >> 14) + (accum >> 15));
+}
+
+
 /* IIR 3 pole High pass filter, 300 Hz corner with 0.5 db ripple */
 
-static short hpass(short input,float *xv,float *yv)
+static int16_t hpass(int16_t input,float *xv,float *yv)
 {
 #define GAIN   1.280673652e+00
 
@@ -2007,12 +2048,22 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		sp++;
 		(void)lpass(*sp++,o->flpr);
 		sp++;
-		if (o->plfilter)
+		if (o->plfilter && o->deemphasis)
+			*sp1++ = hpass6(deemph(lpass(*sp++,o->flpr),&o->destate),
+				o->hpx,o->hpy);
+		else if (o->deemphasis)
+			*sp1++ = deemph(lpass(*sp++,o->flpr),o->destate);
+		else if (o->plfilter)
 			*sp1++ = hpass(lpass(*sp++,o->flpr),o->hpx,o->hpy);
 		else
 			*sp1++ = lpass(*sp++,o->flpr);
 		sp++;
 	}			
+	#if DEBUG_CAPTURES == 1
+	if (o->b.rxcapraw && frxcapcooked) 
+		fwrite(o->simpleusb_read_frame_buf + AST_FRIENDLY_OFFSET
+			,sizeof(short),FRAME_SIZE,frxcapcooked);
+	#endif
 	f->offset = AST_FRIENDLY_OFFSET;
         o->readpos = 0;		       /* reset read pointer for next frame */
         if (c->_state != AST_STATE_UP)  /* drop data if frame is not up */
@@ -2451,11 +2502,13 @@ static int radio_tune(int fd, int argc, char *argv[])
 		ast_cli(fd,"File capture (raw)   was rx=%d tx=%d and now off.\n",o->b.rxcapraw,o->b.txcapraw);
 		o->b.rxcapraw=o->b.txcapraw=0;
 		if (frxcapraw) { fclose(frxcapraw); frxcapraw = NULL; }
+		if (frxcapcooked) { fclose(frxcapcooked); frxcapcooked = NULL; }
 		if (ftxcapraw) { fclose(ftxcapraw); ftxcapraw = NULL; }
 	}
 	else if (!strcasecmp(argv[2],"rxcap")) 
 	{
 		if (!frxcapraw) frxcapraw = fopen(RX_CAP_RAW_FILE,"w");
+		if (!frxcapcooked) frxcapcooked = fopen(RX_CAP_COOKED_FILE,"w");
 		ast_cli(fd,"cap rx raw on.\n");
 		o->b.rxcapraw=1;
 	}
@@ -2743,6 +2796,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_UINT("eeprom",o->wanteeprom)
 			M_UINT("duplex",o->radioduplex)
  			M_BOOL("plfilter",o->plfilter)
+ 			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;
 			);
 	}
@@ -3005,6 +3059,7 @@ static int unload_module(void)
 
 		#if DEBUG_CAPTURES == 1
 		if (frxcapraw) { fclose(frxcapraw); frxcapraw = NULL; }
+		if (frxcapcooked) { fclose(frxcapraw); frxcapcooked = NULL; }
 		if (ftxcapraw) { fclose(ftxcapraw); ftxcapraw = NULL; }
 		#endif
 
