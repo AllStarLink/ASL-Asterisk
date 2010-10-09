@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.257 9/3/2010
+ *  version 0.258 10/9/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -197,6 +197,37 @@
  * 2 - Normal mode
  * 3 - Normal except no main repeat audio.
  * 4 - Normal except no main repeat audio during autopatch only
+ *
+ *
+ * "events" subsystem:
+ *
+ * in the "events" section of the rpt.conf file (if any), the user may 
+ * specify actions to take place when ceratin events occur. 
+ *
+ * It is implemented as acripting, based heavily upon expression evaluation built
+ * into Asterisk. Each line of the section contains an action, a type, and variable info.
+ * Each line either sets a variable, or executes an action based on a transitional state
+ * of a specified (already defined) variable (such as going true, going false, no change, 
+ * or getting set initially).
+ *
+ * The syntax for each line is as follows:
+ *
+ * action-spec = action|type|var-spec
+ *
+ * if action is 'V' (for "setting variable"), then action-spec is the variable being set.
+ * if action is 'G' (for "setting global variable"), then action-spec is the global variable being set.
+ * if action is 'F' (for "function"), then action-spec is a DTMF function to be executed (if result is 1).
+ * if action is 'C' (for "rpt command"), then action-spec is a raw rpt command to be executed (if result is 1).
+ * if action is 'S' (for "shell command"), then action-spec is a shell command to be executed (if result is 1).
+ *
+ * if type is 'E' (for "evaluate statement" (or perhaps "equals") ) then the var-spec is a full statement containing
+ *    expressions, variables and operators per the expression evaluation built into Asterisk.
+ * if type is 'T' (for "going True"), var-spec is a single (already-defined) variable name, and the result will be 1
+ *    if the varible has just gone from 0 to 1.
+ * if type is 'F' (for "going False"), var-spec is a single (already-defined) variable name, and the result will be 1
+ *    if the varible has just gone from 1 to 0.
+ * if type is 'N' (for "no change"), var-spec is a single (already-defined) variable name, and the result will be 1
+ *    if the varible has not changed.
  *
 */
 
@@ -540,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.257 9/3/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.258 10/9/2010";
 
 static char *app = "Rpt";
 
@@ -1077,6 +1108,7 @@ static struct rpt
 		char dias;
 		char *outstreamcmd;
 		char dopfxtone;
+		char *events;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -4741,7 +4773,7 @@ static int send_link_pl(struct rpt *myrpt, char *txt)
 }
 
 /* must be called locked */
-static void __mklinklist(struct rpt *myrpt, struct rpt_link *mylink, char *buf)
+static void __mklinklist(struct rpt *myrpt, struct rpt_link *mylink, char *buf,int flag)
 {
 struct rpt_link *l;
 char mode;
@@ -4771,13 +4803,22 @@ int	i,spos;
 		/* add nodes into buffer */
 		if (l->linklist[0])
 		{
-			snprintf(buf + spos,MAXLINKLIST - spos,
-				"%c%s,%s",mode,l->name,l->linklist);
+			if (flag)
+				snprintf(buf + spos,MAXLINKLIST - spos,
+					"%s%c%c,%s",l->name,mode,(l->lastrx1) ? 'K' : 'U',
+						l->linklist);
+			else
+				snprintf(buf + spos,MAXLINKLIST - spos,
+					"%c%s,%s",mode,l->name,l->linklist);
 		}
 		else /* if no nodes, add this node into buffer */
 		{
-			snprintf(buf + spos,MAXLINKLIST - spos,
-				"%c%s",mode,l->name);
+			if (flag)
+				snprintf(buf + spos,MAXLINKLIST - spos,
+					"%s%c%c",l->name,mode,(l->lastrx1) ? 'K' : 'U');
+			else
+				snprintf(buf + spos,MAXLINKLIST - spos,
+					"%c%s",mode,l->name);
 		}
 		/* if we are in tranceive mode, let all modes stand */
 		if (mode == 'T') continue;
@@ -4806,6 +4847,253 @@ struct rpt_link *l;
 	myrpt->lastgpstime = 0;
 	return;
 }
+
+static void rpt_event_process(struct rpt *myrpt)
+{
+char	*myval,*argv[5],*cmpvar,*var,*var1,*cmd,c;
+char	buf[1000],valbuf[500],action;
+int	i,l,argc,varp,var1p,thisAction,maxActions;
+struct ast_variable *v;
+struct ast_var_t *newvariable;
+
+	for (v = ast_variable_browse(myrpt->cfg, myrpt->p.events); v; v = v->next)
+	{
+		/* make a local copy of the value of this entry */
+		myval = ast_strdupa(v->value);
+		/* separate out specification into pipe-delimited fields */
+		argc = ast_app_separate_args(myval, '|', argv, sizeof(argv) / sizeof(argv[0]));
+		if (argc < 1) continue;
+		if (argc != 3)
+		{
+			ast_log(LOG_ERROR,"event exec item malformed: %s\n",v->value);
+			continue;
+		}
+		action = toupper(*argv[0]);
+		if (!strchr("VGFCS",action))
+		{
+			ast_log(LOG_ERROR,"Unrecognized event action (%c) in exec item malformed: %s\n",action,v->value);
+			continue;
+		}
+		/* start indicating no command to do */
+		cmd = NULL;
+		c = toupper(*argv[1]);
+		if (c == 'E') /* if to merely evaluate the statement */
+		{
+			if (!strncasecmp(v->name,"RPT",3))
+			{
+				ast_log(LOG_ERROR,"%s is not a valid name for an event variable!!!!\n",v->name);
+				continue;
+			}
+			if (!strncasecmp(v->name,"XX_",3))
+			{
+				ast_log(LOG_ERROR,"%s is not a valid name for an event variable!!!!\n",v->name);
+				continue;
+			}
+			/* see if this var exists yet */
+			myval = (char *) pbx_builtin_getvar_helper(myrpt->rxchannel,v->name);
+			/* if not, set it to zero, in case of the value being self-referenced */
+			if (!myval) pbx_builtin_setvar_helper(myrpt->rxchannel,v->name,"0");
+			snprintf(valbuf,sizeof(valbuf) - 1,"$[ %s ]",argv[2]);
+			buf[0] = 0;
+			pbx_substitute_variables_helper(myrpt->rxchannel,
+				valbuf,buf,sizeof(buf) - 1);
+			if (pbx_checkcondition(buf)) cmd = "TRUE";
+		}
+		else
+		{
+			var = (char *) pbx_builtin_getvar_helper(myrpt->rxchannel,argv[2]);
+			if (!var)
+			{
+				ast_log(LOG_ERROR,"Event variable %s not found\n",argv[2]);
+				continue;
+			}
+			/* set to 1 if var is true */
+			varp = ((pbx_checkcondition(var) > 0));
+			for(i = 0; (!cmd) && (c = *(argv[1] + i)); i++)
+			{
+				cmpvar = (char *)ast_malloc(strlen(argv[2]) + 10);
+				if (!cmpvar)
+				{
+					ast_log(LOG_NOTICE,"Cannot malloc()\n");
+					return;
+				}
+				sprintf(cmpvar,"XX_%s",argv[2]);
+				var1 = (char *) pbx_builtin_getvar_helper(myrpt->rxchannel,cmpvar);
+				var1p = !varp; /* start with it being opposite */
+				if (var1)
+				{
+					/* set to 1 if var is true */
+					var1p = ((pbx_checkcondition(var1) > 0));
+				}
+				pbx_builtin_setvar_helper(myrpt->rxchannel,cmpvar,var);
+				ast_free(cmpvar);			
+				c = toupper(c);
+				if (!strchr("TFNI",c))
+				{
+					ast_log(LOG_ERROR,"Unrecognized event type (%c) in exec item malformed: %s\n",c,v->value);
+					continue;
+				}
+				switch(c)
+				{
+				    case 'N': /* if no change */
+					if (var1 && (varp == var1p)) cmd = v->name;
+					break;
+				    case 'I': /* if didnt exist (initial state) */
+					if (!var1) cmd = v->name;
+					break;
+				    case 'F': /* transition to false */
+					if ((var1p == 1) && (varp == 0)) cmd = v->name;
+					break;
+				    case 'T': /* transition to true */
+					if ((var1p == 0) && (varp == 1)) cmd = v->name;
+					break;
+				}
+			}
+		}
+		if (action == 'V') /* set a variable */
+		{
+			pbx_builtin_setvar_helper(myrpt->rxchannel,v->name,(cmd) ? "1" : "0");
+			continue;
+		}
+		if (action == 'G') /* set a global variable */
+		{
+			pbx_builtin_setvar_helper(NULL,v->name,(cmd) ? "1" : "0");
+			continue;
+		}
+		/* if not command to execute, go to next one */
+		if (!cmd) continue;
+		if (action == 'F') /* excecute a function */
+		{
+			rpt_mutex_lock(&myrpt->lock);
+			if ((MAXMACRO - strlen(myrpt->macrobuf)) >= strlen(cmd))
+			{
+				if (option_verbose > 2)
+					ast_verbose(VERBOSE_PREFIX_3 "Event on node %s doing macro %s for condition %s\n",
+						myrpt->name,cmd,v->value);
+				myrpt->macrotimer = MACROTIME;
+				strncat(myrpt->macrobuf,cmd,MAXMACRO - 1);
+			}
+			else
+			{
+				ast_log(LOG_NOTICE,"Could not execute event %s for %s: Macro buffer overflow\n",cmd,argv[1]);
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+		}
+		if (action == 'C') /* excecute a command */
+		{
+
+			/* make a local copy of the value of this entry */
+			myval = ast_strdupa(cmd);
+			/* separate out specification into pipe-delimited fields */
+			argc = ast_app_separate_args(myval, ',', argv, sizeof(argv) / sizeof(argv[0]));
+			if (argc != 3)
+			{
+				ast_log(LOG_ERROR,"event exec rpt command item malformed: %s\n",cmd);
+				continue;
+			}
+			/* Look up the action */
+			l = strlen(argv[0]);
+			thisAction = -1;
+			maxActions = sizeof(function_table)/sizeof(struct function_table_tag);
+			for(i = 0 ; i < maxActions; i++)
+			{
+				if(!strncasecmp(argv[0], function_table[i].action, l))
+				{
+					thisAction = i;
+					break;
+				} 
+			} 
+			if (thisAction < 0)
+			{
+				ast_log(LOG_ERROR, "Unknown action name %s.\n", argv[0]);
+				continue;
+			} 
+			if (option_verbose > 2)
+				ast_verbose(VERBOSE_PREFIX_3 "Event on node %s doing rpt command %s for condition %s\n",
+					myrpt->name,cmd,v->value);
+			rpt_mutex_lock(&myrpt->lock);
+			if (myrpt->cmdAction.state == CMD_STATE_IDLE)
+			{
+				myrpt->cmdAction.state = CMD_STATE_BUSY;
+				myrpt->cmdAction.functionNumber = thisAction;
+				strncpy(myrpt->cmdAction.param, argv[1], MAXDTMF);
+				strncpy(myrpt->cmdAction.digits, argv[2], MAXDTMF);
+				myrpt->cmdAction.command_source = SOURCE_RPT;
+				myrpt->cmdAction.state = CMD_STATE_READY;
+			} 
+			else
+			{
+				ast_log(LOG_NOTICE,"Could not execute event %s for %s: Command buffer in use\n",cmd,argv[1]);
+			}
+			rpt_mutex_unlock(&myrpt->lock);
+			continue;
+		}
+		if (action == 'S') /* excecute a shell command */
+		{
+			char *cp;
+
+			if (option_verbose > 2)
+				ast_verbose(VERBOSE_PREFIX_3 "Event on node %s doing shell command %s for condition %s\n",
+					myrpt->name,cmd,v->value);
+			cp = ast_malloc(strlen(cmd) + 10);
+			if (!cp)
+			{
+				ast_log(LOG_NOTICE,"Unable to alloc");
+				return;
+			}
+			memset(cp,0,strlen(cmd) + 10);
+			sprintf(cp,"%s &",cmd);
+			ast_safe_system(cp);
+			free(cp);
+			continue;
+		}
+	}
+	if (option_verbose < 5) return;
+	i = 0;
+	ast_verbose("Node Variable dump for node %s:\n",myrpt->name);
+	ast_channel_lock(myrpt->rxchannel);
+	AST_LIST_TRAVERSE (&myrpt->rxchannel->varshead, newvariable, entries) {
+		i++;
+		ast_verbose("   %s=%s\n", ast_var_name(newvariable), ast_var_value(newvariable));
+	}
+	ast_channel_unlock(myrpt->rxchannel);
+	ast_verbose("    -- %d variables\n", i);
+	return;
+}
+
+
+static void rpt_update_boolean(struct rpt *myrpt,char *varname, int newval)
+{
+char	buf[10];
+
+	if ((!varname) || (!*varname)) return;
+	buf[0] = '0';
+	buf[1] = 0;
+	if (newval > 0) buf[0] = '1';
+	pbx_builtin_setvar_helper(myrpt->rxchannel, varname, buf);
+	if (newval >= 0) rpt_event_process(myrpt);
+	return;
+}
+
+static void rpt_update_links(struct rpt *myrpt)
+{
+char buf[MAXLINKLIST],obuf[MAXLINKLIST + 20],*strs[MAXLINKLIST];
+int	n;
+
+	ast_mutex_lock(&myrpt->lock);
+	__mklinklist(myrpt,NULL,buf,1);
+	ast_mutex_unlock(&myrpt->lock);
+	/* parse em */
+	n = finddelim(buf,strs,MAXLINKLIST);
+	if (n) snprintf(obuf,sizeof(obuf) - 1,"%d,%s",n,buf);
+	else strcpy(obuf,"0");
+	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_LINKS",obuf);
+	snprintf(obuf,sizeof(obuf) - 1,"%d",n);
+	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_NUMLINKS",obuf);
+	rpt_event_process(myrpt);
+	return;
+}
+
 static void dodispgm(struct rpt *myrpt,char *them)
 {
 char 	*a;
@@ -5548,6 +5836,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.dtmfkeys = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"outstreamcmd");
 	rpt_vars[n].p.outstreamcmd = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"events");
+	if (!val) val = "events";
+	rpt_vars[n].p.events = val;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -6273,7 +6564,7 @@ static int rpt_do_nodes(int fd, int argc, char *argv[])
 			/* Make a copy of all stat variables while locked */
 			myrpt = &rpt_vars[i];
 			rpt_mutex_lock(&myrpt->lock); /* LOCK */
-			__mklinklist(myrpt,NULL,lbuf);
+			__mklinklist(myrpt,NULL,lbuf,0);
 			rpt_mutex_unlock(&myrpt->lock); /* UNLOCK */
 			/* parse em */
 			ns = finddelim(lbuf,strs,MAXLINKLIST);
@@ -6516,7 +6807,7 @@ static int rpt_do_sendall(int fd, int argc, char *argv[])
 
 
 /*
-	the convention is that macros in the data from the rpt() application
+	the convention is that macros in the data from the rpt( application
 	are all at the end of the data, separated by the | and start with a *
 	when put into the macro buffer, the characters have their high bit
 	set so the macro processor knows they came from the application data
@@ -8872,7 +9163,7 @@ struct	mdcparams *mdcp;
 	    case FULLSTATUS:
 		rpt_mutex_lock(&myrpt->lock);
 		/* get all the nodes */
-		__mklinklist(myrpt,NULL,lbuf);
+		__mklinklist(myrpt,NULL,lbuf,0);
 		rpt_mutex_unlock(&myrpt->lock);
 		/* parse em */
 		ns = finddelim(lbuf,strs,MAXLINKLIST);
@@ -9494,7 +9785,7 @@ struct rpt_link *l;
 			rpt_mutex_lock(&myrpt->lock);
 			sprintf(mystr,"STATUS,%s,%d",myrpt->name,myrpt->callmode);
 			/* get all the nodes */
-			__mklinklist(myrpt,NULL,lbuf);
+			__mklinklist(myrpt,NULL,lbuf,0);
 			rpt_mutex_unlock(&myrpt->lock);
 			/* parse em */
 			ns = finddelim(lbuf,strs,MAXLINKLIST);
@@ -10114,7 +10405,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	}
 	else
 	{
-		__mklinklist(myrpt,NULL,lstr);
+		__mklinklist(myrpt,NULL,lstr,0);
 		rpt_mutex_unlock(&myrpt->lock);
 		n = finddelim(lstr,strs,MAXLINKLIST);
 		for(i = 0; i < n; i++)
@@ -17586,6 +17877,10 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	lastmyrx = 0;
 	myfirst = 0;
 	myrpt->lastitx = -1;
+	rpt_update_boolean(myrpt,"RPT_RXKEYED",-1);
+	rpt_update_boolean(myrpt,"RPT_TXKEYED",-1);
+	rpt_update_boolean(myrpt,"RPT_NUMLINKS",-1);
+	rpt_update_boolean(myrpt,"RPT_LINKS",-1);
 	myrpt->ready = 1;	
 	while (ms >= 0)
 	{
@@ -18008,6 +18303,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						donodelog(myrpt,"TXKEY,MAIN");
 				} else donodelog(myrpt,"TXKEY,MAIN");
 			}
+			rpt_update_boolean(myrpt,"RPT_TXKEYED",1);
 			lasttx = 1;
 			myrpt->txkeyed = 1;
 			time(&myrpt->lasttxkeyedtime);
@@ -18037,6 +18333,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			}
 			rpt_mutex_lock(&myrpt->lock);
 			donodelog(myrpt,"TXUNKEY,MAIN");
+			rpt_update_boolean(myrpt,"RPT_TXKEYED",0);
 			if(myrpt->p.s[myrpt->p.sysstate_cur].sleepena){
 				if(myrpt->sleepreq){
 					myrpt->sleeptimer = 0;
@@ -18238,6 +18535,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						donodelog(myrpt,str);
 					}
 					l->lastrx1 = 0;
+					rpt_update_links(myrpt);
 					if(myrpt->p.duplex) 
 						rpt_telemetry(myrpt,LINKUNKEY,l);
 				}
@@ -18289,7 +18587,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				lf.samples = 0;
 				l->linklisttimer = LINKLISTTIME;
 				strcpy(lstr,"L ");
-				__mklinklist(myrpt,l,lstr + 2);
+				__mklinklist(myrpt,l,lstr + 2,0);
 				if (l->chan)
 				{
 					lf.datalen = strlen(lstr) + 1;
@@ -18330,6 +18628,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						if(myrpt->p.duplex) 
 							rpt_telemetry(myrpt,LINKUNKEY,l);
 						l->lastrx1 = 0;
+						rpt_update_links(myrpt);
 					}
 				}
 			}
@@ -18404,6 +18703,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						rpt_telemetry(myrpt,CONNFAIL,l);
 					else rpt_telemetry(myrpt,REMDISC,l);
 				}
+				if (l->hasconnected) rpt_update_links(myrpt);
 				if (myrpt->p.archivedir)
 				{
 					char str[100];
@@ -18411,7 +18711,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					if (!l->hasconnected)
 						sprintf(str,"LINKFAIL,%s",l->name);
 					else
+					{
 						sprintf(str,"LINKDISC,%s",l->name);
+					}
 					donodelog(myrpt,str);
 				}
 				/* hang-up on call to device */
@@ -18432,6 +18734,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		{
 	            	rpt_telemetry(myrpt,REMDISC,l);
 		}
+		rpt_update_links(myrpt);
 		if (myrpt->p.archivedir)
 		{
 			char str[100];
@@ -18934,6 +19237,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						}
 						donodelog(myrpt,"RXKEY,MAIN");
 					}
+					rpt_update_boolean(myrpt,"RPT_RXKEYED",1);
 					myrpt->localoverride = 0;
 					if (f->datalen && f->data)
 					{
@@ -19034,6 +19338,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						donodelog(myrpt,"RXUNKEY,MAIN");
 					}
+					rpt_update_boolean(myrpt,"RPT_RXKEYED",0);
 				}
 			}
 			ast_frfree(f);
@@ -19277,6 +19582,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					if (!l->hasconnected)
 						rpt_telemetry(myrpt,CONNFAIL,l);
 					else if (l->disced != 2) rpt_telemetry(myrpt,REMDISC,l);
+					if (l->hasconnected) rpt_update_links(myrpt);
 					if (myrpt->p.archivedir)
 					{
 						char str[100];
@@ -19358,6 +19664,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 								donodelog(myrpt,str);
 							}
 							l->lastrx1 = 1;
+							rpt_update_links(myrpt);
 						}
 					}
 					if (((l->phonemode) && (l->phonevox)) || 
@@ -19512,6 +19819,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 									sprintf(str,"LINKMONITOR,%s",l->name);
 								donodelog(myrpt,str);
 							}
+							rpt_update_links(myrpt);
 							doconpgm(myrpt,l->name);
 						}		
 						else
@@ -19533,6 +19841,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 								donodelog(myrpt,str);
 							}
 							l->lastrx1 = 1;
+							rpt_update_links(myrpt);
 						}
 					}
 					/* if RX un-key */
@@ -19552,6 +19861,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 								donodelog(myrpt,str);
 							}
 							l->lastrx1 = 0;
+							rpt_update_links(myrpt);
 							if(myrpt->p.duplex)
 								rpt_telemetry(myrpt,LINKUNKEY,l);
 						}
@@ -19606,6 +19916,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						if (!l->hasconnected)
 							rpt_telemetry(myrpt,CONNFAIL,l);
 						else if (l->disced != 2) rpt_telemetry(myrpt,REMDISC,l);
+						if (l->hasconnected) rpt_update_links(myrpt);
 						if (myrpt->p.archivedir)
 						{
 							char str[100];
@@ -20902,6 +21213,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				if (!phone_mode) send_newkey(chan);
 			}
 		}
+		rpt_update_links(myrpt);
 		if (myrpt->p.archivedir)
 		{
 			char str[100];
@@ -21301,6 +21613,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			b1 = b;
 		sprintf(mycmd,"CONNECT,%s",b1);
 		donodelog(myrpt,mycmd);
+		rpt_update_links(myrpt);
 		doconpgm(myrpt,b1);
 	}
 	myrpt->loginuser[0] = 0;
@@ -21572,6 +21885,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 					{
 						ast_indicate(myrpt->txchannel,AST_CONTROL_RADIO_KEY);
 					}
+					rpt_update_boolean(myrpt,"RPT_TXKEYED",1);
 					if (myrpt->p.archivedir) donodelog(myrpt,"TXKEY");
 				}
 			}
@@ -21597,6 +21911,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				ast_indicate(myrpt->txchannel,AST_CONTROL_RADIO_UNKEY);
 			}
 			if (myrpt->p.archivedir) donodelog(myrpt,"TXUNKEY");
+			rpt_update_boolean(myrpt,"RPT_TXKEYED",0);
 		}
 		if (myrpt->hfscanmode){
 			myrpt->scantimer -= elap;
@@ -21915,6 +22230,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_shrink_phone_number(b1);
 		}
 		sprintf(mycmd,"DISCONNECT,%s",b1);
+		rpt_update_links(myrpt);
 		if (myrpt->p.archivedir) donodelog(myrpt,mycmd);
 		dodispgm(myrpt,b1);
 	}
