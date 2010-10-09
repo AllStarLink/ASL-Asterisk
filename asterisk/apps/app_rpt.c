@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.258 10/9/2010
+ *  version 0.259 10/9/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -131,6 +131,8 @@
  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
+ *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
+ *
  *
  * ilink cmds:
  *
@@ -571,7 +573,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.258 10/9/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.259 10/9/2010";
 
 static char *app = "Rpt";
 
@@ -4942,7 +4944,7 @@ struct ast_var_t *newvariable;
 					if (!var1) cmd = v->name;
 					break;
 				    case 'F': /* transition to false */
-					if ((var1p == 1) && (varp == 0)) cmd = v->name;
+					if (var1 && (var1p == 1) && (varp == 0)) cmd = v->name;
 					break;
 				    case 'T': /* transition to true */
 					if ((var1p == 0) && (varp == 1)) cmd = v->name;
@@ -4984,9 +4986,9 @@ struct ast_var_t *newvariable;
 
 			/* make a local copy of the value of this entry */
 			myval = ast_strdupa(cmd);
-			/* separate out specification into pipe-delimited fields */
+			/* separate out specification into comma-delimited fields */
 			argc = ast_app_separate_args(myval, ',', argv, sizeof(argv) / sizeof(argv[0]));
-			if (argc != 3)
+			if (argc < 1)
 			{
 				ast_log(LOG_ERROR,"event exec rpt command item malformed: %s\n",cmd);
 				continue;
@@ -5016,8 +5018,12 @@ struct ast_var_t *newvariable;
 			{
 				myrpt->cmdAction.state = CMD_STATE_BUSY;
 				myrpt->cmdAction.functionNumber = thisAction;
-				strncpy(myrpt->cmdAction.param, argv[1], MAXDTMF);
-				strncpy(myrpt->cmdAction.digits, argv[2], MAXDTMF);
+				myrpt->cmdAction.param[0] = 0;
+				if (argc > 1)
+					strncpy(myrpt->cmdAction.param, argv[1], MAXDTMF);
+				myrpt->cmdAction.digits[0] = 0;
+				if (argc > 2)
+					strncpy(myrpt->cmdAction.digits, argv[2], MAXDTMF);
 				myrpt->cmdAction.command_source = SOURCE_RPT;
 				myrpt->cmdAction.state = CMD_STATE_READY;
 			} 
@@ -11762,6 +11768,21 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
 			return DC_COMPLETE;
 #endif
+		case 61: /* send GPIO change */
+		case 62: /* same, without function complete (quietly, oooooooh baby!) */
+			if (argc < 1) break;
+			/* ignore if not a USB channel */
+			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
+			/* go thru all the specs */
+			for(i = 1; i < argc; i++)
+			{
+				if (sscanf(argv[i],"GPIO%d=%d",&j,&k) < 2) continue;
+				sprintf(string,"GPIO %d %d",j,k);
+				ast_sendtext(myrpt->rxchannel,string);
+			}
+			if (myatoi(argv[0]) == 61) rpt_telemetry(myrpt,COMPLETE,NULL);
+			return DC_COMPLETE;
 	}	
 	return DC_INDETERMINATE;
 }
@@ -19339,6 +19360,23 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						donodelog(myrpt,"RXUNKEY,MAIN");
 					}
 					rpt_update_boolean(myrpt,"RPT_RXKEYED",0);
+				}
+			}
+			else if (f->frametype == AST_FRAME_TEXT) /* if a message from a USB device */
+			{
+				char buf[100];
+				int j;
+
+				/* if is a USB device */
+				if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
+				    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))
+				{
+					/* if message parsable */
+					if (sscanf(f->data,"GPIO%d %d",&i,&j) >= 2)
+					{
+						sprintf(buf,"RPT_URI_GPIO%d",i);
+						rpt_update_boolean(myrpt,buf,j);
+					}
 				}
 			}
 			ast_frfree(f);

@@ -224,6 +224,9 @@ START_CONFIG
 
 	; rxondelay=0		  ; number of 20ms intervals to hold off receiver turn-on indication
 
+
+	; gpioX=in		; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
+
     ;------------------------------ JITTER BUFFER CONFIGURATION --------------------------
     ; jbenable = yes              ; Enables the use of a jitterbuffer on the receiving side of an
                                   ; USBRADIO channel. Defaults to "no". An enabled jitterbuffer will
@@ -621,6 +624,11 @@ struct chan_usbradio_pvt {
 	int		hid_io_ctcss_loc; 	
 	int		hid_io_ptt; 		
 	int		hid_gpio_loc; 		
+	int32_t		hid_gpio_val;
+	int32_t		valid_gpios; 		
+	int32_t		gpio_set;
+	int32_t		last_gpios_in;
+	int		had_gpios_in;
 
 	struct {
 	    unsigned rxcapraw:1;
@@ -649,6 +657,9 @@ struct chan_usbradio_pvt {
 	char usbass;
 	struct timeval tonetime;
 	int toneflag;
+	int32_t cur_gpios;
+	char *gpios[32];
+	ast_mutex_t usblock;
 };
 
 // maw add additional defaults !!!
@@ -1167,9 +1178,16 @@ char *s = usb_device_list;
 
 static int	hidhdwconfig(struct chan_usbradio_pvt *o)
 {
+int	i;
+
+/* NOTE: on the CM-108AH, GPIO2 is *not* a REAL GPIO.. it was re-purposed
+   as a signal called "HOOK" which can not even be read from the HID.
+   Apparently, in a REAL CM-108, GPIO really works as a GPIO */
+
+
 	if(o->hdwtype==1)	  //sphusb
 	{
-		o->hid_gpio_ctl		=  0x08;	/* set GPIO4 to output mode */
+		o->hid_gpio_ctl		=  8;	/* set GPIO4 to output mode */
 		o->hid_gpio_ctl_loc	=  2; 	/* For CTL of GPIO */
 		o->hid_io_cor		=  4;	/* GPIO3 is COR */
 		o->hid_io_cor_loc	=  1;	/* GPIO3 is COR */
@@ -1177,17 +1195,19 @@ static int	hidhdwconfig(struct chan_usbradio_pvt *o)
 		o->hid_io_ctcss_loc =  1;	/* is GPIO 2 */
 		o->hid_io_ptt 		=  8;  	/* GPIO 4 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
+		o->valid_gpios		=  1;   /* for GPIO 1 */
 	}
 	else if(o->hdwtype==0)	//dudeusb
 	{
-		o->hid_gpio_ctl		=  0x0c;	/* set GPIO 3 & 4 to output mode */
+		o->hid_gpio_ctl		=  4;	/* set GPIO 3 to output mode */
 		o->hid_gpio_ctl_loc	=  2; 	/* For CTL of GPIO */
 		o->hid_io_cor		=  2;	/* VOLD DN is COR */
 		o->hid_io_cor_loc	=  0;	/* VOL DN COR */
-		o->hid_io_ctcss		=  2;  	/* GPIO 2 is External CTCSS */
-		o->hid_io_ctcss_loc =  1;	/* is GPIO 2 */
+		o->hid_io_ctcss		=  2;  	/* VOL UP is External CTCSS */
+		o->hid_io_ctcss_loc 	=  0;	/* VOL UP CTCSS */
 		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
+		o->valid_gpios		=  11;   /* for GPIO 1,2,4 */
 	}
 	else if(o->hdwtype==3)	// custom version
 	{
@@ -1199,8 +1219,31 @@ static int	hidhdwconfig(struct chan_usbradio_pvt *o)
 		o->hid_io_ctcss_loc =  1;	/* is GPIO 2 */
 		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
+		o->valid_gpios		=  1;   /* for GPIO 1 */
 	}
-
+	o->hid_gpio_val = 0;
+	for(i = 0; i < 32; i++)
+	{
+		/* skip if this one not specified */
+		if (!o->gpios[i]) continue;
+		/* skip if not out */
+		if (strncasecmp(o->gpios[i],"out",3)) continue;
+		/* skip if PTT */
+		if (i & o->hid_io_ptt)
+		{
+			ast_log(LOG_ERROR,"You can't specify gpio%d, since its the PTT!!!\n",i + 1);
+			continue;
+		}
+		/* skip if not a valid GPIO */
+		if (!(o->valid_gpios & (1 << i)))
+		{
+			ast_log(LOG_ERROR,"You can't specify gpio%d, it is not valid in this configuration\n",i + 1);
+			continue;
+		}
+		o->hid_gpio_ctl |= (1 << i); /* set this one to output, also */
+		/* if default value is 1, set it */
+		if (!strcasecmp(o->gpios[i],"out1")) o->hid_gpio_val |= (1 << i);
+	}
 	return 0;
 }
 /*
@@ -1250,7 +1293,7 @@ static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed;
 	char lastrx, txtmp, fname[200];
-	int i,res;
+	int i,j,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
 	struct chan_usbradio_pvt *o = (struct chan_usbradio_pvt *) arg,*ao,**aop;
@@ -1353,8 +1396,8 @@ static void *hidthread(void *arg)
 			}
 		}
 		memset(buf,0,sizeof(buf));
-		buf[2] = o->hid_gpio_ctl;
-		buf[1] = 0;
+		buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
+		buf[o->hid_gpio_loc] = o->hid_gpio_val;
 		hid_set_outputs(usb_handle,buf);
 		memcpy(bufsave,buf,sizeof(buf));
 		if (pipe(o->pttkick) == -1)
@@ -1510,6 +1553,7 @@ static void *hidthread(void *arg)
 		ast_mutex_unlock(&o->eepromlock);
                 setformat(o,O_RDWR);
                 o->hasusb = 1;
+		o->had_gpios_in = 0;
  		// popen 
 		while((!o->stophid) && o->hasusb)
 		{
@@ -1573,6 +1617,7 @@ static void *hidthread(void *arg)
 				o->eepromctl = 0;
 				ast_mutex_unlock(&o->eepromlock);
 			}
+			ast_mutex_lock(&o->usblock);
 			buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 			hid_get_inputs(usb_handle,buf);
 			keyed = !(buf[o->hid_io_cor_loc] & o->hid_io_cor);
@@ -1580,6 +1625,55 @@ static void *hidthread(void *arg)
 			{
 				if(o->debuglevel)printf("chan_usbradio() hidthread: update rxhidsq = %d\n",keyed);
 				o->rxhidsq=keyed;
+			}
+			j = buf[o->hid_gpio_loc]; /* get the GPIO info */
+			for(i = 0; i < 32; i++)
+			{
+				/* if a valid input bit, dont clear it */
+				if ((o->gpios[i]) && (!strcasecmp(o->gpios[i],"in")) &&
+					(o->valid_gpios & (1 << i))) continue;
+				j &= ~(1 << i); /* clear the bit, since its not an input */
+			}
+			if ((!o->had_gpios_in) || (o->last_gpios_in != j))
+			{
+				char buf1[100];
+				struct ast_frame fr;
+
+				for(i = 0; i < 32; i++)
+				{
+					/* skip if not specified */
+					if (!o->gpios[i]) continue;
+					/* skip if not input */
+					if (strcasecmp(o->gpios[i],"in")) continue;
+					/* skip if not a valid GPIO */
+					if (!(o->valid_gpios & (1 << i))) continue;
+					/* if bit has changed, or never reported */
+					if ((!o->had_gpios_in) || ((o->last_gpios_in & (1 << i)) != (j & (1 << i))))
+					{
+						sprintf(buf1,"GPIO%d %d\n",i + 1,(j & (1 << i)) ? 1 : 0);
+						memset(&fr,0,sizeof(fr));
+						fr.data =  buf1;
+						fr.datalen = strlen(buf1);
+						fr.samples = 0;
+						fr.frametype = AST_FRAME_TEXT;
+						fr.subclass = 0;
+						fr.src = "chan_usbradio";
+						fr.offset = 0;
+						fr.mallocd=0;
+						fr.delivery.tv_sec = 0;
+						fr.delivery.tv_usec = 0;
+						ast_queue_frame(o->owner,&fr);
+					}
+				}
+				o->had_gpios_in = 1;
+				o->last_gpios_in = j;
+			}
+			if (o->gpio_set)
+			{
+				o->gpio_set = 0;
+				buf[o->hid_gpio_loc] = o->hid_gpio_val;
+				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
+				hid_set_outputs(usb_handle,buf);
 			}
 
 			/* if change in tx state as controlled by xpmr */
@@ -1589,36 +1683,44 @@ static void *hidthread(void *arg)
 			{
 				o->pmrChan->txPttHid=o->lasttx = txtmp;
 				if(o->debuglevel)printf("hidthread: tx set to %d\n",txtmp);
-				buf[o->hid_gpio_loc] = 0;
+				o->hid_gpio_val &= ~o->hid_io_ptt;
 				if (!o->invertptt)
 				{
-					if (txtmp) buf[o->hid_gpio_loc] = o->hid_io_ptt;
+					if (txtmp) buf[o->hid_gpio_loc] = o->hid_gpio_val |= o->hid_io_ptt;
 				}
 				else
 				{
-					if (!txtmp) buf[o->hid_gpio_loc] = o->hid_io_ptt;
+					if (!txtmp) buf[o->hid_gpio_loc] = o->hid_gpio_val |= o->hid_io_ptt;
 				}
+				buf[o->hid_gpio_loc] = o->hid_gpio_val;
 				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 				memcpy(bufsave,buf,sizeof(buf));
 				hid_set_outputs(usb_handle,buf);
 			}
 			time(&o->lasthidtime);
+			ast_mutex_unlock(&o->usblock);
 		}
 		txtmp=o->pmrChan->txPttOut = 0;
 		o->lasttx = 0;
-		buf[o->hid_gpio_loc] = 0;
-		if (o->invertptt) buf[o->hid_gpio_loc] = o->hid_io_ptt;
+		ast_mutex_lock(&o->usblock);
+		o->hid_gpio_val = ~o->hid_io_ptt;
+		if (o->invertptt) o->hid_gpio_val |= o->hid_io_ptt;
+		buf[o->hid_gpio_loc] = o->hid_gpio_val;
 		buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 		hid_set_outputs(usb_handle,buf);
+		ast_mutex_unlock(&o->usblock);
 	}
 	txtmp=o->pmrChan->txPttOut = 0;
 	o->lasttx = 0;
         if (usb_handle)
         {
-                buf[o->hid_gpio_loc] = 0;
-                if (o->invertptt) buf[o->hid_gpio_loc] = o->hid_io_ptt;
-                buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
-                hid_set_outputs(usb_handle,buf);
+		ast_mutex_lock(&o->usblock);
+		o->hid_gpio_val = ~o->hid_io_ptt;
+		if (o->invertptt) o->hid_gpio_val |= o->hid_io_ptt;
+		buf[o->hid_gpio_loc] = o->hid_gpio_val;
+		buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
+		hid_set_outputs(usb_handle,buf);
+		ast_mutex_lock(&o->usblock);
         }
         pthread_exit(0);
 }
@@ -1980,7 +2082,7 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 
 	cnt=sscanf(text,"%s %s %s %s %s %c",cmd,rxs,txs,rxpl,txpl,&pwr);
 
-	if (strcmp(cmd,"SETCHAN")==0)
+    if (strcmp(cmd,"SETCHAN")==0)
     { 
 		u8 chan;
 		chan=strtod(rxs,NULL);
@@ -2006,6 +2108,25 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 		o->pmrChan->b.txCtcssOff=!x;
         if(o->debuglevel) ast_log(LOG_NOTICE,"parse usbradio TXCTCSS cmd: %s\n",text);
 	return 0;		
+    }
+
+    if (strcmp(cmd,"GPIO")==0)
+    {
+	int i,j;
+
+	cnt=sscanf(text,"%s %d %d",cmd,&i,&j);
+	if (cnt < 3) return 0;
+	if ((i < 1) || (i > 32)) return 0;
+	i--;
+	/* skip if not valid */
+	if (!(o->valid_gpios & (1 << i))) return 0;
+	ast_mutex_lock(&o->usblock);
+	o->hid_gpio_val &= ~(1 << i);
+	if (j) o->hid_gpio_val |= 1 << i;
+	o->gpio_set = 1;
+	ast_mutex_unlock(&o->usblock);
+	kickptt(o);
+	return 0;
     }
 
     if (cnt < 6)
@@ -2752,6 +2873,7 @@ static struct ast_channel *usbradio_new(struct chan_usbradio_pvt *o, char *ext, 
 	o->owner = c;
 	o->echoq.q_forw = o->echoq.q_back = &o->echoq;
 	ast_mutex_init(&o->echolock);
+	ast_mutex_init(&o->usblock);
 	ast_module_ref(ast_module_info->self);
 	o->echomax = DEFAULT_ECHO_MAX;
 	o->echomode = 0;
@@ -4444,15 +4566,16 @@ static int usbhider(struct chan_usbradio_pvt *o, int opt)
 	{
 		o->pmrChan->txPttHid=o->lasttx = txtmp;
 		if(o->debuglevel)printf("usbhid: tx set to %d\n",txtmp);
-		buf[o->hid_gpio_loc] = 0;
+		o->hid_gpio_val &= ~o->hid_io_ptt;
 		if (!o->invertptt)
 		{
-			if (txtmp) buf[o->hid_gpio_loc] = o->hid_io_ptt;
+			if (txtmp) o->hid_gpio_val |= o->hid_io_ptt;
 		}
 		else
 		{
-			if (!txtmp) buf[o->hid_gpio_loc] = o->hid_io_ptt;
+			if (!txtmp) o->hid_gpio_val |= o->hid_io_ptt;
 		}
+		buf[o->hid_gpio_loc] = o->hid_gpio_val;
 		buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 		hid_set_outputs(o->usb_handle,buf);
 	}
@@ -4651,7 +4774,8 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 	struct ast_variable *v;
 	struct chan_usbradio_pvt *o;
 	struct ast_config *cfg1;
-	char fname[200];
+	char fname[200],buf[100];
+	int i;
 #ifdef	NEW_ASTERISK
 	struct ast_flags zeroflag = {0};
 #endif
@@ -4745,7 +4869,12 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_UINT("rxondelay",o->rxondelay);
 			M_UINT("area",o->area)
 			M_STR("ukey",o->ukey)
-			M_END(;
+			M_END(;			
+			for(i = 0; i < 32; i++)
+			{
+				sprintf(buf,"gpio%d",i + 1);
+				if (!strcmp(v->name,buf)) o->gpios[i] = strdup(v->value);
+			}
 			);
 	}
 
