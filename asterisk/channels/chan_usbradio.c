@@ -1181,7 +1181,7 @@ static int	hidhdwconfig(struct chan_usbradio_pvt *o)
 int	i;
 
 /* NOTE: on the CM-108AH, GPIO2 is *not* a REAL GPIO.. it was re-purposed
-   as a signal called "HOOK" which can not even be read from the HID.
+   as a signal called "HOOK" which can only be read from the HID.
    Apparently, in a REAL CM-108, GPIO really works as a GPIO */
 
 
@@ -1203,7 +1203,7 @@ int	i;
 		o->hid_gpio_ctl_loc	=  2; 	/* For CTL of GPIO */
 		o->hid_io_cor		=  2;	/* VOLD DN is COR */
 		o->hid_io_cor_loc	=  0;	/* VOL DN COR */
-		o->hid_io_ctcss		=  2;  	/* VOL UP is External CTCSS */
+		o->hid_io_ctcss		=  1;  	/* VOL UP is External CTCSS */
 		o->hid_io_ctcss_loc 	=  0;	/* VOL UP CTCSS */
 		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
@@ -1627,6 +1627,14 @@ static void *hidthread(void *arg)
 				o->rxhidsq=keyed;
 			}
 			j = buf[o->hid_gpio_loc]; /* get the GPIO info */
+			/* if is a CM108AH, map the "HOOK" bit (which used to
+			   be GPIO2 in the CM108 into the GPIO position */
+			if (o->devtype == C108AH_PRODUCT_ID)
+			{
+				j |= 2;  /* set GPIO2 bit */
+				/* if HOOK is asserted, clear GPIO bit */
+				if (buf[o->hid_io_cor_loc] & 0x10) j &= ~2;
+			}
 			for(i = 0; i < 32; i++)
 			{
 				/* if a valid input bit, dont clear it */
