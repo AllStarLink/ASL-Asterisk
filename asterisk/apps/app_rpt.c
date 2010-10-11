@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.259 10/9/2010
+ *  version 0.260 10/11/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -573,7 +573,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.259 10/9/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.260 10/11/2010";
 
 static char *app = "Rpt";
 
@@ -626,6 +626,8 @@ static char *descrip =
 "            user on the phone when this mode is selected. Note: If your\n"
 "            radio system is full-duplex, we recommend using either P or D\n"
 "            modes as they provide more flexibility.\n"
+"\n"
+"        V - Set Asterisk channel variable for specified node ( e.g. rpt(2000|V|foo=bar) ).\n"
 "\n"
 "        q - Query Status. Sets channel variables and returns + 101 in plan.\n"
 "\n"
@@ -1723,6 +1725,8 @@ static int rpt_do_sendtext(int fd, int argc, char *argv[]);
 static int rpt_do_fun(int fd, int argc, char *argv[]);
 static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
+static int rpt_do_setvar(int fd, int argc, char *argv[]);
+static int rpt_do_showvars(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
 "Usage: rpt debug level {0-7}\n"
@@ -1783,8 +1787,16 @@ static char fun_usage[] =
 "       Send a DTMF function to a node\n";
 
 static char cmd_usage[] =
-"Usage: rpt cmd <nodename> <cmd-name> <cmd-index> <cmd-args.\n"
+"Usage: rpt cmd <nodename> <cmd-name> <cmd-index> <cmd-args>\n"
 "       Send a command to a node.\n        i.e. rpt cmd 2000 ilink 3 2001\n";
+
+static char setvar_usage[] =
+"Usage: rpt setvar <nodename> <name=value> [<name=value>...]\n"
+"       Set an Asterisk channel variable for a node.\nNote: variable names are case-sensitive.\n";
+
+static char showvars_usage[] =
+"Usage: rpt showvars <nodename>\n"
+"       Display all the Asterisk channel variables for a node.\n";
 
 #ifndef	NEW_ASTERISK
 
@@ -1854,6 +1866,14 @@ static struct ast_cli_entry  cli_fun1 =
 static struct ast_cli_entry  cli_cmd =
         { { "rpt", "cmd" }, rpt_do_cmd,
 		"Execute a DTMF function", cmd_usage };
+
+static struct ast_cli_entry  cli_setvar =
+        { { "rpt", "setvar" }, rpt_do_setvar,
+		"Set an Asterisk channel variable", setvar_usage };
+
+static struct ast_cli_entry  cli_showvars =
+        { { "rpt", "showvars" }, rpt_do_showvars,
+		"Display Asterisk channel variables", showvars_usage };
 
 #endif
 
@@ -6930,6 +6950,77 @@ static int rpt_do_cmd(int fd, int argc, char *argv[])
 	return (busy ? RESULT_FAILURE : RESULT_SUCCESS);
 } /* rpt_do_cmd() */
 
+/*
+* set a node's main channel variable from the command line 
+*/
+static int rpt_do_setvar(int fd, int argc, char *argv[])
+{
+	char *name, *value;
+	int i,x,thisRpt = -1;
+
+	if (argc < 4) return RESULT_SHOWUSAGE;
+	for(i = 0; i < nrpts; i++)
+	{
+		if(!strcmp(argv[2], rpt_vars[i].name))
+		{
+			thisRpt = i;
+			break;
+		} 
+	} 
+
+	if (thisRpt < 0)
+	{
+		ast_cli(fd, "Unknown node number %s.\n", argv[2]);
+		return RESULT_FAILURE;
+	} 
+	
+	for (x = 3; x < argc; x++) {
+		name = argv[x];
+		if ((value = strchr(name, '='))) {
+			*value++ = '\0';
+			pbx_builtin_setvar_helper(rpt_vars[thisRpt].rxchannel, name, value);
+		} else
+			ast_log(LOG_WARNING, "Ignoring entry '%s' with no = \n", name);
+	}
+	return(0);
+}
+
+/*
+* Display a node's main channel variables from the command line 
+*/
+static int rpt_do_showvars(int fd, int argc, char *argv[])
+{
+	int i,thisRpt = -1;
+	struct ast_var_t *newvariable;
+
+	if (argc != 3) return RESULT_SHOWUSAGE;
+	for(i = 0; i < nrpts; i++)
+	{
+		if(!strcmp(argv[2], rpt_vars[i].name))
+		{
+			thisRpt = i;
+			break;
+		} 
+	} 
+
+	if (thisRpt < 0)
+	{
+		ast_cli(fd, "Unknown node number %s.\n", argv[2]);
+		return RESULT_FAILURE;
+	} 
+	i = 0;
+	ast_cli(fd,"Variable listing for node %s:\n",argv[2]);
+	ast_channel_lock(rpt_vars[thisRpt].rxchannel);
+	AST_LIST_TRAVERSE (&rpt_vars[thisRpt].rxchannel->varshead, newvariable, entries) {
+		i++;
+		ast_cli(fd,"   %s=%s\n", ast_var_name(newvariable), ast_var_value(newvariable));
+	}
+	ast_channel_unlock(rpt_vars[thisRpt].rxchannel);
+	ast_cli(fd,"    -- %d variables\n", i);
+	return(0);
+}
+
+
 static int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration, int amplitude)
 {
 	int res;
@@ -7134,6 +7225,34 @@ static char *handle_cli_cmd(struct ast_cli_entry *e,
 	return res2cli(rpt_do_cmd(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_setvar(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "rpt setvar";
+                e->usage = setvar_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_setvar(a->fd,a->argc,a->argv));
+}
+
+static char *handle_cli_showvars(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "rpt showvars";
+                e->usage = showvars_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_showvars(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
 	AST_CLI_DEFINE(handle_cli_dump,"Dump app_rpt structs for debugging"),
@@ -7147,6 +7266,8 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_fun,"Execute a DTMF function"),
 	AST_CLI_DEFINE(handle_cli_fun1,"Execute a DTMF function"),
 	AST_CLI_DEFINE(handle_cli_cmd,"Execute a DTMF function")
+	AST_CLI_DEFINE(handle_cli_setvar,"Set an Asterisk channel variable")
+	AST_CLI_DEFINE(handle_cli_showvars,"Display Asterisk channel variables")
 };
 
 #endif
@@ -20790,6 +20911,18 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		return res;
 	}
 
+	if(options && (*options == 'V' || *options == 'v'))
+	{
+		if (callstr && myrpt->rxchannel)
+		{
+			pbx_builtin_setvar(myrpt->rxchannel,callstr);
+			if (option_verbose > 2)
+				ast_verbose(VERBOSE_PREFIX_3 "Set Asterisk channel variable %s for node %s\n",
+					callstr,myrpt->name);
+		}					
+		return 0;
+	}
+
 	if(options && *options == 'o')
 	{
 		return(channel_revert(myrpt));
@@ -23022,7 +23155,6 @@ static int mdcgen_exec(struct ast_channel *chan, void *data)
 
 #endif
 
-
 #ifdef	OLD_ASTERISK
 int unload_module()
 #else
@@ -23063,6 +23195,8 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_playback);
 	ast_cli_unregister(&cli_fun);
 	ast_cli_unregister(&cli_fun1);
+	ast_cli_unregister(&cli_setvar);
+	ast_cli_unregister(&cli_showvars);
 	res |= ast_cli_unregister(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
@@ -23132,6 +23266,8 @@ static int load_module(void)
 	ast_cli_register(&cli_sendall);
 	ast_cli_register(&cli_fun);
 	ast_cli_register(&cli_fun1);
+	ast_cli_register(&cli_setvar);
+	ast_cli_register(&cli_showvars);
 	res = ast_cli_register(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
