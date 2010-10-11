@@ -1,7 +1,7 @@
 ;
 ; chan_usbradio.c configuration file
 ;
-; 20071025 1000 Steven Henke, sphenke@xelatec.com
+; 20101011 0920
 ;
 ; This sample configuration file is for repeater operation using a pair of
 ; GM300, M1225 or CDM1550 mobile radios or a single R1225 repeater 
@@ -45,7 +45,7 @@ ctcssfrom=dsp		; CTCSS Decoder Source
 			        ; Options = no,usb,dsp
 			        ; no - CTCSS decoding, system will be carrier squelch
 			        ; usb - CTCSS decoding using input from USB adapter 
-			        ; (currently not supported)
+			        ; usbinvert - same as above but inverted polarity.
 			        ; dsp - CTCSS decoding using RX audio in DSP.
 			        ; rxdemod option must be set to flat for this to work.
 
@@ -92,6 +92,11 @@ duplex=0            ; Connected Radio Device Duplex Capability
 eeprom=1            ; 1 = Indicates that an EEPROM internal to the radio
                     ;     adapter and cable is expected. 
                     ; 0 = no warning message if no EEPROM found.
+
+
+;gpioX=in	    ; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
+
+
 
 ; the following settings are for systems built with an
 ; integral synthesized radio only.

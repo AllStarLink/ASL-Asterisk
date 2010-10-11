@@ -210,7 +210,7 @@ START_CONFIG
 	; rxctcssoverride=0	; default condition to not require rx CTCSS
 
 	; carrierfrom=dsp     ;no,usb,usbinvert,dsp,vox
-	; ctcssfrom=dsp       ;no,usb,dsp
+	; ctcssfrom=dsp       ;no,usb,usbinvert,dsp
 
 	; rxdemod=flat            ; input type from radio: no,speaker,flat
 	; txlimonly=no            ; output is limited, but not pre-emphasised
@@ -517,6 +517,7 @@ struct chan_usbradio_pvt {
 
 	char lastrx;
 	char rxhidsq;
+	char rxhidctcss;
 	char rxcarrierdetect;		// status from pmr channel
 	char rxctcssdecode;			// status from pmr channel
 
@@ -1626,6 +1627,8 @@ static void *hidthread(void *arg)
 				if(o->debuglevel)printf("chan_usbradio() hidthread: update rxhidsq = %d\n",keyed);
 				o->rxhidsq=keyed;
 			}
+			o->rxhidctcss = 
+				!(buf[o->hid_io_ctcss_loc] & o->hid_io_ctcss);
 			j = buf[o->hid_gpio_loc]; /* get the GPIO info */
 			/* if is a CM108AH, map the "HOOK" bit (which used to
 			   be GPIO2 in the CM108 into the GPIO position */
@@ -2587,8 +2590,8 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		sd=1;
 	}
 	#endif
-
-
+	if(o->rxsdtype == SD_HID) sd = o->rxhidctcss;
+	if(o->rxsdtype == SD_HID_INVERT) sd = !o->rxhidctcss;
 	if (o->rxctcssoverride) sd = 1;
 	if ( cd && sd )
 	{
