@@ -2011,7 +2011,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 
 	/* apply cd turn-on delay, if one specified */
 	if (o->rxondelay && cd && (o->rxoncnt++ < o->rxondelay)) cd = 0;
-	else o->rxoncnt = 0;
+	else if (!cd) o->rxoncnt = 0;
 
 	sd = 1; /* assume SD */
 	if ((o->rxsdtype == SD_HID) && (!o->rxhidctcss)) sd = 0;
