@@ -3,7 +3,7 @@
  * Asterisk -- An open source telephony toolkit.
  *
  * Copyright (C) 1999 - 2005, Digium, Inc.
- * Copyright (C) 2007 - 2008, Jim Dixon
+ * Copyright (C) 2007 - 2010, Jim Dixon
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Steve Henke, W9SH  <w9sh@arrl.net>
@@ -630,6 +630,9 @@ struct chan_usbradio_pvt {
 	int32_t		gpio_set;
 	int32_t		last_gpios_in;
 	int		had_gpios_in;
+	int		hid_gpio_pulsetimer[32];
+	int32_t		hid_gpio_pulsemask;
+	int32_t		hid_gpio_lastmask;
 
 	struct {
 	    unsigned rxcapraw:1;
@@ -1294,11 +1297,11 @@ static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed;
 	char lastrx, txtmp, fname[200];
-	int i,j,res;
+	int i,j,k,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
 	struct chan_usbradio_pvt *o = (struct chan_usbradio_pvt *) arg,*ao,**aop;
-	struct timeval to;
+	struct timeval to,then;
 	struct ast_config *cfg1;
 	struct ast_variable *v;
 	fd_set rfds;
@@ -1563,6 +1566,7 @@ static void *hidthread(void *arg)
 
 			FD_ZERO(&rfds);
 			FD_SET(o->pttkick[0],&rfds);
+			then = ast_tvnow();
 			/* ast_select emulates linux behaviour in terms of timeout handling */
 			res = ast_select(o->pttkick[0] + 1, &rfds, NULL, NULL, &to);
 			if (res < 0) {
@@ -1645,6 +1649,27 @@ static void *hidthread(void *arg)
 					(o->valid_gpios & (1 << i))) continue;
 				j &= ~(1 << i); /* clear the bit, since its not an input */
 			}
+			j = ast_tvdiff_ms(ast_tvnow(),then);
+			/* make output inversion mask (for pulseage) */
+			o->hid_gpio_lastmask = o->hid_gpio_pulsemask;
+			o->hid_gpio_pulsemask = 0;
+			for(i = 0; i < 32; i++)
+			{
+				k = o->hid_gpio_pulsetimer[i];
+				if (k)
+				{
+					k -= j;
+					if (k < 0) k = 0;
+					o->hid_gpio_pulsetimer[i] = k;
+				}
+				if (k) o->hid_gpio_pulsemask |= 1 << i;
+			}
+			if (o->hid_gpio_pulsemask || o->hid_gpio_lastmask) /* if anything inverted (temporarily) */
+			{
+				buf[o->hid_gpio_loc] = o->hid_gpio_val ^ o->hid_gpio_pulsemask;
+				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
+				hid_set_outputs(usb_handle,buf);
+			}
 			if ((!o->had_gpios_in) || (o->last_gpios_in != j))
 			{
 				char buf1[100];
@@ -1682,11 +1707,10 @@ static void *hidthread(void *arg)
 			if (o->gpio_set)
 			{
 				o->gpio_set = 0;
-				buf[o->hid_gpio_loc] = o->hid_gpio_val;
+				buf[o->hid_gpio_loc] = o->hid_gpio_val ^ o->hid_gpio_pulsemask;
 				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 				hid_set_outputs(usb_handle,buf);
 			}
-
 			/* if change in tx state as controlled by xpmr */
 			txtmp=o->pmrChan->txPttOut;
 					
@@ -1703,7 +1727,7 @@ static void *hidthread(void *arg)
 				{
 					if (!txtmp) buf[o->hid_gpio_loc] = o->hid_gpio_val |= o->hid_io_ptt;
 				}
-				buf[o->hid_gpio_loc] = o->hid_gpio_val;
+				buf[o->hid_gpio_loc] = o->hid_gpio_val ^ o->hid_gpio_pulsemask;
 				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 				memcpy(bufsave,buf,sizeof(buf));
 				hid_set_outputs(usb_handle,buf);
@@ -1716,7 +1740,7 @@ static void *hidthread(void *arg)
 		ast_mutex_lock(&o->usblock);
 		o->hid_gpio_val = ~o->hid_io_ptt;
 		if (o->invertptt) o->hid_gpio_val |= o->hid_io_ptt;
-		buf[o->hid_gpio_loc] = o->hid_gpio_val;
+		buf[o->hid_gpio_loc] = o->hid_gpio_val ^ o->hid_gpio_pulsemask;
 		buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 		hid_set_outputs(usb_handle,buf);
 		ast_mutex_unlock(&o->usblock);
@@ -2132,9 +2156,18 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 	/* skip if not valid */
 	if (!(o->valid_gpios & (1 << i))) return 0;
 	ast_mutex_lock(&o->usblock);
-	o->hid_gpio_val &= ~(1 << i);
-	if (j) o->hid_gpio_val |= 1 << i;
-	o->gpio_set = 1;
+	if (j > 1) /* if to request pulse-age */
+	{
+		o->hid_gpio_pulsetimer[i] = j - 1;
+	}
+	else
+	{
+		/* clear pulsetimer, if in the middle of running */
+		o->hid_gpio_pulsetimer[i] = 0;
+		o->hid_gpio_val &= ~(1 << i);
+		if (j) o->hid_gpio_val |= 1 << i;
+		o->gpio_set = 1;
+	}
 	ast_mutex_unlock(&o->usblock);
 	kickptt(o);
 	return 0;
