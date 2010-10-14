@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.260 10/11/2010
+ *  version 0.261 10/13/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -573,7 +573,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.260 10/11/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.261 10/13/2010";
 
 static char *app = "Rpt";
 
@@ -4822,25 +4822,24 @@ int	i,spos;
 			strcat(buf,",");
 			spos++;
 		}
-		/* add nodes into buffer */
-		if (l->linklist[0])
+		if (flag)
 		{
-			if (flag)
-				snprintf(buf + spos,MAXLINKLIST - spos,
-					"%s%c%c,%s",l->name,mode,(l->lastrx1) ? 'K' : 'U',
-						l->linklist);
-			else
+			snprintf(buf + spos,MAXLINKLIST - spos,
+				"%s%c%c",l->name,mode,(l->lastrx1) ? 'K' : 'U');
+		}
+		else
+		{
+			/* add nodes into buffer */
+			if (l->linklist[0])
+			{
 				snprintf(buf + spos,MAXLINKLIST - spos,
 					"%c%s,%s",mode,l->name,l->linklist);
-		}
-		else /* if no nodes, add this node into buffer */
-		{
-			if (flag)
-				snprintf(buf + spos,MAXLINKLIST - spos,
-					"%s%c%c",l->name,mode,(l->lastrx1) ? 'K' : 'U');
-			else
+			}
+			else /* if no nodes, add this node into buffer */
+			{
 				snprintf(buf + spos,MAXLINKLIST - spos,
 					"%c%s",mode,l->name);
+			}	
 		}
 		/* if we are in tranceive mode, let all modes stand */
 		if (mode == 'T') continue;
@@ -5110,7 +5109,17 @@ int	n;
 	__mklinklist(myrpt,NULL,buf,1);
 	ast_mutex_unlock(&myrpt->lock);
 	/* parse em */
-	n = finddelim(buf,strs,MAXLINKLIST);
+	n = finddelim(strdupa(buf),strs,MAXLINKLIST);
+	if (n) snprintf(obuf,sizeof(obuf) - 1,"%d,%s",n,buf);
+	else strcpy(obuf,"0");
+	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_ALINKS",obuf);
+	snprintf(obuf,sizeof(obuf) - 1,"%d",n);
+	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_NUMALINKS",obuf);
+	ast_mutex_lock(&myrpt->lock);
+	__mklinklist(myrpt,NULL,buf,0);
+	ast_mutex_unlock(&myrpt->lock);
+	/* parse em */
+	n = finddelim(strdupa(buf),strs,MAXLINKLIST);
 	if (n) snprintf(obuf,sizeof(obuf) - 1,"%d,%s",n,buf);
 	else strcpy(obuf,"0");
 	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_LINKS",obuf);
