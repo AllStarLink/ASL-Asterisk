@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.261 10/13/2010
+ *  version 0.262 10/16/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -519,6 +519,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/manager.h"
 #include "asterisk/astdb.h"
 #include "asterisk/app.h"
+#include "asterisk/indications.h"
 #include <termios.h>
 
 #ifdef	NEW_ASTERISK
@@ -573,7 +574,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.261 10/13/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.262 10/16/2010";
 
 static char *app = "Rpt";
 
@@ -20616,7 +20617,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #endif
 	char tmp[256], keyed = 0,keyed1 = 0;
 	char *options,*stringp,*callstr,*tele,c,*altp,*memp;
-	char sx[320],*sy,myfirst;
+	char sx[320],*sy,myfirst,*b,*b1;
 	struct	rpt *myrpt;
 	struct ast_frame *f,*f1,*f2;
 	struct ast_channel *who;
@@ -20689,7 +20690,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 
 	if (myrpt == NULL)
 	{
-		char *val,*myadr,*mypfx,sx[320],*b1,*sy,*s,*s1,*s2,*s3,dstr[100];
+		char *val,*myadr,*mypfx,sx[320],*sy,*s,*s1,*s2,*s3,dstr[100];
 		char xstr[100],hisip[100],nodeip[100],tmp1[100];
 		struct ast_config *cfg;
 	        struct ast_hostent ahp;
@@ -21130,7 +21131,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
         struct ast_hostent ahp;
         struct hostent *hp;
         struct in_addr ia;
-        char hisip[100],nodeip[100], *s, *s1, *s2, *s3, *b,*b1;
+        char hisip[100],nodeip[100], *s, *s1, *s2, *s3;
 
 		/* look at callerid to see what node this comes from */
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
@@ -21240,7 +21241,6 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	/* if is not a remote */
 	if (!myrpt->remote)
 	{
-		char *b,*b1;
 		int reconnects = 0;
 
 		rpt_mutex_lock(&myrpt->lock);
@@ -21422,7 +21422,34 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		usleep(500000);
 		if (myrpt->remoteon)
 		{
+			const struct ind_tone_zone_sound *ts = NULL;
+
+			/* look at callerid to see what node this comes from */
+			if (!chan->cid.cid_num) /* if doesn't have caller id */
+			{
+				b1 = "0";
+				b = NULL;
+			} else {
+				b = chan->cid.cid_name;
+				b1 = chan->cid.cid_num;
+				ast_shrink_phone_number(b1);
+			}
+			/* if is an IAX client */
+			if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+				b1 = b;
 			ast_log(LOG_WARNING, "Trying to use busy link on %s\n",tmp);
+			if ((b1 && (*b1 > '9')) || (b && (*b > '9')))
+			{
+				ts = ast_get_indication_tone(chan->zone, "busy");
+				ast_playtones_start(chan,0,ts->data, 1);
+				i = 0;
+				while(chan->generatordata && (i < 5000))
+				{
+					if(ast_safe_sleep(chan, 20)) break;
+					i += 20;
+				}
+				ast_playtones_stop(chan);
+			}
 #ifdef	AST_CDR_FLAG_POST_DISABLED
 			if (chan->cdr)
 				ast_set_flag(chan->cdr,AST_CDR_FLAG_POST_DISABLED);
@@ -21752,9 +21779,22 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 		}
 	}
+	/* look at callerid to see what node this comes from */
+	if (!chan->cid.cid_num) /* if doesn't have caller id */
+	{
+		b1 = "0";
+		b = NULL;
+	} else {
+		b = chan->cid.cid_name;
+		b1 = chan->cid.cid_num;
+		ast_shrink_phone_number(b1);
+	}
+	/* if is an IAX client */
+	if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+		b1 = b;
 	if (myrpt->p.archivedir)
 	{
-		char mycmd[100],mydate[100],*b,*b1;
+		char mycmd[100],mydate[100];
 		time_t myt;
 		long blocksleft;
 
@@ -21778,24 +21818,13 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			if (blocksleft >= myrpt->p.monminblocks)
 				ast_cli_command(nullfd,mycmd);
 		} else ast_cli_command(nullfd,mycmd);
-		/* look at callerid to see what node this comes from */
-		if (!chan->cid.cid_num) /* if doesn't have caller id */
-		{
-			b1 = "0";
-			b = NULL;
-		} else {
-			b = chan->cid.cid_name;
-			b1 = chan->cid.cid_num;
-			ast_shrink_phone_number(b1);
-		}
-		/* if is an IAX client */
-		if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
-			b1 = b;
 		sprintf(mycmd,"CONNECT,%s",b1);
 		donodelog(myrpt,mycmd);
 		rpt_update_links(myrpt);
 		doconpgm(myrpt,b1);
 	}
+	/* if is a webtransceiver */
+	if (b1 && (*b1 > '9')) myrpt->newkey = 2;
 	myrpt->loginuser[0] = 0;
 	myrpt->loginlevel[0] = 0;
 	myrpt->authtelltimer = 0;
@@ -22399,7 +22428,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	}
 	if (myrpt->p.archivedir || myrpt->p.discpgm)
 	{
-		char mycmd[100],*b,*b1;
+		char mycmd[100];
 
 		/* look at callerid to see what node this comes from */
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
