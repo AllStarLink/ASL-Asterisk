@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.262 10/16/2010
+ *  version 0.263 10/16/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -574,7 +574,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.262 10/16/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.263 10/16/2010";
 
 static char *app = "Rpt";
 
@@ -1243,6 +1243,7 @@ static struct rpt
 	time_t lastgpstime;
 	int outstreampipe[2];
 	int outstreampid;
+	struct ast_channel *remote_webtransceiver;
 #ifndef	OLD_ASTERISK
 	struct timeval lastdtmftime;
 #endif
@@ -15945,7 +15946,32 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 			myrpt->rxplon);
 		donodelog(myrpt,str);
 	}
-
+	if (myrpt->remote && myrpt->remote_webtransceiver) 
+	{
+		if (myrpt->remmode == REM_MODE_FM)
+		{
+			char *myfreq = strdupa(myrpt->freq),*cp,*cp1 = NULL;
+			cp = strchr(myfreq,'.');
+			if (cp && (*(cp + 1)))
+			{
+				cp1 = strchr(cp + 2,'0');
+				*cp1 = 0;
+			}
+			sprintf(str,"J Remote Frequency\n%s FM\n%s Offset\n",
+				(cp) ? myfreq : myrpt->freq,offsets[(int)myrpt->offset]);
+			sprintf(str + strlen(str),"%s Power\nTX PL %s\nRX PL %s\n",
+				powerlevels[(int)myrpt->powerlevel],
+				(myrpt->txplon) ? myrpt->txpl : "Off",
+				(myrpt->rxplon) ? myrpt->rxpl : "Off");
+		}
+		else
+		{
+			sprintf(str,"J Remote Frequency %s %s\n%s Power\n",
+				myrpt->freq,modes[(int)myrpt->remmode],
+				powerlevels[(int)myrpt->powerlevel]);
+		}
+		ast_sendtext(myrpt->remote_webtransceiver,str);
+	}
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 	{
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
@@ -17576,6 +17602,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->ready = 0;
 	rpt_mutex_lock(&myrpt->lock);
 	myrpt->remrx = 0;
+	myrpt->remote_webtransceiver = 0;
 
 	telem = myrpt->tele.next;
 	while(telem != &myrpt->tele)
@@ -21415,6 +21442,20 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	}
 	/* well, then it is a remote */
 	rpt_mutex_lock(&myrpt->lock);
+	/* look at callerid to see what node this comes from */
+	if (!chan->cid.cid_num) /* if doesn't have caller id */
+	{
+		b1 = "0";
+		b = NULL;
+	} else {
+		b = chan->cid.cid_name;
+		b1 = chan->cid.cid_num;
+		ast_shrink_phone_number(b1);
+	}
+	/* if is an IAX client */
+	if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
+		b1 = b;
+	if (b1 && (*b1 > '9')) myrpt->remote_webtransceiver = chan;
 	/* if remote, error if anyone else already linked */
 	if (myrpt->remoteon)
 	{
@@ -21424,21 +21465,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		{
 			const struct ind_tone_zone_sound *ts = NULL;
 
-			/* look at callerid to see what node this comes from */
-			if (!chan->cid.cid_num) /* if doesn't have caller id */
-			{
-				b1 = "0";
-				b = NULL;
-			} else {
-				b = chan->cid.cid_name;
-				b1 = chan->cid.cid_num;
-				ast_shrink_phone_number(b1);
-			}
-			/* if is an IAX client */
-			if ((b1[0] == '0') && b && b[0] && (strlen(b) <= 8))
-				b1 = b;
 			ast_log(LOG_WARNING, "Trying to use busy link on %s\n",tmp);
-			if ((b1 && (*b1 > '9')) || (b && (*b > '9')))
+			if (myrpt->remote_webtransceiver || (b && (*b > '9')))
 			{
 				ts = ast_get_indication_tone(chan->zone, "busy");
 				ast_playtones_start(chan,0,ts->data, 1);
@@ -21824,7 +21852,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		doconpgm(myrpt,b1);
 	}
 	/* if is a webtransceiver */
-	if (b1 && (*b1 > '9')) myrpt->newkey = 2;
+	if (myrpt->remote_webtransceiver) myrpt->newkey = 2;
 	myrpt->loginuser[0] = 0;
 	myrpt->loginlevel[0] = 0;
 	myrpt->authtelltimer = 0;
@@ -22443,6 +22471,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if (myrpt->p.archivedir) donodelog(myrpt,mycmd);
 		dodispgm(myrpt,b1);
 	}
+	myrpt->remote_webtransceiver = 0;
 	/* wait for telem to be done */
 	while(myrpt->tele.next != &myrpt->tele) usleep(50000);
 	sprintf(tmp,"mixmonitor stop %s",chan->name);
