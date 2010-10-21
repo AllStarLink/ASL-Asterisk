@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.264 10/21/2010
+ *  version 0.265 10/21/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -574,7 +574,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.264 10/21/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.265 10/21/2010";
 
 static char *app = "Rpt";
 
@@ -1730,6 +1730,7 @@ static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
 static int rpt_do_setvar(int fd, int argc, char *argv[]);
 static int rpt_do_showvars(int fd, int argc, char *argv[]);
+static int rpt_do_frog(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
 "Usage: rpt debug level {0-7}\n"
@@ -1800,6 +1801,10 @@ static char setvar_usage[] =
 static char showvars_usage[] =
 "Usage: rpt showvars <nodename>\n"
 "       Display all the Asterisk channel variables for a node.\n";
+
+static char frog_usage[] =
+"Usage: frog [warp_factor]\n"
+"       Performs frog-in-a-blender calculations (Jacobsen Corollary)\n";
 
 #ifndef	NEW_ASTERISK
 
@@ -1877,6 +1882,10 @@ static struct ast_cli_entry  cli_setvar =
 static struct ast_cli_entry  cli_showvars =
         { { "rpt", "showvars" }, rpt_do_showvars,
 		"Display Asterisk channel variables", showvars_usage };
+
+static struct ast_cli_entry  cli_frog =
+        { { "frog" }, rpt_do_frog,
+               "Perform frog-in-a-blender calculations", frog_usage };
 
 #endif
 
@@ -7071,6 +7080,27 @@ static int rpt_do_showvars(int fd, int argc, char *argv[])
 	return(0);
 }
 
+/*
+* Perform frong-in-a-blender calculations (Jacobsen Corollary) 
+*/
+                                                                               
+                                                  
+static int rpt_do_frog(int fd, int argc, char *argv[])
+{
+       double warpone = 75139293848.398696166028333356763;
+       double warpfactor = 1.0;
+
+       if (argc > 2) return RESULT_SHOWUSAGE;
+       if ((argc > 1) && (sscanf(argv[1],"%lf",&warpfactor) != 1))
+                return RESULT_SHOWUSAGE;
+
+       ast_cli(fd, "A frog in a blender with a base diameter of 3 inches going\n");
+       ast_cli(fd, "%lf RPM will be travelling at warp factor %lf,\n",
+               warpfactor * warpfactor * warpfactor * warpone,warpfactor);
+       ast_cli(fd,"based upon the Jacobsen Frog Corollary.\n");
+       return RESULT_SUCCESS;
+}
+
 
 static int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration, int amplitude)
 {
@@ -7304,6 +7334,20 @@ static char *handle_cli_showvars(struct ast_cli_entry *e,
 	return res2cli(rpt_do_showvars(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_frog(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "rpt frog";
+                e->usage = frog_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_frog(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
 	AST_CLI_DEFINE(handle_cli_dump,"Dump app_rpt structs for debugging"),
@@ -7319,6 +7363,7 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_cmd,"Execute a DTMF function")
 	AST_CLI_DEFINE(handle_cli_setvar,"Set an Asterisk channel variable")
 	AST_CLI_DEFINE(handle_cli_showvars,"Display Asterisk channel variables")
+	AST_CLI_DEFINE(handle_cli_frog,"Perform frog-in-a-blender calculations")
 };
 
 #endif
@@ -23299,6 +23344,7 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_fun1);
 	ast_cli_unregister(&cli_setvar);
 	ast_cli_unregister(&cli_showvars);
+	ast_cli_unregister(&cli_frog);
 	res |= ast_cli_unregister(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
@@ -23370,6 +23416,7 @@ static int load_module(void)
 	ast_cli_register(&cli_fun1);
 	ast_cli_register(&cli_setvar);
 	ast_cli_register(&cli_showvars);
+	ast_cli_register(&cli_frog);
 	res = ast_cli_register(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
