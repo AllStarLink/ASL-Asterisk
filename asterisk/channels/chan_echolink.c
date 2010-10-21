@@ -132,10 +132,13 @@ do not use 127.0.0.1
 
 /* 50 * 10 * 20ms iax2 = 10,000ms = 10 seconds heartbeat */
 #define	KEEPALIVE_TIME 50 * 10
+#define	AUTH_RETRY_MS 5000
+#define	AUTH_ABANDONED_MS 15000
 #define	BLOCKING_FACTOR 4
 #define	GSM_FRAME_SIZE 33
 #define QUEUE_OVERLOAD_THRESHOLD_AST 25
 #define QUEUE_OVERLOAD_THRESHOLD_EL 20
+#define	MAXPENDING 20
 
 #define EL_IP_SIZE 16
 #define EL_CALL_SIZE 16
@@ -211,6 +214,11 @@ struct el_node {
    struct ast_channel *chan;
 };
 
+struct el_pending {
+	char fromip[EL_IP_SIZE + 1];
+	struct timeval reqtime;
+} ;		
+
 struct el_instance
 {
 	ast_mutex_t lock;
@@ -246,6 +254,7 @@ struct el_instance
 	struct gsmVoice_t audio_all_but_one;
 	struct gsmVoice_t audio_all;
 	struct el_node el_node_test;
+	struct el_pending pending[MAXPENDING];
 	pthread_t el_reader_thread;
 } ;
 
@@ -358,6 +367,7 @@ static  pthread_t el_directory_thread = 0;
 static int run_forever = 1;
 static int killing = 0;
 static int nullfd = -1;
+static int el_sleeptime = 0;
 
 static char *config = "echolink.conf";
 
@@ -2362,7 +2372,7 @@ int	sock;
 		if (str[strlen(str) - 1] == '\n')
 			str[strlen(str) - 1] = 0;
 		strncpy(ipaddr,str,sizeof(ipaddr) - 1);
-		usleep(2000); /* To get to dry land */
+		if (!(n % 10)) usleep(2000); /* To get to dry land */
 		ast_mutex_lock(&el_db_lock);
 		el_db_put(nodenum,ipaddr,call);
 		ast_mutex_unlock(&el_db_lock);
@@ -2379,25 +2389,35 @@ int	sock;
 static void *el_directory(void *data)
 {
 	int rc = 0,curdir;
-
+	time_t	then,now;
 	curdir = 0;
+	time(&then);
 	while (run_forever)
 	{
+		time(&now);
+		el_sleeptime -= (now - then);		
+		then = now;
+		if (el_sleeptime < 0) el_sleeptime = 0;
+		if (el_sleeptime)
+		{
+			usleep(200000);
+			continue;
+		}
 		if (!instances[0]->elservers[curdir][0])
 		{
 			if (++curdir >= EL_MAX_SERVERS) curdir = 0;
 			continue;
 		}
-		if (debug) ast_log(LOG_DEBUG, "Trying to do directory downloa Echolink server %s\n", instances[0]->elservers[curdir]);
+		if (debug) ast_log(LOG_DEBUG, "Trying to do directory download Echolink server %s\n", instances[0]->elservers[curdir]);
 		rc = do_el_directory(instances[0]->elservers[curdir]);
 		if (rc < 0)
 		{
 			if (++curdir >= EL_MAX_SERVERS) curdir = 0;
-			sleep(20);
+			el_sleeptime = 20;
 			continue;
 		}
-		if (rc == 1) sleep(240);
-		else if (rc == 0) sleep(1800);
+		if (rc == 1) el_sleeptime = 240;
+		else if (rc == 0) el_sleeptime = 1800;
 	}
 	ast_log(LOG_NOTICE, "Echolink directory thread exited.\n");
 	mythread_exit(NULL);
@@ -2677,16 +2697,54 @@ static void *el_reader(void *data)
 						}
 						if (i) /* if not authorized */
 						{
-							if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",
-								instp->el_node_test.ip);
-							x = rtcp_make_bye(bye,"UN-AUTHORIZED");
-							sin1.sin_family = AF_INET;
-							sin1.sin_addr.s_addr = inet_addr(instp->el_node_test.ip);
-							sin1.sin_port = htons(instp->ctrl_port);
-							for (i = 0; i < 20; i++)
+							/* first, see if we have one that is ours and not abandoned */
+							for(x = 0; x < MAXPENDING; x++)
 							{
-								sendto(instp->ctrl_sock, bye, x,
-									0,(struct sockaddr *)&sin1,sizeof(sin1));
+								if (strcmp(instp->pending[x].fromip,
+									instp->el_node_test.ip)) continue;
+								if (ast_tvdiff_ms(ast_tvnow(),
+									instp->pending[x].reqtime) < AUTH_ABANDONED_MS) break;
+							}
+							if (x < MAXPENDING)
+							{
+								/* if its time, send un-auth */
+								if (ast_tvdiff_ms(ast_tvnow(),
+									instp->pending[x].reqtime) >= AUTH_RETRY_MS)
+								{
+									if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",
+										instp->el_node_test.ip);
+									x = rtcp_make_bye(bye,"UN-AUTHORIZED");
+									sin1.sin_family = AF_INET;
+									sin1.sin_addr.s_addr = inet_addr(instp->el_node_test.ip);
+									sin1.sin_port = htons(instp->ctrl_port);
+									for (i = 0; i < 20; i++)
+									{
+										sendto(instp->ctrl_sock, bye, x,
+											0,(struct sockaddr *)&sin1,sizeof(sin1));
+									}
+									instp->pending[x].fromip[0] = 0;
+								}
+							}
+							else /* find empty one */
+							{
+								for(x = 0; x < MAXPENDING; x++)
+								{
+									if (!instp->pending[x].fromip[0]) break;
+									if (ast_tvdiff_ms(ast_tvnow(),
+										instp->pending[x].reqtime) >= AUTH_ABANDONED_MS) break;
+								}
+								if (x < MAXPENDING) /* we found one */
+								{
+									strcpy(instp->pending[x].fromip,
+										instp->el_node_test.ip);
+									instp->pending[x].reqtime = ast_tvnow();
+									el_sleeptime = 0;
+								}
+								else
+								{
+									ast_log(LOG_ERROR,"Cannot find open pending echolink request slot for IP %s\n",
+										instp->el_node_test.ip);
+								}
 							}
 						}
 					        twalk(el_node_list, send_info); 
