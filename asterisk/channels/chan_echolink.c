@@ -33,7 +33,8 @@
 	<depend>zlib</depend>
  ***/
 
-/* Version 0.21, 07/09/2008
+/*
+
 Echolink channel driver for Asterisk/app_rpt.
 
 I wish to thank the following people for the immeasurable amount of
@@ -333,6 +334,8 @@ struct eldb {
 	char callsign[ELDB_CALLSIGNLEN];
 	char ipaddr[ELDB_IPADDRLEN];
 } ;
+
+AST_MUTEX_DEFINE_STATIC(el_db_lock);
 
 #ifdef	OLD_ASTERISK
 static int usecnt;
@@ -1827,9 +1830,11 @@ static int el_do_dbdump(int fd, int argc, char *argv[])
 	{
 		c = tolower(*argv[2]);
 	}
+	ast_mutex_lock(&el_db_lock);
 	if (c == 'i') twalk(el_db_ipaddr,print_nodes);
 	else if (c == 'c') twalk(el_db_callsign,print_nodes);
 	else twalk(el_db_nodenum,print_nodes);
+	ast_mutex_unlock(&el_db_lock);
 	return RESULT_SUCCESS;
 }
 
@@ -1847,9 +1852,11 @@ static int el_do_dbget(int fd, int argc, char *argv[])
                 return RESULT_SHOWUSAGE;
 
 	c = tolower(*argv[2]);
+	ast_mutex_lock(&el_db_lock);
 	if (c == 'i') mynode = el_db_find_ipaddr(argv[3]);
 	else if (c == 'c') mynode = el_db_find_callsign(argv[3]);
 	else mynode = el_db_find_nodenum(argv[3]);
+	ast_mutex_unlock(&el_db_lock);
 	if (!mynode)
 	{
 		ast_cli(fd,"Error: Entry for %s not found!\n",argv[3]);
@@ -2097,7 +2104,9 @@ static void my_stupid_free(void *ptr)
 
 static void el_zapem(void)
 {
+	ast_mutex_lock(&el_db_lock);
         tdestroy(el_node_list, my_stupid_free);
+	ast_mutex_unlock(&el_db_lock);
 }
 
 static void el_zapcall(char *call)
@@ -2106,12 +2115,16 @@ struct eldb *mynode;
 
 	if (debug)
 		ast_log(LOG_DEBUG,"zapcall eldb delete Attempt: Call=%s\n",call);
+	ast_mutex_lock(&el_db_lock);
 	mynode = el_db_find_callsign(call);
-	if (!mynode) return;
-	if (debug)
-		ast_log(LOG_DEBUG,"zapcall eldb delete: Node=%s, Call=%s, IP=%s\n",
-			mynode->nodenum,mynode->callsign,mynode->ipaddr);
-	el_db_delete(mynode);
+	if (mynode)
+	{
+		if (debug)
+			ast_log(LOG_DEBUG,"zapcall eldb delete: Node=%s, Call=%s, IP=%s\n",
+				mynode->nodenum,mynode->callsign,mynode->ipaddr);
+		el_db_delete(mynode);
+	}
+	ast_mutex_unlock(&el_db_lock);
 }
 
 static int el_net_read(int sock,unsigned char *buf1,int buf1len,
@@ -2350,7 +2363,9 @@ int	sock;
 			str[strlen(str) - 1] = 0;
 		strncpy(ipaddr,str,sizeof(ipaddr) - 1);
 		usleep(2000); /* To get to dry land */
+		ast_mutex_lock(&el_db_lock);
 		el_db_put(nodenum,ipaddr,call);
+		ast_mutex_unlock(&el_db_lock);
 		n++;
 	}
 	close(sock);
