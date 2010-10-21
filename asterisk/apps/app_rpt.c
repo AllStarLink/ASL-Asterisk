@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.263 10/16/2010
+ *  version 0.264 10/21/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -574,7 +574,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.263 10/16/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.264 10/21/2010";
 
 static char *app = "Rpt";
 
@@ -1488,6 +1488,7 @@ pthread_t id;
 #define rpt_mutex_unlock(x) ast_mutex_unlock(x)
 
 #endif  /* APP_RPT_LOCK_DEBUG */
+
 
 #ifdef	_MDC_DECODE_H_
 static const char *my_variable_match(const struct ast_config *config, const char *category, const char *variable)
@@ -4745,6 +4746,45 @@ int	i;
 	return str;
 }
 
+static int elink_cmd(char *cmd, char *outstr, int outlen)
+{
+FILE	*tf;
+
+	tf = tmpfile();
+	if (!tf) return -1;
+	if (debug) ast_log(LOG_DEBUG,"elink_cmd sent %s\n",cmd);
+	ast_cli_command(fileno(tf),cmd);
+	rewind(tf);
+	outstr[0] = 0;
+	if (!fgets(outstr,outlen,tf)) 
+	{
+		fclose(tf);
+		return 0;
+	}
+	fclose(tf);
+	if (!strlen(outstr)) return 0;
+	if (outstr[strlen(outstr) - 1] == '\n')
+		outstr[strlen(outstr) - 1] = 0;
+	if (debug) ast_log(LOG_DEBUG,"elink_cmd ret. %s\n",outstr);
+	return(strlen(outstr));
+}
+
+static int elink_db_get(char *lookup, char c, char *nodenum,char *callsign, char *ipaddr)
+{
+char	str[100],str1[100],*strs[5];
+int	n;
+
+	snprintf(str,sizeof(str) - 1,"echolink dbget %c %s",c,lookup);
+	n = elink_cmd(str,str1,sizeof(str1));
+	if (n < 1) return(n);
+	n = explode_string(str1, strs, 5, '|', '\"');
+	if (n < 3) return(0);
+	if (nodenum) strcpy(nodenum,strs[0]);
+	if (callsign) strcpy(callsign,strs[1]);
+	if (ipaddr) strcpy(ipaddr,strs[2]);
+	return(1);
+}
+
 /*
 	send asterisk frame text message on the current tx channel
 */
@@ -7586,7 +7626,7 @@ config, and see if there's a custom node file to play, and if so, play it */
 static int saynode(struct rpt *myrpt, struct ast_channel *mychannel, char *name)
 {
 int	res = 0;
-char	*val,fname[300],dbstr[100],actstr[100];
+char	*val,fname[300],str[100];
 
 	if ((name[0] != '3') || (myrpt->p.eannmode != 2))
 	{
@@ -7601,9 +7641,8 @@ char	*val,fname[300],dbstr[100],actstr[100];
 	}
 	if (name[0] != '3') return res;
 	if (myrpt->p.eannmode < 2) return res;
-	if (ast_db_get(EL_DB_ROOT,"active",actstr,sizeof(actstr) - 1)) return res;
-	sprintf(dbstr,"%s/nodenum-call/%d",actstr,atoi(name + 1));
-	if (ast_db_get(EL_DB_ROOT,dbstr,fname,sizeof(fname))) return res;
+	sprintf(str,"%d",atoi(name + 1));	
+	if (elink_db_get(str,'n',NULL,fname,NULL) < 1) return res;
 	res = sayphoneticstr(mychannel,fname);
 	return res;
 }
@@ -10474,13 +10513,11 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	}
 	else
 	{
-		char actstr[10],dbstr[40],str1[40];
+		char str1[60],str2[50];
 
 		if (strlen(node) < 7) return 1;
-		if (ast_db_get(EL_DB_ROOT,"active",actstr,sizeof(actstr) - 1))
-			return -1;
-		sprintf(dbstr,"%s/nodenum/%d",actstr,atoi(node + 1));
-		if (ast_db_get(EL_DB_ROOT,dbstr,str1,sizeof(str1))) return -1;
+		sprintf(str2,"%d",atoi(node + 1));
+		if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return -1;
 		sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
 	}
 
@@ -10750,13 +10787,11 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			}
 			else
 			{
-				char actstr[10],dbstr[40],str1[40];
+				char str1[60],str2[50];
 
 				if (strlen(digitbuf) < 7) break;
-				if (ast_db_get(EL_DB_ROOT,"active",actstr,sizeof(actstr) - 1))
-					return DC_ERROR;
-				sprintf(dbstr,"%s/nodenum/%d",actstr,atoi(digitbuf + 1));
-				if (ast_db_get(EL_DB_ROOT,dbstr,str1,sizeof(str1))) return DC_ERROR;
+				sprintf(str2,"%d",atoi(digitbuf + 1));
+				if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return DC_ERROR;
 				sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
 			}
 			s = tmp;

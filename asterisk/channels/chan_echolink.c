@@ -147,6 +147,10 @@ do not use 127.0.0.1
 #define	EL_MAX_INSTANCES 100
 #define	EL_MAX_CALL_LIST 30
 
+#define	ELDB_NODENUMLEN 8
+#define	ELDB_CALLSIGNLEN 20
+#define	ELDB_IPADDRLEN 18
+
 #define	DELIMCHR ','
 #define	QUOTECHR 34
 
@@ -161,8 +165,6 @@ do not use 127.0.0.1
 static const char tdesc[] = "Echolink channel driver";
 static int prefformat = AST_FORMAT_GSM;
 static char type[] = "echolink";
-static char db_active = 'a';
-static char db_loading = 0;
 static char snapshot_id[50] = {'0',0};
 static int el_net_get_index = 0;
 static int el_net_get_nread = 0;
@@ -326,6 +328,12 @@ struct rtcp_t {
   } r;
 };
 
+struct eldb {
+	char nodenum[ELDB_NODENUMLEN];
+	char callsign[ELDB_CALLSIGNLEN];
+	char ipaddr[ELDB_IPADDRLEN];
+} ;
+
 #ifdef	OLD_ASTERISK
 static int usecnt;
 AST_MUTEX_DEFINE_STATIC(usecnt_lock);
@@ -337,6 +345,9 @@ int ninstances = 0;
 
 /* binary search tree in memory, root node */
 static void *el_node_list = NULL;
+static void *el_db_callsign = NULL;
+static void *el_db_nodenum = NULL;
+static void *el_db_ipaddr = NULL;
 
 /* Echolink registration thread */
 static  pthread_t el_register_thread = 0;
@@ -408,6 +419,42 @@ static const struct ast_channel_tech el_tech = {
 #endif
 };
 
+/*
+* CLI extensions
+*/
+
+/* Debug mode */
+static int el_do_debug(int fd, int argc, char *argv[]);
+static int el_do_dbdump(int fd, int argc, char *argv[]);
+static int el_do_dbget(int fd, int argc, char *argv[]);
+
+static char debug_usage[] =
+"Usage: echolink debug level {0-7}\n"
+"       Enables debug messages in app_rpt\n";
+
+static char dbdump_usage[] =
+"Usage: echolink dbdump [nodename|callsign|ipaddr]\n"
+"       Dumps entire echolink db\n";
+
+static char dbget_usage[] =
+"Usage: echolink dbget <nodename|callsign|ipaddr> <lookup-data>\n"
+"       Looks up echolink db entry\n";
+
+#ifndef	NEW_ASTERISK
+
+static struct ast_cli_entry  cli_debug =
+        { { "echolink", "debug", "level" }, el_do_debug, 
+		"Enable echolink debugging", debug_usage };
+static struct ast_cli_entry  cli_dbdump =
+        { { "echolink", "dbdump" }, el_do_dbdump,
+		"Dump entire echolink db", dbdump_usage };
+
+static struct ast_cli_entry  cli_dbget =
+        { { "echolink", "dbget" }, el_do_dbget,
+		"Look up echolink db entry", dbget_usage };
+
+#endif
+
 static void mythread_exit(void *nothing)
 {
 int	i;
@@ -475,6 +522,116 @@ int     i,l,inquo;
         return(i);
 
 }
+
+static void print_nodes(const void *nodep, const VISIT which, const int depth)
+{
+   if ((which == leaf) || (which == postorder)) {
+      ast_verbose("%s|%s|%s\n",
+             (*(struct eldb **)nodep)->nodenum,
+             (*(struct eldb **)nodep)->callsign,
+             (*(struct eldb **)nodep)->ipaddr);
+   }
+}
+
+static int compare_eldb_nodenum(const void *pa, const void *pb)
+{
+   return strcmp(((struct eldb *)pa)->nodenum,((struct eldb *)pb)->nodenum);
+}
+
+static int compare_eldb_ipaddr(const void *pa, const void *pb)
+{
+   return strcmp(((struct eldb *)pa)->ipaddr,((struct eldb *)pb)->ipaddr);
+}
+
+static int compare_eldb_callsign(const void *pa, const void *pb)
+{
+   return strcmp(((struct eldb *)pa)->callsign,((struct eldb *)pb)->callsign);
+}
+
+static struct eldb *el_db_find_nodenum(char *nodenum)
+{
+struct eldb **found_key = NULL,key;
+
+	memset(&key,0,sizeof(key));
+	strncpy(key.nodenum,nodenum,sizeof(key.nodenum) - 1);
+	found_key = (struct eldb **)tfind(&key,&el_db_nodenum,compare_eldb_nodenum);
+	if (found_key) return(*found_key);
+	return NULL;
+}
+
+static struct eldb *el_db_find_callsign(char *callsign)
+{
+struct eldb **found_key = NULL,key;
+
+	memset(&key,0,sizeof(key));
+	strncpy(key.callsign,callsign,sizeof(key.callsign) - 1);
+	found_key = (struct eldb **)tfind(&key,&el_db_callsign,compare_eldb_callsign);
+	if (found_key) return(*found_key);
+	return NULL;
+}
+
+static struct eldb *el_db_find_ipaddr(char *ipaddr)
+{
+struct eldb **found_key = NULL,key;
+
+	memset(&key,0,sizeof(key));
+	strncpy(key.ipaddr,ipaddr,sizeof(key.ipaddr) - 1);
+	found_key = (struct eldb **)tfind(&key,&el_db_ipaddr,compare_eldb_ipaddr);
+	if (found_key) return(*found_key);
+	return NULL;
+}
+
+static void el_db_delete_indexes(struct eldb *node)
+{
+struct eldb *mynode;
+
+	if (!node) return;
+	mynode = el_db_find_nodenum(node->nodenum);
+	if (mynode) tdelete(mynode, &el_db_nodenum, compare_eldb_nodenum);
+	mynode = el_db_find_ipaddr(node->ipaddr);
+	if (mynode) tdelete(mynode, &el_db_ipaddr, compare_eldb_ipaddr);
+	mynode = el_db_find_callsign(node->callsign);
+	if (mynode) tdelete(mynode, &el_db_callsign, compare_eldb_callsign);
+	return;
+}
+
+static void el_db_delete(struct eldb *node)
+{
+	if (!node) return;
+	el_db_delete_indexes(node);
+	ast_free(node);
+	return;
+}
+
+static struct eldb *el_db_put(char *nodenum,char *ipaddr, char *callsign)
+{
+struct eldb *node,*mynode;
+
+	node = (struct eldb *)ast_malloc(sizeof(struct eldb));
+	if (!node)
+	{
+		ast_log(LOG_NOTICE,"Caannot malloc!!\n");
+		return NULL;
+	}
+	memset(node,0,sizeof(struct eldb));
+	strncpy(node->nodenum,nodenum,ELDB_NODENUMLEN - 1);
+	strncpy(node->ipaddr,ipaddr,ELDB_IPADDRLEN - 1);
+	strncpy(node->callsign,callsign,ELDB_CALLSIGNLEN - 1);
+	mynode = el_db_find_nodenum(node->nodenum);
+	if (mynode) el_db_delete(mynode);
+	mynode = el_db_find_ipaddr(node->ipaddr);
+	if (mynode) el_db_delete(mynode);
+	mynode = el_db_find_callsign(node->callsign);
+	if (mynode) el_db_delete(mynode);
+	tsearch(node,&el_db_nodenum,compare_eldb_nodenum);
+	tsearch(node,&el_db_ipaddr,compare_eldb_ipaddr);
+	tsearch(node,&el_db_callsign,compare_eldb_callsign);
+	if (debug)
+		ast_log(LOG_DEBUG,"eldb put: Node=%s, Call=%s, IP=%s\n",nodenum,callsign,ipaddr);
+	return(node);
+}
+
+
 static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name)
 {
     unsigned char zp[1500];
@@ -1633,6 +1790,142 @@ static struct ast_channel *el_request(const char *type, int format, void *data, 
 	return tmp;
 }
 
+/*
+* Enable or disable debug output at a given level at the console
+*/
+                                                                                                                                 
+static int el_do_debug(int fd, int argc, char *argv[])
+{
+	int newlevel;
+
+        if (argc != 4)
+                return RESULT_SHOWUSAGE;
+        newlevel = atoi(argv[3]);
+        if((newlevel < 0) || (newlevel > 7))
+                return RESULT_SHOWUSAGE;
+        if(newlevel)
+                ast_cli(fd, "echolink Debugging enabled, previous level: %d, new level: %d\n", debug, newlevel);
+        else
+                ast_cli(fd, "echolink Debugging disabled\n");
+
+        debug = newlevel;                                                                                                                          
+        return RESULT_SUCCESS;
+}
+
+/*
+* Dump entire database
+*/
+                                                                                                                                 
+static int el_do_dbdump(int fd, int argc, char *argv[])
+{
+	char c;
+        if (argc < 2)
+                return RESULT_SHOWUSAGE;
+
+	c = 'n';
+	if (argc > 2)
+	{
+		c = tolower(*argv[2]);
+	}
+	if (c == 'i') twalk(el_db_ipaddr,print_nodes);
+	else if (c == 'c') twalk(el_db_callsign,print_nodes);
+	else twalk(el_db_nodenum,print_nodes);
+	return RESULT_SUCCESS;
+}
+
+
+/*
+* Get echolink db entry
+*/
+                                                                                                                                 
+static int el_do_dbget(int fd, int argc, char *argv[])
+{
+	char c;
+	struct eldb *mynode;
+
+        if (argc != 4)
+                return RESULT_SHOWUSAGE;
+
+	c = tolower(*argv[2]);
+	if (c == 'i') mynode = el_db_find_ipaddr(argv[3]);
+	else if (c == 'c') mynode = el_db_find_callsign(argv[3]);
+	else mynode = el_db_find_nodenum(argv[3]);
+	if (!mynode)
+	{
+		ast_cli(fd,"Error: Entry for %s not found!\n",argv[3]);
+		return RESULT_FAILURE;
+	}
+	ast_cli(fd,"%s|%s|%s\n",mynode->nodenum,mynode->callsign,mynode->ipaddr);
+	return RESULT_SUCCESS;
+}
+
+#ifdef	NEW_ASTERISK
+
+static char *res2cli(int r)
+
+{
+	switch (r)
+	{
+	    case RESULT_SUCCESS:
+		return(CLI_SUCCESS);
+	    case RESULT_SHOWUSAGE:
+		return(CLI_SHOWUSAGE);
+	    default:
+		return(CLI_FAILURE);
+	}
+}
+
+static char *handle_cli_debug(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "echolink debug level";
+                e->usage = debug_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(el_do_debug(a->fd,a->argc,a->argv));
+}
+
+static char *handle_cli_dbdump(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "echolink dbdump";
+                e->usage = dbdump_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_dbdump(a->fd,a->argc,a->argv));
+}
+
+
+static char *handle_cli_dbget(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "echolink dbget";
+                e->usage = dbget_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_dbget(a->fd,a->argc,a->argv));
+}
+
+static struct ast_cli_entry rpt_cli[] = {
+	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
+	AST_CLI_DEFINE(handle_cli_dbdump,"Dump entire echolink db"),
+	AST_CLI_DEFINE(handle_cli_dbget,"Look up echolink db entry")
+} ;
+
+#endif
+
 #ifndef	OLD_ASTERISK
 static
 #endif
@@ -1655,6 +1948,15 @@ int	n;
 			instances[n]->ctrl_sock = -1;
 		}
 	}	
+#ifdef	NEW_ASTERISK
+	ast_cli_unregister_multiple(el_cli,sizeof(el_cli) / 
+		sizeof(struct ast_cli_entry));
+#else
+	/* Unregister cli extensions */
+	ast_cli_unregister(&cli_debug);
+	ast_cli_unregister(&cli_dbdump);
+	ast_cli_unregister(&cli_dbget);
+#endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&el_tech);
 	for(n = 0; n < ninstances; n++) ast_free(instances[n]);
@@ -1787,28 +2089,29 @@ static int sendcmd(char *server, struct el_instance *instp)
 #define	EL_DIRECTORY_PORT 5200
 #define EL_DB_ROOT "echolink"
 
-static void el_zapem(char loading)
+static void my_stupid_free(void *ptr)
 {
-char str[10];
-
-	str[0] = loading;
-	str[1] = 0;
-	ast_db_deltree(EL_DB_ROOT,str);
+	ast_free(ptr);
+	return;
 }
 
-static void el_zapcall(char loading,char *call)
+static void el_zapem(void)
 {
-char	node[50],ipaddr[50],str[150],dbstr[50];
+        tdestroy(el_node_list, my_stupid_free);
+}
 
-	sprintf(dbstr,"%c/call/%s",loading,call);
-	if (ast_db_get(EL_DB_ROOT,dbstr,str,sizeof(str) - 1)) return;
-	if (sscanf(str,"%s:%s",node,ipaddr) != 2) return;
-	if (debug) ast_log(LOG_DEBUG,"Zapped %s\n",dbstr);
-	sprintf(dbstr,"%c/node/%s",loading,node);
-	ast_db_del(EL_DB_ROOT,dbstr);
-	sprintf(dbstr,"%c/ipaddr/%s",loading,ipaddr);
-	ast_db_del(EL_DB_ROOT,dbstr);
-	return;
+static void el_zapcall(char *call)
+{
+struct eldb *mynode;
+
+	if (debug)
+		ast_log(LOG_DEBUG,"zapcall eldb delete Attempt: Call=%s\n",call);
+	mynode = el_db_find_callsign(call);
+	if (!mynode) return;
+	if (debug)
+		ast_log(LOG_DEBUG,"zapcall eldb delete: Node=%s, Call=%s, IP=%s\n",
+			mynode->nodenum,mynode->callsign,mynode->ipaddr);
+	el_db_delete(mynode);
 }
 
 static int el_net_read(int sock,unsigned char *buf1,int buf1len,
@@ -1881,20 +2184,13 @@ static int do_el_directory(char *hostname)
 struct ast_hostent ah;
 struct hostent *host;
 struct sockaddr_in dirserver;
-char	str[200],dbstr[100],ipaddr[50],nodenum[50];
-char	dbstr1[100],call[50],*pp,*cc;
+char	str[200],ipaddr[50],nodenum[50];
+char	call[50],*pp,*cc;
 int	n = 0,rep_lines,delmode;
 int	dir_compressed,dir_partial;
 struct	z_stream_s z;
 int	sock;
 
-	db_active = 'a';
-	db_loading = 'a';
-	if (!ast_db_get(EL_DB_ROOT,"active",str,sizeof(str) - 1))
-	{
-		db_active = *str;
-		if (db_active == 'a') db_loading = 'b';
-	}
 	sendcmd(hostname,instances[0]);
 	el_net_get_index = 0;
 	el_net_get_nread = 0;
@@ -2005,9 +2301,8 @@ int	sock;
 			return -1;
 		}	
 	}
-	if (dir_partial) db_loading = db_active;
-	else el_zapem(db_loading);
 	delmode = 0;
+	if (!dir_partial) el_zapem();
 	for(;;)
 	{
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1) break;
@@ -2024,20 +2319,20 @@ int	sock;
 		strncpy(call,str,sizeof(call) - 1);
 		if (dir_partial)
 		{
-			el_zapcall(db_loading,call);
+			el_zapcall(call);
 			if (delmode) continue;
 		}
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1)
 		{
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
-			el_zapem(db_loading);
+			el_zapem();
 			close(sock);
 			return -1;
 		}
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1)
 		{
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
-			el_zapem(db_loading);
+			el_zapem();
 			close(sock);
 			return -1;
 		}
@@ -2047,57 +2342,16 @@ int	sock;
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1)
 		{
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
-			el_zapem(db_loading);
+			el_zapem();
 			close(sock);
 			return -1;
 		}
 		if (str[strlen(str) - 1] == '\n')
 			str[strlen(str) - 1] = 0;
 		strncpy(ipaddr,str,sizeof(ipaddr) - 1);
-		sprintf(dbstr,"%c/ipaddr/%s",db_loading,ipaddr);
 		usleep(2000); /* To get to dry land */
-		if (ast_db_put(EL_DB_ROOT,dbstr,nodenum) != 0)
-		{
-			ast_log(LOG_ERROR,"Error in putting ipaddr record %s (nodenum %s)",ipaddr,nodenum);
-			close(sock);
-			return -1;
-		}
-		sprintf(dbstr,"%c/nodenum/%s",db_loading,nodenum);
-		usleep(2000); /* To get to dry land */
-		if (ast_db_put(EL_DB_ROOT,dbstr,ipaddr))
-		{
- 			ast_log(LOG_ERROR,"Error in putting nodenum record %s (ipaddr %s)",nodenum,ipaddr);
-			close(sock);
-			return -1;
-		}
-		sprintf(dbstr,"%c/nodenum-call/%s",db_loading,nodenum);
-		usleep(2000); /* To get to dry land */
-		if (ast_db_put(EL_DB_ROOT,dbstr,call))
-		{
- 			ast_log(LOG_ERROR,"Error in putting nodenum-call record %s (call %s)",nodenum,call);
-			close(sock);
-			return -1;
-		}
-		sprintf(dbstr,"%c/call/%s",db_loading,call);
-		sprintf(dbstr1,"%s:%s",nodenum,ipaddr);
-		usleep(2000); /* To get to dry land */
-		if (ast_db_put(EL_DB_ROOT,dbstr,dbstr1))
-		{
- 			ast_log(LOG_ERROR,"Error in putting call record %s (ipaddr %s)",nodenum,ipaddr);
-			close(sock);
-			return -1;
-		}
+		el_db_put(nodenum,ipaddr,call);
 		n++;
-	}
-	db_active = db_loading;
-	db_loading = 0;
-	dbstr[0] = db_active;
-	dbstr[1] = 0;
-	if (ast_db_put(EL_DB_ROOT,"active",dbstr) != 0)
-	{
-		ast_log(LOG_ERROR,"Error in finalizing DB process on %s\n",hostname);
-		close(sock);
-		return -1;
 	}
 	close(sock);
 	pp = (dir_partial) ? "partial" : "full";
@@ -2174,7 +2428,8 @@ static void *el_register(void *data)
 static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, char *name)
 {
         struct el_node *el_node_key = NULL;
-	char dbstr[40],nodestr[30];
+	struct eldb *mynode;
+	char nodestr[30];
 
 	el_node_key = (struct el_node *)ast_malloc(sizeof(struct el_node));
 	if (el_node_key)
@@ -2182,13 +2437,15 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		strncpy(el_node_key->call,call,EL_CALL_SIZE);
 		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE);
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
-		snprintf(dbstr,sizeof(dbstr) - 1,"%c/ipaddr/%s",db_active,el_node_key->ip);
-		if (ast_db_get(EL_DB_ROOT,dbstr,nodestr,sizeof(nodestr) - 1))
+		
+		mynode = el_db_find_ipaddr(el_node_key->ip);
+		if (!mynode)
 		{
-			ast_log(LOG_ERROR, "Cannot find DB entry for %s\n",dbstr);
+			ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
 			ast_free(el_node_key); 
 			return 1;
 		}
+		strncpy(nodestr,mynode->nodenum,sizeof(nodestr) - 1);
 		el_node_key->nodenum = atoi(nodestr);
 		el_node_key->countdown = instp->rtcptimeout;
 		el_node_key->seqnum = 1;
@@ -2788,6 +3045,15 @@ int load_module(void)
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         ast_pthread_create(&el_directory_thread,&attr,el_directory,NULL);
+#ifdef	NEW_ASTERISK
+	ast_cli_register_multiple(el_cli,sizeof(el_cli) / 
+		sizeof(struct ast_cli_entry));
+#else
+	/* Register cli extensions */
+	ast_cli_register(&cli_debug);
+	ast_cli_register(&cli_dbdump);
+	ast_cli_register(&cli_dbget);
+#endif
 	/* Make sure we can register our channel type */
 	if (ast_channel_register(&el_tech)) {
 		ast_log(LOG_ERROR, "Unable to register channel class %s\n", type);
