@@ -2052,7 +2052,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 			*sp1++ = hpass6(deemph(lpass(*sp++,o->flpr),&o->destate),
 				o->hpx,o->hpy);
 		else if (o->deemphasis)
-			*sp1++ = deemph(lpass(*sp++,o->flpr),o->destate);
+			*sp1++ = deemph(lpass(*sp++,o->flpr),&o->destate);
 		else if (o->plfilter)
 			*sp1++ = hpass(lpass(*sp++,o->flpr),o->hpx,o->hpy);
 		else
