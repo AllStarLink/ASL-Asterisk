@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.265 10/21/2010
+ *  version 0.266 10/22/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -101,8 +101,6 @@
  *  37 - Foreign Link Local Output Path Disable
  *  38 - Foreign Link Local Output Path Follows Local Telemetry
  *  39 - Foreign Link Local Output Path on Demand
- *  40 - IRLP announce Enable
- *  41 - IRLP announce Disable
  *  42 - Echolink announce node # only
  *  43 - Echolink announce node Callsign only
  *  44 - Echolink announce node # & Callsign
@@ -303,10 +301,7 @@
 
 #define	DEFAULT_ERXGAIN "-3.0"
 #define	DEFAULT_ETXGAIN "3.0"
-#define	DEFAULT_IRXGAIN "-10.0"
-#define	DEFAULT_ITXGAIN "10.0"
 
-#define	DEFAULT_IRLPANN 1
 #define	DEFAULT_EANNMODE 1
 
 #define	DEFAULT_RXBURST_TIME 250 
@@ -352,7 +347,6 @@
 #define	DEFAULT_CIV_ADDR 0x58
 
 #define	MAXCONNECTTIME 5000
-#define	MAXCONNECTTIME_IRLP 25000
 
 #define MAXNODESTR 300
 
@@ -414,7 +408,7 @@
 enum {REM_OFF,REM_MONITOR,REM_TX};
 
 enum {LINKMODE_OFF,LINKMODE_ON,LINKMODE_FOLLOW,LINKMODE_DEMAND,
-	LINKMODE_GUI,LINKMODE_PHONE,LINKMODE_ECHOLINK,LINKMODE_IRLP};
+	LINKMODE_GUI,LINKMODE_PHONE,LINKMODE_ECHOLINK};
 
 enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	CONNECTED,CONNFAIL,STATUS,TIMEOUT,ID1, STATS_TIME, PLAYBACK,
@@ -463,8 +457,6 @@ enum{DAQ_TYPE_UCHAMELEON};
 #define	DEFAULT_PHONE_LINK_MODE_DYNAMIC 1
 #define	DEFAULT_ECHOLINK_LINK_MODE LINKMODE_DEMAND
 #define	DEFAULT_ECHOLINK_LINK_MODE_DYNAMIC 1
-#define	DEFAULT_IRLP_LINK_MODE LINKMODE_DEMAND
-#define	DEFAULT_IRLP_LINK_MODE_DYNAMIC 1
 
 #include "asterisk.h"
 
@@ -574,7 +566,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.265 10/21/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.266 10/22/2010";
 
 static char *app = "Rpt";
 
@@ -1088,9 +1080,6 @@ static struct rpt
 		char ctgroup[16];
 		float erxgain;
 		float etxgain;
-		float irxgain;
-		float itxgain;
-		char irlpann;
 		char eannmode; /* {NONE,NODE,CALL,BOTH} */
 		char *discpgm;
 		char *connpgm;
@@ -1722,7 +1711,6 @@ static int rpt_do_reload(int fd, int argc, char *argv[]);
 static int rpt_do_restart(int fd, int argc, char *argv[]);
 static int rpt_do_playback(int fd, int argc, char *argv[]);
 static int rpt_do_localplay(int fd, int argc, char *argv[]);
-static int rpt_do_irlpplay(int fd, int argc, char *argv[]);
 static int rpt_do_sendall(int fd, int argc, char *argv[]);
 static int rpt_do_sendtext(int fd, int argc, char *argv[]);
 static int rpt_do_fun(int fd, int argc, char *argv[]);
@@ -1772,10 +1760,6 @@ static char localplay_usage[] =
 "Usage: rpt localplay <nodename> <sound_file_base_name>\n"
 "       Send an Audio File to a node, do not send to other connected nodes (local)\n";
 
-
-static char irlpplay_usage[] =
-"Usage: rpt irlpplay <nodename> <sound_file_base_name>\n"
-"       Send an Audio File to a node, do not send to other connected nodes (local)\n";
 
 static char sendtext_usage[] =
 "Usage: rpt sendtext <nodename> <destnodename> <Text Message>\n"
@@ -1847,11 +1831,6 @@ static struct ast_cli_entry  cli_playback =
 static struct ast_cli_entry  cli_localplay =
         { { "rpt", "localplay" }, rpt_do_localplay,
                 "Play Back an Audio File Locally", localplay_usage };
-
-
-static struct ast_cli_entry  cli_irlpplay =
-        { { "rpt", "irlpplay" }, rpt_do_irlpplay,
-                "Play Back an Audio File Locally", irlpplay_usage };
 
 static struct ast_cli_entry  cli_sendtext =
         { { "rpt", "sendtext" }, rpt_do_sendtext,
@@ -4043,7 +4022,6 @@ int	src;
 		src = LINKMODE_GUI;
 		if (mylink->phonemode) src = LINKMODE_PHONE;
 		else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-		else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
 		if (myrpt->p.linkmodedynamic[src] && (mylink->linkmode >= 1) && 
 		    (mylink->linkmode < 0x7ffffffe))
 				mylink->linkmode = LINK_HANG_TIME;
@@ -4063,8 +4041,7 @@ static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 	/* if doesnt qual as a foreign link */
 	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
 	    (!mylink->phonemode) &&
-	    strncasecmp(mylink->chan->name,"echolink",8) &&
-		strncasecmp(mylink->chan->name,"irlp",4)) return(0);
+	    strncasecmp(mylink->chan->name,"echolink",8)) return(0);
 	if ((myrpt->p.duplex < 2) && (myrpt->tele.next == &myrpt->tele)) return(0);
 	if (mylink->linkmode < 2) return(0);
 	if (mylink->linkmode == 0x7fffffff) return(1);
@@ -4098,8 +4075,7 @@ int	nonlocals;
 	/* if doesnt qual as a foreign link */
 	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
 	    (!mylink->phonemode) &&
-	    strncasecmp(mylink->chan->name,"echolink",8) &&
-		strncasecmp(mylink->chan->name,"irlp",4)) return(1);
+	    strncasecmp(mylink->chan->name,"echolink",8)) return(1);
 	if (mylink->linkmode < 2) return(0);
 	if (mylink->linkmode == 0x7fffffff) return(1);
 	if (mylink->linkmode < 0x7ffffffe) return(1);
@@ -5850,15 +5826,6 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"etxgain");
 	if (!val) val = DEFAULT_ETXGAIN;
 	rpt_vars[n].p.etxgain = pow(10.0,atof(val) / 20.0);
-	val = (char *) ast_variable_retrieve(cfg,this,"irxgain");
-	if (!val) val = DEFAULT_IRXGAIN;	
-	rpt_vars[n].p.irxgain = pow(10.0,atof(val) / 20.0);
-	val = (char *) ast_variable_retrieve(cfg,this,"itxgain");
-	if (!val) val = DEFAULT_ITXGAIN;
-	rpt_vars[n].p.itxgain = pow(10.0,atof(val) / 20.0);
-	val = (char *) ast_variable_retrieve(cfg,this,"irlpann");
-	if (val) rpt_vars[n].p.irlpann = ast_true(val);
-	else rpt_vars[n].p.irlpann = DEFAULT_IRLPANN;
 	val = (char *) ast_variable_retrieve(cfg,this,"eannmode");
 	if (val) rpt_vars[n].p.eannmode = atoi(val);
 	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
@@ -5976,13 +5943,6 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"echolinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = ast_true(val);
 	else rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = DEFAULT_ECHOLINK_LINK_MODE_DYNAMIC;
-
-	val = (char *) ast_variable_retrieve(cfg,this,"irlplinkdefault");
-	if (val) rpt_vars[n].p.linkmode[LINKMODE_IRLP] = atoi(val) + 4;
-	else rpt_vars[n].p.linkmode[LINKMODE_IRLP] = DEFAULT_IRLP_LINK_MODE;
-	val = (char *) ast_variable_retrieve(cfg,this,"irlplinkdynamic");
-	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_IRLP] = ast_true(val);
-	else rpt_vars[n].p.linkmodedynamic[LINKMODE_IRLP] = DEFAULT_IRLP_LINK_MODE_DYNAMIC;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"locallist");
 	if (val) {
@@ -6795,22 +6755,6 @@ static int rpt_do_localplay(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
-
-static int rpt_do_irlpplay(int fd, int argc, char *argv[])
-{
-        int     i;
-
-        if (argc != 4) return RESULT_SHOWUSAGE;
-
-        for(i = 0; i < nrpts; i++){
-		if (!rpt_vars[i].p.irlpann) continue;
-                if(!strcmp(argv[2], rpt_vars[i].name)){
-                        struct rpt *myrpt = &rpt_vars[i];
-                        rpt_telemetry(myrpt,LOCALPLAY,argv[3]);
-                }
-        }
-        return RESULT_SUCCESS;
-}
 
 static int rpt_do_sendtext(int fd, int argc, char *argv[])
 {
@@ -8896,12 +8840,6 @@ struct	mdcparams *mdcp;
 		else
 			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		ast_stopstream(mychannel);
-		if (!strncasecmp(mytele->param,"/home/irlp/astrun",14)) 
-		{
-			char fn[100];
-			snprintf(fn,sizeof(fn) - 1,"/bin/rm -f %s.*",mytele->param);
-			ast_safe_system(fn);
-		}
 		imdone = 1;
 		break;
 	    case TOPKEY:
@@ -9821,8 +9759,7 @@ struct rpt_link *l;
  		mylink = (struct rpt_link *) data;
 		if ((!mylink) || (mylink->name[0] == '0')) return;
 		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
-		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8) &&
-			strncasecmp(mylink->chan->name,"irlp",4)) return;
+		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8)) return;
 		break;
 	    case VARCMD:
 		if (myrpt->telemmode < 2) return; 
@@ -10542,12 +10479,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	ZT_CONFINFO ci;  /* conference info */
 
 
-	if (node[0] == '4')
-	{
-		if (strlen(node) < 5) return 1;
-		sprintf(tmp,"irlp/%d,NONE",atoi(node + 1));
-	}
-	else if (node[0] != '3')
+	if (node[0] != '3')
 	{
 		if (!node_lookup(myrpt,node,tmp,sizeof(tmp) - 1,1))
 		{
@@ -10579,7 +10511,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	s = tmp;
 	s1 = strsep(&s,",");
 	if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6) && 
-		strncasecmp(s1,"echolink/",9) && strncasecmp(s1,"irlp/",5))
+		strncasecmp(s1,"echolink/",9))
 	{
 		sy = strchr(s1,'/');		
 		*sy = 0;
@@ -10608,8 +10540,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			rpt_mutex_unlock(&myrpt->lock);
 			return 2; /* Already linked */
 		}
-		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
-			(!strncasecmp(l->chan->name,"irlp",4)))
+		if (!strncasecmp(l->chan->name,"echolink",8))
 		{
 			l->mode = mode;
 			strncpy(myrpt->lastlinknode,node,MAXNODESTR - 1);
@@ -10659,13 +10590,12 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	l->newkeytimer = NEWKEYTIME;
 	l->iaxkey = 0;
 	l->newkey = 2;
-	if ((strncasecmp(s1,"echolink/",9) == 0) || (strncasecmp(s1,"irlp/",5) == 0)) l->newkey = 0;
+	if (strncasecmp(s1,"echolink/",9) == 0) l->newkey = 0;
 #ifdef ALLOW_LOCAL_CHANNELS
 	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1, "local/", 6) == 0) ||
-	    (strncasecmp(s1,"echolink/",9) == 0) || (strncasecmp(s1,"irlp/",5) == 0))
+	    (strncasecmp(s1,"echolink/",9) == 0))
 #else
-	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1,"echolink/",9) == 0) ||
-	    (strncasecmp(s1,"irlp/",5) == 0))
+	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1,"echolink/",9) == 0))
 #endif
         	strncpy(deststr, s1, sizeof(deststr));
 	else
@@ -10677,23 +10607,14 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 		return -1;
 	}
 	*tele++ = 0;
-	if ((!strncasecmp(deststr,"echolink",8)) ||
-	    (!strncasecmp(deststr,"irlp",4)))
+	if (!strncasecmp(deststr,"echolink",8))
 	{
 		char tel1[100];
 
 		strncpy(tel1,tele,sizeof(tel1) - 1);
 		cp = strchr(tel1,'/');
 		if (cp) cp++; else cp = tel1;
-		if (!strncasecmp(deststr,"irlp",4))
-		{
-			snprintf(cp,sizeof(tel1) - 1,"%s/%s",
-				myrpt->name,node + 1);
-		}
-		else
-		{
-			strcpy(cp,node + 1);
-		}
+		strcpy(cp,node + 1);
 		l->chan = ast_request(deststr, AST_FORMAT_SLINEAR,  tel1,NULL);
 	}
 	else
@@ -10767,8 +10688,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 		return -1;
 	}
 	rpt_mutex_lock(&myrpt->lock);
-	if (node[0] == '4') init_linkmode(myrpt,l,LINKMODE_IRLP);
-	else if (node[0] == '3') init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
+	if (node[0] == '3') init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
 	else l->linkmode = 0;
 	l->reconnects = reconnects;
 	/* insert at end of queue */
@@ -10816,12 +10736,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 		case 1: /* Link off */
 			if ((digitbuf[0] == '0') && (myrpt->lastlinknode[0]))
 				strcpy(digitbuf,myrpt->lastlinknode);
-			if (digitbuf[0] == '4')
-			{
-				if (strlen(digitbuf) < 5) break;
-				sprintf(tmp,"irlp/%d,NONE",atoi(digitbuf + 1));
-			}
-			else if (digitbuf[0] != '3')
+			if (digitbuf[0] != '3')
 			{
 				if (!node_lookup(myrpt,digitbuf,tmp,sizeof(tmp) - 1,1))
 				{
@@ -10842,7 +10757,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			s = tmp;
 			s1 = strsep(&s,",");
 			if ((!strchr(s1,':')) && strchr(s1,'/') && strncasecmp(s1, "local/", 6) &&
-				strncasecmp(s1,"echolink/",9) && strncasecmp(s1, "irlp/",5))
+				strncasecmp(s1,"echolink/",9))
 			{
 				sy = strchr(s1,'/');		
 				*sy = 0;
@@ -10945,8 +10860,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				(command_source != SOURCE_ALT) &&
 				(command_source != SOURCE_DPHONE) && mylink &&
 				(!iswebtransceiver(mylink)) &&
-				strncasecmp(mylink->chan->name,"echolink",8) &&
-				strncasecmp(mylink->chan->name,"irlp",4))
+				strncasecmp(mylink->chan->name,"echolink",8))
 					return DC_COMPLETE;
 			
 			/* if already in cmd mode, or selected self, fughetabahtit */
@@ -11730,7 +11644,6 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_ON);
@@ -11745,7 +11658,6 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_OFF);
@@ -11760,7 +11672,6 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_FOLLOW);
@@ -11775,7 +11686,6 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-			else if (!strncasecmp(mylink->chan->name,"irlp",4)) src = LINKMODE_IRLP;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_DEMAND);
@@ -11784,14 +11694,6 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 				return DC_COMPLETE;
 			}
 			break;
-                case 40: /* IRLP announce Enable */
-			myrpt->p.irlpann = 1;
-			rpt_telemetry(myrpt,COMPLETE,NULL);
-			return DC_COMPLETE;
-                case 41: /* IRLP announce Disable */
-			myrpt->p.irlpann = 0;
-			rpt_telemetry(myrpt,COMPLETE,NULL);
-			return DC_COMPLETE;
                 case 42: /* Echolink announce node # only */
 			myrpt->p.eannmode = 1;
 			rpt_telemetry(myrpt,COMPLETE,NULL);
@@ -12657,8 +12559,7 @@ int	res;
 		if (c == myrpt->p.endchar)
 		{
 			if (mylink->lastrx && 
-			    strncasecmp(mylink->chan->name,"echolink",8) &&
-				strncasecmp(mylink->chan->name,"irlp",4))
+			    strncasecmp(mylink->chan->name,"echolink",8))
 			{
 				mylink->lastrealrx = 0;
 				rpt_mutex_unlock(&myrpt->lock);
@@ -17201,8 +17102,6 @@ static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 	}
 	/* cannot apply to echolink */
 	if (!strncasecmp(tmp,"echolink",8)) return 0;
-	/* nor to irlp */
-	if (!strncasecmp(tmp,"irlp",4)) return 0;
 	rpt_mutex_lock(&myrpt->lock);
 	/* remove from queue */
 	remque((struct qelem *) l);
@@ -18915,8 +18814,6 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			}
 			l->elaptime += elap;
 			mymaxct = MAXCONNECTTIME;
-			if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
-				mymaxct = MAXCONNECTTIME_IRLP;
 			/* if connection has taken too long */
 			if ((l->elaptime > mymaxct) && 
 			   ((!l->chan) || (l->chan->_state != AST_STATE_UP)))
@@ -19813,8 +19710,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					rpt_mutex_lock(&myrpt->lock);
 					__kickshort(myrpt);
 					rpt_mutex_unlock(&myrpt->lock);
-					if ((strncasecmp(l->chan->name,"echolink",8)) &&
-					    (strncasecmp(l->chan->name,"irlp",4)))
+					if (strncasecmp(l->chan->name,"echolink",8))
 					{
 						if ((!l->disced) && (!l->outbound))
 						{
@@ -19905,9 +19801,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					}
 
 					fac = 1.0;
-					if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
-						fac = myrpt->p.irxgain;
-					else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+					if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 						fac = myrpt->p.erxgain;
 					if (fac != 1.0)
 					{
@@ -19944,8 +19838,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						}
 					}
 					if (((l->phonemode) && (l->phonevox)) || 
-					    (!strncasecmp(l->chan->name,"echolink",8)) ||
-						(!strncasecmp(l->chan->name,"irlp",4)))
+					    (!strncasecmp(l->chan->name,"echolink",8)))
 					{
 						if (l->phonevox)
 						{
@@ -20000,8 +19893,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						ismuted |= (!l->lastrx);
 						if (l->dtmfed && 
 							(l->phonemode || 
-							    (!strncasecmp(l->chan->name,"echolink",8)) ||
-								(!strncasecmp(l->chan->name,"irlp",4)))) ismuted = 1;
+							    (!strncasecmp(l->chan->name,"echolink",8)))) ismuted = 1;
 						l->dtmfed = 0;
 						if (ismuted)
 						{
@@ -20148,8 +20040,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						rpt_mutex_lock(&myrpt->lock);
 						__kickshort(myrpt);
 						rpt_mutex_unlock(&myrpt->lock);
-						if ((strncasecmp(l->chan->name,"echolink",8)) &&
-						    (strncasecmp(l->chan->name,"irlp",4)))
+						if (strncasecmp(l->chan->name,"echolink",8))
 						{
 							if ((!l->outbound) && (!l->disced))
 							{
@@ -20236,9 +20127,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					float fac,fsamp;
 
 					fac = 1.0;
-					if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
-						fac = myrpt->p.itxgain;
-					else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+					if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 						fac = myrpt->p.etxgain;
 
 					if (fac != 1.0)
@@ -20308,9 +20197,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				}
 				fs = ast_frdup(f);
 				fac = 1.0;
-				if (l->chan && (!strncasecmp(l->chan->name,"irlp",4)))
-					fac = myrpt->p.itxgain;
-				else if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
+				if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 					fac = myrpt->p.etxgain;
 				if (fac != 1.0)
 				{
@@ -20332,8 +20219,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					    strncasecmp(l->chan->name,"IAX",3)))
 					    {
 						if (l->chan && 
-						    ((!strncasecmp(l->chan->name,"irlp",4)) ||
-							(!strncasecmp(l->chan->name,"echolink",8))))
+						    (!strncasecmp(l->chan->name,"irlp",4)))
 						{
 							ast_write(l->chan,fs);
 						} 
@@ -21099,13 +20985,12 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #ifdef ALLOW_LOCAL_CHANNELS
 	        /* Check to insure the connection is IAX2 or Local*/
 	        if ( (strncmp(chan->name,"IAX2",4)) && (strncmp(chan->name,"Local",5)) &&
-		  (strncasecmp(chan->name,"echolink",8)) && (strncasecmp(chan->name,"irlp",4)) ) {
+		  (strncasecmp(chan->name,"echolink",8)) ) {
 	            ast_log(LOG_WARNING, "We only accept links via IAX2, Echolink, IRLP or Local!!\n");
 	            return -1;
 	        }
 #else
-		if (strncmp(chan->name,"IAX2",4) && strncasecmp(chan->name,"Echolink",8) &&
-		    strncasecmp(chan->name,"irlp",4))
+		if (strncmp(chan->name,"IAX2",4) && strncasecmp(chan->name,"Echolink",8))
 		{
 			ast_log(LOG_WARNING, "We only accept links via IAX2 or Echolink!!\n");
 			return -1;
@@ -21232,7 +21117,6 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	}
 	i = 0;
 	if (!strncasecmp(chan->name,"echolink",8)) i = 1;
-	if (!strncasecmp(chan->name,"irlp",4)) i = 1;
 	if ((!options) && (!i))
 	{
         struct ast_hostent ahp;
@@ -21446,14 +21330,11 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		l->newkey = 0;
 		l->iaxkey = 0;
 		if ((!phone_mode) && (l->name[0] != '0') &&
-		    strncasecmp(chan->name,"echolink",8) &&
-			strncasecmp(chan->name,"irlp",4)) l->newkey = 2;
+		    strncasecmp(chan->name,"echolink",8)) l->newkey = 2;
 		if (l->name[0] > '9') l->newkeytimer = 0;
 		voxinit_link(l,1);
 		if (!strncasecmp(chan->name,"echolink",8)) 
 			init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
-		else if (!strncasecmp(chan->name,"irlp",4)) 
-			init_linkmode(myrpt,l,LINKMODE_IRLP);
 		else if (phone_mode) init_linkmode(myrpt,l,LINKMODE_PHONE);
 		else init_linkmode(myrpt,l,LINKMODE_GUI);	
 		ast_set_read_format(l->chan,AST_FORMAT_SLINEAR);
@@ -21515,7 +21396,6 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if ((!phone_mode) && (l->name[0] <=  '9'))
 			send_newkey(chan);
 		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
-		    (!strncasecmp(l->chan->name,"irlp",4)) ||
 		      (l->name[0] > '9'))
 			rpt_telemetry(myrpt,CONNECTED,l);
 		return AST_PBX_KEEPALIVE;
@@ -23409,7 +23289,6 @@ static int load_module(void)
 	ast_cli_register(&cli_restart);
 	ast_cli_register(&cli_playback);
 	ast_cli_register(&cli_localplay);
-	ast_cli_register(&cli_irlpplay);
 	ast_cli_register(&cli_sendtext);
 	ast_cli_register(&cli_sendall);
 	ast_cli_register(&cli_fun);
