@@ -249,7 +249,6 @@ struct el_instance
 	int fdr;
 	unsigned long seqno;
 	int confmode;
-	int irlpnode;
 	struct el_pvt *confp;
 	struct gsmVoice_t audio_all_but_one;
 	struct gsmVoice_t audio_all;
@@ -1138,25 +1137,6 @@ static int el_text(struct ast_channel *ast, const char *text)
 			    }
 			}
 			strcat(pkt,"\r");
-			j = 0;
-			k = strlen(pkt);
-			for(x = 0; x < i; x++)
-			{
-			    if (*(strs[x] + 1) == '4')
-			    {
-				    if (strlen(pkt + k) >= 32)
-				    {
-					k = strlen(pkt);
-					strcat(pkt,"\r    ");
-				    }
-				    if (!j++) strcat(pkt,"IRLP: ");
-				    if (*strs[x] == 'T')
-					    sprintf(pkt + strlen(pkt)," %s",strs[x] + 2);
-				    else
-					    sprintf(pkt + strlen(pkt)," %s(M)",strs[x] + 2);
-			    }
-			}
-			strcat(pkt,"\r");
 			if (p->linkstr && pkt && (!strcmp(p->linkstr,pkt))) ast_free(pkt);
 			else p->linkstr = pkt;
 		}
@@ -1310,12 +1290,6 @@ static void send_info(const void *nodep, const VISIT which, const int depth)
 		sin.sin_addr.s_addr = inet_addr((*(struct el_node **)nodep)->ip);
 		snprintf(pkt,sizeof(pkt) - 1,
 			"oNDATA\rWelcome to Allstar Node %s\r",instp->astnode);
-		if (instp->irlpnode)
-		{
-			i = strlen(pkt);
-			snprintf(pkt + i,sizeof(pkt) - (i + 1),
-				"IRLP Node %04d\r",instp->irlpnode);
-		}
 		i = strlen(pkt);
 		snprintf(pkt + i,sizeof(pkt) - (i + 1),
 			"Echolink Node %s\rNumber %u\r \r",
@@ -2994,12 +2968,6 @@ pthread_attr_t attr;
            instp->elservers[2][0] = '\0';
         else
            strncpy(instp->elservers[2],val,EL_SERVERNAME_SIZE);
-
-        val = (char *) ast_variable_retrieve(cfg,ctg,"irlpnode"); 
-        if (val)
-	{
-	   instp->irlpnode = atoi(val);
-	}
 
         val = (char *) ast_variable_retrieve(cfg,ctg,"deny"); 
 	if (val) instp->ndenylist = finddelim(strdup(val),instp->denylist,EL_MAX_CALL_LIST);
