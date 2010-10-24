@@ -92,7 +92,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 
 #define	DEFAULT_ECHO_MAX 1000  /* 20 secs of echo buffer, max */
 
-#define	PP_MASK 0xb7fc
+#define	PP_MASK 0xbffc
 #define	PP_PORT "/dev/parport0"
 #define	PP_IOPORT 0x378
 
@@ -1795,7 +1795,7 @@ static void *hidthread(void *arg)
 				o->last_gpios_in = j;
 			}
 			ast_mutex_lock(&pp_lock);
-			j = k = ppread(); /* get PP input */
+			j = k = ppread() ^ 0x80; /* get PP input */
 			ast_mutex_unlock(&pp_lock);
 			for(i = 10; i <= 15; i++)
 			{
