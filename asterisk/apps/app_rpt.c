@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.267 10/23/2010
+ *  version 0.268 10/26/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -301,8 +301,11 @@
 
 #define	DEFAULT_ERXGAIN "-3.0"
 #define	DEFAULT_ETXGAIN "3.0"
+#define	DEFAULT_TRXGAIN "-3.0"
+#define	DEFAULT_TTXGAIN "3.0"
 
 #define	DEFAULT_EANNMODE 1
+#define	DEFAULT_TANNMODE 1
 
 #define	DEFAULT_RXBURST_TIME 250 
 #define	DEFAULT_RXBURST_THRESHOLD 16
@@ -408,7 +411,7 @@
 enum {REM_OFF,REM_MONITOR,REM_TX};
 
 enum {LINKMODE_OFF,LINKMODE_ON,LINKMODE_FOLLOW,LINKMODE_DEMAND,
-	LINKMODE_GUI,LINKMODE_PHONE,LINKMODE_ECHOLINK};
+	LINKMODE_GUI,LINKMODE_PHONE,LINKMODE_ECHOLINK,LINKMODE_TLB};
 
 enum{ID,PROC,TERM,COMPLETE,UNKEY,REMDISC,REMALREADY,REMNOTFOUND,REMGO,
 	CONNECTED,CONNFAIL,STATUS,TIMEOUT,ID1, STATS_TIME, PLAYBACK,
@@ -457,6 +460,8 @@ enum{DAQ_TYPE_UCHAMELEON};
 #define	DEFAULT_PHONE_LINK_MODE_DYNAMIC 1
 #define	DEFAULT_ECHOLINK_LINK_MODE LINKMODE_DEMAND
 #define	DEFAULT_ECHOLINK_LINK_MODE_DYNAMIC 1
+#define	DEFAULT_TLB_LINK_MODE LINKMODE_DEMAND
+#define	DEFAULT_TLB_LINK_MODE_DYNAMIC 1
 
 #include "asterisk.h"
 
@@ -566,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.267 10/23/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.268 10/26/2010";
 
 static char *app = "Rpt";
 
@@ -1081,6 +1086,9 @@ static struct rpt
 		float erxgain;
 		float etxgain;
 		char eannmode; /* {NONE,NODE,CALL,BOTH} */
+		float trxgain;
+		float ttxgain;
+		char tannmode; /* {NONE,NODE,CALL,BOTH} */
 		char *discpgm;
 		char *connpgm;
 		char *mdclog;
@@ -4022,6 +4030,7 @@ int	src;
 		src = LINKMODE_GUI;
 		if (mylink->phonemode) src = LINKMODE_PHONE;
 		else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+		else if (!strncasecmp(mylink->chan->name,"tlb",8)) src = LINKMODE_TLB;
 		if (myrpt->p.linkmodedynamic[src] && (mylink->linkmode >= 1) && 
 		    (mylink->linkmode < 0x7ffffffe))
 				mylink->linkmode = LINK_HANG_TIME;
@@ -4041,7 +4050,8 @@ static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 	/* if doesnt qual as a foreign link */
 	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
 	    (!mylink->phonemode) &&
-	    strncasecmp(mylink->chan->name,"echolink",8)) return(0);
+	    strncasecmp(mylink->chan->name,"echolink",8) &&
+		strncasecmp(mylink->chan->name,"tlb",3)) return(0);
 	if ((myrpt->p.duplex < 2) && (myrpt->tele.next == &myrpt->tele)) return(0);
 	if (mylink->linkmode < 2) return(0);
 	if (mylink->linkmode == 0x7fffffff) return(1);
@@ -4075,7 +4085,8 @@ int	nonlocals;
 	/* if doesnt qual as a foreign link */
 	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
 	    (!mylink->phonemode) &&
-	    strncasecmp(mylink->chan->name,"echolink",8)) return(1);
+	    strncasecmp(mylink->chan->name,"echolink",8) &&
+		strncasecmp(mylink->chan->name,"tlb",3)) return(1);
 	if (mylink->linkmode < 2) return(0);
 	if (mylink->linkmode == 0x7fffffff) return(1);
 	if (mylink->linkmode < 0x7ffffffe) return(1);
@@ -4244,19 +4255,18 @@ static void birdbath(struct rpt *myrpt)
 	rpt_mutex_unlock(&myrpt->lock);
 }
 
+/* must be called locked */
 static void cancel_pfxtone(struct rpt *myrpt)
 {
 	struct rpt_tele *telem;
 	if(debug > 2)
 		ast_log(LOG_NOTICE, "cancel_pfxfone!!");
-	rpt_mutex_lock(&myrpt->lock);
 	telem = myrpt->tele.next;
 	while(telem != &myrpt->tele)
 	{
 		if (telem->mode == PFXTONE) ast_softhangup(telem->chan,AST_SOFTHANGUP_DEV);
 		telem = telem->next;
 	}
-	rpt_mutex_unlock(&myrpt->lock);
 }
 
 static void do_dtmf_phone(struct rpt *myrpt, struct rpt_link *mylink, char c)
@@ -4737,7 +4747,7 @@ FILE	*tf;
 
 	tf = tmpfile();
 	if (!tf) return -1;
-	if (debug) ast_log(LOG_DEBUG,"elink_cmd sent %s\n",cmd);
+	if (debug)  ast_log(LOG_DEBUG,"elink_cmd sent %s\n",cmd);
 	ast_cli_command(fileno(tf),cmd);
 	rewind(tf);
 	outstr[0] = 0;
@@ -4750,7 +4760,7 @@ FILE	*tf;
 	if (!strlen(outstr)) return 0;
 	if (outstr[strlen(outstr) - 1] == '\n')
 		outstr[strlen(outstr) - 1] = 0;
-	if (debug) ast_log(LOG_DEBUG,"elink_cmd ret. %s\n",outstr);
+	if (debug)  ast_log(LOG_DEBUG,"elink_cmd ret. %s\n",outstr);
 	return(strlen(outstr));
 }
 
@@ -4767,6 +4777,23 @@ int	n;
 	if (nodenum) strcpy(nodenum,strs[0]);
 	if (callsign) strcpy(callsign,strs[1]);
 	if (ipaddr) strcpy(ipaddr,strs[2]);
+	return(1);
+}
+
+static int tlb_node_get(char *lookup, char c, char *nodenum,char *callsign, char *ipaddr, char *port)
+{
+char	str[100],str1[100],*strs[5];
+int	n;
+
+	snprintf(str,sizeof(str) - 1,"tlb nodeget %c %s",c,lookup);
+	n = elink_cmd(str,str1,sizeof(str1));
+	if (n < 1) return(n);
+	n = explode_string(str1, strs, 5, '|', '\"');
+	if (n < 4) return(0);
+	if (nodenum) strcpy(nodenum,strs[0]);
+	if (callsign) strcpy(callsign,strs[1]);
+	if (ipaddr) strcpy(ipaddr,strs[2]);
+	if (port) strcpy(port,strs[3]);
 	return(1);
 }
 
@@ -5792,7 +5819,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	if (val) rpt_vars[n].p.authlevel = atoi(val); 
 	else rpt_vars[n].p.authlevel = 0;
 	val = (char *) ast_variable_retrieve(cfg,this,"parrot");
-	if (val) rpt_vars[n].p.parrotmode = ast_true(val) * 2;
+	if (val) rpt_vars[n].p.parrotmode = (ast_true(val)) ? 2 : 0;
 	else rpt_vars[n].p.parrotmode = 0;
 	val = (char *) ast_variable_retrieve(cfg,this,"parrottime");
 	if (val) rpt_vars[n].p.parrottime = atoi(val); 
@@ -5831,6 +5858,17 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
 	if (rpt_vars[n].p.eannmode < 1) rpt_vars[n].p.eannmode = 1;
 	if (rpt_vars[n].p.eannmode > 3) rpt_vars[n].p.eannmode = 3;
+	val = (char *) ast_variable_retrieve(cfg,this,"trxgain");
+	if (!val) val = DEFAULT_TRXGAIN;
+	rpt_vars[n].p.trxgain = pow(10.0,atof(val) / 20.0); 
+	val = (char *) ast_variable_retrieve(cfg,this,"ttxgain");
+	if (!val) val = DEFAULT_TTXGAIN;
+	rpt_vars[n].p.ttxgain = pow(10.0,atof(val) / 20.0);
+	val = (char *) ast_variable_retrieve(cfg,this,"tannmode");
+	if (val) rpt_vars[n].p.tannmode = atoi(val);
+	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
+	if (rpt_vars[n].p.tannmode < 1) rpt_vars[n].p.tannmode = 1;
+	if (rpt_vars[n].p.tannmode > 3) rpt_vars[n].p.tannmode = 3;
 	val = (char *) ast_variable_retrieve(cfg,this,"discpgm");
 	rpt_vars[n].p.discpgm = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
@@ -5943,6 +5981,13 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"echolinkdynamic");
 	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = ast_true(val);
 	else rpt_vars[n].p.linkmodedynamic[LINKMODE_ECHOLINK] = DEFAULT_ECHOLINK_LINK_MODE_DYNAMIC;
+
+	val = (char *) ast_variable_retrieve(cfg,this,"tlbdefault");
+	if (val) rpt_vars[n].p.linkmode[LINKMODE_TLB] = atoi(val) + 4;
+	else rpt_vars[n].p.linkmode[LINKMODE_TLB] = DEFAULT_TLB_LINK_MODE;
+	val = (char *) ast_variable_retrieve(cfg,this,"tlbdynamic");
+	if (val) rpt_vars[n].p.linkmodedynamic[LINKMODE_TLB] = ast_true(val);
+	else rpt_vars[n].p.linkmodedynamic[LINKMODE_TLB] = DEFAULT_TLB_LINK_MODE_DYNAMIC;
 
 	val = (char *) ast_variable_retrieve(cfg,this,"locallist");
 	if (val) {
@@ -7614,10 +7659,13 @@ config, and see if there's a custom node file to play, and if so, play it */
 
 static int saynode(struct rpt *myrpt, struct ast_channel *mychannel, char *name)
 {
-int	res = 0;
+int	res = 0,tgn;
 char	*val,fname[300],str[100];
 
-	if ((name[0] != '3') || (myrpt->p.eannmode != 2))
+	if (strlen(name) < 1) return(0);
+	tgn = tlb_node_get(name,'n',NULL,str,NULL,NULL);
+	if (((name[0] != '3') && (tgn != 1)) || ((name[0] == '3') && (myrpt->p.eannmode != 2)) ||
+		((tgn == 1) && (myrpt->p.tannmode != 2)))
 	{
 		val = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name, "nodenames");
 		if (!val) val = NODENAMES;
@@ -7627,6 +7675,11 @@ char	*val,fname[300],str[100];
 		res = sayfile(mychannel,"rpt/node");
 		if (!res) 
 			res = ast_say_character_str(mychannel,name,NULL,mychannel->language);
+	}
+	if (tgn == 1)
+	{
+		if (myrpt->p.tannmode < 2) return res;
+		return(sayphoneticstr(mychannel,str));
 	}
 	if (name[0] != '3') return res;
 	if (myrpt->p.eannmode < 2) return res;
@@ -9759,7 +9812,8 @@ struct rpt_link *l;
  		mylink = (struct rpt_link *) data;
 		if ((!mylink) || (mylink->name[0] == '0')) return;
 		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
-		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8)) return;
+		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8) &&
+			strncasecmp(mylink->chan->name,"tlb",3)) return;
 		break;
 	    case VARCMD:
 		if (myrpt->telemmode < 2) return; 
@@ -10478,24 +10532,32 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	int i,n;
 	ZT_CONFINFO ci;  /* conference info */
 
+	if (strlen(node) < 1) return 1;
 
-	if (node[0] != '3')
+	if (tlb_node_get(node,'n',NULL,NULL,NULL,NULL) == 1)
 	{
-		if (!node_lookup(myrpt,node,tmp,sizeof(tmp) - 1,1))
-		{
-			if(strlen(node) >= myrpt->longestnode)
-				return -1; /* No such node */
-			return 1; /* No match yet */
-		}
+		sprintf(tmp,"tlb/%s/%s",node,myrpt->name);
 	}
 	else
 	{
-		char str1[60],str2[50];
+		if (node[0] != '3')
+		{
+			if (!node_lookup(myrpt,node,tmp,sizeof(tmp) - 1,1))
+			{
+				if(strlen(node) >= myrpt->longestnode)
+					return -1; /* No such node */
+				return 1; /* No match yet */
+			}
+		}
+		else
+		{
+			char str1[60],str2[50];
 
-		if (strlen(node) < 7) return 1;
-		sprintf(str2,"%d",atoi(node + 1));
-		if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return -1;
-		sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
+			if (strlen(node) < 7) return 1;
+			sprintf(str2,"%d",atoi(node + 1));
+			if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return -1;
+			sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
+		}
 	}
 
 	if(!strcmp(myrpt->name,node)) /* Do not allow connections to self */
@@ -10508,17 +10570,21 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 		ast_log(LOG_NOTICE,"Connection type: %s\n",(perma)?"Permalink":"Normal");
 	}
 
-	s = tmp;
-	s1 = strsep(&s,",");
-	if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6) && 
-		strncasecmp(s1,"echolink/",9))
+	s1 = tmp;
+	if (strncasecmp(tmp,"tlb",3)) /* if not tlb */
 	{
-		sy = strchr(s1,'/');		
-		*sy = 0;
-		sprintf(sx,"%s:4569/%s",s1,sy + 1);
-		s1 = sx;
+		s = tmp;
+		s1 = strsep(&s,",");
+		if (!strchr(s1,':') && strchr(s1,'/') && strncasecmp(s1, "local/", 6) && 
+			strncasecmp(s1,"echolink/",9))
+		{
+			sy = strchr(s1,'/');		
+			*sy = 0;
+			sprintf(sx,"%s:4569/%s",s1,sy + 1);
+			s1 = sx;
+		}
+		s2 = strsep(&s,",");
 	}
-	s2 = strsep(&s,",");
 	rpt_mutex_lock(&myrpt->lock);
 	l = myrpt->links.next;
 	/* try to find this one in queue */
@@ -10540,7 +10606,8 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			rpt_mutex_unlock(&myrpt->lock);
 			return 2; /* Already linked */
 		}
-		if (!strncasecmp(l->chan->name,"echolink",8))
+		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
+			(!strncasecmp(l->chan->name,"tlb",3)))
 		{
 			l->mode = mode;
 			strncpy(myrpt->lastlinknode,node,MAXNODESTR - 1);
@@ -10593,9 +10660,10 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	if (strncasecmp(s1,"echolink/",9) == 0) l->newkey = 0;
 #ifdef ALLOW_LOCAL_CHANNELS
 	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1, "local/", 6) == 0) ||
-	    (strncasecmp(s1,"echolink/",9) == 0))
+	    (strncasecmp(s1,"echolink/",9) == 0) || (strncasecmp(s1,"tlb/",4) == 0))
 #else
-	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1,"echolink/",9) == 0))
+	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1,"echolink/",9) == 0) ||
+		(strncasecmp(s1,"tlb/",4) == 0))
 #endif
         	strncpy(deststr, s1, sizeof(deststr));
 	else
@@ -10688,7 +10756,9 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 		return -1;
 	}
 	rpt_mutex_lock(&myrpt->lock);
-	if (node[0] == '3') init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
+	if (tlb_node_get(node,'n',NULL,NULL,NULL,NULL) == 1) 
+		init_linkmode(myrpt,l,LINKMODE_TLB);
+	else if (node[0] == '3') init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
 	else l->linkmode = 0;
 	l->reconnects = reconnects;
 	/* insert at end of queue */
@@ -10711,11 +10781,9 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 static int function_ilink(struct rpt *myrpt, char *param, char *digits, int command_source, struct rpt_link *mylink)
 {
 
-	char *s, *s1, *s2;
-	char tmp[300];
+	char *s1,*s2,tmp[300];
 	char digitbuf[MAXNODESTR],*strs[MAXLINKLIST];
 	char mode,perma;
-	char sx[320],*sy;
 	struct rpt_link *l;
 	int i,r;
 
@@ -10734,37 +10802,9 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 	switch(myatoi(param)){
 		case 11: /* Perm Link off */
 		case 1: /* Link off */
+			if (strlen(digitbuf) < 1) break;
 			if ((digitbuf[0] == '0') && (myrpt->lastlinknode[0]))
 				strcpy(digitbuf,myrpt->lastlinknode);
-			if (digitbuf[0] != '3')
-			{
-				if (!node_lookup(myrpt,digitbuf,tmp,sizeof(tmp) - 1,1))
-				{
-					if(strlen(digitbuf) >= myrpt->longestnode)
-						return DC_ERROR;
-					break;
-				}
-			}
-			else
-			{
-				char str1[60],str2[50];
-
-				if (strlen(digitbuf) < 7) break;
-				sprintf(str2,"%d",atoi(digitbuf + 1));
-				if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return DC_ERROR;
-				sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
-			}
-			s = tmp;
-			s1 = strsep(&s,",");
-			if ((!strchr(s1,':')) && strchr(s1,'/') && strncasecmp(s1, "local/", 6) &&
-				strncasecmp(s1,"echolink/",9))
-			{
-				sy = strchr(s1,'/');		
-				*sy = 0;
-				sprintf(sx,"%s:4569/%s",s1,sy + 1);
-				s1 = sx;
-			}
-			s2 = strsep(&s,",");
 			rpt_mutex_lock(&myrpt->lock);
 			l = myrpt->links.next;
 			/* try to find this one in queue */
@@ -10811,7 +10851,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				return DC_COMPLETE;
 			}
 			rpt_mutex_unlock(&myrpt->lock);	
-			return DC_COMPLETE;
+			break;
 		case 2: /* Link Monitor */
 		case 3: /* Link transceive */
 		case 12: /* Link Monitor permanent */
@@ -11644,6 +11684,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+			else if (!strncasecmp(mylink->chan->name,"tlb",3)) src = LINKMODE_TLB;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_ON);
@@ -11658,6 +11699,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+			else if (!strncasecmp(mylink->chan->name,"tlb",3)) src = LINKMODE_TLB;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_OFF);
@@ -11672,6 +11714,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+			else if (!strncasecmp(mylink->chan->name,"tlb",3)) src = LINKMODE_TLB;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_FOLLOW);
@@ -11686,6 +11729,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((mylink->name[0] <= '0') || (mylink->name[0] > '9')) src = LINKMODE_GUI;
 			if (mylink->phonemode) src = LINKMODE_PHONE;
 			else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+			else if (!strncasecmp(mylink->chan->name,"tlb",3)) src = LINKMODE_TLB;
 			if (src && myrpt->p.linkmodedynamic[src])
 			{
 				set_linkmode(mylink,LINKMODE_DEMAND);
@@ -17109,6 +17153,8 @@ static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 	}
 	/* cannot apply to echolink */
 	if (!strncasecmp(tmp,"echolink",8)) return 0;
+	/* cannot apply to tlb */
+	if (!strncasecmp(tmp,"tlb",3)) return 0;
 	rpt_mutex_lock(&myrpt->lock);
 	/* remove from queue */
 	remque((struct qelem *) l);
@@ -19723,7 +19769,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					rpt_mutex_lock(&myrpt->lock);
 					__kickshort(myrpt);
 					rpt_mutex_unlock(&myrpt->lock);
-					if (strncasecmp(l->chan->name,"echolink",8))
+					if (strncasecmp(l->chan->name,"echolink",8) && 
+					    strncasecmp(l->chan->name,"tlb",3))
 					{
 						if ((!l->disced) && (!l->outbound))
 						{
@@ -19816,6 +19863,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					fac = 1.0;
 					if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 						fac = myrpt->p.erxgain;
+					if (l->chan && (!strncasecmp(l->chan->name,"tlb",3)))
+						fac = myrpt->p.trxgain;
 					if (fac != 1.0)
 					{
 						int x1;
@@ -19851,7 +19900,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						}
 					}
 					if (((l->phonemode) && (l->phonevox)) || 
-					    (!strncasecmp(l->chan->name,"echolink",8)))
+					    (!strncasecmp(l->chan->name,"echolink",8)) ||
+					       (!strncasecmp(l->chan->name,"tlb",3)))
 					{
 						if (l->phonevox)
 						{
@@ -19906,7 +19956,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						ismuted |= (!l->lastrx);
 						if (l->dtmfed && 
 							(l->phonemode || 
-							    (!strncasecmp(l->chan->name,"echolink",8)))) ismuted = 1;
+							    (!strncasecmp(l->chan->name,"echolink",8)) ||
+								(!strncasecmp(l->chan->name,"tlb",3)))) ismuted = 1;
 						l->dtmfed = 0;
 						if (ismuted)
 						{
@@ -20053,7 +20104,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						rpt_mutex_lock(&myrpt->lock);
 						__kickshort(myrpt);
 						rpt_mutex_unlock(&myrpt->lock);
-						if (strncasecmp(l->chan->name,"echolink",8))
+						if (strncasecmp(l->chan->name,"echolink",8) && 
+							strncasecmp(l->chan->name,"tlb",3))
 						{
 							if ((!l->outbound) && (!l->disced))
 							{
@@ -20142,6 +20194,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					fac = 1.0;
 					if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 						fac = myrpt->p.etxgain;
+					if (l->chan && (!strncasecmp(l->chan->name,"tlb",3)))
+						fac = myrpt->p.ttxgain;
 
 					if (fac != 1.0)
 					{
@@ -20998,12 +21052,13 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 #ifdef ALLOW_LOCAL_CHANNELS
 	        /* Check to insure the connection is IAX2 or Local*/
 	        if ( (strncmp(chan->name,"IAX2",4)) && (strncmp(chan->name,"Local",5)) &&
-		  (strncasecmp(chan->name,"echolink",8)) ) {
-	            ast_log(LOG_WARNING, "We only accept links via IAX2, Echolink, IRLP or Local!!\n");
+		  (strncasecmp(chan->name,"echolink",8)) && (strncasecmp(chan->name,"tlb",3)) ) {
+	            ast_log(LOG_WARNING, "We only accept links via IAX2, Echolink, TheLinkBox or Local!!\n");
 	            return -1;
 	        }
 #else
-		if (strncmp(chan->name,"IAX2",4) && strncasecmp(chan->name,"Echolink",8))
+		if (strncmp(chan->name,"IAX2",4) && strncasecmp(chan->name,"Echolink",8) && 
+			strncasecmp(chan->name,"tlb",3))
 		{
 			ast_log(LOG_WARNING, "We only accept links via IAX2 or Echolink!!\n");
 			return -1;
@@ -21130,12 +21185,13 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	}
 	i = 0;
 	if (!strncasecmp(chan->name,"echolink",8)) i = 1;
+	if (!strncasecmp(chan->name,"tlb",3)) i = 1;
 	if ((!options) && (!i))
 	{
-        struct ast_hostent ahp;
-        struct hostent *hp;
-        struct in_addr ia;
-        char hisip[100],nodeip[100], *s, *s1, *s2, *s3;
+	        struct ast_hostent ahp;
+	        struct hostent *hp;
+	        struct in_addr ia;
+	        char hisip[100],nodeip[100], *s, *s1, *s2, *s3;
 
 		/* look at callerid to see what node this comes from */
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
@@ -21146,10 +21202,10 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		/* get his IP from IAX2 module */
 		memset(hisip,0,sizeof(hisip));
 #ifdef ALLOW_LOCAL_CHANNELS
-        /* set IP address if this is a local connection*/
-        if (strncmp(chan->name,"Local",5)==0) {
-            strcpy(hisip,"127.0.0.1");
-        } else {
+	        /* set IP address if this is a local connection*/
+	        if (strncmp(chan->name,"Local",5)==0) {
+	            strcpy(hisip,"127.0.0.1");
+	        } else {
 			pbx_substitute_variables_helper(chan,"${IAXPEER(CURRENTCHANNEL)}",hisip,sizeof(hisip) - 1);
 		}
 #else
@@ -21343,11 +21399,14 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		l->newkey = 0;
 		l->iaxkey = 0;
 		if ((!phone_mode) && (l->name[0] != '0') &&
-		    strncasecmp(chan->name,"echolink",8)) l->newkey = 2;
+		    strncasecmp(chan->name,"echolink",8) && 
+			strncasecmp(chan->name,"tlb",3)) l->newkey = 2;
 		if (l->name[0] > '9') l->newkeytimer = 0;
 		voxinit_link(l,1);
 		if (!strncasecmp(chan->name,"echolink",8)) 
 			init_linkmode(myrpt,l,LINKMODE_ECHOLINK);
+		else if (!strncasecmp(chan->name,"tlb",3)) 
+			init_linkmode(myrpt,l,LINKMODE_TLB);
 		else if (phone_mode) init_linkmode(myrpt,l,LINKMODE_PHONE);
 		else init_linkmode(myrpt,l,LINKMODE_GUI);	
 		ast_set_read_format(l->chan,AST_FORMAT_SLINEAR);
@@ -21409,6 +21468,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		if ((!phone_mode) && (l->name[0] <=  '9'))
 			send_newkey(chan);
 		if ((!strncasecmp(l->chan->name,"echolink",8)) ||
+		    (!strncasecmp(l->chan->name,"tlb",3)) ||
 		      (l->name[0] > '9'))
 			rpt_telemetry(myrpt,CONNECTED,l);
 		return AST_PBX_KEEPALIVE;
