@@ -165,7 +165,7 @@ struct TLB_pvt;
 /* Also each node in binary tree in memory */
 struct TLB_node {
    char ip[TLB_IP_SIZE + 1]; 
-   short port;
+   uint16_t port;
    char call[TLB_CALL_SIZE + 1];
    char name[TLB_NAME_SIZE + 1];
    unsigned int nodenum; /* not used yet */
@@ -223,7 +223,7 @@ struct TLB_rxqel {
         struct TLB_rxqel *qe_back;
         char buf[BLOCKING_FACTOR * GSM_FRAME_SIZE];
         char fromip[TLB_IP_SIZE + 1];
-	short fromport;
+	uint16_t fromport;
 };
 
 struct TLB_pvt {
@@ -232,7 +232,7 @@ struct TLB_pvt {
 	char app[16];		
 	char stream[80];
 	char ip[TLB_IP_SIZE + 1]; 
-	short port;
+	uint16_t port;
 	char txkey;
 	int rxkey;
 	int keepalive;
@@ -692,8 +692,8 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 	}
 	/* When we call, it just works, really, there's no destination...  Just
 	   ring the phone and wait for someone to answer */
-//	if (option_debug)
-		ast_log(LOG_NOTICE, "Calling %s on %s\n", dest, ast->name);
+	if (option_debug)
+		ast_log(LOG_DEBUG, "Calling %s on %s\n", dest, ast->name);
 	if (*dest)  /* if number specified */
 	{
 		char *str,*cp,*val,*sval,*strs[10];
@@ -728,7 +728,7 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 		}
 		ast_mutex_lock(&instp->lock);
 		strcpy(instp->TLB_node_test.ip,strs[1]);
-		instp->TLB_node_test.port = atoi(strs[2]);
+		instp->TLB_node_test.port = strtoul(strs[2],NULL,0);
 		do_new_call(instp,p,"OUTBOUND","OUTBOUND");
 		pack_length = rtcp_make_sdes(pack,sizeof(pack),instp->mycall);
 		sin.sin_family = AF_INET;
@@ -736,7 +736,8 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 		sin.sin_addr.s_addr = inet_addr(strs[1]);
 	        sendto(instp->ctrl_sock, pack, pack_length,
 			0,(struct sockaddr *)&sin,sizeof(sin));
-		ast_log(LOG_NOTICE,"connect request sent to %s (%s:%s)\n", str,strs[1],strs[2]);
+		if (option_verbose > 2)
+			ast_verbose(VERBOSE_PREFIX_3 "tlb: Connect request sent to %s (%s:%s)\n", str,strs[1],strs[2]);
 		ast_mutex_unlock(&instp->lock);
 		ast_free(str);
 	}
@@ -775,7 +776,7 @@ static struct TLB_pvt *TLB_alloc(void *data)
 	}
 	if (n >= ninstances)
 	{
-		ast_log(LOG_NOTICE,"Cannot find TheLinkBox channel %s\n",(char *)data);
+		ast_log(LOG_ERROR,"Cannot find TheLinkBox channel %s\n",(char *)data);
 		return NULL;
 	}
 
@@ -900,133 +901,8 @@ static int TLB_digit_end(struct ast_channel *ast, char digit, unsigned int durat
 	return -1;
 }
 
-static int mycompar(const void *a, const void *b)
-{
-char	**x = (char **) a;
-char	**y = (char **) b;
-int	xoff,yoff;
-
-	if ((**x < '0') || (**x > '9')) xoff = 1; else xoff = 0;
-	if ((**y < '0') || (**y > '9')) yoff = 1; else yoff = 0;
-	return(strcmp((*x) + xoff,(*y) + yoff));
-}
-
 static int TLB_text(struct ast_channel *ast, const char *text)
 {
-#define	MAXLINKSTRS 200
-
-	struct TLB_pvt *p = ast->tech_pvt;
-	char *cmd = NULL,*arg1 = NULL,*arg2 = NULL;
-	char *arg3 = NULL,delim = ' ',*saveptr,*cp,*pkt;
-	char buf[200],*ptr,str[200],*arg4 = NULL,*strs[MAXLINKSTRS];
-	int i,j,k,x;
-
-	ast_copy_string(buf,text,sizeof(buf) - 1);
-	ptr = strchr(buf, (int)'\r'); 
-	if (ptr) *ptr = '\0';
-	ptr = strchr(buf, (int)'\n');    
-	if (ptr) *ptr = '\0';
-
-	if (p->instp && (!p->instp->confmode) && (text[0] == 'L'))
-	{
-		if (strlen(text) < 3)
-		{
-			if (p->linkstr)
-			{
-				ast_free(p->linkstr);
-				p->linkstr = NULL;
-			}
-			return 0;
-		}
-		if (p->linkstr)
-		{
-			ast_free(p->linkstr);
-			p->linkstr = NULL;
-		}
-		cp = ast_strdup(text + 2);
-		if (!cp)
-		{
-			ast_log(LOG_ERROR,"Couldnt alloc");
-			return -1;
-		}
-		i = finddelim(cp,strs,MAXLINKSTRS);
-		if (i) 
-		{
-			qsort((void *)strs,i,sizeof(char *),mycompar);
-			pkt = ast_malloc((i * 10) + 50);
-			if (!pkt)
-			{
-				ast_log(LOG_ERROR,"Couldnt alloc");
-				return -1;
-			}
-			memset(pkt,0,(i * 10) + 50);
-			j = 0;
-			k = 0;
-			for(x = 0; x < i; x++)
-			{
-			    if ((*(strs[x] + 1) < '3') ||
-			        (*(strs[x] + 1) > '4'))
-
-			    {
-				    if (strlen(pkt + k) >= 32)
-				    {
-					k = strlen(pkt);
-					strcat(pkt,"\r    ");
-				    }
-				    if (!j++) strcat(pkt,"Allstar:");
-				    if (*strs[x] == 'T')
-					    sprintf(pkt + strlen(pkt)," %s",strs[x] + 1);
-				    else
-					    sprintf(pkt + strlen(pkt)," %s(M)",strs[x] + 1);
-			    }
-			}
-			strcat(pkt,"\r");
-			j = 0;
-			k = strlen(pkt);
-			for(x = 0; x < i; x++)
-			{
-			    if (*(strs[x] + 1) == '3')
-			    {
-				    if (strlen(pkt + k) >= 32)
-				    {
-					k = strlen(pkt);
-					strcat(pkt,"\r    ");
-				    }
-				    if (!j++) strcat(pkt,"TheLinkBox: ");
-				    if (*strs[x] == 'T')
-					    sprintf(pkt + strlen(pkt)," %d",atoi(strs[x] + 2));
-				    else
-					    sprintf(pkt + strlen(pkt)," %d(M)",atoi(strs[x] + 2));
-			    }
-			}
-			strcat(pkt,"\r");
-			if (p->linkstr && pkt && (!strcmp(p->linkstr,pkt))) ast_free(pkt);
-			else p->linkstr = pkt;
-		}
-		ast_free(cp);
-		return 0;
-	}
-
-	cmd = strtok_r(buf, &delim, &saveptr);
-	if (!cmd)
-	{
-		return 0;
-	}
-
-	arg1 = strtok_r(NULL, &delim, &saveptr);
-	arg2 = strtok_r(NULL, &delim, &saveptr);
-	arg3 = strtok_r(NULL, &delim, &saveptr);
-	arg4 = strtok_r(NULL, &delim, &saveptr);
-
-	if (!strcasecmp(cmd,"D"))
-	{
-//		sprintf(str,"3%06u",p->nodenum);
-		sprintf(str,"9%u",p->nodenum);
-		/* if not for this one, we cant go any farther */
-		if (strcmp(arg1,str)) return 0;
-		ast_senddigit(ast,*arg4);
-		return 0;
-	}
 	return 0;
 }
 
@@ -1058,11 +934,6 @@ void send_audio_all_but_one(const void *nodep, const VISIT which, const int dept
          instp->audio_all_but_one.time = htonl(0);
          instp->audio_all_but_one.ssrc = htonl(6969);
 
-         /*
-         ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct TLB_node **)nodep)->call, (*(struct TLB_node **)nodep)->ip);
-         */
-        
          sendto(instp->audio_sock, (char *)&instp->audio_all_but_one, sizeof(instp->audio_all_but_one),
                 0,(struct sockaddr *)&sin,sizeof(sin));
       }
@@ -1091,10 +962,6 @@ static void send_audio_only_one(const void *nodep, const VISIT which, const int 
       instp->audio_all.time = htonl(0);
       instp->audio_all.ssrc = htonl(6969);
 
-      /*
-      ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct TLB_node **)nodep)->call, (*(struct TLB_node **)nodep)->ip);
-      */
       sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
              0,(struct sockaddr *)&sin,sizeof(sin));
       }
@@ -1122,10 +989,6 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
       instp->audio_all.time = htonl(0);
       instp->audio_all.ssrc = htonl(6969);
 
-      /*
-      ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct TLB_node **)nodep)->call, (*(struct TLB_node **)nodep)->ip);
-      */
       sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
              0,(struct sockaddr *)&sin,sizeof(sin));
    }
@@ -1147,7 +1010,7 @@ static void send_heartbeat(const void *nodep, const VISIT which, const int depth
          ast_copy_string(instp->TLB_node_test.ip,(*(struct TLB_node **)nodep)->ip,TLB_IP_SIZE);
 	 instp->TLB_node_test.port = (*(struct TLB_node **)nodep)->port;
          ast_copy_string(instp->TLB_node_test.call,(*(struct TLB_node **)nodep)->call,TLB_CALL_SIZE);
-         ast_log(LOG_NOTICE,"countdown for %s(%s) negative\n",instp->TLB_node_test.call,instp->TLB_node_test.ip);
+         ast_log(LOG_WARNING,"countdown for %s(%s) negative\n",instp->TLB_node_test.call,instp->TLB_node_test.ip);
       }
       memset(sdes_packet,0,sizeof(sdes_packet));
       sdes_length = rtcp_make_sdes(sdes_packet,sizeof(sdes_packet),
@@ -1296,7 +1159,8 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 #ifndef	OLD_ASTERISK
 						if (f1->frametype == AST_FRAME_DTMF_END)
 #endif
-							ast_log(LOG_NOTICE,"TheLinkBox %s Got DTMF char %c from IP %s\n",p->stream,f1->subclass,p->ip);
+							if (option_verbose > 2)
+								ast_verbose(VERBOSE_PREFIX_3 "tlb: channel %s Got DTMF char %c from IP %s\n",p->stream,f1->subclass,p->ip);
 						ast_queue_frame(ast,f1);
 						x = 1;
 					}
@@ -1400,7 +1264,8 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
                  sendto(instp->ctrl_sock, bye, bye_length,
                         0,(struct sockaddr *)&sin,sizeof(sin));
 	      ast_mutex_unlock(&instp->lock);
-              ast_log(LOG_NOTICE,"call=%s RTCP timeout, removing\n",instp->TLB_node_test.call);
+              if (option_verbose > 2)
+		ast_verbose(VERBOSE_PREFIX_3 "tlb: call=%s RTCP timeout, removing\n",instp->TLB_node_test.call);
            }
            instp->TLB_node_test.ip[0] = '\0';
            instp->TLB_node_test.port = 0;
@@ -1481,7 +1346,7 @@ static struct ast_channel *TLB_request(const char *type, int format, void *data,
 	oldformat = format;
 	format &= (AST_FORMAT_GSM);
 	if (!format) {
-		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", oldformat);
+		ast_log(LOG_ERROR, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
 	}
 	cp1 = 0;
@@ -1556,7 +1421,7 @@ static int TLB_do_nodedump(int fd, int argc, char *argv[])
 #else
         if (!(cfg = ast_config_load(config))) {
 #endif
-                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
 		return RESULT_FAILURE;
 	}
 	for (v = ast_variable_browse(cfg, "nodes"); v; v = v->next)
@@ -1594,7 +1459,7 @@ static int TLB_do_nodeget(int fd, int argc, char *argv[])
 #else
         if (!(cfg = ast_config_load(config))) {
 #endif
-                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
 		return RESULT_FAILURE;
 	}
 	s = ast_strdupa(argv[3]);
@@ -1774,7 +1639,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 #else
 	        if (!(cfg = ast_config_load(config))) {
 #endif
-	                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+	                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
 			ast_free(TLB_node_key); 
 			return -1;
 		}
@@ -1788,13 +1653,13 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 				n = finddelim(sval,strs,10);
 				if (n < 3) continue;
 				if ((!strcmp(TLB_node_key->ip,strs[1])) &&
-				    (TLB_node_key->port == atoi(strs[2])) &&
+				    (TLB_node_key->port == (unsigned short)strtoul(strs[2],NULL,0)) &&
 					(!strcmp(call,strs[0]))) break;
 			}
 			if (!v)
 			{
-				ast_log(LOG_ERROR, "Cannot find node entry for %s IP addr %s port %d\n",
-					call,TLB_node_key->ip,TLB_node_key->port);
+				ast_log(LOG_ERROR, "Cannot find node entry for %s IP addr %s port %u\n",
+					call,TLB_node_key->ip,TLB_node_key->port & 0xffff);
 				ast_free(TLB_node_key); 
 				ast_config_destroy(cfg);
 				return 1;
@@ -1811,9 +1676,9 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 		TLB_node_key->instp = instp;
 		if (tsearch(TLB_node_key, &TLB_node_list, compare_ip))
 		{
-			ast_log(LOG_NOTICE, "new CALL=%s,ip=%s,port=%u\n",
+			if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "tlb: new CALL = %s, ip = %s, port = %u\n",
 				TLB_node_key->call,TLB_node_key->ip,
-					TLB_node_key->port);
+					TLB_node_key->port & 0xffff);
 			if (instp->confmode)
 			{
 				TLB_node_key->p = instp->confp;
@@ -1825,7 +1690,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 					p = TLB_alloc((void *)instp->name);
 					if (!p)
 					{
-						ast_log(LOG_NOTICE,"Cannot alloc el channel\n");
+						ast_log(LOG_ERROR,"Cannot alloc el channel\n");
 						return -1;
 					}	
 					TLB_node_key->p = p;
@@ -1850,8 +1715,8 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 		}
 		else
 		{
-			ast_log(LOG_ERROR, "tsearch() failed to add CALL=%s,ip=%s,port=%u\n",
-				TLB_node_key->call,TLB_node_key->ip,TLB_node_key->port);
+			ast_log(LOG_ERROR, "tsearch() failed to add CALL = %s,ip = %s,port = %u\n",
+				TLB_node_key->call,TLB_node_key->ip,TLB_node_key->port & 0xffff);
 			ast_free(TLB_node_key); 
 			return -1;
 		}
@@ -1883,7 +1748,7 @@ static void *TLB_reader(void *data)
 	fd_set fds[2];
 	struct timeval tmout;
 
-	ast_log(LOG_NOTICE, "TheLinkBox reader thread started on %s.\n",instp->name);
+	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "tlb: reader thread started on %s.\n",instp->name);
 	ast_mutex_lock(&instp->lock);
 	while(run_forever)
 	{
@@ -2021,7 +1886,8 @@ static void *TLB_reader(void *data)
 				if (is_rtcp_bye((unsigned char *)buf,recvlen))
 				{
 					if (find_delete(&instp->TLB_node_test))
-						ast_log(LOG_NOTICE,"disconnect from ip=%s\n",instp->TLB_node_test.ip);
+						if (option_verbose > 2)
+							ast_verbose(VERBOSE_PREFIX_3 "tlb: Disconnect from ip %s\n",instp->TLB_node_test.ip);
 				} 
 			    }
 			}
@@ -2061,8 +1927,9 @@ static void *TLB_reader(void *data)
 							fr.delivery.tv_sec = 0;
 							fr.delivery.tv_usec = 0;
 							ast_queue_frame((*found_key)->chan,&fr);
-							ast_log(LOG_NOTICE,"Channel %s answering\n",
-								(*found_key)->chan->name);
+							if (option_verbose > 2)
+								ast_verbose(VERBOSE_PREFIX_3 "tlb: Channel %s answering\n",
+									(*found_key)->chan->name);
 						}
 						(*found_key)->countdown = instp->rtcptimeout;
 						if (recvlen == sizeof(struct rtpVoice_t))
@@ -2076,7 +1943,7 @@ static void *TLB_reader(void *data)
 									qpast = ast_malloc(sizeof(struct TLB_rxqast));
 									if (!qpast)
 									{
-										ast_log(LOG_NOTICE,"Cannot malloc for qpast\n");
+										ast_log(LOG_ERROR,"Cannot malloc for qpast\n");
 										ast_mutex_unlock(&instp->lock);
 										mythread_exit(NULL);
 									}
@@ -2091,7 +1958,7 @@ static void *TLB_reader(void *data)
 							qpel = ast_malloc(sizeof(struct TLB_rxqel));
 							if (!qpel)
 							{
-								ast_log(LOG_NOTICE,"Cannot malloc for qpel\n");
+								ast_log(LOG_ERROR,"Cannot malloc for qpel\n");
 							}
 							else
 							{
@@ -2109,7 +1976,8 @@ static void *TLB_reader(void *data)
 		}
 	}
 	ast_mutex_unlock(&instp->lock);
-	ast_log(LOG_NOTICE, "TheLinkBox read thread exited.\n");
+	if (option_verbose > 2)
+		ast_verbose(VERBOSE_PREFIX_3 "tlb: read thread exited.\n");
 	mythread_exit(NULL);
 	return NULL;
 }
@@ -2227,7 +2095,7 @@ pthread_attr_t attr;
 		si_me.sin_addr.s_addr = htonl(INADDR_ANY);
         else
 		si_me.sin_addr.s_addr = inet_addr(instp->ipaddr);
-        instp->audio_port = atoi(instp->port);
+        instp->audio_port = strtoul(instp->port,NULL,0);;
 	si_me.sin_port = htons(instp->audio_port);               
 	if (bind(instp->audio_sock, &si_me, sizeof(si_me)) == -1) 
 	{
@@ -2253,8 +2121,11 @@ pthread_attr_t attr;
         ast_pthread_create(&instp->TLB_reader_thread,&attr,TLB_reader,(void *)instp);
 	instances[ninstances++] = instp;
 
-        ast_log(LOG_NOTICE, "tlb/%s listening on %s port %s\n", instp->name, instp->ipaddr,instp->port);
-        ast_log(LOG_NOTICE, "tlb/%s call set to %s\n",instp->name,instp->mycall);
+	if (option_verbose > 2)
+	{
+	        ast_verbose(VERBOSE_PREFIX_3 "tlb: tlb/%s listening on %s port %s\n", instp->name, instp->ipaddr,instp->port);
+	        ast_verbose(VERBOSE_PREFIX_3 "tlb: tlb/%s call set to %s\n",instp->name,instp->mycall);
+	}
 	return 0;
 }
 #ifndef	OLD_ASTERISK
@@ -2274,7 +2145,7 @@ int load_module(void)
 #else
         if (!(cfg = ast_config_load(config))) {
 #endif
-                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
                 return AST_MODULE_LOAD_DECLINE;
         }
 
