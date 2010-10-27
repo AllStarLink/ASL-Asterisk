@@ -1811,7 +1811,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 		TLB_node_key->instp = instp;
 		if (tsearch(TLB_node_key, &TLB_node_list, compare_ip))
 		{
-			ast_log(LOG_NOTICE, "new CALL=%s,ip=%s,port=%d\n",
+			ast_log(LOG_NOTICE, "new CALL=%s,ip=%s,port=%u\n",
 				TLB_node_key->call,TLB_node_key->ip,
 					TLB_node_key->port);
 			if (instp->confmode)
@@ -1850,7 +1850,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 		}
 		else
 		{
-			ast_log(LOG_ERROR, "tsearch() failed to add CALL=%s,ip=%s,port=%d\n",
+			ast_log(LOG_ERROR, "tsearch() failed to add CALL=%s,ip=%s,port=%u\n",
 				TLB_node_key->call,TLB_node_key->ip,TLB_node_key->port);
 			ast_free(TLB_node_key); 
 			return -1;
@@ -1858,7 +1858,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 	}
 	else
 	{
-		ast_log(LOG_ERROR,"malloc() failed for new CALL=%s, ip=%s, port=%d\n",
+		ast_log(LOG_ERROR,"malloc() failed for new CALL=%s, ip=%s, port=%u\n",
 			call,instp->TLB_node_test.ip,instp->TLB_node_test.port);
 		return -1;
 	}
