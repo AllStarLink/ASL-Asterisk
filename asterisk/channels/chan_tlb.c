@@ -104,6 +104,7 @@ tlb.conf file.
 #define QUEUE_OVERLOAD_THRESHOLD_AST 25
 #define QUEUE_OVERLOAD_THRESHOLD_EL 20
 #define	MAXPENDING 20
+#define DTMF_NPACKETS 5
 
 #define TLB_IP_SIZE 16
 #define TLB_CALL_SIZE 16
@@ -227,6 +228,7 @@ struct TLB_rxqel {
 };
 
 struct TLB_pvt {
+	ast_mutex_t lock;
 	struct ast_channel *owner;
 	struct TLB_instance *instp;
 	char app[16];		
@@ -247,6 +249,10 @@ struct TLB_pvt {
 	struct ast_trans_pvt *xpath;
 	unsigned int nodenum;
 	char *linkstr;
+	uint32_t dtmflastseq;
+	uint32_t dtmflasttime;
+	uint32_t dtmfseq;
+	uint32_t dtmfidx;
 };
 
 struct rtcp_sdes_request_item {
@@ -784,6 +790,7 @@ static struct TLB_pvt *TLB_alloc(void *data)
 	if (p) {
 		memset(p, 0, sizeof(struct TLB_pvt));
 		
+		ast_mutex_init(&p->lock);
 		sprintf(stream,"%s-%lu",(char *)data,instances[n]->seqno++);
 		strcpy(p->stream,stream);
 		p->rxqast.qe_forw = &p->rxqast;
@@ -883,6 +890,67 @@ static int TLB_indicate(struct ast_channel *ast, int cond, const void *data, siz
 	return 0;
 }
 
+static int tlb_send_dtmf(struct ast_channel *ast,char digit)
+{
+
+	time_t	now;
+	struct rtpVoice_t pkt;
+	struct TLB_pvt *p = ast->tech_pvt;
+	struct sockaddr_in sin;
+        struct TLB_node **found_key = NULL;
+	int i;
+
+	/* set all packet contents to zero */
+	memset(&pkt,0,sizeof(pkt));
+
+	/* get a pointer to the TLB_Node entry and get and
+		increment the seqno for the RTP packet */
+	ast_mutex_lock(&p->instp->lock);
+	strcpy(p->instp->TLB_node_test.ip,p->ip);
+	p->instp->TLB_node_test.port = p->port;
+	found_key = (struct TLB_node **)tfind(&p->instp->TLB_node_test,
+			&TLB_node_list, compare_ip); 
+	if (found_key)
+	{
+	        pkt.seqnum = htons((*(struct TLB_node **)found_key)->seqnum++); 
+	} 
+	ast_mutex_unlock(&p->instp->lock);
+	if (!found_key)
+	{
+		ast_log(LOG_ERROR,"Unable to find node refernce for IP addr %s, port %u\n",
+			p->ip,p->port & 0xffff);
+		return -1;
+	}
+
+	time(&now);
+        sin.sin_family = AF_INET;
+        sin.sin_port = htons(p->port);
+        sin.sin_addr.s_addr = inet_addr(p->ip);
+
+	/* build the rest of the RTP packet */
+        pkt.version = 2;
+        pkt.pad = 0;
+        pkt.ext = 0;
+        pkt.csrc = 0;
+        pkt.marker = 0;
+        pkt.payt = 69;
+        pkt.time = htonl(0);
+        pkt.ssrc = htonl(6969);
+	ast_mutex_lock(&p->lock); /* needs to be locked, since we are incrementing dtmfseq */
+	sprintf((char *)pkt.data,"DTMF%c %u %u",digit,++p->dtmfseq,(uint32_t)now);
+	ast_mutex_unlock(&p->lock);
+	for(i = 0; i < DTMF_NPACKETS; i++)
+	{
+	        sendto(p->instp->audio_sock, (char *)&pkt, strlen((char *)pkt.data) + 12,
+	                0,(struct sockaddr *)&sin,sizeof(sin));
+	}
+	if (option_verbose > 2)
+		ast_verbose(VERBOSE_PREFIX_3 "tlb: Sent DTMF digit %c to IP %s, port %u\n",
+			digit,p->ip,p->port & 0xffff);
+	return(0);
+}
+
+
 #ifndef	OLD_ASTERISK
 
 static int TLB_digit_begin(struct ast_channel *ast, char digit)
@@ -898,11 +966,36 @@ static int TLB_digit_end(struct ast_channel *ast, char digit)
 static int TLB_digit_end(struct ast_channel *ast, char digit, unsigned int duration)
 #endif
 {
-	return -1;
+	return(tlb_send_dtmf(ast,digit));
 }
 
 static int TLB_text(struct ast_channel *ast, const char *text)
 {
+	char buf[200],*arg1 = NULL,*arg2 = NULL;
+	char *arg3 = NULL, *arg4 = NULL,*ptr,*saveptr;
+	char delim = ' ',*cmd;
+
+	strncpy(buf,text,sizeof(buf) - 1);
+	ptr = strchr(buf, (int)'\r'); 
+	if (ptr) *ptr = '\0';
+	ptr = strchr(buf, (int)'\n');    
+	if (ptr) *ptr = '\0';
+
+	cmd = strtok_r(buf, &delim, &saveptr);
+	if (!cmd)
+	{
+		return 0;
+	}
+
+	arg1 = strtok_r(NULL, &delim, &saveptr);
+	arg2 = strtok_r(NULL, &delim, &saveptr);
+	arg3 = strtok_r(NULL, &delim, &saveptr);
+	arg4 = strtok_r(NULL, &delim, &saveptr);
+
+	if (!strcasecmp(cmd,"D"))
+	{
+		tlb_send_dtmf(ast,*arg4);
+	}
 	return 0;
 }
 
@@ -924,7 +1017,7 @@ void send_audio_all_but_one(const void *nodep, const VISIT which, const int dept
          sin.sin_port = htons((*(struct TLB_node **)nodep)->port);
          sin.sin_addr.s_addr = inet_addr((*(struct TLB_node **)nodep)->ip);
 
-         instp->audio_all_but_one.version = 3;
+         instp->audio_all_but_one.version = 2;
          instp->audio_all_but_one.pad = 0;
          instp->audio_all_but_one.ext = 0;
          instp->audio_all_but_one.csrc = 0;
@@ -952,7 +1045,7 @@ static void send_audio_only_one(const void *nodep, const VISIT which, const int 
          sin.sin_port = htons((*(struct TLB_node **)nodep)->port);
          sin.sin_addr.s_addr = inet_addr((*(struct TLB_node **)nodep)->ip);
 
-      instp->audio_all.version = 3;
+      instp->audio_all.version = 2;
       instp->audio_all.pad = 0;
       instp->audio_all.ext = 0;
       instp->audio_all.csrc = 0;
@@ -979,7 +1072,7 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
       sin.sin_port = htons(instp->audio_port);
       sin.sin_addr.s_addr = inet_addr((*(struct TLB_node **)nodep)->ip);
 
-      instp->audio_all.version = 3;
+      instp->audio_all.version = 2;
       instp->audio_all.pad = 0;
       instp->audio_all.ext = 0;
       instp->audio_all.csrc = 0;
@@ -1906,21 +1999,81 @@ static void *TLB_reader(void *data)
 				ast_copy_string(instp->TLB_node_test.ip,ast_inet_ntoa(sin.sin_addr),TLB_IP_SIZE);
 #endif
 				instp->TLB_node_test.port = ntohs(sin.sin_port);
-				{
-					found_key = (struct TLB_node **)tfind(&instp->TLB_node_test, &TLB_node_list, compare_ip);
-					if (found_key)
-					{
-						struct TLB_pvt *p = (*found_key)->p;
 
-						if (!(*found_key)->p->firstheard)
+				found_key = (struct TLB_node **)tfind(&instp->TLB_node_test, &TLB_node_list, compare_ip);
+				if (found_key)
+				{
+					struct TLB_pvt *p = (*found_key)->p;
+
+					if (!(*found_key)->p->firstheard)
+					{
+						(*found_key)->p->firstheard = 1;
+						memset(&fr,0,sizeof(fr));
+						fr.datalen = 0;
+						fr.samples = 0;
+						fr.frametype = AST_FRAME_CONTROL;
+						fr.subclass = AST_CONTROL_ANSWER;
+						fr.data =  0;
+						fr.src = type;
+						fr.offset = 0;
+						fr.mallocd=0;
+						fr.delivery.tv_sec = 0;
+						fr.delivery.tv_usec = 0;
+						ast_queue_frame((*found_key)->chan,&fr);
+						if (option_verbose > 2)
+							ast_verbose(VERBOSE_PREFIX_3 "tlb: Channel %s answering\n",
+								(*found_key)->chan->name);
+					}
+					(*found_key)->countdown = instp->rtcptimeout;
+					if (recvlen > 12) /* if at least a header size and some payload */
+					{
+						/* if its a DTMF frame */
+						if ((((struct rtpVoice_t *)buf)->version == 2) &&
+							(((struct rtpVoice_t *)buf)->payt == 69))
 						{
-							(*found_key)->p->firstheard = 1;
+							uint32_t dseq,dtime;
+							char dchar,dstr[50];
+
+							/* The DTMF sequence numbers are a 32 bit number. I guess to be
+							   *really* pedantic, there should be code to handle a roll-over
+							   in the sequence counter, but really, I don't think there is even
+							   a remote possiblity of sending over 4 BILLION DTMF messages
+							   in a lifetime, much less during a single connection, so
+							   we're not going to worry about it here. */
+
+							/* parse the packet. If not parseable, throw away */
+							if (sscanf((char *)((struct rtpVoice_t *)buf)->data,
+								"DTMF%c %u %u",&dchar,&dseq,&dtime) < 3) continue;
+							ast_mutex_lock(&p->lock);
+							/* if we had a packet before, and this one is before last one,
+							    throw away */
+							if (p->dtmflasttime && (dtime < p->dtmflasttime)) 
+							{
+								ast_mutex_unlock(&p->lock);
+								continue;
+
+							}
+							/* if we get one out of sequence, or the same one again throw away */
+							if (dseq <= p->dtmflastseq)			
+							{
+								ast_mutex_unlock(&p->lock);
+								continue;
+
+							}
+							/* okay, this one is for real!!! */
+							/* save lastdtmftime and lastdtmfseq */
+							p->dtmflastseq = dseq;
+							p->dtmflasttime = dtime;
+							snprintf(dstr, sizeof(dstr) - 1, "D 0 %s %u %c", p->instp->astnode,
+								++(p->dtmfidx), dchar);
+							ast_mutex_unlock(&p->lock);
+							/* Send DTMF (in dchar) to Asterisk */
 							memset(&fr,0,sizeof(fr));
-							fr.datalen = 0;
+							fr.datalen = strlen(dstr) + 1;
+							fr.data = dstr;
 							fr.samples = 0;
-							fr.frametype = AST_FRAME_CONTROL;
-							fr.subclass = AST_CONTROL_ANSWER;
-							fr.data =  0;
+							fr.frametype = AST_FRAME_TEXT;
+							fr.subclass = 0;
 							fr.src = type;
 							fr.offset = 0;
 							fr.mallocd=0;
@@ -1928,14 +2081,14 @@ static void *TLB_reader(void *data)
 							fr.delivery.tv_usec = 0;
 							ast_queue_frame((*found_key)->chan,&fr);
 							if (option_verbose > 2)
-								ast_verbose(VERBOSE_PREFIX_3 "tlb: Channel %s answering\n",
-									(*found_key)->chan->name);
+								ast_verbose(VERBOSE_PREFIX_3 "tlb: Channel %s got DTMF %c\n",
+									(*found_key)->chan->name,dchar);
 						}
-						(*found_key)->countdown = instp->rtcptimeout;
-						if (recvlen == sizeof(struct rtpVoice_t))
+						/* it its a voice frame */
+						if ((((struct rtpVoice_t *)buf)->version == 2) &&
+							(((struct rtpVoice_t *)buf)->payt == 3))
 						{
-							if ((((struct rtpVoice_t *)buf)->version == 2) &&
-								(((struct rtpVoice_t *)buf)->payt == 3))
+							if (recvlen == sizeof(struct rtpVoice_t))
 							{
 								/* break them up for Asterisk */
 								for (i = 0; i < BLOCKING_FACTOR; i++)
@@ -2025,7 +2178,7 @@ pthread_attr_t attr;
 	}
         else
 	{
-	   strcpy(instp->port,"3250");
+	   strcpy(instp->port,"44966");
 	}
 
         val = (char *) ast_variable_retrieve(cfg,ctg,"rtcptimeout");

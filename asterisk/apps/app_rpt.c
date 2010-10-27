@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.268 10/26/2010
+ *  version 0.269 10/27/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.268 10/26/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.269 10/27/2010";
 
 static char *app = "Rpt";
 
@@ -10893,6 +10893,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 
 		case 4: /* Enter Command Mode */
 		
+			if (strlen(digitbuf) < 1) break;
 			/* if doesnt allow link cmd, or no links active, return */
 			if (myrpt->links.next == &myrpt->links) return DC_COMPLETE;
  			if ((command_source != SOURCE_RPT) && 
@@ -10900,7 +10901,8 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				(command_source != SOURCE_ALT) &&
 				(command_source != SOURCE_DPHONE) && mylink &&
 				(!iswebtransceiver(mylink)) &&
-				strncasecmp(mylink->chan->name,"echolink",8))
+				strncasecmp(mylink->chan->name,"echolink",8) &&
+				strncasecmp(mylink->chan->name,"tlb",3))
 					return DC_COMPLETE;
 			
 			/* if already in cmd mode, or selected self, fughetabahtit */
@@ -10913,23 +10915,22 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			if ((digitbuf[0] == '0') && (myrpt->lastlinknode[0]))
 				strcpy(digitbuf,myrpt->lastlinknode);
 			/* node must at least exist in list */
-			if (digitbuf[0] == '4')
+			if (tlb_node_get(digitbuf,'n',NULL,NULL,NULL,NULL) != 1)
 			{
-				if (strlen(digitbuf) < 5) break;
-			}
-			else if (digitbuf[0] != '3')
-			{
-				if (!node_lookup(myrpt,digitbuf,NULL,0,1))
+				if (digitbuf[0] != '3')
 				{
-					if(strlen(digitbuf) >= myrpt->longestnode)
-						return DC_ERROR;
-					break;
-			
+					if (!node_lookup(myrpt,digitbuf,NULL,0,1))
+					{
+						if(strlen(digitbuf) >= myrpt->longestnode)
+							return DC_ERROR;
+						break;
+				
+					}
 				}
-			}
-			else
-			{
-				if (strlen(digitbuf) < 7) break;
+				else
+				{
+					if (strlen(digitbuf) < 7) break;
+				}
 			}
 			rpt_mutex_lock(&myrpt->lock);
 			strcpy(myrpt->lastlinknode,digitbuf);
@@ -12461,7 +12462,8 @@ struct	ast_frame wf;
 	c = func_xlat(myrpt,c,&myrpt->p.outxlat);
 	if (!c) return;
 	rpt_mutex_lock(&myrpt->lock);
-	if (iswebtransceiver(mylink)) /* if a WebTransceiver node */
+	if ((iswebtransceiver(mylink)) ||  /* if a WebTransceiver node */
+		(!strncasecmp(mylink->chan->name,"tlb",3)))  /* or a tlb node */
 	{
 		if (c == myrpt->p.endchar) myrpt->cmdnode[0] = 0;
 		else if (myrpt->cmdnode[0])
