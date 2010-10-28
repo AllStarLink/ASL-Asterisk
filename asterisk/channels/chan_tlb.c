@@ -992,7 +992,7 @@ static int tlb_send_dtmf(struct ast_channel *ast,char digit)
         pkt.ext = 0;
         pkt.csrc = 0;
         pkt.marker = 0;
-        pkt.payt = 69;
+        pkt.payt = 96;
         pkt.time = htonl(now);
         pkt.ssrc = htonl(p->instp->call_crc);
 	ast_mutex_lock(&p->lock); /* needs to be locked, since we are incrementing dtmfseq */
@@ -2094,7 +2094,7 @@ static void *TLB_reader(void *data)
 					{
 						/* if its a DTMF frame */
 						if ((((struct rtpVoice_t *)buf)->version == 2) &&
-							(((struct rtpVoice_t *)buf)->payt == 69))
+							(((struct rtpVoice_t *)buf)->payt == 96))
 						{
 							uint32_t dseq,dtime;
 							char dchar,dstr[50];
