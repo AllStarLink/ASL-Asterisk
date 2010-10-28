@@ -761,7 +761,7 @@ static int xpmr_config(struct chan_usbradio_pvt *o);
 static int RxTestIt(struct chan_usbradio_pvt *o);
 #endif
 
-int	ppinshift[] = {0,0,0,0,0,0,0,0,0,0,6,0,5,4,0,3};
+int	ppinshift[] = {0,0,0,0,0,0,0,0,0,0,6,7,5,4,0,3};
 
 static char tdesc[] = "USB (CM108) Radio Channel Driver";
 
