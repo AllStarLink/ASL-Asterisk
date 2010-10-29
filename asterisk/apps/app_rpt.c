@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.270 10/29/2010
+ *  version 0.271 10/29/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.270 10/29/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.271 10/29/2010";
 
 static char *app = "Rpt";
 
@@ -4931,6 +4931,8 @@ int	i,l,argc,varp,var1p,thisAction,maxActions;
 struct ast_variable *v;
 struct ast_var_t *newvariable;
 
+
+	if (!starttime) return;
 	for (v = ast_variable_browse(myrpt->cfg, myrpt->p.events); v; v = v->next)
 	{
 		/* make a local copy of the value of this entry */
@@ -5000,7 +5002,7 @@ struct ast_var_t *newvariable;
 					/* set to 1 if var is true */
 					var1p = ((pbx_checkcondition(var1) > 0));
 				}
-				pbx_builtin_setvar_helper(myrpt->rxchannel,cmpvar,var);
+//				pbx_builtin_setvar_helper(myrpt->rxchannel,cmpvar,var);
 				ast_free(cmpvar);			
 				c = toupper(c);
 				if (!strchr("TFNI",c))
@@ -5126,6 +5128,32 @@ struct ast_var_t *newvariable;
 			free(cp);
 			continue;
 		}
+	}
+	for (v = ast_variable_browse(myrpt->cfg, myrpt->p.events); v; v = v->next)
+	{
+		/* make a local copy of the value of this entry */
+		myval = ast_strdupa(v->value);
+		/* separate out specification into pipe-delimited fields */
+		argc = ast_app_separate_args(myval, '|', argv, sizeof(argv) / sizeof(argv[0]));
+		if (argc != 3) continue;
+		action = toupper(*argv[0]);
+		if (!strchr("VGFCS",action)) continue;
+		c = *argv[1];
+		if (c == 'E') continue;
+		var = (char *) pbx_builtin_getvar_helper(myrpt->rxchannel,argv[2]);
+		if (!var) continue;
+		/* set to 1 if var is true */
+		varp = ((pbx_checkcondition(var) > 0));
+		cmpvar = (char *)ast_malloc(strlen(argv[2]) + 10);
+		if (!cmpvar)
+		{
+			ast_log(LOG_NOTICE,"Cannot malloc()\n");
+			return;
+		}
+		sprintf(cmpvar,"XX_%s",argv[2]);
+		var1 = (char *) pbx_builtin_getvar_helper(myrpt->rxchannel,cmpvar);
+		pbx_builtin_setvar_helper(myrpt->rxchannel,cmpvar,var);
+		ast_free(cmpvar);			
 	}
 	if (option_verbose < 5) return;
 	i = 0;
@@ -11231,7 +11259,7 @@ static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, 
 	channel_revert(myrpt);
 	rpt_mutex_unlock(&myrpt->lock);
 	rpt_telem_select(myrpt,command_source,mylink);
-	rpt_telemetry(myrpt, TERM, NULL);
+	if (!myrpt->patchquiet) rpt_telemetry(myrpt, TERM, NULL);
 	return DC_COMPLETE;
 }
 
@@ -17416,7 +17444,8 @@ char	cmd[MAXDTMF+1] = "",c;
 		rpt_mutex_unlock(&myrpt->lock);
 		return;
 	}
-	if ((myrpt->callmode == 2) || (myrpt->callmode == 3))
+	if (((myrpt->callmode == 2) || (myrpt->callmode == 3)) &&
+		(myrpt->dtmfidx < 0))
 	{
 		myrpt->mydtmf = c;
 	}
