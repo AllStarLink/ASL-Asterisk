@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.269 10/27/2010
+ *  version 0.270 10/29/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.269 10/27/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.270 10/29/2010";
 
 static char *app = "Rpt";
 
@@ -11094,7 +11094,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	pthread_attr_t attr;
-	int i, index, paramlength;
+	int i, index, paramlength,nostar = 0;
 	char *lparam;
 	char *value = NULL;
 	char *paramlist[20];
@@ -11107,6 +11107,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 	"quiet",
 	"voxalways",
 	"exten",
+	"nostar",
 	NULL
 	};
 		
@@ -11126,20 +11127,21 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 		strncpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT);
 		memset(myrpt->patchexten, 0, sizeof(myrpt->patchexten));
 
-		if(param){
-			/* Process parameter list */
-			lparam = ast_strdup(param);
-			if(!lparam){
-				ast_log(LOG_ERROR,"App_rpt out of memory on line %d\n",__LINE__);
-				return DC_ERROR;	
-			}
-			paramlength = finddelim(lparam, paramlist, 20); 			
-			for(i = 0; i < paramlength; i++){
-				index = matchkeyword(paramlist[i], &value, keywords);
-				if(value)
-					value = skipchars(value, "= ");
+	}
+	if(param){
+		/* Process parameter list */
+		lparam = ast_strdup(param);
+		if(!lparam){
+			ast_log(LOG_ERROR,"App_rpt out of memory on line %d\n",__LINE__);
+			return DC_ERROR;	
+		}
+		paramlength = finddelim(lparam, paramlist, 20); 			
+		for(i = 0; i < paramlength; i++){
+			index = matchkeyword(paramlist[i], &value, keywords);
+			if(value)
+				value = skipchars(value, "= ");
+			if(!myrpt->callmode){
 				switch(index){
-
 					case 1: /* context */
 						strncpy(myrpt->patchcontext, value, MAXPATCHCONTEXT - 1) ;
 						break;
@@ -11172,8 +11174,15 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 						break;
 				}
 			}
-		ast_free(lparam);
+			else {
+				switch(index){
+					case 8: /* nostar */
+						nostar = 1;
+						break;
+				}
+			}
 		}
+		ast_free(lparam);
 	}
 					
 	rpt_mutex_lock(&myrpt->lock);
@@ -11181,7 +11190,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 	/* if on call, force * into current audio stream */
 	
 	if ((myrpt->callmode == 2) || (myrpt->callmode == 3)){
-		myrpt->mydtmf = myrpt->p.funcchar;
+		if (!nostar) myrpt->mydtmf = myrpt->p.funcchar;
 	}
 	if (myrpt->callmode){
 		rpt_mutex_unlock(&myrpt->lock);
@@ -17617,7 +17626,7 @@ static void *rpt(void *this)
 {
 struct	rpt *myrpt = (struct rpt *)this;
 char *tele,*idtalkover,c,myfirst,*p;
-int ms = MSWAIT,i,lasttx=0,val,identqueued,othertelemqueued;
+int ms = MSWAIT,i,lasttx=0,lastexttx = 0,lastpatchup = 0,val,identqueued,othertelemqueued;
 int tailmessagequeued,ctqueued,dtmfed,lastmyrx,localmsgqueued;
 unsigned int u;
 FILE *fp;
@@ -18033,6 +18042,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->skedtimer = 0;
 	myrpt->tailevent = 0;
 	lasttx = 0;
+	lastexttx = 0;
 	myrpt->keyed = 0;
 	myrpt->txkeyed = 0;
 	time(&myrpt->lastkeyedtime);
@@ -18092,6 +18102,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->lastitx = -1;
 	rpt_update_boolean(myrpt,"RPT_RXKEYED",-1);
 	rpt_update_boolean(myrpt,"RPT_TXKEYED",-1);
+	rpt_update_boolean(myrpt,"RPT_ETXKEYED",-1);
+	rpt_update_boolean(myrpt,"RPT_AUTOPATCHUP",-1);
 	rpt_update_boolean(myrpt,"RPT_NUMLINKS",-1);
 	rpt_update_boolean(myrpt,"RPT_LINKS",-1);
 	myrpt->ready = 1;	
@@ -18111,6 +18123,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			ast_log(LOG_NOTICE,"totx = %d\n",totx);
 			ast_log(LOG_NOTICE,"myrpt->remrx = %d\n",myrpt->remrx);
 			ast_log(LOG_NOTICE,"lasttx = %d\n",lasttx);
+			ast_log(LOG_NOTICE,"lastexttx = %d\n",lastexttx);
 			ast_log(LOG_NOTICE,"elap = %d\n",elap);
 			ast_log(LOG_NOTICE,"toexit = %d\n",toexit);
 
@@ -18602,8 +18615,19 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				"app_rpt Parrot",O_CREAT | O_TRUNC,0,0600);
 		}
 
-		/* Reconnect */
+		if (myrpt->exttx != lastexttx)
+		{
+			lastexttx = myrpt->exttx;
+			rpt_update_boolean(myrpt,"RPT_ETXKEYED",lastexttx);
+		}
 
+		if (((myrpt->callmode != 0)) != lastpatchup)
+		{
+			lastpatchup = ((myrpt->callmode != 0));
+			rpt_update_boolean(myrpt,"RPT_AUTOPATCHUP",lastpatchup);
+		}
+
+		/* Reconnect */
 
 		l = myrpt->links.next;
 		while(l != &myrpt->links)
