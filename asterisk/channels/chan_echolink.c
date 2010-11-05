@@ -172,6 +172,7 @@ static char type[] = "echolink";
 static char snapshot_id[50] = {'0',0};
 static int el_net_get_index = 0;
 static int el_net_get_nread = 0;
+static int nodeoutfd = -1;
 
 
 /* Echolink audio packet heafer */
@@ -538,7 +539,7 @@ int     i,l,inquo;
 static void print_nodes(const void *nodep, const VISIT which, const int depth)
 {
    if ((which == leaf) || (which == postorder)) {
-      ast_verbose("%s|%s|%s\n",
+      ast_cli(nodeoutfd,"%s|%s|%s\n",
              (*(struct eldb **)nodep)->nodenum,
              (*(struct eldb **)nodep)->callsign,
              (*(struct eldb **)nodep)->ipaddr);
@@ -1815,9 +1816,11 @@ static int el_do_dbdump(int fd, int argc, char *argv[])
 		c = tolower(*argv[2]);
 	}
 	ast_mutex_lock(&el_db_lock);
+	nodeoutfd = fd;
 	if (c == 'i') twalk(el_db_ipaddr,print_nodes);
 	else if (c == 'c') twalk(el_db_callsign,print_nodes);
 	else twalk(el_db_nodenum,print_nodes);
+	nodeoutfd = -1;
 	ast_mutex_unlock(&el_db_lock);
 	return RESULT_SUCCESS;
 }
