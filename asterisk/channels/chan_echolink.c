@@ -391,7 +391,7 @@ static int el_digit_end(struct ast_channel *c, char digit, unsigned int duratiio
 #endif
 static int el_text(struct ast_channel *c, const char *text);
 
-static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name);
+static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name, char *astnode);
 static int rtcp_make_bye(unsigned char *p, char *reason);
 static void parse_sdes(unsigned char *packet, struct rtcp_sdes_request *r);
 static void copy_sdes_item(char *source, char *dest, int destlen);
@@ -645,7 +645,7 @@ struct eldb *node,*mynode;
 }
 
 
-static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name)
+static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name, char *astnode)
 {
     unsigned char zp[1500];
     unsigned char *p = zp;
@@ -680,6 +680,14 @@ static int rtcp_make_sdes(unsigned char *pkt, int pktLen, char *call, char *name
     memcpy(ap,line,l); 
     ap += l;
 
+    if (astnode)
+    {
+	    snprintf(line,EL_CALL_SIZE + EL_NAME_SIZE,"Allstar %s",astnode);
+	    *ap++ = 6;
+	    *ap++ = l = strlen(line);
+	    memcpy(ap,line,l); 
+	    ap += l;
+    }
     /* enable DTMF keypad */
     *ap++ = 8;
     *ap++ = 3;
@@ -1331,7 +1339,7 @@ static void send_heartbeat(const void *nodep, const VISIT which, const int depth
       }
       memset(sdes_packet,0,sizeof(sdes_packet));
       sdes_length = rtcp_make_sdes(sdes_packet,sizeof(sdes_packet),
-	instp->mycall,instp->myname);
+	instp->mycall,instp->myname,instp->astnode);
 
       sin.sin_family = AF_INET;
       sin.sin_port = htons(instp->ctrl_port);
@@ -1429,7 +1437,7 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
       if (strcmp(cmd, "o.conip") == 0)
       {
 	 n = 1;
-         pack_length = rtcp_make_sdes(pack,sizeof(pack),instp->mycall,instp->myname);
+         pack_length = rtcp_make_sdes(pack,sizeof(pack),instp->mycall,instp->myname,instp->astnode);
       }
       else
       {
@@ -1507,7 +1515,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 		p->firstsent = 1;
 		memset(sdes_packet,0,sizeof(sdes_packet));
 		sdes_length = rtcp_make_sdes(sdes_packet,sizeof(sdes_packet),
-			instp->mycall,instp->myname);
+			instp->mycall,instp->myname,instp->astnode);
 
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(instp->ctrl_port);
