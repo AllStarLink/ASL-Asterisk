@@ -94,12 +94,30 @@ tlb.conf file.
 
 #define	MAX_RXKEY_TIME 4
 
+#define	RTPBUF_SIZE 400  /* actually 320 would be sufficient */
+enum {TLB_GSM,TLB_G726,TLB_ULAW};
+
+struct {
+	int blocking_factor;
+	int frame_size;
+	int format;
+	int payt;
+	char *name;
+   } tlb_codecs[] = {
+	{4,33,AST_FORMAT_GSM,3,"GSM"}, /* GSM */
+	{2,80,AST_FORMAT_G726,97,"G726"}, /* G726 */
+	{2,160,AST_FORMAT_ULAW,0,"ULAW"}, /* ULAW */
+	{0,0,0,0,0} /* NO MORE */
+} ;
+
+#define	PREF_RXCODEC TLB_GSM
+#define	PREF_TXCODEC TLB_ULAW
+
 /* 50 * 10 * 20ms iax2 = 10,000ms = 10 seconds heartbeat */
 #define	KEEPALIVE_TIME 50 * 10
 #define	AUTH_RETRY_MS 5000
 #define	AUTH_ABANDONED_MS 15000
-#define	BLOCKING_FACTOR 4
-#define	GSM_FRAME_SIZE 33
+
 #define QUEUE_OVERLOAD_THRESHOLD_AST 25
 #define QUEUE_OVERLOAD_THRESHOLD_EL 20
 #define	MAXPENDING 20
@@ -127,7 +145,6 @@ tlb.conf file.
 */
 
 static const char tdesc[] = "TheLinkBox channel driver";
-static int prefformat = AST_FORMAT_GSM;
 static char type[] = "tlb";
 
 int run_forever = 1;
@@ -155,7 +172,7 @@ struct rtpVoice_t {
   uint16_t seqnum;
   uint32_t time;
   uint32_t ssrc;
-  unsigned char data[BLOCKING_FACTOR * GSM_FRAME_SIZE];
+  unsigned char data[RTPBUF_SIZE];
 };
 
 struct TLB_instance;
@@ -211,18 +228,20 @@ struct TLB_instance
 	struct TLB_node TLB_node_test;
 	struct TLB_pending pending[MAXPENDING];
 	pthread_t TLB_reader_thread;
+	int pref_rxcodec;
+	int pref_txcodec;
 } ;
 
 struct TLB_rxqast {
 	struct TLB_rxqast *qe_forw;
 	struct TLB_rxqast *qe_back;
-	char buf[GSM_FRAME_SIZE];
+	char buf[RTPBUF_SIZE];
 };
 
 struct TLB_rxqel {
         struct TLB_rxqel *qe_forw;
         struct TLB_rxqel *qe_back;
-        char buf[BLOCKING_FACTOR * GSM_FRAME_SIZE];
+        char buf[RTPBUF_SIZE];
         char fromip[TLB_IP_SIZE + 1];
 	uint16_t fromport;
 };
@@ -253,6 +272,8 @@ struct TLB_pvt {
 	uint32_t dtmflasttime;
 	uint32_t dtmfseq;
 	uint32_t dtmfidx;
+	int rxcodec;
+	int txcodec;
 };
 
 struct rtcp_sdes_request_item {
@@ -347,12 +368,12 @@ static void send_audio_all(const void *nodep, const VISIT which, const int depth
 static void send_heartbeat(const void *nodep, const VISIT which, const int depth);
 static void free_node(void *nodep);
 static int find_delete(struct TLB_node *key);
-static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call, char *name);
+static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call, char *name, char *codec);
 
 static const struct ast_channel_tech TLB_tech = {
 	.type = type,
 	.description = tdesc,
-	.capabilities = AST_FORMAT_GSM,
+	.capabilities = (AST_FORMAT_GSM | AST_FORMAT_G726 | AST_FORMAT_ULAW),
 	.requester = TLB_request,
 	.call = TLB_call,
 	.hangup = TLB_hangup,
@@ -785,6 +806,7 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 		sval = ast_strdupa(val);
 		ast_config_destroy(cfg);
 		strupr(sval);
+		strs[3] = NULL;
 		n = finddelim(sval,strs,10);
 		if (n < 3) 
 		{
@@ -794,7 +816,7 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_mutex_lock(&instp->lock);
 		strcpy(instp->TLB_node_test.ip,strs[1]);
 		instp->TLB_node_test.port = strtoul(strs[2],NULL,0);
-		do_new_call(instp,p,"OUTBOUND","OUTBOUND");
+		do_new_call(instp,p,"OUTBOUND","OUTBOUND",strs[3]);
 		pack_length = rtcp_make_sdes(pack,sizeof(pack),instp->mycall);
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(atoi(strs[2]) + 1);
@@ -861,6 +883,8 @@ static struct TLB_pvt *TLB_alloc(void *data)
 		p->keepalive = KEEPALIVE_TIME;
 		p->instp = instances[n];
 		p->instp->confp = p;  /* save for conference mode */
+		p->rxcodec = instances[n]->pref_rxcodec;
+		p->txcodec = instances[n]->pref_txcodec;
 		if (!p->instp->confmode)
 		{
 			p->dsp = ast_dsp_new();
@@ -876,7 +900,7 @@ static struct TLB_pvt *TLB_alloc(void *data)
 	                ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
 	                ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
-			p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_GSM);
+			p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,tlb_codecs[p->rxcodec].format);
 			if (!p->xpath)
 			{
 				ast_log(LOG_ERROR,"Cannot get translator!!\n");
@@ -1068,6 +1092,7 @@ void send_audio_all_but_one(const void *nodep, const VISIT which, const int dept
 {
    struct sockaddr_in sin;
    struct TLB_instance *instp = (*(struct TLB_node **)nodep)->instp;
+   struct TLB_pvt *p = (*(struct TLB_node **)nodep)->p;
    time_t now;
 
    if ((which == leaf) || (which == postorder)) {
@@ -1083,13 +1108,14 @@ void send_audio_all_but_one(const void *nodep, const VISIT which, const int dept
          instp->audio_all_but_one.ext = 0;
          instp->audio_all_but_one.csrc = 0;
          instp->audio_all_but_one.marker = 0;
-         instp->audio_all_but_one.payt = 3;
+         instp->audio_all_but_one.payt = tlb_codecs[p->txcodec].payt;
          instp->audio_all_but_one.seqnum = htons((*(struct TLB_node **)nodep)->seqnum++); 
          instp->audio_all_but_one.time = htonl(now);
          instp->audio_all_but_one.ssrc = htonl(instp->call_crc);
 
-         sendto(instp->audio_sock, (char *)&instp->audio_all_but_one, sizeof(instp->audio_all_but_one),
-                0,(struct sockaddr *)&sin,sizeof(sin));
+         sendto(instp->audio_sock, (char *)&instp->audio_all_but_one,
+		(tlb_codecs[p->txcodec].frame_size * tlb_codecs[p->txcodec].blocking_factor) + 12,
+	                0,(struct sockaddr *)&sin,sizeof(sin));
       }
    }
 }
@@ -1098,6 +1124,7 @@ static void send_audio_only_one(const void *nodep, const VISIT which, const int 
 {
    struct sockaddr_in sin;
    struct TLB_instance *instp = (*(struct TLB_node **)nodep)->instp;
+   struct TLB_pvt *p = (*(struct TLB_node **)nodep)->p;
    time_t now;
 
    if ((which == leaf) || (which == postorder)) {
@@ -1114,12 +1141,13 @@ static void send_audio_only_one(const void *nodep, const VISIT which, const int 
       instp->audio_all.ext = 0;
       instp->audio_all.csrc = 0;
       instp->audio_all.marker = 0;
-      instp->audio_all.payt = 3;
+      instp->audio_all.payt = tlb_codecs[p->txcodec].payt;
       instp->audio_all.seqnum = htons((*(struct TLB_node **)nodep)->seqnum++);
       instp->audio_all.time = htonl(now);
       instp->audio_all.ssrc = htonl(instp->call_crc);
 
-      sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
+      sendto(instp->audio_sock, (char *)&instp->audio_all, 
+	(tlb_codecs[p->txcodec].frame_size * tlb_codecs[p->txcodec].blocking_factor) + 12,
              0,(struct sockaddr *)&sin,sizeof(sin));
       }
    }
@@ -1130,6 +1158,7 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
 {
    struct sockaddr_in sin;
    struct TLB_instance *instp = (*(struct TLB_node **)nodep)->instp;
+   struct TLB_pvt *p = (*(struct TLB_node **)nodep)->p;
    time_t now;
 
    if ((which == leaf) || (which == postorder)) {
@@ -1143,12 +1172,13 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
       instp->audio_all.ext = 0;
       instp->audio_all.csrc = 0;
       instp->audio_all.marker = 0;
-      instp->audio_all.payt = 3;
+      instp->audio_all.payt = tlb_codecs[p->txcodec].payt;
       instp->audio_all.seqnum = htons((*(struct TLB_node **)nodep)->seqnum++);
       instp->audio_all.time = htonl(now);
       instp->audio_all.ssrc = htonl(instp->call_crc);
 
-      sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
+      sendto(instp->audio_sock, (char *)&instp->audio_all, 
+	(tlb_codecs[p->txcodec].frame_size * tlb_codecs[p->txcodec].blocking_factor) + 12,
              0,(struct sockaddr *)&sin,sizeof(sin));
    }
 }
@@ -1233,7 +1263,7 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	struct TLB_rxqast *qpast;
 	int n,m,x;
         struct TLB_rxqel *qpel;
-	char buf[GSM_FRAME_SIZE + AST_FRIENDLY_OFFSET];
+	char buf[RTPBUF_SIZE + AST_FRIENDLY_OFFSET];
 
 	if (frame->frametype != AST_FRAME_VOICE) return 0;
 
@@ -1285,14 +1315,14 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			p->rxkey = MAX_RXKEY_TIME;
 			qpast = p->rxqast.qe_forw;
 			remque((struct qelem *)qpast);
-			memcpy(buf + AST_FRIENDLY_OFFSET,qpast->buf,GSM_FRAME_SIZE);
+			memcpy(buf + AST_FRIENDLY_OFFSET,qpast->buf,tlb_codecs[p->rxcodec].frame_size);
 			ast_free(qpast);
 
 			memset(&fr,0,sizeof(fr));
-			fr.datalen = GSM_FRAME_SIZE;
+			fr.datalen = tlb_codecs[p->rxcodec].frame_size;
 			fr.samples = 160;
 			fr.frametype = AST_FRAME_VOICE;
-			fr.subclass = AST_FORMAT_GSM;
+			fr.subclass = tlb_codecs[p->rxcodec].format;
 			fr.data =  buf + AST_FRIENDLY_OFFSET;
 			fr.src = type;
 			fr.offset = AST_FRIENDLY_OFFSET;
@@ -1363,7 +1393,7 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
               qpel = p->rxqel.qe_forw;
               remque((struct qelem *)qpel);
 
-              memcpy(instp->audio_all_but_one.data,qpel->buf,BLOCKING_FACTOR * GSM_FRAME_SIZE);
+              memcpy(instp->audio_all_but_one.data,qpel->buf,tlb_codecs[p->txcodec].blocking_factor * tlb_codecs[p->txcodec].frame_size);
               ast_copy_string(instp->TLB_node_test.ip, qpel->fromip, TLB_IP_SIZE);
               instp->TLB_node_test.port = qpel->fromport;
 
@@ -1373,21 +1403,21 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	      ast_mutex_unlock(&instp->lock);
 
               if (instp->fdr >= 0)
-                 write(instp->fdr, instp->audio_all_but_one.data, BLOCKING_FACTOR * GSM_FRAME_SIZE);
+                 write(instp->fdr, instp->audio_all_but_one.data, tlb_codecs[p->txcodec].blocking_factor * tlb_codecs[p->txcodec].frame_size);
            }
         }
         else
         {
            /* Asterisk to TheLinkBox */
-           if (!(frame->subclass & (AST_FORMAT_GSM))) {
+           if (!(frame->subclass & (tlb_codecs[p->txcodec].format))) {
                 ast_log(LOG_WARNING, "Cannot handle frames in %d format\n", frame->subclass);
 		ast_mutex_unlock(&instp->lock);
                 return 0;
            }
            if (p->txkey || p->txindex)  {
-                memcpy(instp->audio_all.data + (GSM_FRAME_SIZE * p->txindex++), frame->data,GSM_FRAME_SIZE);
+                memcpy(instp->audio_all.data + (tlb_codecs[p->txcodec].frame_size * p->txindex++), frame->data,tlb_codecs[p->txcodec].frame_size);
            }      
-           if (p->txindex >= BLOCKING_FACTOR) {
+           if (p->txindex >= tlb_codecs[p->txcodec].blocking_factor) {
 		ast_mutex_lock(&instp->lock);
                 if (instp->confmode)
 		{
@@ -1437,6 +1467,7 @@ static struct ast_channel *TLB_new(struct TLB_pvt *i, int state, unsigned int no
 {
 	struct ast_channel *tmp;
 	struct TLB_instance *instp = i->instp;
+	int prefformat;
 
 #ifdef	OLD_ASTERISK
 	tmp = ast_channel_alloc(1);
@@ -1451,10 +1482,12 @@ static struct ast_channel *TLB_new(struct TLB_pvt *i, int state, unsigned int no
 	if (tmp) {
 #endif
 		tmp->tech = &TLB_tech;
-		tmp->nativeformats = prefformat;
-		tmp->rawreadformat = prefformat;
+		prefformat = tlb_codecs[i->txcodec].format;
 		tmp->rawwriteformat = prefformat;
 		tmp->writeformat = prefformat;
+		prefformat = tlb_codecs[i->rxcodec].format;
+		tmp->nativeformats = tlb_codecs[i->txcodec].format | prefformat;
+		tmp->rawreadformat = prefformat;
 		tmp->readformat = prefformat;
 		if (state == AST_STATE_RING)
 			tmp->rings = 1;
@@ -1503,7 +1536,7 @@ static struct ast_channel *TLB_request(const char *type, int format, void *data,
 	char *str,*cp,*cp1;
 	
 	oldformat = format;
-	format &= (AST_FORMAT_GSM);
+	format &= (AST_FORMAT_GSM | AST_FORMAT_G726 | AST_FORMAT_ULAW);
 	if (!format) {
 		ast_log(LOG_ERROR, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
@@ -1590,7 +1623,10 @@ static int TLB_do_nodedump(int fd, int argc, char *argv[])
 		strupr(s);
 		n = finddelim(s,strs,10);
 		if (n < 3) continue;
-		ast_cli(fd,"%s|%s|%s|%s\n",v->name,strs[0],strs[1],strs[2]);
+		if (n < 4)
+			ast_cli(fd,"%s|%s|%s|%s\n",v->name,strs[0],strs[1],strs[2]);
+		else
+			ast_cli(fd,"%s|%s|%s|%s|%s\n",v->name,strs[0],strs[1],strs[2],strs[3]);
 	}
 	ast_config_destroy(cfg);
 	return RESULT_SUCCESS;
@@ -1668,7 +1704,10 @@ static int TLB_do_nodeget(int fd, int argc, char *argv[])
 		return RESULT_FAILURE;
 	}
 	ast_config_destroy(cfg);
-	ast_cli(fd,"%s|%s|%s|%s\n",s,strs[0],strs[1],strs[2]);
+	if (n < 4)
+		ast_cli(fd,"%s|%s|%s|%s\n",s,strs[0],strs[1],strs[2]);
+	else
+		ast_cli(fd,"%s|%s|%s|%s|%s\n",s,strs[0],strs[1],strs[2],strs[3]);
 	return RESULT_SUCCESS;
 }
 
@@ -1734,7 +1773,7 @@ static char *handle_cli_nodeget(struct ast_cli_entry *e,
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
 	AST_CLI_DEFINE(handle_cli_nodedump,"Dump entire tlb node list"),
-	AST_CLI_DEFINE(handle_cli_nodeget,"Look up tlb node entry""),
+	AST_CLI_DEFINE(handle_cli_nodeget,"Look up tlb node entry"),
 } ;
 
 #endif
@@ -1777,14 +1816,17 @@ int	n;
 	return 0;
 }
 
-static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call, char *name)
+static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call, char *name, char *codec)
 {
         struct TLB_node *TLB_node_key = NULL;
 	struct ast_config *cfg = NULL;
 	struct ast_variable *v;
-	char *sval,*strs[10];
-	int n;
+	struct ast_channel *ast;
+	char *sval,*strs[10],mycodec[20];
+	int i,n;
 
+	mycodec[0] = 0;
+	if (codec) ast_copy_string(mycodec,codec,sizeof(mycodec) - 1);
 	TLB_node_key = (struct TLB_node *)ast_malloc(sizeof(struct TLB_node));
 	if (TLB_node_key)
 	{
@@ -1824,6 +1866,7 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 				return 1;
 			}
 			TLB_node_key->nodenum = atoi(v->name);
+			if (n > 3) ast_copy_string(mycodec,strs[3],sizeof(mycodec) - 1);
 		}
 		else
 		{
@@ -1886,6 +1929,26 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 			call,instp->TLB_node_test.ip,instp->TLB_node_test.port);
 		return -1;
 	}
+	if (mycodec[0])
+	{
+		for(i = 0;tlb_codecs[i].name;i++)
+		{
+			if (!strcasecmp(mycodec,tlb_codecs[i].name)) break;
+		}
+		if (!tlb_codecs[i].name)
+		{
+			ast_log(LOG_ERROR, "Unknown codec type %s for call %s\n",mycodec,TLB_node_key->call);
+			ast_free(TLB_node_key); 
+			ast_free(p);
+			return -1;
+		}			
+		p->txcodec = i;
+	}
+	ast = TLB_node_key->chan;
+	ast->nativeformats = tlb_codecs[p->txcodec].format | tlb_codecs[p->rxcodec].format;
+	ast_set_read_format(ast,ast->readformat);
+	ast_set_write_format(ast,ast->writeformat);
+	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "tlb: tx codec set to %s\n",tlb_codecs[p->txcodec].name);
 	return 0;
 }
 
@@ -1895,7 +1958,7 @@ static void *TLB_reader(void *data)
 	char buf[1024];
 	unsigned char bye[40];
 	struct sockaddr_in sin,sin1;
- 	int i,x;
+ 	int i,j,x;
         struct TLB_rxqast *qpast;
         struct TLB_rxqel *qpel;
 	struct ast_frame fr;
@@ -2014,7 +2077,7 @@ static void *TLB_reader(void *data)
 						}
 						if (!i) /* if authorized */
 						{
-							i = do_new_call(instp,NULL,call,"UNKNOWN");
+							i = do_new_call(instp,NULL,call,"UNKNOWN",NULL);
 							if (i < 0)
 							{
 								ast_mutex_unlock(&instp->lock);
@@ -2150,13 +2213,50 @@ static void *TLB_reader(void *data)
 									(*found_key)->chan->name,dchar);
 						}
 						/* it its a voice frame */
-						if ((((struct rtpVoice_t *)buf)->version == 2) &&
-							(((struct rtpVoice_t *)buf)->payt == 3))
+						if (((struct rtpVoice_t *)buf)->version == 2)
 						{
-							if (recvlen == sizeof(struct rtpVoice_t))
+							j = ((struct rtpVoice_t *)buf)->payt;
+							/* if codec changed from ours */
+							if (j != tlb_codecs[p->rxcodec].payt)
+							{
+								struct ast_channel *ast = (*found_key)->chan;
+								for(i = 0; tlb_codecs[i].blocking_factor; i++)
+								{
+									if (tlb_codecs[i].payt == j) break;
+								}
+								if (!tlb_codecs[i].blocking_factor)
+								{
+									ast_log(LOG_ERROR,"tlb:Payload type %d not recognized on channel %s\n",
+										j,ast->name);
+									continue;
+								}
+								if (option_verbose > 2)
+									ast_verbose(VERBOSE_PREFIX_3 "tlb: channel %s switching to codec %s from codec %s\n",
+										ast->name,tlb_codecs[i].name,
+											tlb_codecs[p->rxcodec].name);
+								p->rxcodec = i;
+								ast->nativeformats = tlb_codecs[i].format;
+								ast_set_read_format(ast,ast->readformat);
+								ast_set_write_format(ast,ast->writeformat);
+								if (p->dsp && p->xpath)
+								{
+									ast_translator_free_path(p->xpath);
+									p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,
+										tlb_codecs[p->rxcodec].format);
+									if (!p->xpath)
+									{
+										ast_log(LOG_ERROR,"Cannot get translator!!\n");
+										ast_mutex_unlock(&instp->lock);
+										mythread_exit(NULL);
+									}
+								}
+							}
+							if (recvlen == 
+							    ((tlb_codecs[p->rxcodec].frame_size * 
+								tlb_codecs[p->rxcodec].blocking_factor) + 12))
 							{
 								/* break them up for Asterisk */
-								for (i = 0; i < BLOCKING_FACTOR; i++)
+								for (i = 0; i < tlb_codecs[p->rxcodec].blocking_factor; i++)
 								{
 									qpast = ast_malloc(sizeof(struct TLB_rxqast));
 									if (!qpast)
@@ -2166,7 +2266,8 @@ static void *TLB_reader(void *data)
 										mythread_exit(NULL);
 									}
 									memcpy(qpast->buf,((struct rtpVoice_t *)buf)->data +
-										(GSM_FRAME_SIZE * i),GSM_FRAME_SIZE);
+										(tlb_codecs[p->rxcodec].frame_size * i),
+											tlb_codecs[p->rxcodec].frame_size);
 									insque((struct qelem *)qpast,(struct qelem *)
 										p->rxqast.qe_back);
 								}
@@ -2181,7 +2282,7 @@ static void *TLB_reader(void *data)
 							else
 							{
 								memcpy(qpel->buf,((struct rtpVoice_t *)buf)->data,
-									BLOCKING_FACTOR * GSM_FRAME_SIZE);
+									tlb_codecs[p->rxcodec].blocking_factor * tlb_codecs[p->rxcodec].frame_size);
 								ast_copy_string(qpel->fromip,instp->TLB_node_test.ip,TLB_IP_SIZE);
 								qpel->fromport = instp->TLB_node_test.port;
 								insque((struct qelem *)qpel,(struct qelem *)
@@ -2292,6 +2393,17 @@ pthread_attr_t attr;
         val = (char *) ast_variable_retrieve(cfg,ctg,"permit"); 
 	if (val) instp->npermitlist = finddelim(strdup(val),instp->permitlist,TLB_MAX_CALL_LIST);
 
+	instp->pref_rxcodec = PREF_RXCODEC;
+	instp->pref_txcodec = PREF_TXCODEC;
+
+        val = (char *) ast_variable_retrieve(cfg,ctg,"codec"); 
+	if (val) 
+	{
+		if (!strcasecmp(val,"GSM")) instp->pref_txcodec = TLB_GSM;
+		else if (!strcasecmp(val,"G726")) instp->pref_txcodec = TLB_G726;
+		else if (!strcasecmp(val,"ULAW")) instp->pref_txcodec = TLB_ULAW;
+	}
+
 	instp->audio_sock = -1;
 	instp->ctrl_sock = -1;
 
@@ -2315,7 +2427,7 @@ pthread_attr_t attr;
 		si_me.sin_addr.s_addr = htonl(INADDR_ANY);
         else
 		si_me.sin_addr.s_addr = inet_addr(instp->ipaddr);
-        instp->audio_port = strtoul(instp->port,NULL,0);;
+        instp->audio_port = strtoul(instp->port,NULL,0);
 	si_me.sin_port = htons(instp->audio_port);               
 	if (bind(instp->audio_sock, &si_me, sizeof(si_me)) == -1) 
 	{

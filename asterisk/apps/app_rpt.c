@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.271 10/29/2010
+ *  version 0.272 10/09/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.271 10/29/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.272 11/09/2010";
 
 static char *app = "Rpt";
 
@@ -4782,13 +4782,13 @@ int	n;
 
 static int tlb_node_get(char *lookup, char c, char *nodenum,char *callsign, char *ipaddr, char *port)
 {
-char	str[100],str1[100],*strs[5];
+char	str[100],str1[100],*strs[6];
 int	n;
 
 	snprintf(str,sizeof(str) - 1,"tlb nodeget %c %s",c,lookup);
 	n = elink_cmd(str,str1,sizeof(str1));
 	if (n < 1) return(n);
-	n = explode_string(str1, strs, 5, '|', '\"');
+	n = explode_string(str1, strs, 6, '|', '\"');
 	if (n < 4) return(0);
 	if (nodenum) strcpy(nodenum,strs[0]);
 	if (callsign) strcpy(callsign,strs[1]);
