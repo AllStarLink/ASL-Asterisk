@@ -1945,9 +1945,11 @@ static int do_new_call(struct TLB_instance *instp, struct TLB_pvt *p, char *call
 		p->txcodec = i;
 	}
 	ast = TLB_node_key->chan;
-	ast->nativeformats = tlb_codecs[p->txcodec].format | tlb_codecs[p->rxcodec].format;
+	ast->nativeformats = tlb_codecs[p->rxcodec].format;
 	ast_set_read_format(ast,ast->readformat);
+	ast->nativeformats = tlb_codecs[p->txcodec].format;
 	ast_set_write_format(ast,ast->writeformat);
+	ast->nativeformats = tlb_codecs[p->txcodec].format | tlb_codecs[p->rxcodec].format;
 	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "tlb: tx codec set to %s\n",tlb_codecs[p->txcodec].name);
 	return 0;
 }
@@ -2235,9 +2237,9 @@ static void *TLB_reader(void *data)
 										ast->name,tlb_codecs[i].name,
 											tlb_codecs[p->rxcodec].name);
 								p->rxcodec = i;
-								ast->nativeformats = tlb_codecs[i].format;
+								ast->nativeformats = tlb_codecs[p->rxcodec].format;
 								ast_set_read_format(ast,ast->readformat);
-								ast_set_write_format(ast,ast->writeformat);
+								ast->nativeformats = tlb_codecs[p->txcodec].format | tlb_codecs[p->rxcodec].format;
 								if (p->dsp && p->xpath)
 								{
 									ast_translator_free_path(p->xpath);
