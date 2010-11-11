@@ -2215,6 +2215,7 @@ int	sock;
 	if (!host)
 	{
 		ast_log(LOG_ERROR,"Unable to resolve name for directory server %s\n",hostname);
+		inflateEnd(&z);
 		return -1;
 	}
 	memset(&dirserver, 0, sizeof(dirserver));       /* Clear struct */
@@ -2226,6 +2227,7 @@ int	sock;
 	if (sock < 0)
 	{
 		ast_log(LOG_ERROR,"Unable to obtain a socket for directory server %s\n",hostname);
+		inflateEnd(&z);
 		return -1;
 	}
         /* Establish connection */
@@ -2233,6 +2235,7 @@ int	sock;
 		sizeof(dirserver)) < 0)
 	{
 		ast_log(LOG_ERROR,"Unable to connect to directory server %s\n",hostname);
+		inflateEnd(&z);
 		return -1;
 	}
 	sprintf(str,"F%s\r",snapshot_id);
@@ -2240,6 +2243,7 @@ int	sock;
 	{
 		ast_log(LOG_ERROR,"Unable to send to directory server %s\n",hostname);
 		close(sock);
+		inflateEnd(&z);
 		return -1;
 	}
 	str[strlen(str) - 1] = 0;
@@ -2248,6 +2252,7 @@ int	sock;
 	{
 		ast_log(LOG_ERROR,"Error in directory download (header) on %s\n",hostname);
 		close(sock);
+		inflateEnd(&z);
 		return -1;
 	} 
 	dir_compressed = 1;
@@ -2268,6 +2273,7 @@ int	sock;
 		{
 			ast_log(LOG_ERROR,"Error in directory download (header) on %s\n",hostname);
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}
 		if (!strncmp(str,"@@@",3))
@@ -2282,6 +2288,7 @@ int	sock;
 		{
 			ast_log(LOG_ERROR,"Error in header on %s\n",hostname);
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}
 	}
@@ -2289,6 +2296,7 @@ int	sock;
 	{
 		ast_log(LOG_ERROR,"Error in directory download (header) on %s\n",hostname);
 		close(sock);
+		inflateEnd(&z);
 		return -1;
 	}
 	if (dir_compressed)
@@ -2297,6 +2305,7 @@ int	sock;
 		{
 			ast_log(LOG_ERROR,"Error in parsing header on %s\n",hostname);
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}	
 	}
@@ -2306,6 +2315,7 @@ int	sock;
 		{
 			ast_log(LOG_ERROR,"Error in parsing header on %s\n",hostname);
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}	
 	}
@@ -2335,6 +2345,7 @@ int	sock;
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
 			el_zapem();
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1)
@@ -2342,6 +2353,7 @@ int	sock;
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
 			el_zapem();
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}
 		if (str[strlen(str) - 1] == '\n')
@@ -2352,6 +2364,7 @@ int	sock;
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
 			el_zapem();
 			close(sock);
+			inflateEnd(&z);
 			return -1;
 		}
 		if (str[strlen(str) - 1] == '\n')
@@ -2364,6 +2377,7 @@ int	sock;
 		n++;
 	}
 	close(sock);
+	inflateEnd(&z);
 	pp = (dir_partial) ? "partial" : "full";
 	cc = (dir_compressed) ? "compressed" : "un-compressed";
 	ast_log(LOG_NOTICE,"Directory pgm done downloading(%s,%s), %d records\n",pp,cc,n);
