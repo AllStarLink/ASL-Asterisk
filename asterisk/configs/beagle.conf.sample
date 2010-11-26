@@ -1,0 +1,29 @@
+;
+; chan_beagle.c configuration file
+;
+
+[ch0]               ; left channel
+                    ; this starts the definition block for a device
+
+
+carrierfrom=hw		; Carrier Detect Source
+			        ; Options - no,hw,hwinvert
+			        ; no - no carrier detection at all
+			        ; hw - via GPIO COR connection
+			        ; hwinvert - same as above but inverted polarity.
+
+ctcssfrom=dsp		; CTCSS Decoder Source
+			        ; Options - no,hw,hwinvert
+			        ; no - no carrier detection at all
+			        ; hw - via GPIO CTCSS connection
+			        ; hwinvert - same as above but inverted polarity.
+
+invertptt=0         ; Invert PTT 
+			        ; 0 = ground to transmit, 1 = open to transmit
+			        ; This is the collector lead of the 2N4401 transistor
+			        ; on the modified usb sound adapter.
+
+duplex=0            ; Connected Radio Device Duplex Capability
+                                ; 0 = Simplex (PTT / Release to Listen)
+                                ; 1 = Duplex (simultaneous Tx and Rx)
+
