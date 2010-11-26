@@ -134,3 +134,5 @@ chan_simpleusb.o: chan_simpleusb.c busy.h ringtone.h
 
 chan_simpleusb.so: LIBS+=-lusb -lasound
 
+chan_beagle.so: LIBS+=-lasound
+
