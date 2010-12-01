@@ -910,20 +910,29 @@ static struct usb_device *hid_device_init(char *desired_device)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
-				if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
-				else strcpy(str,"/sys/class/sound/dsp/device");
+				sprintf(str,"/sys/class/sound/card%d/device",i);
 				memset(desdev,0,sizeof(desdev));
-				if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+				if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
 				{
-					sprintf(str,"/sys/class/sound/controlC%d/device",i);
-					memset(desdev,0,sizeof(desdev));
-					if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+					cp = strrchr(desdev,'/');
+					if (!cp) continue;
+					cp++;
 				}
-				cp = strrchr(desdev,'/');
-				if (cp) *cp = 0; else continue;
-				cp = strrchr(desdev,'/');
-				if (!cp) continue;
-				cp++;
+				else
+				{
+					memset(desdev,0,sizeof(desdev));
+					if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+					{
+						sprintf(str,"/sys/class/sound/controlC%d/device",i);
+						memset(desdev,0,sizeof(desdev));
+						if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+					}
+					cp = strrchr(desdev,'/');
+					if (cp) *cp = 0; else continue;
+					cp = strrchr(desdev,'/');
+					if (!cp) continue;
+					cp++;
+				}
 				break;
 			}
 			if (i >= 32) continue;
@@ -944,6 +953,7 @@ static int hid_device_mklist(void)
     FILE *fp;
 
     ast_mutex_lock(&usb_list_lock);
+    if (usb_device_list) ast_free(usb_device_list);
     usb_device_list = ast_malloc(2);
     if (!usb_device_list) 
     {
@@ -982,20 +992,27 @@ static int hid_device_mklist(void)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
-				if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
-				else strcpy(str,"/sys/class/sound/dsp/device");
-				memset(desdev,0,sizeof(desdev));
-				if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+				if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
 				{
-					sprintf(str,"/sys/class/sound/controlC%d/device",i);
-					memset(desdev,0,sizeof(desdev));
-					if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+					cp = strrchr(desdev,'/');
+					if (!cp) continue;
+					cp++;
 				}
-				cp = strrchr(desdev,'/');
-				if (cp) *cp = 0; else continue;
-				cp = strrchr(desdev,'/');
-				if (!cp) continue;
-				cp++;
+				else
+				{
+					memset(desdev,0,sizeof(desdev));
+					if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+					{
+						sprintf(str,"/sys/class/sound/controlC%d/device",i);
+						memset(desdev,0,sizeof(desdev));
+						if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+					}
+					cp = strrchr(desdev,'/');
+					if (cp) *cp = 0; else continue;
+					cp = strrchr(desdev,'/');
+					if (!cp) continue;
+					cp++;
+				}
 				break;
 			}
 			if (i >= 32) 
@@ -1035,20 +1052,29 @@ char	str[200],desdev[200],*cp;
 
 	for(i = 0;i < 32; i++)
 	{
-		if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
-		else strcpy(str,"/sys/class/sound/dsp/device");
+		sprintf(str,"/sys/class/sound/card%d/device",i);
 		memset(desdev,0,sizeof(desdev));
-		if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+		if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
 		{
-			sprintf(str,"/sys/class/sound/controlC%d/device",i);
-			memset(desdev,0,sizeof(desdev));
-			if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+			cp = strrchr(desdev,'/');
+			if (!cp) continue;
+			cp++;
 		}
-		cp = strrchr(desdev,'/');
-		if (cp) *cp = 0; else continue;
-		cp = strrchr(desdev,'/');
-		if (!cp) continue;
-		cp++;
+		else
+		{
+			memset(desdev,0,sizeof(desdev));
+			if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
+			{
+				sprintf(str,"/sys/class/sound/controlC%d/device",i);
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+			}
+			cp = strrchr(desdev,'/');
+			if (cp) *cp = 0; else continue;
+			cp = strrchr(desdev,'/');
+			if (!cp) continue;
+			cp++;
+		}
 		if (!strcasecmp(cp,devstr)) break;
 	}
 	if (i >= 32) return -1;
@@ -1603,7 +1629,6 @@ static int setformat(struct chan_simpleusb_pvt *o, int mode)
 	int fmt, desired, res, fd;
 	char device[100];
 
-puts("setformat");
 	if (o->sounddev >= 0) {
 		ioctl(o->sounddev, SNDCTL_DSP_RESET, 0);
 		close(o->sounddev);
@@ -1806,6 +1831,10 @@ static int simpleusb_write(struct ast_channel *c, struct ast_frame *f)
 	o->cursound = -1;
 #endif
 	if (!o->hasusb) return 0;
+	if (o->sounddev < 0)
+		setformat(o, O_RDWR);
+	if (o->sounddev < 0)
+		return 0;				/* not fatal */
 	/*
 	 * we could receive a block which is not a multiple of our
 	 * FRAME_SIZE, so buffer it locally and write to the device
@@ -2271,7 +2300,7 @@ static struct ast_channel *simpleusb_new(struct chan_simpleusb_pvt *o, char *ext
 	if (c == NULL)
 		return NULL;
 	c->tech = &simpleusb_tech;
-	if (o->sounddev < 0)
+	if ((o->sounddev < 0) && o->hasusb)
 		setformat(o, O_RDWR);
 	c->fds[0] = o->sounddev;	/* -1 if device closed, override later */
 	c->nativeformats = AST_FORMAT_SLINEAR;
