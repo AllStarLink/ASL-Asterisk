@@ -83,7 +83,6 @@ tlb.conf file.
 #include "asterisk/options.h"
 #include "asterisk/utils.h"
 #include "asterisk/app.h"
-#include "asterisk/dsp.h"
 #include "asterisk/translate.h"
 #include "asterisk/astdb.h"
 #include "asterisk/cli.h"
@@ -263,9 +262,7 @@ struct TLB_pvt {
         struct TLB_rxqel rxqel;
 	char firstsent;
 	char firstheard;
-	struct ast_dsp *dsp;
 	struct ast_module_user *u;
-	struct ast_trans_pvt *xpath;
 	unsigned int nodenum;
 	char *linkstr;
 	uint32_t dtmflastseq;
@@ -834,8 +831,6 @@ static int TLB_call(struct ast_channel *ast, char *dest, int timeout)
 
 static void TLB_destroy(struct TLB_pvt *p)
 {
-	if (p->dsp) ast_dsp_free(p->dsp);
-	if (p->xpath) ast_translator_free_path(p->xpath);
 	if (p->linkstr) ast_free(p->linkstr);
 	p->linkstr = NULL;
 #ifdef	OLD_ASTERISK
@@ -885,28 +880,6 @@ static struct TLB_pvt *TLB_alloc(void *data)
 		p->instp->confp = p;  /* save for conference mode */
 		p->rxcodec = instances[n]->pref_rxcodec;
 		p->txcodec = instances[n]->pref_txcodec;
-		if (!p->instp->confmode)
-		{
-			p->dsp = ast_dsp_new();
-			if (!p->dsp)
-			{
-				ast_log(LOG_ERROR,"Cannot get DSP!!\n");
-				return NULL;
-			}
-#ifdef  NEW_ASTERISK
-	                ast_dsp_set_features(p->dsp,DSP_FEATURE_DIGIT_DETECT);
-	                ast_dsp_set_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
-#else
-	                ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
-	                ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
-#endif
-			p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,tlb_codecs[p->rxcodec].format);
-			if (!p->xpath)
-			{
-				ast_log(LOG_ERROR,"Cannot get translator!!\n");
-				return NULL;
-			}
-		}
 	}
 	return p;
 }
@@ -1259,7 +1232,7 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
         struct sockaddr_in sin;
 	struct TLB_pvt *p = ast->tech_pvt;
 	struct TLB_instance *instp = p->instp;
-	struct ast_frame fr,*f1, *f2;
+	struct ast_frame fr;
 	struct TLB_rxqast *qpast;
 	int n,m,x;
         struct TLB_rxqel *qpel;
@@ -1331,30 +1304,6 @@ static int TLB_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			fr.delivery.tv_usec = 0;
 
 			x = 0;
-			if (p->dsp && (!instp->confmode))
-			{
-				f2 = ast_translate(p->xpath,&fr,0);
-				f1 = ast_dsp_process(NULL,p->dsp,f2);
-				ast_frfree(f2);
-#ifdef	OLD_ASTERISK
-				if (f1->frametype == AST_FRAME_DTMF)
-#else
-				if ((f1->frametype == AST_FRAME_DTMF_END) ||
-					(f1->frametype == AST_FRAME_DTMF_BEGIN))
-#endif
-				{
-					if ((f1->subclass != 'm') && (f1->subclass != 'u'))
-					{
-#ifndef	OLD_ASTERISK
-						if (f1->frametype == AST_FRAME_DTMF_END)
-#endif
-							if (option_verbose > 2)
-								ast_verbose(VERBOSE_PREFIX_3 "tlb: channel %s Got DTMF char %c from IP %s\n",p->stream,f1->subclass,p->ip);
-						ast_queue_frame(ast,f1);
-						x = 1;
-					}
-				}
-			} 
 			if (!x) ast_queue_frame(ast,&fr);
 		}
 	}
@@ -2215,7 +2164,7 @@ static void *TLB_reader(void *data)
 									(*found_key)->chan->name,dchar);
 						}
 						/* it its a voice frame */
-						if (((struct rtpVoice_t *)buf)->version == 2)
+						else if (((struct rtpVoice_t *)buf)->version == 2)
 						{
 							j = ((struct rtpVoice_t *)buf)->payt;
 							/* if codec changed from ours */
@@ -2240,18 +2189,6 @@ static void *TLB_reader(void *data)
 								ast->nativeformats = tlb_codecs[p->rxcodec].format;
 								ast_set_read_format(ast,ast->readformat);
 								ast->nativeformats = tlb_codecs[p->txcodec].format | tlb_codecs[p->rxcodec].format;
-								if (p->dsp && p->xpath)
-								{
-									ast_translator_free_path(p->xpath);
-									p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,
-										tlb_codecs[p->rxcodec].format);
-									if (!p->xpath)
-									{
-										ast_log(LOG_ERROR,"Cannot get translator!!\n");
-										ast_mutex_unlock(&instp->lock);
-										mythread_exit(NULL);
-									}
-								}
 							}
 							if (recvlen == 
 							    ((tlb_codecs[p->rxcodec].frame_size * 
