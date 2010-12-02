@@ -28,7 +28,7 @@
  */
 
 /*** MODULEINFO
-        <defaultenabled>yes</defaultenabled> 	 	 
+        <defaultenabled>no</defaultenabled> 	 	 
  ***/
 
 #include "asterisk.h"
@@ -1850,6 +1850,11 @@ static int load_module(void)
 
 	ast_config_destroy(cfg);
 
+	if (find_pvt(beagle_active) == NULL) {
+		ast_log(LOG_NOTICE, "beagle active device not found\n");
+		return AST_MODULE_LOAD_FAILURE;
+	}
+
 	hwfd = open("/dev/mem", O_RDWR | O_SYNC);
 	if (hwfd < 0)
 	{
@@ -1903,11 +1908,6 @@ static int load_module(void)
 
 	snd_pcm_prepare(alsa.icard);
 	snd_pcm_start(alsa.icard);
-
-	if (find_pvt(beagle_active) == NULL) {
-		ast_log(LOG_NOTICE, "beagle active device not found\n");
-		return AST_MODULE_LOAD_FAILURE;
-	}
 
 	if (mixer_write() == -1) return AST_MODULE_LOAD_FAILURE;
 
