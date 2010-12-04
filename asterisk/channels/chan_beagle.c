@@ -1832,7 +1832,7 @@ static int load_module(void)
 #if !defined(__ARM_ARCH_7A__)
 	ast_log(LOG_WARNING,"chan_beagle declining module load since WE ARE NOT A BEAGLEBOARD!!\n");
 	return AST_MODULE_LOAD_DECLINE;
-#else
+#endif
 	beagle_active = NULL;
 
 	/* Copy the default jb config over global_jbconf */
@@ -1923,7 +1923,6 @@ static int load_module(void)
 	ast_cli_register_multiple(cli_beagle, sizeof(cli_beagle) / sizeof(struct ast_cli_entry));
 
 	return AST_MODULE_LOAD_SUCCESS;
-#endif
 }
 /*
 */
