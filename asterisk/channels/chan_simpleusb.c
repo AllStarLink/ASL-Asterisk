@@ -28,8 +28,6 @@
  */
 
 /*** MODULEINFO
-	<depend>ossaudio</depend>
-        <depend>usb</depend>
         <defaultenabled>yes</defaultenabled> 	 	 
  ***/
 
@@ -910,29 +908,29 @@ static struct usb_device *hid_device_init(char *desired_device)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
+
+#if defined(__ARM_ARCH_7A__)
 				sprintf(str,"/sys/class/sound/card%d/device",i);
 				memset(desdev,0,sizeof(desdev));
-				if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+#else
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
 				{
-					cp = strrchr(desdev,'/');
-					if (!cp) continue;
-					cp++;
-				}
-				else
-				{
+					sprintf(str,"/sys/class/sound/controlC%d/device",i);
 					memset(desdev,0,sizeof(desdev));
-					if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
-					{
-						sprintf(str,"/sys/class/sound/controlC%d/device",i);
-						memset(desdev,0,sizeof(desdev));
-						if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
-					}
-					cp = strrchr(desdev,'/');
-					if (cp) *cp = 0; else continue;
-					cp = strrchr(desdev,'/');
-					if (!cp) continue;
-					cp++;
+					if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
 				}
+				cp = strrchr(desdev,'/');
+				if (cp) *cp = 0; else continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+
+#endif
 				break;
 			}
 			if (i >= 32) continue;
@@ -992,27 +990,28 @@ static int hid_device_mklist(void)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
-				if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
+#if defined(__ARM_ARCH_7A__)
+				sprintf(str,"/sys/class/sound/card%d/device",i);
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+#else
+				sprintf(str,"/sys/class/sound/card%d/device",i);
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
 				{
-					cp = strrchr(desdev,'/');
-					if (!cp) continue;
-					cp++;
-				}
-				else
-				{
+					sprintf(str,"/sys/class/sound/controlC%d/device",i);
 					memset(desdev,0,sizeof(desdev));
-					if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
-					{
-						sprintf(str,"/sys/class/sound/controlC%d/device",i);
-						memset(desdev,0,sizeof(desdev));
-						if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
-					}
-					cp = strrchr(desdev,'/');
-					if (cp) *cp = 0; else continue;
-					cp = strrchr(desdev,'/');
-					if (!cp) continue;
-					cp++;
+					if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
 				}
+				cp = strrchr(desdev,'/');
+				if (cp) *cp = 0; else continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+#endif
 				break;
 			}
 			if (i >= 32) 
@@ -1052,29 +1051,28 @@ char	str[200],desdev[200],*cp;
 
 	for(i = 0;i < 32; i++)
 	{
+#if defined(__ARM_ARCH_7A__)
 		sprintf(str,"/sys/class/sound/card%d/device",i);
 		memset(desdev,0,sizeof(desdev));
-		if (readlink(str,desdev,sizeof(desdev) - 1) != -1)
+		if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+		cp = strrchr(desdev,'/');
+		if (!cp) continue;
+		cp++;
+#else
+		sprintf(str,"/sys/class/sound/card%d/device",i);
+		memset(desdev,0,sizeof(desdev));
+		if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
 		{
-			cp = strrchr(desdev,'/');
-			if (!cp) continue;
-			cp++;
-		}
-		else
-		{
+			sprintf(str,"/sys/class/sound/controlC%d/device",i);
 			memset(desdev,0,sizeof(desdev));
-			if (readlink(str,desdev,sizeof(desdev) - 1) == -1)
-			{
-				sprintf(str,"/sys/class/sound/controlC%d/device",i);
-				memset(desdev,0,sizeof(desdev));
-				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
-			}
-			cp = strrchr(desdev,'/');
-			if (cp) *cp = 0; else continue;
-			cp = strrchr(desdev,'/');
-			if (!cp) continue;
-			cp++;
+			if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
 		}
+		cp = strrchr(desdev,'/');
+		if (cp) *cp = 0; else continue;
+		cp = strrchr(desdev,'/');
+		if (!cp) continue;
+		cp++;
+#endif
 		if (!strcasecmp(cp,devstr)) break;
 	}
 	if (i >= 32) return -1;
@@ -1466,6 +1464,7 @@ static int used_blocks(struct chan_simpleusb_pvt *o)
 static int soundcard_writeframe(struct chan_simpleusb_pvt *o, short *data)
 {
 	int res;
+
 
 	if (o->sounddev < 0)
 		setformat(o, O_RDWR);
