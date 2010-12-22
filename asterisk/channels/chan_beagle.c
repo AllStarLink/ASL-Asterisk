@@ -197,8 +197,14 @@ END_CONFIG
 #define FRAME_SIZE	160
 #define PERIOD_FRAMES 80
 
+#define	GPIO_MASK 0x70ff0
+#define	GPIO_INPUTS 0x703f0
 #define	MASK_GPIOS_COR0 0x200
-#define	MASK_GPIOS_CTCSS0 0x800
+#define	MASK_GPIOS_CTCSS0 0x100
+#define	MASK_GPIOS_PTT0 0x800
+#define	MASK_GPIOS_COR1 0x80
+#define	MASK_GPIOS_CTCSS1 0x40
+#define	MASK_GPIOS_PTT1 0x400
 
 #if defined(__FreeBSD__)
 #define	FRAGS	0x8
@@ -397,12 +403,12 @@ static unsigned long get_gpios(void)
 
 static void set_ptt(int n,int val)
 {
-unsigned int mask = 16,c;
+unsigned int mask = MASK_GPIOS_PTT0,c;
 
-	if (n) mask = 16;
+	if (n) mask = MASK_GPIOS_PTT1;
 	c = gpio[0x603c/4];
 	c &= ~mask;
-	if (val) c |= mask;
+	if (!val) c |= mask;
 	gpio[0x603c/4] = c;
 	return;
 }
@@ -898,6 +904,10 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		if (gv & MASK_GPIOS_COR0) pvts[0].rxhidsq = 1;
 		pvts[0].rxhidctcss = 0;
 		if (gv & MASK_GPIOS_CTCSS0) pvts[0].rxhidctcss = 1;
+		pvts[1].rxhidsq = 0;
+		if (gv & MASK_GPIOS_COR1) pvts[1].rxhidsq = 1;
+		pvts[1].rxhidctcss = 0;
+		if (gv & MASK_GPIOS_CTCSS0) pvts[1].rxhidctcss = 1;
 	}
 
 	o = c->tech_pvt;
@@ -1873,14 +1883,14 @@ static int load_module(void)
 		return 0;
 	}
 
-	pinconf[0x2158/4] = 0x011C011C;
-	pinconf[0x215C/4] = 0x011C011C;
-	pinconf[0x2160/4] = 0x011C011C;
-	pinconf[0x2164/4] = 0x011C011C;
-	pinconf[0x2168/4] = 0x011C011C;
-	pinconf[0x216C/4] = 0x011C011C;
-	pinconf[0x2170/4] = 0x011C011C;
-	pinconf[0x2188/4] = 0x011C011C;
+	pinconf[0x215C/4] = 0x01140114;
+	pinconf[0x2160/4] = 0x01140114;
+	pinconf[0x2164/4] = 0x01140114;
+	pinconf[0x2168/4] = 0x01140114;
+	pinconf[0x216C/4] = 0x01140114;
+	pinconf[0x2170/4] = 0x01140114;
+	pinconf[0x2174/4] = 0x01140114;
+	pinconf[0x2178/4] = 0x01040114;
 
 	close(hwfd);
 
@@ -1899,8 +1909,8 @@ static int load_module(void)
 	}
 
 	c = gpio[0x6034/4];
-	c &= ~(0x10);
-	c |= 0xa00;
+	c &= ~GPIO_MASK;
+	c |= GPIO_INPUTS;
 	gpio[0x6034/4] = c;
 
 	alsa.icard = alsa_card_init("default", SND_PCM_STREAM_CAPTURE);
