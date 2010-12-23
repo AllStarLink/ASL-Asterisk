@@ -205,6 +205,12 @@ END_CONFIG
 #define	MASK_GPIOS_COR1 0x80
 #define	MASK_GPIOS_CTCSS1 0x40
 #define	MASK_GPIOS_PTT1 0x400
+#define	MASK_GPIOS_GPIO1 0x20
+#define	MASK_GPIOS_GPIO2 0x10
+#define	MASK_GPIOS_GPIO3 0x10000
+#define	MASK_GPIOS_GPIO4 0x20000
+#define	MASK_GPIOS_GPIO5 0x40000
+#define	MASK_GPIOS_GPIOS 0x70030
 
 #if defined(__FreeBSD__)
 #define	FRAGS	0x8
@@ -241,6 +247,16 @@ int beagle_write_dst;
 int total_blocks;			/* total blocks in the output device */
 static volatile unsigned long *gpio = NULL;
 int hwfd = -1;
+
+int32_t	gpio_val = 0;		/* current value of gpios */
+int32_t	gpio_ctl = 0;		/* mask of output ones */
+int32_t	gpios_mask[] = {0,MASK_GPIOS_GPIO1,MASK_GPIOS_GPIO2,MASK_GPIOS_GPIO3,
+	MASK_GPIOS_GPIO4,MASK_GPIOS_GPIO5} ;
+int32_t gpio_lastmask = 0;
+int32_t	gpio_pulsemask = 0;
+int	gpio_pulsetimer[] = {0,0,0,0,0,0};
+struct timeval gpio_then;
+AST_MUTEX_DEFINE_STATIC(gpio_lock);
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 static snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
@@ -345,6 +361,9 @@ struct chan_beagle_pvt {
 	int16_t apeak;
 	int plfilter;
 	int deemphasis;
+	char *gpios[32];
+	int32_t	last_gpios_in;
+	char had_gpios_in;
 };
 
 static struct chan_beagle_pvt beagle_default = {
@@ -409,6 +428,17 @@ unsigned int mask = MASK_GPIOS_PTT0,c;
 	c = gpio[0x603c/4];
 	c &= ~mask;
 	if (!val) c |= mask;
+	gpio[0x603c/4] = c;
+	return;
+}
+
+static void set_gpios(void)
+{
+unsigned int c;
+
+	c = gpio[0x603c/4];
+	c &= ~MASK_GPIOS_GPIOS;
+	c |= gpio_val;
 	gpio[0x603c/4] = c;
 	return;
 }
@@ -746,6 +776,29 @@ static int beagle_text(struct ast_channel *c, const char *text)
 	/* print received messages */
 	if(o->debuglevel)ast_verbose(" << Chan_beagle Received beagle text %s >> \n", text);
 
+	if (strcmp(cmd,"GPIO")==0)
+	{
+		int i,j,cnt;
+
+		cnt = sscanf(text,"%s %d %d",cmd,&i,&j);
+		if (cnt < 3) return 0;
+		if ((i < 1) || (i > 5)) return 0;
+		ast_mutex_lock(&gpio_lock);
+		if (j > 1) /* if to request pulse-age */
+		{
+			gpio_pulsetimer[i] = j - 1;
+		}
+		else
+		{
+			/* clear pulsetimer, if in the middle of running */
+			gpio_pulsetimer[i] = 0;
+			gpio_val &= ~gpios_mask[i];
+			if (j) gpio_val |= gpios_mask[i];
+			set_gpios();
+		}
+		ast_mutex_unlock(&gpio_lock);
+		return 0;
+	}
 	return 0;
 }
 
@@ -808,14 +861,14 @@ static int beagle_write(struct ast_channel *c, struct ast_frame *f)
 
 static struct ast_frame *beagle_read(struct ast_channel *c)
 {
-	int res,cd,sd,i,n,n0,n1,ismaster,chindex;
+	int res,cd,sd,i,j,k,n,n0,n1,ismaster,chindex;
 	unsigned int gv;
 	struct chan_beagle_pvt *o = c->tech_pvt;
 	struct ast_frame *f = &o->read_f,*f1,*f0;
 	struct ast_frame wf = { AST_FRAME_CONTROL };
 	short *sp,*sp0,*sp1;
         snd_pcm_state_t state;
-	struct timeval tv;
+	struct timeval tv,now;
 
 	ismaster = 0;
 	for(chindex = 0; chindex < 2; chindex++)
@@ -861,7 +914,6 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 			AST_LIST_TRAVERSE(&pvts[1].txq, f1,frame_list) n1++;
 			ast_mutex_unlock(&pvts[1].txqlock);
 			n = MAX(n0,n1);
-//if (o->txkeyed) printf("foop!!! n is %d\n",n);
 			if (n && ((n > 3) || (!o->txkeyed)))
 			{
 				f0 = f1 = NULL;
@@ -908,6 +960,31 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		if (gv & MASK_GPIOS_COR1) pvts[1].rxhidsq = 1;
 		pvts[1].rxhidctcss = 0;
 		if (gv & MASK_GPIOS_CTCSS0) pvts[1].rxhidctcss = 1;
+
+		ast_mutex_lock(&gpio_lock);
+		now = ast_tvnow();
+		j = ast_tvdiff_ms(now,gpio_then);
+		gpio_then = now;
+		/* make output inversion mask (for pulseage) */
+		gpio_lastmask = gpio_pulsemask;
+		gpio_pulsemask = 0;
+		for(i = 1; i <= 5; i++)
+		{
+			k = gpio_pulsetimer[i];
+			if (k)
+			{
+				k -= j;
+				if (k < 0) k = 0;
+				gpio_pulsetimer[i] = k;
+			}
+			if (k) gpio_pulsemask |= gpios_mask[i];
+		}
+		if (gpio_pulsemask != gpio_lastmask) /* if anything inverted (temporarily) */
+		{
+			gpio_val ^= gpio_lastmask ^ gpio_pulsemask;
+			set_gpios();
+		}
+		ast_mutex_unlock(&gpio_lock);
 	}
 
 	o = c->tech_pvt;
@@ -945,16 +1022,59 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 	if (o->lasttx && (!n))
 	{
 		o->lasttx = 0;
+		ast_mutex_lock(&gpio_lock);
 		set_ptt(chindex,0);
+		ast_mutex_unlock(&gpio_lock);
 		if (o->debuglevel) ast_verbose("Channel %s TX UNKEY\n",o->name);
 	}
 	else if ((!o->lasttx) && n)
 	{
 		o->lasttx = 1;
+		ast_mutex_lock(&gpio_lock);
 		set_ptt(chindex,1);
+		ast_mutex_unlock(&gpio_lock);
 		if (o->debuglevel) ast_verbose("Channel %s TX KEY\n",o->name);
 	}
 
+	gv = get_gpios() & MASK_GPIOS_GPIOS;
+	for(i = 1; i <= 5; i++)
+	{
+		/* if a valid input bit, dont clear it */
+		if ((o->gpios[i]) && (!strcasecmp(o->gpios[i],"in"))) continue;
+		gv &= ~(gpios_mask[i]); /* clear the bit, since its not an input */
+	}
+	if ((!o->had_gpios_in) || (o->last_gpios_in != gv))
+	{
+		char buf1[100];
+		struct ast_frame fr;
+
+		for(i = 1; i <= 5; i++)
+		{
+			/* skip if not specified */
+			if (!o->gpios[i]) continue;
+			/* skip if not input */
+			if (strcasecmp(o->gpios[i],"in")) continue;
+			/* if bit has changed, or never reported */
+			if ((!o->had_gpios_in) || ((o->last_gpios_in & gpios_mask[i]) != (gv & (gpios_mask[i]))))
+			{
+				sprintf(buf1,"GPIO%d %d\n",i + 1,(gv & (gpios_mask[i])) ? 1 : 0);
+				memset(&fr,0,sizeof(fr));
+				fr.data =  buf1;
+				fr.datalen = strlen(buf1);
+				fr.samples = 0;
+				fr.frametype = AST_FRAME_TEXT;
+				fr.subclass = 0;
+				fr.src = "chan_usbradio";
+				fr.offset = 0;
+				fr.mallocd=0;
+				fr.delivery.tv_sec = 0;
+				fr.delivery.tv_usec = 0;
+				ast_queue_frame(o->owner,&fr);
+			}
+		}
+		o->had_gpios_in = 1;
+		o->last_gpios_in = gv;
+	}
 	sp = (short *)beagle_read_buf;
 	sp += chindex;
 	sp1 = (short *)(o->beagle_read_frame_buf + AST_FRIENDLY_OFFSET);
@@ -1625,7 +1745,8 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
 	struct ast_variable *v;
 	struct chan_beagle_pvt *o;
 	struct ast_config *cfg1;
-	char fname[200];
+	char fname[200],buf[100];
+	int i;
 #ifdef	NEW_ASTERISK
 	struct ast_flags zeroflag = {0};
 #endif
@@ -1670,6 +1791,11 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
  			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;
 			);
+			for(i = 0; i < 32; i++)
+			{
+				sprintf(buf,"gpio%d",i + 1);
+				if (!strcmp(v->name,buf)) o->gpios[i] = strdup(v->value);
+			}
 	}
 
 	o->debuglevel = 0;
@@ -1708,7 +1834,16 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
           ast_dsp_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
 	}
-
+	for(i = 1; i <= 5; i++)
+	{
+		/* skip if this one not specified */
+		if (!o->gpios[i]) continue;
+		/* skip if not out */
+		if (strncasecmp(o->gpios[i],"out",3)) continue;
+		gpio_ctl |= gpios_mask[i]; /* set this one to output, also */
+		/* if default value is 1, set it */
+		if (!strcasecmp(o->gpios[i],"out1")) gpio_val |= (1 << gpios_mask[i]);
+	}
 	return o;
   
   error:
@@ -1911,7 +2046,10 @@ static int load_module(void)
 	c = gpio[0x6034/4];
 	c &= ~GPIO_MASK;
 	c |= GPIO_INPUTS;
+	c &= ~gpio_ctl;
 	gpio[0x6034/4] = c;
+
+	set_gpios();
 
 	alsa.icard = alsa_card_init("default", SND_PCM_STREAM_CAPTURE);
 	alsa.ocard = alsa_card_init("default", SND_PCM_STREAM_PLAYBACK);
