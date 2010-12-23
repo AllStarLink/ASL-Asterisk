@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.274 12/22/2010
+ *  version 0.275 12/23/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.274 12/22/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.275 12/23/2010";
 
 static char *app = "Rpt";
 
@@ -11970,6 +11970,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if (argc < 1) break;
 			/* ignore if not a USB channel */
 			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"beagle/", 7) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
 			/* go thru all the specs */
 			for(i = 1; i < argc; i++)
