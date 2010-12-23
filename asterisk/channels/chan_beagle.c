@@ -2050,6 +2050,7 @@ static int load_module(void)
 	gpio[0x6034/4] = c;
 
 	set_gpios();
+	gpio_then = ast_tvnow();
 
 	alsa.icard = alsa_card_init("default", SND_PCM_STREAM_CAPTURE);
 	alsa.ocard = alsa_card_init("default", SND_PCM_STREAM_PLAYBACK);
