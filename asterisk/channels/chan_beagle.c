@@ -212,6 +212,8 @@ END_CONFIG
 #define	MASK_GPIOS_GPIO5 0x40000
 #define	MASK_GPIOS_GPIOS 0x70030
 
+#define	PLAYBACK_MAX 64
+
 #if defined(__FreeBSD__)
 #define	FRAGS	0x8
 #else
@@ -417,7 +419,7 @@ static const struct ast_channel_tech beagle_tech = {
 
 static unsigned long get_gpios(void)
 {
-	return(gpio[0x6038/4] & 0xa00);
+	return(gpio[0x6038/4] & GPIO_INPUTS);
 }
 
 static void set_ptt(int n,int val)
@@ -533,7 +535,7 @@ snd_ctl_elem_info_t *info;
 	if (!elem)
 	{
 		snd_hctl_close(hctl);
-		ast_log(LOG_ERROR,"Cannot find mixer element '%s'\n",param);
+		fprintf(stderr,"Cannot find mixer element '%s'\n",param);
 		return(-1);
 	}
 	snd_ctl_elem_info_alloca(&info);
@@ -550,12 +552,13 @@ snd_ctl_elem_info_t *info;
 		break;
 	    case SND_CTL_ELEM_TYPE_BOOLEAN:
 		snd_ctl_elem_value_set_integer(control, 0, (v1 != 0));
+		if (v2 >= 0) snd_ctl_elem_value_set_integer(control, 1, (v2 != 0));
 		break;
 	}
 	if (snd_hctl_elem_write(elem, control))
 	{
 		snd_hctl_close(hctl);
-		ast_log(LOG_ERROR,"Cannot set value for mixer element '%s'\n",param);
+		fprintf(stderr,"Cannot set value for mixer element '%s'\n",param);
 		return(-1);
 	}
 	snd_hctl_close(hctl);
@@ -825,12 +828,15 @@ static int beagle_answer(struct ast_channel *c)
 static int beagle_hangup(struct ast_channel *c)
 {
 	struct chan_beagle_pvt *o = c->tech_pvt;
+	int chindex = 0;
 
+	if (o == &pvts[1]) chindex = 1;
 	//ast_log(LOG_NOTICE, "beagle_hangup()\n");
 	c->tech_pvt = NULL;
 	o->owner = NULL;
 	ast_module_unref(ast_module_info->self);
 	if (o->hookstate) o->hookstate = 0;
+	if (o->invertptt) set_ptt(chindex,1); else set_ptt(chindex,0);
 	return 0;
 }
 
@@ -898,7 +904,6 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		{
 	                return f;
 	        }
-//printf("foop!!! recv %d at %19.19s.%06d\n",res,ctime(&tv.tv_sec),(int)tv.tv_usec);
 #if DEBUG_CAPTURES == 1
 			if (frxcapraw) 
 				fwrite(beagle_read_buf,1,res,frxcapraw);
@@ -939,10 +944,10 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 				if (f1) sp1 = (short *) f1->data;
 				for(i = 0; i < (n / 2); i++)
 				{
-					if (f0) *sp++ = *sp0++;
-					else *sp++ = 0;					
 					if (f1) *sp++ = *sp1++;
 					else *sp++ = 0;						
+					if (f0) *sp++ = *sp0++;
+					else *sp++ = 0;					
 				}	
 				soundcard_writeframe((short *)beagle_write_buf);
 				if (f0) ast_frfree(f0);
@@ -959,7 +964,7 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		pvts[1].rxhidsq = 0;
 		if (gv & MASK_GPIOS_COR1) pvts[1].rxhidsq = 1;
 		pvts[1].rxhidctcss = 0;
-		if (gv & MASK_GPIOS_CTCSS0) pvts[1].rxhidctcss = 1;
+		if (gv & MASK_GPIOS_CTCSS1) pvts[1].rxhidctcss = 1;
 
 		ast_mutex_lock(&gpio_lock);
 		now = ast_tvnow();
@@ -1076,7 +1081,7 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		o->last_gpios_in = gv;
 	}
 	sp = (short *)beagle_read_buf;
-	sp += chindex;
+	if (!chindex) sp++;
 	sp1 = (short *)(o->beagle_read_frame_buf + AST_FRIENDLY_OFFSET);
 	for(n = 0; n < FRAME_SIZE; n++)
 	{
@@ -1644,12 +1649,6 @@ static void tune_write(struct chan_beagle_pvt *o)
 
 }
 
-#ifdef NORMAL_SETTINGS
-#define	PLAYBACK_MAX 51
-#else
-#define	PLAYBACK_MAX 64
-#endif
-
 static int mixer_write(void)
 {
 int	v1,v2;
@@ -1670,7 +1669,6 @@ float f,f1;
 	if (setamixer(0,"CarkitR Mixer AudioR1",0,-1) == -1) return -1;
 	if (setamixer(0,"CarkitR Mixer AudioR2",0,-1) == -1) return -1;
 	if (setamixer(0,"CarkitR Mixer Voice",0,-1) == -1) return -1;
-//	if (setamixer(0,"Codec Operation Mode",1,-1) == -1) return -1;
 	if (setamixer(0,"DAC Voice Analog Downlink Switch",0,-1) == -1) return -1;
 	if (setamixer(0,"DAC Voice Analog Downlink Volume",18,-1) == -1) return -1;
 	if (setamixer(0,"DAC Voice Digital Downlink Volume",0,-1) == -1) return -1;
@@ -1683,7 +1681,7 @@ float f,f1;
 	if (setamixer(0,"DAC2 Digital Coarse Playback Volume",0,0) == -1) return -1;
 	v1 =  pvts[0].txmixerset * PLAYBACK_MAX / 1000;
 	v2 =  pvts[1].txmixerset * PLAYBACK_MAX / 1000;
-	if (setamixer(0,"DAC2 Digital Fine Playback Volume",v1,v2) == -1) return -1;
+	if (setamixer(0,"DAC2 Digital Fine Playback Volume",v2,v1) == -1) return -1;
 	if (setamixer(0,"Digimic LR Swap",0,-1) == -1) return -1;
 	if (setamixer(0,"Earpiece Mixer AudioL1",0,-1) == -1) return -1;
 	if (setamixer(0,"Earpiece Mixer AudioL2",0,-1) == -1) return -1;
@@ -1699,8 +1697,8 @@ float f,f1;
 	if (setamixer(0,"HeadsetL Mixer AudioL1",1,-1) == -1) return -1;
 	if (setamixer(0,"HeadsetL Mixer AudioL2",1,-1) == -1) return -1;
 	if (setamixer(0,"HeadsetL Mixer Voice",0,-1) == -1) return -1;
-	if (setamixer(0,"HeadsetR Mixer AudioR1",0,-1) == -1) return -1;
-	if (setamixer(0,"HeadsetR Mixer AudioR2",0,-1) == -1) return -1;
+	if (setamixer(0,"HeadsetR Mixer AudioR1",1,-1) == -1) return -1;
+	if (setamixer(0,"HeadsetR Mixer AudioR2",1,-1) == -1) return -1;
 	if (setamixer(0,"HeadsetR Mixer Voice",0,-1) == -1) return -1;
 	if (setamixer(0,"Left Digital Loopback Volume",0,-1) == -1) return -1;
 	if (setamixer(0,"Left1 Analog Loopback Switch",0,-1) == -1) return -1;
@@ -1724,7 +1722,7 @@ float f,f1;
 	f = 1000.0 / 32.0;
 	pvts[0].rxvoiceadj = 1.0 + (modff(((float) pvts[0].rxmixerset) / f,&f1) * .093981);
 	pvts[1].rxvoiceadj = 1.0 + (modff(((float) pvts[1].rxmixerset) / f,&f1) * .093981);
-	if (setamixer(0,"TX1 Digital Capture Volume",v1,v2) == -1) return -1;
+	if (setamixer(0,"TX1 Digital Capture Volume",v2,v1) == -1) return -1;
 	if (setamixer(0,"TX2 Capture Route",0,-1) == -1) return -1;
 	if (setamixer(0,"TX2 Digital Capture Volume",0,0) == -1) return -1;
 	if (setamixer(0,"Vibra H-bridge direction",0,-1) == -1) return -1;
@@ -1813,7 +1811,6 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
 	o->txmixerset = 500;
 	if (cfg1) {
 		for (v = ast_variable_browse(cfg1, o->name); v; v = v->next) {
-	
 			M_START((char *)v->name, (char *)v->value);
 			M_UINT("rxmixerset", o->rxmixerset)
 			M_UINT("txmixerset", o->txmixerset)
@@ -2052,6 +2049,9 @@ static int load_module(void)
 	set_gpios();
 	gpio_then = ast_tvnow();
 
+	if (pvts[0].invertptt) set_ptt(0,1); else set_ptt(0,0);
+	if (pvts[1].invertptt) set_ptt(1,1); else set_ptt(1,0);
+
 	alsa.icard = alsa_card_init("default", SND_PCM_STREAM_CAPTURE);
 	alsa.ocard = alsa_card_init("default", SND_PCM_STREAM_PLAYBACK);
 	if (!alsa.icard || !alsa.ocard) {
@@ -2111,7 +2111,8 @@ static int unload_module(void)
 	return 0;
 }
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Beagleboard Radio Interface Channel Driver");
+AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY,"Beagleboard Radio Interface Channel Driver");
+
 
 /*	end of file */
 
