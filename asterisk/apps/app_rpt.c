@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.275 12/23/2010
+ *  version 0.276 12/25/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.275 12/23/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.276 12/25/2010";
 
 static char *app = "Rpt";
 
@@ -1630,6 +1630,23 @@ static int dovox(struct vox *v,short *buf,int bs)
 
 
 
+}
+
+static int rpt_safe_sleep(struct rpt *rpt,struct ast_channel *chan, int ms)
+{
+	struct ast_frame *f;
+	struct ast_channel *cs[2],*w;
+
+	cs[0] = rpt->rxchannel;
+	cs[1] = chan;
+	while (ms > 0) {
+		w = ast_waitfor_n(cs,2,&ms);
+		if (!w) break;
+		f = ast_read(w);
+		if (!f) return -1;
+		ast_frfree(f);
+	}
+	return 0;
 }
 
 static void rpt_forward(struct ast_channel *chan, char *dialstr, char *nodefrom)
@@ -10871,7 +10888,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				if (l->chan)
 				{
 					if (l->thisconnected) ast_write(l->chan,&wf);
-					if (ast_safe_sleep(l->chan,250) == -1) return DC_ERROR;
+					if (rpt_safe_sleep(myrpt,l->chan,250) == -1) return DC_ERROR;
 					ast_softhangup(l->chan,AST_SOFTHANGUP_DEV);
 				}
 				myrpt->linkactivityflag = 1;
@@ -11016,7 +11033,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
                                 if (l->chan)
                                 {
                                         if (l->thisconnected) ast_write(l->chan,&wf);
-                                        ast_safe_sleep(l->chan,250); /* It's dead already, why check the return value? */
+                                        rpt_safe_sleep(myrpt,l->chan,250); /* It's dead already, why check the return value? */
                                         ast_softhangup(l->chan,AST_SOFTHANGUP_DEV);
                                 }
 				rpt_mutex_lock(&myrpt->lock);
