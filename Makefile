@@ -180,3 +180,14 @@ upgrade-acid:
 	-$(MAKE) -C asterisk install
 	mkdir -p /var/lib/asterisk/sounds/rpt
 	cp -a sounds/* /var/lib/asterisk/sounds
+
+
+upgrade-pickle:
+	$(MAKE) -C libpri install
+	-rm -rf /usr/lib/asterisk/modules/*
+	(cd asterisk; ./configure CXX=gcc)
+	-$(MAKE) -C asterisk install
+	mkdir -p /var/lib/asterisk/sounds/rpt
+	cp -a sounds/* /var/lib/asterisk/sounds
+	sync
+
