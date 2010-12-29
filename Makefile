@@ -183,6 +183,8 @@ upgrade-acid:
 
 
 upgrade-pickle:
+	(cd zaptel; ./configure)
+	(MAKELEVEL=0; $(MAKE) -C zaptel install KBUILD_OBJ_M="zaptel.o ztd-eth.o ztd-loc.o ztdummy.o ztdynamic.o")
 	$(MAKE) -C libpri install
 	-rm -rf /usr/lib/asterisk/modules/*
 	(cd asterisk; ./configure CXX=gcc)
