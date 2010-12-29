@@ -23,6 +23,10 @@ ifeq ($(ARCH),)
 ARCH:=$(shell uname -m | sed -e s/i.86/i386/)
 endif
 
+ifeq ($(ARCH),armv7l)
+ARCH:=arm
+endif
+
 ifeq ($(DEB_HOST_GNU_TYPE),)
 UNAME_M:=$(shell uname -m)
 else

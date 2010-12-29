@@ -46,6 +46,8 @@
 #include <linux/version.h>
 #include <linux/ctype.h>
 #include <linux/kmod.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
 #ifdef CONFIG_DEVFS_FS
 #include <linux/devfs_fs_kernel.h>
 #endif /* CONFIG_DEVFS_FS */

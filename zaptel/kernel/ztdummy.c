@@ -80,6 +80,7 @@
 #include <asm/io.h>
 #endif
 #ifdef LINUX26
+#include <linux/slab.h>
 #ifdef USE_HIGHRESTIMER
 #include <linux/hrtimer.h>
 #endif
