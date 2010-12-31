@@ -80,6 +80,7 @@ ifneq ($(JN),0)
    MAKEJ=-j$(JN)
 endif
 
+
 # even though we could use '-include makeopts' here, use a wildcard
 # lookup anyway, so that make won't try to build makeopts if it doesn't
 # exist (other rules will force it to be built if needed)
@@ -213,6 +214,11 @@ ASTCFLAGS+=-pipe
 endif
 
 ASTCFLAGS+=-Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations $(DEBUG)
+
+UNAME_M:=$(shell uname -m)
+ifeq ($(UNAME_M),armv7l)
+ASTCFLAGS+=-Wno-unused-result
+endif
 
 ifeq ($(AST_DEVMODE),yes)
   ASTCFLAGS+=-Werror  -Wunused $(AST_DECLARATION_AFTER_STATEMENT)

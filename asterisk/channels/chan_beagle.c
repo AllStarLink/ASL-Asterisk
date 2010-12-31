@@ -249,6 +249,7 @@ int beagle_write_dst;
 int total_blocks;			/* total blocks in the output device */
 static volatile unsigned long *gpio = NULL;
 int hwfd = -1;
+int has_been_open = 0;
 
 int32_t	gpio_val = 0;		/* current value of gpios */
 int32_t	gpio_ctl = 0;		/* mask of output ones */
@@ -366,6 +367,7 @@ struct chan_beagle_pvt {
 	char *gpios[32];
 	int32_t	last_gpios_in;
 	char had_gpios_in;
+	struct timeval starttime;
 };
 
 static struct chan_beagle_pvt beagle_default = {
@@ -779,7 +781,7 @@ static int beagle_text(struct ast_channel *c, const char *text)
 	/* print received messages */
 	if(o->debuglevel)ast_verbose(" << Chan_beagle Received beagle text %s >> \n", text);
 
-	if (strcmp(cmd,"GPIO")==0)
+	if (!strncasecmp(text,"GPIO",4))
 	{
 		int i,j,cnt;
 
@@ -1048,7 +1050,8 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 		if ((o->gpios[i]) && (!strcasecmp(o->gpios[i],"in"))) continue;
 		gv &= ~(gpios_mask[i]); /* clear the bit, since its not an input */
 	}
-	if ((!o->had_gpios_in) || (o->last_gpios_in != gv))
+	if (((!o->had_gpios_in) || (o->last_gpios_in != gv)) &&
+		(!ast_tvzero(o->starttime)) && (ast_tvdiff_ms(ast_tvnow(),o->starttime) >= 550))
 	{
 		char buf1[100];
 		struct ast_frame fr;
@@ -1062,14 +1065,14 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 			/* if bit has changed, or never reported */
 			if ((!o->had_gpios_in) || ((o->last_gpios_in & gpios_mask[i]) != (gv & (gpios_mask[i]))))
 			{
-				sprintf(buf1,"GPIO%d %d\n",i + 1,(gv & (gpios_mask[i])) ? 1 : 0);
+				sprintf(buf1,"GPIO%d %d",i,(gv & (gpios_mask[i])) ? 1 : 0);
 				memset(&fr,0,sizeof(fr));
 				fr.data =  buf1;
-				fr.datalen = strlen(buf1);
+				fr.datalen = strlen(buf1) + 1;
 				fr.samples = 0;
 				fr.frametype = AST_FRAME_TEXT;
 				fr.subclass = 0;
-				fr.src = "chan_usbradio";
+				fr.src = "chan_beagle";
 				fr.offset = 0;
 				fr.mallocd=0;
 				fr.delivery.tv_sec = 0;
@@ -1307,7 +1310,6 @@ static struct ast_channel *beagle_new(struct chan_beagle_pvt *o, char *ext, char
 			/* XXX what about usecnt ? */
 		}
 	}
-
 	return c;
 }
 /*
@@ -1336,7 +1338,13 @@ static struct ast_channel *beagle_request(const char *type, int format, void *da
 		ast_log(LOG_WARNING, "Unable to create new usb channel\n");
 		return NULL;
 	}
-		
+	if (!has_been_open)
+	{
+		snd_pcm_prepare(alsa.icard);
+		snd_pcm_start(alsa.icard);
+		has_been_open = 1;
+	}
+	o->starttime = ast_tvnow();
 	return c;
 }
 /*
@@ -1789,9 +1797,9 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
  			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;
 			);
-			for(i = 0; i < 32; i++)
+			for(i = 1; i <= 5; i++)
 			{
-				sprintf(buf,"gpio%d",i + 1);
+				sprintf(buf,"gpio%d",i);
 				if (!strcmp(v->name,buf)) o->gpios[i] = strdup(v->value);
 			}
 	}
@@ -1839,7 +1847,7 @@ static struct chan_beagle_pvt *store_config(struct ast_config *cfg, char *ctg)
 		if (strncasecmp(o->gpios[i],"out",3)) continue;
 		gpio_ctl |= gpios_mask[i]; /* set this one to output, also */
 		/* if default value is 1, set it */
-		if (!strcasecmp(o->gpios[i],"out1")) gpio_val |= (1 << gpios_mask[i]);
+		if (!strcasecmp(o->gpios[i],"out1")) gpio_val |= gpios_mask[i];
 	}
 	return o;
   
@@ -2058,9 +2066,6 @@ static int load_module(void)
 		ast_log(LOG_ERROR, "Problem opening alsa I/O devices\n");
 		return AST_MODULE_LOAD_DECLINE;
 	}
-
-	snd_pcm_prepare(alsa.icard);
-	snd_pcm_start(alsa.icard);
 
 	if (mixer_write() == -1) return AST_MODULE_LOAD_FAILURE;
 

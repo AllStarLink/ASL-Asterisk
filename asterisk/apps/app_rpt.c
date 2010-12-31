@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.276 12/25/2010
+ *  version 0.277 12/31/2010
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.276 12/25/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.277 12/31/2010";
 
 static char *app = "Rpt";
 
@@ -19643,6 +19643,16 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					else if (sscanf(f->data,"PP%d %d",&i,&j) >= 2)
 					{
 						sprintf(buf,"RPT_PP%d",i);
+						rpt_update_boolean(myrpt,buf,j);
+					}
+				}
+				/* if is a BeagleBoard device */
+				if (strncasecmp(myrpt->rxchannel->name,"beagle/", 7) == 0)
+				{
+					/* if message parsable */
+					if (sscanf(f->data,"GPIO%d %d",&i,&j) >= 2)
+					{
+						sprintf(buf,"RPT_BEAGLE_GPIO%d",i);
 						rpt_update_boolean(myrpt,buf,j);
 					}
 				}
