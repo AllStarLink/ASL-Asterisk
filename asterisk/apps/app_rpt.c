@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.277 12/31/2010
+ *  version 0.278 01/05/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.277 12/31/2010";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.278 01/05/2011";
 
 static char *app = "Rpt";
 
@@ -9036,7 +9036,6 @@ struct	mdcparams *mdcp;
 			if ((!strcmp(myrpt->remoterig, remote_rig_tm271)) ||
 			   (!strcmp(myrpt->remoterig, remote_rig_kenwood)))
 				telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
-			imdone = 1;
 			break;
 		}
 		/* fall thru to invalid freq */
@@ -13728,8 +13727,8 @@ int powers[] = {2,1,0};
 		atoi(mhz),freq,step,offsets[(int)myrpt->offset],
 		(myrpt->txplon != 0),tm271_pltocode(myrpt->txpl),mysplit);
 
-	if (sendrxkenwood(myrpt,txstr,rxstr,"VF") < 0) return -1;
 	if (sendrxkenwood(myrpt,"VM 0\r",rxstr,"VM") < 0) return -1;
+	if (sendrxkenwood(myrpt,txstr,rxstr,"VF") < 0) return -1;
 	sprintf(txstr,"PC %d\r",powers[(int)myrpt->powerlevel]);
 	if (sendrxkenwood(myrpt,txstr,rxstr,"PC") < 0) return -1;
 	return 0;
