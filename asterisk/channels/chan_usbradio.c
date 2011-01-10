@@ -3,7 +3,7 @@
  * Asterisk -- An open source telephony toolkit.
  *
  * Copyright (C) 1999 - 2005, Digium, Inc.
- * Copyright (C) 2007 - 2010, Jim Dixon
+ * Copyright (C) 2007 - 2011, Jim Dixon
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Steve Henke, W9SH  <w9sh@arrl.net>
@@ -154,6 +154,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define C108_PRODUCT_ID  	0x000c
 #define C108AH_PRODUCT_ID  	0x013c
 #define C119_PRODUCT_ID  	0x0008
+#define N1KDO_PRODUCT_ID  	0x6a00
 #define C108_HID_INTERFACE	3
 
 #define HID_REPORT_GET		0x01
@@ -457,6 +458,7 @@ struct chan_usbradio_pvt {
 	 * nosound is set to disable the audio data from the channel
 	 * (so we can play the tones etc.).
 	 */
+	int index;				/* index within config file */
 	int sndcmd[2];				/* Sound command pipe */
 	int cursound;				/* index of sound to send */
 	int sampsent;				/* # of sound samples sent  */
@@ -866,7 +868,7 @@ int	v,rv;
 
 	v = (val * o->spkrmax) / 1000;
 	/* if just the old one, do it the old way */
-	if (o->devtype != C108AH_PRODUCT_ID) return v;
+	if (o->devtype == C108_PRODUCT_ID) return v;
 	rv = (o->spkrmax + lround(20.0 * log10((float)(v + 1) / (float)(o->spkrmax + 1)) / 0.25));
 	if (rv < 0) rv = 0;
 	return rv;	
@@ -1070,6 +1072,7 @@ static struct usb_device *hid_device_init(char *desired_device)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -1143,6 +1146,7 @@ static int hid_device_mklist(void)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -1407,7 +1411,7 @@ int	i,j,k;
 static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed;
-	char lastrx, txtmp, fname[200];
+	char lastrx, txtmp, fname[200], *s;
 	int i,j,k,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
@@ -1430,11 +1434,21 @@ static void *hidthread(void *arg)
                 usb_handle = NULL;
                 usb_dev = NULL;
                 hid_device_mklist();
+		for(s = usb_device_list; *s; s += strlen(s) + 1)
+		{
+			i = usb_get_usbdev(s);
+			if (i < 0) continue;
+			usb_dev = hid_device_init(s);
+			if (usb_dev == NULL) continue;
+			if ((usb_dev->descriptor.idProduct & 0xff00) != N1KDO_PRODUCT_ID) continue;
+			if (o->index != (usb_dev->descriptor.idProduct & 0xf)) continue;
+			ast_log(LOG_NOTICE,"N1KDO port %d, USB device %s usbradio channel %s\n",
+				usb_dev->descriptor.idProduct & 0xf,s,o->name);
+			strcpy(o->devstr,s);
+		}
 		/* if our specified one exists in the list */
 		if ((!usb_list_check(o->devstr)) || (!find_desc_usb(o->devstr)))
 		{
-			char *s;
-
 			for(s = usb_device_list; *s; s += strlen(s) + 1)
 			{
 				if (!find_desc_usb(s)) break;
@@ -1747,7 +1761,7 @@ static void *hidthread(void *arg)
 			j = buf[o->hid_gpio_loc]; /* get the GPIO info */
 			/* if is a CM108AH, map the "HOOK" bit (which used to
 			   be GPIO2 in the CM108 into the GPIO position */
-			if (o->devtype == C108AH_PRODUCT_ID)
+				if (o->devtype != C108_PRODUCT_ID)
 			{
 				j |= 2;  /* set GPIO2 bit */
 				/* if HOOK is asserted, clear GPIO bit */
@@ -2629,7 +2643,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
                 return f;
         }
         if (o->readerrs) ast_log(LOG_WARNING,"Nope, USB read channel [%s] wasn't stuck after all.\n",o->name);
-	if (o->devtype == C108AH_PRODUCT_ID)
+	if (o->devtype != C108_PRODUCT_ID)
 	{
 		short *sp = (short *)  (o->usbradio_read_buf + o->readpos);
  		float v;
@@ -2701,7 +2715,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		{	
 			/* enough to fill a frame */
 			memcpy(o->usbradio_write_buf + o->usbradio_write_dst, o->usbradio_write_buf_1 + src, l);
-			if (o->devtype == C108AH_PRODUCT_ID)
+			if (o->devtype != C108_PRODUCT_ID)
 			{
 				short *sp = (short *)  o->usbradio_write_buf;
 				float v;
@@ -5054,7 +5068,7 @@ static int xpmr_config(struct chan_usbradio_pvt *o)
 /*
  * grab fields from the config file, init the descriptor and open the device.
  */
-static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
+static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg, int *indexp)
 {
 	struct ast_variable *v;
 	struct chan_usbradio_pvt *o;
@@ -5078,6 +5092,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 				return NULL;
 			*o = usbradio_default;
 			o->name = ast_strdup(ctg);
+			o->index = (*indexp)++;
 			if (!usbradio_active) 
 				usbradio_active = o->name;
 		}
@@ -5616,6 +5631,7 @@ static int load_module(void)
 {
 	struct ast_config *cfg = NULL;
 	char *ctg = NULL,*val;
+	int n;
 #ifdef	NEW_ASTERISK
 	struct ast_flags zeroflag = {0};
 #endif
@@ -5645,8 +5661,9 @@ static int load_module(void)
 	pp_val = 0;
 	hasout = 0;
 
+	n = 0;
 	do {
-		store_config(cfg, ctg);
+		store_config(cfg, ctg, &n);
 	} while ( (ctg = ast_category_browse(cfg, ctg)) != NULL);
 
 	ppfd = -1;
