@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.278 01/05/2011
+ *  version 0.279 01/15/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.278 01/05/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.279 01/15/2011";
 
 static char *app = "Rpt";
 
@@ -3284,7 +3284,7 @@ static void *uchameleon_monitor_thread(void *this)
 
 static int saynum(struct ast_channel *mychannel, int num);
 static int sayfile(struct ast_channel *mychannel,char *fname);
-static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
+static int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
 static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 
@@ -3753,7 +3753,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 	
 	/* Wait the normal telemetry delay time */
 	
-	wait_interval(myrpt, DLY_TELEM, mychannel);
+	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) goto done;
 	
 
 	/* Split up the sounds string */
@@ -3804,7 +3804,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 			res = sayfile(mychannel, sound_files[i]); /* Say the next word in the list */
 		}					
 	}
- 	
+done: 	
 	/* Done */
 	ast_free(myargs);
 	ast_free(meter_face);
@@ -3861,13 +3861,14 @@ static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel,
 	/* Wait the normal telemetry delay time */
 	
 	if(!res)
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) goto done;
 
 	/* Say the files one by one at argc index 3 */
 	for(i = 3; i < argc && !res; i++){
 		res = sayfile(mychannel, argv[i]); /* Say the next word in the list */
 	}					
 	
+done:
 	ast_free(myargs);
 	return 0;
 }
@@ -7922,7 +7923,7 @@ static int get_wait_interval(struct rpt *myrpt, int type)
 /*
 * Wait a configurable interval of time 
 */
-static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
+static int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 {
 	int interval;
 
@@ -7930,20 +7931,20 @@ static void wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 		while (myrpt->p.holdofftelem && 
 			(myrpt->keyed || (myrpt->remrx && (type != DLY_ID))))
 		{
-			if (ast_safe_sleep(chan,100) < 0) return;
+			if (ast_safe_sleep(chan,100) < 0) return -1;
 		}
 
 		interval = get_wait_interval(myrpt, type);
 		if(debug)
 			ast_log(LOG_NOTICE,"Delay interval = %d\n", interval);
 		if(interval)
-			ast_safe_sleep(chan,interval);
+			if (ast_safe_sleep(chan,interval) < 0) return -1;
 		if(debug)
 			ast_log(LOG_NOTICE,"Delay complete\n");
 	}
 	while (myrpt->p.holdofftelem && 
 		(myrpt->keyed || (myrpt->remrx && (type != DLY_ID))));
-	return;
+	return 0;
 }
 
 static int split_freq(char *mhz, char *decimals, char *freq);
@@ -7962,25 +7963,25 @@ struct	tm localtm;
 	if (n < 1) return;
 	if (!strcasecmp(strs[0],"REMGO"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		sayfile(mychannel, "rpt/remote_go");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_go");
 		return;
 	}
 	if (!strcasecmp(strs[0],"REMALREADY"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		sayfile(mychannel, "rpt/remote_already");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_already");
 		return;
 	}
 	if (!strcasecmp(strs[0],"REMNOTFOUND"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		sayfile(mychannel, "rpt/remote_notfound");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_notfound");
 		return;
 	}
 	if (!strcasecmp(strs[0],"COMPLETE"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
@@ -8001,7 +8002,7 @@ struct	tm localtm;
 	if (!strcasecmp(strs[0],"TERM"))
 	{
 		/* wait a little bit longer */
-		wait_interval(myrpt, DLY_CALLTERM, mychannel);
+		if (wait_interval(myrpt, DLY_CALLTERM, mychannel) == -1) return;
 		res = telem_lookup(myrpt, mychannel, myrpt->name, "patchdown");
 		if(res < 0){ /* Then default message */
 			sayfile(mychannel, "rpt/callterminated");
@@ -8010,21 +8011,21 @@ struct	tm localtm;
 	}
 	if (!strcasecmp(strs[0],"MACRO_NOTFOUND"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		sayfile(mychannel, "rpt/macro_notfound");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/macro_notfound");
 		return;
 	}
 	if (!strcasecmp(strs[0],"MACRO_BUSY"))
 	{
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		sayfile(mychannel, "rpt/macro_busy");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/macro_busy");
 		return;
 	}
 	if (!strcasecmp(strs[0],"CONNECTED"))
 	{
 
 		if (n < 3) return;
-		wait_interval(myrpt, DLY_TELEM,  mychannel);
+		if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1) return;
 		res = saynode(myrpt,mychannel,strs[2]);
 		if (!res)
 		    res = ast_streamfile(mychannel, "rpt/connected", mychannel->language);
@@ -8046,7 +8047,7 @@ struct	tm localtm;
 	{
 
 		if (n < 2) return;			
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		res = saynode(myrpt,mychannel,strs[1]);
 		if (!res) 
 		   sayfile(mychannel, "rpt/connection_failed");
@@ -8056,7 +8057,7 @@ struct	tm localtm;
 	{
 
 		if (n < 2) return;			
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		res = saynode(myrpt,mychannel,strs[1]);
 		if (!res) 
 		   sayfile(mychannel, "rpt/remote_disc");
@@ -8067,7 +8068,7 @@ struct	tm localtm;
 		if (n < 2) return;
 		if (sscanf(strs[1],"%u",&t1) != 1) return;
 		t = t1;
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		rpt_localtime(&t, &localtm);
 		/* Say the phase of the day is before the time */
 		if((localtm.tm_hour >= 0) && (localtm.tm_hour < 12))
@@ -8090,7 +8091,7 @@ struct	tm localtm;
 	{
 		if (n < 2) return;
 		if(sscanf(strs[1], "%d.%d", &vmajor, &vminor) != 2) return;
-    		wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+    		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		/* Say "version" */
 		if (sayfile(mychannel,"rpt/version") == -1) return;
 		res = ast_say_number(mychannel, vmajor, "", mychannel->language, (char *) NULL);
@@ -8111,7 +8112,7 @@ struct	tm localtm;
 	if (!strcasecmp(strs[0],"STATS_GPS"))
 	{
 		if (n < 5) return;
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		if (saynode(myrpt,mychannel,strs[1]) == -1) return;
 		if (sayfile(mychannel,"location") == -1) return;
 		c = *(strs[2] + strlen(strs[2]) - 1);
@@ -8177,7 +8178,7 @@ struct	tm localtm;
 	if (!strcasecmp(strs[0],"ARB_ALPHA"))
 	{
 		if (n < 2) return;
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 	    	saycharstr(mychannel, strs[1]);
 		return;
 	}		
@@ -8189,7 +8190,7 @@ struct	tm localtm;
 		int looptemp=0,i=0, dres = 0;
 
 		if (n < 3) return;
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 	
 
 		tpl_working = ast_strdup(strs[2]);
@@ -8223,14 +8224,14 @@ struct	tm localtm;
 	{
 		if (n < 2) return;
 		if (!atoi(strs[1])) return;
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		saynode(myrpt,mychannel,strs[1]);
 		return;
 	}
 	if (!strcasecmp(strs[0],"LASTUSER"))
 	{
 		if (n < 2) return;
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		sayphoneticstr(mychannel,strs[1]);
 		if (n < 3) return;
 		sayfile(mychannel,"and");
@@ -8240,7 +8241,7 @@ struct	tm localtm;
 	if (!strcasecmp(strs[0],"STATUS"))
 	{
 		if (n < 3) return;
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
 		saynode(myrpt,mychannel,strs[1]);
 		if (atoi(strs[2]) > 0) sayfile(mychannel, "rpt/autopatch_on");
 		else if (n == 3)
@@ -8409,6 +8410,7 @@ struct	mdcparams *mdcp;
 		pthread_exit(NULL);
 	}
 	ast_stopstream(mychannel);
+	res = 0;
 	switch(mytele->mode)
 	{
 	    case USEROUT:
@@ -8430,16 +8432,16 @@ struct	mdcparams *mdcp;
 		if (*ident)
 		{
 			/* wait a bit */
-			wait_interval(myrpt, (mytele->mode == ID) ? DLY_ID : DLY_TELEM,mychannel);
-			res = telem_any(myrpt,mychannel, ident); 
+			if (!wait_interval(myrpt, (mytele->mode == ID) ? DLY_ID : DLY_TELEM,mychannel))
+				res = telem_any(myrpt,mychannel, ident); 
 		}
 		imdone=1;	
 		break;
 		
 	    case TAILMSG:
 		/* wait a little bit longer */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, myrpt->p.tailmessages[myrpt->tailmessagen], mychannel->language); 
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, myrpt->p.tailmessages[myrpt->tailmessagen], mychannel->language); 
 		break;
 
 	    case IDTALKOVER:
@@ -8453,56 +8455,58 @@ struct	mdcparams *mdcp;
 	    		
 	    case PROC:
 		/* wait a little bit longer */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = telem_lookup(myrpt, mychannel, myrpt->name, "patchup");
+		if (wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = telem_lookup(myrpt, mychannel, myrpt->name, "patchup");
 		if(res < 0){ /* Then default message */
 			res = ast_streamfile(mychannel, "rpt/callproceeding", mychannel->language);
 		}
 		break;
 	    case TERM:
 		/* wait a little bit longer */
-		wait_interval(myrpt, DLY_CALLTERM, mychannel);
-		res = telem_lookup(myrpt, mychannel, myrpt->name, "patchdown");
+		if (!wait_interval(myrpt, DLY_CALLTERM, mychannel))
+			res = telem_lookup(myrpt, mychannel, myrpt->name, "patchdown");
 		if(res < 0){ /* Then default message */
 			res = ast_streamfile(mychannel, "rpt/callterminated", mychannel->language);
 		}
 		break;
 	    case COMPLETE:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		break;
 	    case REMCOMPLETE:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = telem_lookup(myrpt,mychannel, myrpt->name, "remcomplete");
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = telem_lookup(myrpt,mychannel, myrpt->name, "remcomplete");
 		break;
 	    case MACRO_NOTFOUND:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/macro_notfound", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/macro_notfound", mychannel->language);
 		break;
 	    case MACRO_BUSY:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/macro_busy", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/macro_busy", mychannel->language);
 		break;
 	    case PAGE:
-		wait_interval(myrpt, DLY_TELEM,  mychannel);
-		res = -1;
-		if (mytele->submode)
+		if (!wait_interval(myrpt, DLY_TELEM,  mychannel))
 		{
-			res = ast_playtones_start(myrpt->txchannel,0,
-				(char *) mytele->submode,0);
-			while(myrpt->txchannel->generatordata)
+			res = -1;
+			if (mytele->submode)
 			{
-				if(ast_safe_sleep(myrpt->txchannel, 50))
+				res = ast_playtones_start(myrpt->txchannel,0,
+					(char *) mytele->submode,0);
+				while(myrpt->txchannel->generatordata)
 				{
-					res = -1;
-					break;
+					if(ast_safe_sleep(myrpt->txchannel, 50))
+					{
+						res = -1;
+						break;
+					}
 				}
+				free((char *)mytele->submode);
 			}
-			free((char *)mytele->submode);
 		}
 		imdone = 1;
 		break;
@@ -8512,9 +8516,23 @@ struct	mdcparams *mdcp;
 		if (mdcp)
 		{
 			if (mdcp->type[0] != 'A')
-				wait_interval(myrpt, DLY_TELEM,  mychannel);
+			{
+				if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1)
+				{
+					res = -1;
+					imdone = 1;
+					break;
+				}
+			}
 			else
-				wait_interval(myrpt, DLY_MDC1200,  mychannel);
+			{
+				if (wait_interval(myrpt, DLY_MDC1200,  mychannel) == -1)
+				{
+					res = -1;
+					imdone = 1;
+					break;
+				}
+			}
 			res = mdc1200gen_start(myrpt->txchannel,mdcp->type,mdcp->UnitID,mdcp->DestID,mdcp->subcode);
 			ast_free(mdcp);
 			while(myrpt->txchannel->generatordata)
@@ -8850,7 +8868,7 @@ struct	mdcparams *mdcp;
 		break;
 	    case REMDISC:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		l = myrpt->links.next;
 		haslink = 0;
 		/* dont report if a link for this one still on system */
@@ -8885,22 +8903,22 @@ struct	mdcparams *mdcp;
 		break;
 	    case REMALREADY:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/remote_already", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/remote_already", mychannel->language);
 		break;
 	    case REMNOTFOUND:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/remote_notfound", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/remote_notfound", mychannel->language);
 		break;
 	    case REMGO:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/remote_go", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/remote_go", mychannel->language);
 		break;
 	    case CONNECTED:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM,  mychannel);
+		if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1) break;
 		res = saynode(myrpt,mychannel,mytele->mylink.name);
 		if (!res)
 		    res = ast_streamfile(mychannel, "rpt/connected", mychannel->language);
@@ -8925,13 +8943,13 @@ struct	mdcparams *mdcp;
 		break;
 	    case MEMNOTFOUND:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/memory_notfound", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/memory_notfound", mychannel->language);
 		break;
 	    case PLAYBACK:
             case LOCALPLAY:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		res = ast_streamfile(mychannel, mytele->param, mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
@@ -8942,7 +8960,7 @@ struct	mdcparams *mdcp;
 		break;
 	    case TOPKEY:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		for(i = 0; i < TOPKEYN; i++)
 		{
 			if (!myrpt->topkey[i].node[0]) continue;
@@ -9041,12 +9059,12 @@ struct	mdcparams *mdcp;
 		/* fall thru to invalid freq */
 	    case INVFREQ:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = ast_streamfile(mychannel, "rpt/invalid-freq", mychannel->language);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = ast_streamfile(mychannel, "rpt/invalid-freq", mychannel->language);
 		break;
 	    case REMMODE:
 		cp = 0;
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		switch(myrpt->remmode)
 		{
 		    case REM_MODE_FM:
@@ -9062,23 +9080,23 @@ struct	mdcparams *mdcp;
 			saycharstr(mychannel,"AM");
 			break;
 		}
-		wait_interval(myrpt, DLY_COMP, mychannel);
-		if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		if (!wait_interval(myrpt, DLY_COMP, mychannel))
+			if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		break;
 	    case LOGINREQ:
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		sayfile(mychannel,"rpt/login");
 		saycharstr(mychannel,myrpt->name);
 		break;
 	    case REMLOGIN:
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		saycharstr(mychannel,myrpt->loginuser);
 		saynode(myrpt,mychannel,myrpt->name);
 		wait_interval(myrpt, DLY_COMP, mychannel);
 		if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		break;
 	    case REMXXX:
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		res = 0;
 		switch(mytele->submode)
 		{
@@ -9137,8 +9155,8 @@ struct	mdcparams *mdcp;
 		if (strcmp(myrpt->remoterig, remote_rig_tm271) &&
 		   strcmp(myrpt->remoterig, remote_rig_kenwood))
 		{
-			wait_interval(myrpt, DLY_COMP, mychannel);
-			if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+			if (!wait_interval(myrpt, DLY_COMP, mychannel))
+				if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		}
 		break;
 	    case SCAN:
@@ -9202,7 +9220,7 @@ struct	mdcparams *mdcp;
 		break;
 	    case REMSHORTSTATUS:
 	    case REMLONGSTATUS:	
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		res = saynode(myrpt,mychannel,myrpt->name);
 		if(!res)
 			res = sayfile(mychannel,"rpt/frequency");
@@ -9273,8 +9291,8 @@ struct	mdcparams *mdcp;
 		if (res == -1) break;
 
 		if(mytele->mode == REMSHORTSTATUS){ /* Short status? */
-			wait_interval(myrpt, DLY_COMP, mychannel);
-			if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+			if (!wait_interval(myrpt, DLY_COMP, mychannel))
+				if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 			break;
 		}
 
@@ -9313,12 +9331,12 @@ struct	mdcparams *mdcp;
 					break;
 				}
 		}
-		wait_interval(myrpt, DLY_COMP, mychannel);
-		if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		if (!wait_interval(myrpt, DLY_COMP, mychannel))
+			if (!res) res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
 		break;
 	    case STATUS:
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		hastx = 0;
 		linkbase.next = &linkbase;
 		linkbase.prev = &linkbase;
@@ -9427,7 +9445,7 @@ struct	mdcparams *mdcp;
 		/* sort em */
 		if (ns) qsort((void *)strs,ns,sizeof(char *),mycompar);
 		/* wait a little bit */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		hastx = 0;
 		res = saynode(myrpt,mychannel,myrpt->name);
 		if (myrpt->callmode)
@@ -9493,14 +9511,14 @@ struct	mdcparams *mdcp;
 			imdone = 1; /* no node previously keyed us up, or the node which did has been disconnected */
 			break;
 		}
-		wait_interval(myrpt, DLY_TELEM, mychannel);
-		res = saynode(myrpt,mychannel,p);
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			res = saynode(myrpt,mychannel,p);
 		ast_free(p);
 		imdone = 1;
 		break;		
 
 	    case UNAUTHTX: /* Say unauthorized transmit frequency */
-		wait_interval(myrpt, DLY_TELEM, mychannel);
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		res = ast_streamfile(mychannel, "rpt/unauthtx", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
@@ -9519,7 +9537,7 @@ struct	mdcparams *mdcp;
 			myrpt->parrotstate = 0;
 			break;
 		}
-		wait_interval(myrpt, DLY_PARROT, mychannel);
+		if (wait_interval(myrpt, DLY_PARROT, mychannel) == -1) break;
 		sprintf(mystr,PARROTFILE,myrpt->name,mytele->parrot);
 		res = ast_streamfile(mychannel, mystr, mychannel->language);
 		if (!res) 
@@ -9583,7 +9601,7 @@ struct	mdcparams *mdcp;
 		
 	    case STATS_TIME:
             case STATS_TIME_LOCAL:
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		t = time(NULL);
 		rpt_localtime(&t, &localtm);
 		/* Say the phase of the day is before the time */
@@ -9617,7 +9635,7 @@ struct	mdcparams *mdcp;
 			break;	
 		if(sscanf(p, "version %d.%d", &vmajor, &vminor) != 2)
 			break;
-    		wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+    		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		/* Say "version" */
 		if (sayfile(mychannel,"rpt/version") == -1)
 		{
@@ -9656,7 +9674,7 @@ struct	mdcparams *mdcp;
 		was = (time_t) u;
 		time(&t);
 		if ((was + GPS_VALID_SECS) < t) break;
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		if (saynode(myrpt,mychannel,myrpt->name) == -1) break;
 		if (sayfile(mychannel,"location") == -1) break;
 		c = lat[strlen(lat) - 1];
@@ -9720,13 +9738,13 @@ struct	mdcparams *mdcp;
 		imdone = 1;
 		break;
 	    case ARB_ALPHA:
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
-	    	if(mytele->param)
-	    		saycharstr(mychannel, mytele->param);
+	    	if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+		    	if(mytele->param)
+		    		saycharstr(mychannel, mytele->param);
 	    	imdone = 1;
 		break;
 	    case REV_PATCH:
-	    	wait_interval(myrpt, DLY_TELEM, mychannel); /* Wait a little bit */
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 	    	if(mytele->param) {
 
 			/* Parts of this section taken from app_parkandannounce */
