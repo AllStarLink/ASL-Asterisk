@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.280 01/16/2011
+ *  version 0.281 01/17/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.280 01/16/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.281 01/17/2011";
 
 static char *app = "Rpt";
 
@@ -5902,7 +5902,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"eannmode");
 	if (val) rpt_vars[n].p.eannmode = atoi(val);
 	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
-	if (rpt_vars[n].p.eannmode < 1) rpt_vars[n].p.eannmode = 1;
+	if (rpt_vars[n].p.eannmode < 0) rpt_vars[n].p.eannmode = 0;
 	if (rpt_vars[n].p.eannmode > 3) rpt_vars[n].p.eannmode = 3;
 	val = (char *) ast_variable_retrieve(cfg,this,"trxgain");
 	if (!val) val = DEFAULT_TRXGAIN;
@@ -9870,8 +9870,13 @@ struct rpt_link *l;
 
 	switch(mode)
 	{
+	    case CONNECTED:
+ 		mylink = (struct rpt_link *) data;
+		if ((mylink->name[0] == '3') && (!myrpt->p.eannmode)) return;
+		break;
 	    case REMDISC:
  		mylink = (struct rpt_link *) data;
+		if ((mylink->name[0] == '3') && (!myrpt->p.eannmode)) return;
 		if ((!mylink) || (mylink->name[0] == '0')) return;
 		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
 		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8) &&
