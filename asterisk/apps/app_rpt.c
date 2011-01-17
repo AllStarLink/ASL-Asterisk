@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.279 01/15/2011
+ *  version 0.280 01/16/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.279 01/15/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.280 01/16/2011";
 
 static char *app = "Rpt";
 
@@ -5912,7 +5912,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.ttxgain = pow(10.0,atof(val) / 20.0);
 	val = (char *) ast_variable_retrieve(cfg,this,"tannmode");
 	if (val) rpt_vars[n].p.tannmode = atoi(val);
-	else rpt_vars[n].p.eannmode = DEFAULT_EANNMODE;
+	else rpt_vars[n].p.tannmode = DEFAULT_TANNMODE;
 	if (rpt_vars[n].p.tannmode < 1) rpt_vars[n].p.tannmode = 1;
 	if (rpt_vars[n].p.tannmode > 3) rpt_vars[n].p.tannmode = 3;
 	val = (char *) ast_variable_retrieve(cfg,this,"discpgm");
