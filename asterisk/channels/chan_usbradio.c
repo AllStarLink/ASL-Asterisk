@@ -1286,6 +1286,18 @@ int	i;
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
 		o->valid_gpios		=  11;   /* for GPIO 1,2,4 */
 	}
+	else if(o->hdwtype==2)	//NHRC (N1KDO) (dudeusb w/o user GPIO)
+	{
+		o->hid_gpio_ctl		=  4;	/* set GPIO 3 to output mode */
+		o->hid_gpio_ctl_loc	=  2; 	/* For CTL of GPIO */
+		o->hid_io_cor		=  2;	/* VOLD DN is COR */
+		o->hid_io_cor_loc	=  0;	/* VOL DN COR */
+		o->hid_io_ctcss		=  1;  	/* VOL UP is External CTCSS */
+		o->hid_io_ctcss_loc 	=  0;	/* VOL UP CTCSS */
+		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
+		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
+		o->valid_gpios		=  0;   /* for GPIO 1,2,4 */
+	}
 	else if(o->hdwtype==3)	// custom version
 	{
 		o->hid_gpio_ctl		=  0x0c;	/* set GPIO 3 & 4 to output mode */
