@@ -154,6 +154,7 @@ z - WinAPRS
 #include <pthread.h>
 #include <signal.h>
 #include <termios.h>
+#include <math.h>
 
 #include "asterisk/lock.h"
 #include "asterisk/channel.h"
@@ -175,7 +176,6 @@ z - WinAPRS
 #define	GPS_DEFAULT_SERVER "second.aprs.net"
 #define	GPS_DEFAULT_PORT "10151"
 #define	GPS_DEFAULT_COMMENT "Asterisk app_rpt server"
-#define	GPS_DEFAULT_COMPORT "/dev/ttyS0"
 #define	GPS_DEFAULT_BAUDRATE B4800
 #define	GPS_DEFAULT_ICON '>' /* car */
 #define	GPS_WORK_FILE "/tmp/gps.tmp"
@@ -194,8 +194,11 @@ static char *descrip = "Interfaces app_rpt to a NMEA 0183 (GGA records) complian
 static  pthread_t gps_thread = 0;
 static int run_forever = 1;
 static char *call,*password,*server,*port,*comment,*comport,icon;
+static char *deflat,*deflon;
+char power,height,gain,dir;
 static int baudrate;
 static int debug = 0;
+
 
 /*
 * Break up a delimited string into a table of substrings
@@ -304,8 +307,10 @@ char	c;
 static void *gpsthread(void *data)
 {
 char	buf[300],c,*strs[100],lat[100],lon[100],basecall[20];
-char	*cp;
-int	res,i,n,fd,sockfd;
+char	*cp,latc,lonc,astr[50];
+int	res,i,n,fd,sockfd,has_comport = 0;
+float	mylat,lata,latb,latd;
+float	mylon,lona,lonb,lond;
 FILE	*fp;
 time_t	t,lastupdate;
 struct termios mode;
@@ -314,6 +319,11 @@ struct hostent *hp;
 struct sockaddr_in servaddr;
 
 
+
+
+	if (comport) has_comport = 1;
+	else comport = "/dev/null";
+
 	fd = open(comport,O_RDWR);
 	if (fd == -1)
 	{
@@ -321,89 +331,123 @@ struct sockaddr_in servaddr;
 		goto err;
 	}
 
-	memset(&mode, 0, sizeof(mode));
-	if (tcgetattr(fd, &mode)) {
-		ast_log(LOG_WARNING, "Unable to get serial parameters on %s: %s\n", comport, strerror(errno));
-		close(fd);
-		goto err;
-	}
+	if (has_comport)
+	{
+		memset(&mode, 0, sizeof(mode));
+		if (tcgetattr(fd, &mode)) {
+			ast_log(LOG_WARNING, "Unable to get serial parameters on %s: %s\n", comport, strerror(errno));
+			close(fd);
+			goto err;
+		}
 #ifndef	SOLARIS
-	cfmakeraw(&mode);
+		cfmakeraw(&mode);
 #else
-        mode.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP
+	        mode.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP
                         |INLCR|IGNCR|ICRNL|IXON);
-        mode.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
-        mode.c_cflag &= ~(CSIZE|PARENB|CRTSCTS);
-        mode.c_cflag |= CS8;
-	mode.c_cc[VTIME] = 3;
-	mode.c_cc[VMIN] = 1; 
+	        mode.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+	        mode.c_cflag &= ~(CSIZE|PARENB|CRTSCTS);
+	        mode.c_cflag |= CS8;
+		mode.c_cc[VTIME] = 3;
+		mode.c_cc[VMIN] = 1; 
 #endif
 
-	cfsetispeed(&mode, baudrate);
-	cfsetospeed(&mode, baudrate);
-	if (tcsetattr(fd, TCSANOW, &mode)) 
-	{
-		ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", comport, strerror(errno));
-		close(fd);
-		goto err;
+		cfsetispeed(&mode, baudrate);
+		cfsetospeed(&mode, baudrate);
+		if (tcsetattr(fd, TCSANOW, &mode)) 
+		{
+			ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", comport, strerror(errno));
+			close(fd);
+			goto err;
+		}
 	}
 	usleep(100000);
 	lastupdate = 0;
 
 	while(run_forever)
 	{
-
-		res = getserial(fd,buf,sizeof(buf) - 1);
-		if (res < 0)
+		if (has_comport)
 		{
-			ast_log(LOG_ERROR,"GPS fatal error!!\n");
-			continue;
+			res = getserial(fd,buf,sizeof(buf) - 1);
+			if (res < 0)
+			{
+				ast_log(LOG_ERROR,"GPS fatal error!!\n");
+				continue;
+			}
+		}
+		else
+		{
+			sleep(10);
+			res = 0;
 		}
 		if (!res)
 		{
-			ast_log(LOG_WARNING,"GPS timeout\n");
-			continue;
+			if ((!deflat) || (!deflon)) 
+			{
+				if (has_comport) ast_log(LOG_WARNING,"GPS timeout\n");
+				continue;
+			}
+			if (has_comport) ast_log(LOG_WARNING,"GPS timeout -- Using default (fixed location) parameters instead\n");
+			mylat = strtof(deflat,NULL);
+			mylon = strtof(deflon,NULL);
+			latc = (mylat >= 0.0) ? 'N' : 'S';
+			lonc = (mylon >= 0.0) ? 'E' : 'W';
+			lata = fabs(mylat);
+			lona = fabs(mylon);
+			latb = (lata - floor(lata)) * 60;
+                        latd = (latb - floor(latb)) * 100 + 0.5;
+                        lonb = (lona - floor(lona)) * 60;
+                        lond = (lonb - floor(lonb)) * 100 + 0.5;
+			sprintf(lat,"%02d%02d.%02d%c",(int)lata,(int)latb,(int)latd,latc);
+			sprintf(lon,"%03d%02d.%02d%c",(int)lona,(int)lonb,(int)lond,lonc);
+			mylat = (float)(1 << height) * 3.048;
+			lata = (mylat - floor(mylat)) * 10 + 0.5;
+			sprintf(astr,"%03d.%1d",(int)mylat,(int)lata);
+			strs[9] = astr;
+			strs[10] = "M";
 		}
-		c = 0;
-		if (buf[0] != '$')
+		else
 		{
-			ast_log(LOG_WARNING,"GPS Invalid data format (no '$' at beginning)\n");
-			continue;
+			c = 0;
+			if (buf[0] != '$')
+			{
+				ast_log(LOG_WARNING,"GPS Invalid data format (no '$' at beginning)\n");
+				continue;
+			}
+			for(i = 1; buf[i]; i++)
+			{
+				if (buf[i] == '*') break;
+				c ^= buf[i];
+			}
+			if ((!buf[i]) || (strlen(buf) < (i + 3)))
+			{
+				ast_log(LOG_WARNING,"GPS Invalid data format (checksum format)\n");
+				continue;
+			}
+			if ((sscanf(buf + i + 1,"%x",&i) != 1) || (c != i))
+			{
+				ast_log(LOG_WARNING,"GPS Invalid checksum\n");
+				continue;
+			}
+			n = explode_string(buf,strs,100,',','\"');
+			if (!n)
+			{
+				ast_log(LOG_WARNING,"GPS Invalid data format (no data)\n");
+				continue;
+			}
+			if (strcasecmp(strs[0],"$GPGGA")) continue;
+			if (n != 15)
+			{
+				ast_log(LOG_WARNING,"GPS Invalid data format (invalid format for GGA record)\n");
+				continue;
+			}
+			if (*strs[6] < '1')
+			{
+				ast_log(LOG_WARNING,"GPS data not available\n");
+				continue;
+			}
+			snprintf(lat,sizeof(lat) - 1,"%s%s",strs[2],strs[3]);
+			snprintf(lon,sizeof(lon) - 1,"%s%s",strs[4],strs[5]);
 		}
-		for(i = 1; buf[i]; i++)
-		{
-			if (buf[i] == '*') break;
-			c ^= buf[i];
-		}
-		if ((!buf[i]) || (strlen(buf) < (i + 3)))
-		{
-			ast_log(LOG_WARNING,"GPS Invalid data format (checksum format)\n");
-			continue;
-		}
-		if ((sscanf(buf + i + 1,"%x",&i) != 1) || (c != i))
-		{
-			ast_log(LOG_WARNING,"GPS Invalid checksum\n");
-			continue;
-		}
-		n = explode_string(buf,strs,100,',','\"');
-		if (!n)
-		{
-			ast_log(LOG_WARNING,"GPS Invalid data format (no data)\n");
-			continue;
-		}
-		if (strcasecmp(strs[0],"$GPGGA")) continue;
-		if (n != 15)
-		{
-			ast_log(LOG_WARNING,"GPS Invalid data format (invalid format for GGA record)\n");
-			continue;
-		}
-		if (*strs[6] < '1')
-		{
-			ast_log(LOG_WARNING,"GPS data not available\n");
-			continue;
-		}
-		snprintf(lat,sizeof(lat) - 1,"%s%s",strs[2],strs[3]);
-		snprintf(lon,sizeof(lon) - 1,"%s%s",strs[4],strs[5]);
 		if (debug) ast_log(LOG_NOTICE,"got lat: %s, long: %s\n",lat,lon);
 		fp = fopen(GPS_WORK_FILE,"w");
 		if (!fp)
@@ -467,8 +511,8 @@ struct sockaddr_in servaddr;
 			continue;
 		}
 		if (debug) ast_log(LOG_NOTICE,"sent packet: %s",buf);
-		sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%c%s\n",
-			call,basecall,lat,lon,icon,comment);
+		sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%cPHG%d%d%d%d/%s\n",
+			call,basecall,lat,lon,icon,power,height,gain,dir,comment);
 		if (send(sockfd,buf,strlen(buf),0) < 0)
 		{
 			ast_log(LOG_WARNING, "Can not send signon to server\n");
@@ -546,8 +590,19 @@ int load_module(void)
 	val = (char *) ast_variable_retrieve(cfg,ctg,"comment");	
 	if (val) comment = ast_strdup(val); else comment = ast_strdup(GPS_DEFAULT_COMMENT);
 	val = (char *) ast_variable_retrieve(cfg,ctg,"comport");	
-	if (val) comport = ast_strdup(val); else comport = ast_strdup(GPS_DEFAULT_COMPORT);
-	val = (char *) ast_variable_retrieve(cfg,ctg,"baudrate");	
+	if (val) comport = ast_strdup(val); else comport = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lat");	
+	if (val) deflat = ast_strdup(val); else deflat = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
+	if (val) deflon = ast_strdup(val); else deflon = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"power");	
+	if (val) power = (char)strtol(val,NULL,0); else power = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"height");	
+	if (val) height = (char)strtol(val,NULL,0); else height = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"gain");	
+	if (val) gain = (char)strtol(val,NULL,0); else gain = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"dir");	
+	if (val) dir = (char)strtol(val,NULL,0); else dir = 0;
 	if (val)
 	{
 	    switch(atoi(val))
