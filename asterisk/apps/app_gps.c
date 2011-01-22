@@ -194,7 +194,7 @@ static char *descrip = "Interfaces app_rpt to a NMEA 0183 (GGA records) complian
 static  pthread_t gps_thread = 0;
 static int run_forever = 1;
 static char *call,*password,*server,*port,*comment,*comport,icon;
-static char *deflat,*deflon;
+static char *deflat,*deflon,*defelev;
 char power,height,gain,dir;
 static int baudrate;
 static int debug = 0;
@@ -399,10 +399,15 @@ struct sockaddr_in servaddr;
                         lond = (lonb - floor(lonb)) * 100 + 0.5;
 			sprintf(lat,"%02d%02d.%02d%c",(int)lata,(int)latb,(int)latd,latc);
 			sprintf(lon,"%03d%02d.%02d%c",(int)lona,(int)lonb,(int)lond,lonc);
-			mylat = (float)(1 << height) * 3.048;
-			lata = (mylat - floor(mylat)) * 10 + 0.5;
-			sprintf(astr,"%03d.%1d",(int)mylat,(int)lata);
-			strs[9] = astr;
+			if (defelev)
+			{
+				mylat = strtof(defelev,NULL);
+				lata = (mylat - floor(mylat)) * 10 + 0.5;
+				sprintf(astr,"%03d.%1d",(int)mylat,(int)lata);
+				strs[9] = astr;
+			}
+			else
+				strs[9] = "000.0";
 			strs[10] = "M";
 		}
 		else
@@ -448,7 +453,7 @@ struct sockaddr_in servaddr;
 			snprintf(lat,sizeof(lat) - 1,"%s%s",strs[2],strs[3]);
 			snprintf(lon,sizeof(lon) - 1,"%s%s",strs[4],strs[5]);
 		}
-		if (debug) ast_log(LOG_NOTICE,"got lat: %s, long: %s\n",lat,lon);
+		if (debug) ast_log(LOG_NOTICE,"got lat: %s, long: %s, elev: %s%s\n",lat,lon,strs[9],strs[10]);
 		fp = fopen(GPS_WORK_FILE,"w");
 		if (!fp)
 		{
@@ -595,6 +600,8 @@ int load_module(void)
 	if (val) deflat = ast_strdup(val); else deflat = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
 	if (val) deflon = ast_strdup(val); else deflon = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"elev");	
+	if (val) defelev = ast_strdup(val); else defelev = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"power");	
 	if (val) power = (char)strtol(val,NULL,0); else power = 0;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"height");	
