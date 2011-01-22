@@ -671,7 +671,7 @@ struct eldb *node,*mynode;
 	tsearch(node,&el_db_nodenum,compare_eldb_nodenum);
 	tsearch(node,&el_db_ipaddr,compare_eldb_ipaddr);
 	tsearch(node,&el_db_callsign,compare_eldb_callsign);
-	if (debug)
+	if (debug > 1)
 		ast_log(LOG_DEBUG,"eldb put: Node=%s, Call=%s, IP=%s\n",nodenum,callsign,ipaddr);
 	return(node);
 }
@@ -2209,13 +2209,13 @@ static void el_zapcall(char *call)
 {
 struct eldb *mynode;
 
-	if (debug)
+	if (debug > 1)
 		ast_log(LOG_DEBUG,"zapcall eldb delete Attempt: Call=%s\n",call);
 	ast_mutex_lock(&el_db_lock);
 	mynode = el_db_find_callsign(call);
 	if (mynode)
 	{
-		if (debug)
+		if (debug > 1)
 			ast_log(LOG_DEBUG,"zapcall eldb delete: Node=%s, Call=%s, IP=%s\n",
 				mynode->nodenum,mynode->callsign,mynode->ipaddr);
 		el_db_delete(mynode);
@@ -2742,8 +2742,10 @@ static void *el_reader(void *data)
 					was = (time_t) u;
 					if ((was + GPS_VALID_SECS) >= now)
 					{
-						mylat = lat / 100.0;
-						mylon = lon / 100.0;
+						mylat = floor(lat / 100.0);
+						mylat += (lat - (mylat * 100)) / 60.0;
+						mylon = floor(lon / 100.0);
+						mylon += (lon - (mylon * 100)) / 60.0;
 						if (latc == 'S') mylat = -mylat;
 						if (lonc == 'W') mylon = -mylon;
 					}						
@@ -2754,16 +2756,17 @@ static void *el_reader(void *data)
 			lonc = (mylon >= 0.0) ? 'E' : 'W';
 			lata = fabs(mylat);
 			lona = fabs(mylon);
-			latb = (lata - floor(lata)) * 0.60;
-			latd = ((latb * 100.0) - floor(latb * 100.0)) * 0.60;
-			lonb = (lona - floor(lona)) * 0.60;
-			lond = ((lonb  * 100.0)- floor(lonb * 100.0)) * 0.60;
+			latb = (lata - floor(lata)) * 60;
+                        latd = (latb - floor(latb)) * 100 + 0.5;
+                        lonb = (lona - floor(lona)) * 60;
+                        lond = (lonb - floor(lonb)) * 100 + 0.5;
 			sprintf(aprsstr,")EL-%-6.6s!%02d%02d.%02d%cE%03d%02d.%02d%c0PHG%d%d%d%d/%06d/%03d%s",instp->mycall,
-				(int)floor(lata),(int)((latb * 100.0) + 0.5),(int)((latd * 100.0) + 0.5),latc,
-				(int)floor(lona),(int)((lonb * 100.0) + 0.5),(int)((lond * 100.0) + 0.5),lonc,
+				(int)lata,(int)latb,(int)latd,latc,
+				(int)lona,(int)lonb,(int)lond,lonc,
 				instp->power,instp->height,instp->gain,instp->dir,
 				(int)((instp->freq * 1000) + 0.5),(int)(instp->tone + 0.05),instp->aprs_display);
 
+			if (debug) ast_log(LOG_DEBUG,"aprs out: %s\n",aprsstr);
 			sprintf(aprscall,"%s/%s",instp->mycall,instp->mycall);
 			memset(sdes_packet,0,sizeof(sdes_packet));
 			sdes_length = rtcp_make_el_sdes(sdes_packet,sizeof(sdes_packet),aprscall,aprsstr);
