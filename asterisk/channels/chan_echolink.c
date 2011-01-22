@@ -2705,7 +2705,7 @@ static void *el_reader(void *data)
 			char aprsstr[256],aprscall[256],latc,lonc;
  			unsigned char sdes_packet[256];
 			unsigned int u;
-			float lata,lona,lat,lon,mylat,mylon;
+			float lata,lona,latb,lonb,latd,lond,lat,lon,mylat,mylon;
 			int sdes_length;
 
 			instp->aprstime = now + EL_APRS_INTERVAL;
@@ -2754,11 +2754,15 @@ static void *el_reader(void *data)
 			lonc = (mylon >= 0.0) ? 'E' : 'W';
 			lata = fabs(mylat);
 			lona = fabs(mylon);
-			sprintf(aprsstr,")EL-%-6.6s!%04d.%02d%cE%05d.%02d%c0PHG%d%d%d%d/%06d/%03d%s",instp->mycall,
-				(int)(lata * 100.0),(int)(lata * 10000.0) % 100,latc,
-				(int)(lona * 100.0),(int)(lona * 10000.0) % 100,lonc,
+			latb = (lata - floor(lata)) * 0.60;
+			latd = ((latb * 100.0) - floor(latb * 100.0)) * 0.60;
+			lonb = (lona - floor(lona)) * 0.60;
+			lond = ((lonb  * 100.0)- floor(lonb * 100.0)) * 0.60;
+			sprintf(aprsstr,")EL-%-6.6s!%02d%02d.%02d%cE%03d%02d.%02d%c0PHG%d%d%d%d/%06d/%03d%s",instp->mycall,
+				(int)floor(lata),(int)((latb * 100.0) + 0.5),(int)((latd * 100.0) + 0.5),latc,
+				(int)floor(lona),(int)((lonb * 100.0) + 0.5),(int)((lond * 100.0) + 0.5),lonc,
 				instp->power,instp->height,instp->gain,instp->dir,
-				(int)(instp->freq * 1000),(int)instp->tone,instp->aprs_display);
+				(int)((instp->freq * 1000) + 0.5),(int)(instp->tone + 0.05),instp->aprs_display);
 
 			sprintf(aprscall,"%s/%s",instp->mycall,instp->mycall);
 			memset(sdes_packet,0,sizeof(sdes_packet));
