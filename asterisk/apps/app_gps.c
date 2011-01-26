@@ -465,7 +465,7 @@ struct sockaddr_in servaddr;
 			strs[9],strs[10]);
 		fclose(fp);
 		sprintf(buf,"/bin/mv %s %s > /dev/null 2>&1",GPS_WORK_FILE,GPS_DATA_FILE);
-		system(buf);
+		ast_safe_system(buf);
 		if (t < (lastupdate + GPS_UPDATE_SECS)) continue;
 		lastupdate = t;	
 
