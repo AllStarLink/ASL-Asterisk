@@ -30,6 +30,51 @@
 /*** MODULEINFO
  ***/
 
+/*  Basic Information On How This Works
+Each node has a number of potential "clients" associated with it. In the voter.conf file, each stanza (category)
+is named by the node number that the clients specified within the stanza are to be associated with. Each entry
+consists of an arbitrary (realtively meaningless, just included for easy identification putposes within this
+channel driver, and has nothing to do with its operation) identifier equated to a unique password. This password
+is programmed into the client. All clients must have unique passwords, as that is what is used by this channel
+driver to identify them.
+
+Each channel instance (as opened by app_rpt as a main radio channel, e.g. rxchannel=Voter/1999 in rpt.conf) and
+is directly associated with the node that opened it.
+
+Each client has a pair of circular buffers, one for mu-law audio data, and one for RSSI value. The allocated buffer
+length in all clients is determined by the 'buflen' parameter, which is specified in the "global" stanza in the 
+voter.conf file in milliseconds, and represnted in the channel driver as number of samples (actual buffer length,
+which is 8 * milliseconds). 
+
+Every channel instance has a index ("drainindex"), indicating the next position within the physical buffer(s) where
+the audio will be taken from the buffers and presented to the Asterisk channel stream as VOICE frames.
+
+Therefore, there is an abstraction of a "buffer" that exists starting at drainindex and ending (modulo) at
+drainindex - 1, with length of buflen.
+
+Buflen is selected so that there is enough time (delay) for any straggling packets to arrive before it is time
+to present the data to the Asterisk channel. 
+
+The idea is that the current audio being presented to Asterisk is from some time shortly in the past. Therefore,
+"Now" is the position in the abstratcted buffer of 'bufdelay' (generally buflen - 160) (you gotta at least leave room for
+an entire frame) and the data is being presented from the start of the abstracted buffer. As the physical buffer
+moves along, what was once "now" will eventually become far enough in the "past" to be presented to Asterisk (gosh,
+doesn't this sound like a scene from "Spaceballs"??.. I too always drink coffee while watching "Mr. Radar").
+
+During the processing of an audio frame to be presented to Asterisk, all client's buffers that are associated with
+a channel instance (node) are examined by taking an average of the RSSI value for each sample in the associated
+time period (the first 160 samples of the abstracted buffer (which is the physical buffer from drainindex to
+drainindex + 159) and whichever one, if any that has the largest RSSI average greather then zero is selected
+as the audio source for that frame. The corresponding audio buffer's contents (in the corresponding offsets)
+are presented to Asterisk, then ALL the clients corresponding RSSI data is set to 0, ALL the clients corresponding
+audio is set to quiet (0x7f). The overwriting of the buffers after their use/examination is done so that the 
+next time those positions in the physical buffer are examined, they will not contain any data that was not actually
+put there, since all client's buffers are significant regardless of whether they were populated or not. This
+allows for the true 'connectionless-ness' of this protocol implementation.
+
+*/
+
+
 #include "asterisk.h"
 
 #include <stdio.h>
