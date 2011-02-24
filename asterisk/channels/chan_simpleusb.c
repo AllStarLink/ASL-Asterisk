@@ -121,6 +121,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define C108_VENDOR_ID		0x0d8c
 #define C108_PRODUCT_ID  	0x000c
 #define C108AH_PRODUCT_ID  	0x013c
+#define N1KDO_PRODUCT_ID  	0x6a00
 #define C119_PRODUCT_ID  	0x0008
 #define C108_HID_INTERFACE	3
 
@@ -373,6 +374,7 @@ struct chan_simpleusb_pvt {
 	struct chan_simpleusb_pvt *next;
 
 	char *name;
+	int index;
 #ifndef	NEW_ASTERISK
 	/*
 	 * cursound indicates which in struct sound we play. -1 means nothing,
@@ -687,7 +689,7 @@ int	v,rv;
 
 	v = (val * o->spkrmax) / 1000;
 	/* if just the old one, do it the old way */
-	if (o->devtype != C108AH_PRODUCT_ID) return v;
+	if (o->devtype == C108_PRODUCT_ID) return v;
 	rv = (o->spkrmax + lround(20.0 * log10((float)(v + 1) / (float)(o->spkrmax + 1)) / 0.25));
 	if (rv < 0) rv = 0;
 	return rv;	
@@ -891,6 +893,7 @@ static struct usb_device *hid_device_init(char *desired_device)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -973,6 +976,7 @@ static int hid_device_mklist(void)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
@@ -1119,6 +1123,18 @@ static int	hidhdwconfig(struct chan_simpleusb_pvt *o)
 		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
 	}
+	else if(o->hdwtype==2)  //NHRC (N1KDO) (dudeusb w/o user GPIO)
+	{
+		o->hid_gpio_ctl         =  4;   /* set GPIO 3 to output mode */
+		o->hid_gpio_ctl_loc     =  2;   /* For CTL of GPIO */
+		o->hid_io_cor           =  2;   /* VOLD DN is COR */
+		o->hid_io_cor_loc       =  0;   /* VOL DN COR */
+		o->hid_io_ctcss         =  1;   /* VOL UP is External CTCSS */
+		o->hid_io_ctcss_loc     =  0;   /* VOL UP CTCSS */
+		o->hid_io_ptt           =  4;   /* GPIO 3 is PTT */
+		o->hid_gpio_loc         =  1;   /* For ALL GPIO */
+//		o->valid_gpios          =  0;   /* for GPIO 1,2,4 */
+	}
 	else if(o->hdwtype==3)	// custom version
 	{
 		o->hid_gpio_ctl		=  0x0c;	/* set GPIO 3 & 4 to output mode */
@@ -1179,7 +1195,7 @@ static struct chan_simpleusb_pvt *find_desc_usb(char *devstr)
 static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed,ctcssed,txreq;
-	char lastrx, fname[200];
+	char lastrx, fname[200], *s, isn1kdo;
 	int i,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
@@ -1202,6 +1218,38 @@ static void *hidthread(void *arg)
                 usb_handle = NULL;
                 usb_dev = NULL;
                 hid_device_mklist();
+		isn1kdo = 0;
+		for(s = usb_device_list; *s; s += strlen(s) + 1)
+		{
+			i = usb_get_usbdev(s);
+			if (i < 0) continue;
+			usb_dev = hid_device_init(s);
+			if (usb_dev == NULL) continue;
+			if ((usb_dev->descriptor.idProduct & 0xff00) != N1KDO_PRODUCT_ID) continue;
+			if (o->index != (usb_dev->descriptor.idProduct & 0xf)) continue;
+			ast_log(LOG_NOTICE,"N1KDO port %d, USB device %s usbradio channel %s\n",
+				usb_dev->descriptor.idProduct & 0xf,s,o->name);
+			strcpy(o->devstr,s);
+			isn1kdo = 1;
+			break;
+		}
+		/* if we are not an N1KDO, and an N1KDO has this devstr, set it to invalid */
+		if (!isn1kdo) 
+		{
+			for(s = usb_device_list; *s; s += strlen(s) + 1)
+			{
+				i = usb_get_usbdev(s);
+				if (i < 0) continue;
+				usb_dev = hid_device_init(s);
+				if (usb_dev == NULL) continue;
+				if ((usb_dev->descriptor.idProduct & 0xff00) != N1KDO_PRODUCT_ID) continue;
+				if (!strcmp(s,o->devstr))
+				{
+					strcpy(o->devstr,"XXX");
+					break;
+				}
+			}
+		}
 		/* if our specified one exists in the list */
 		if ((!usb_list_check(o->devstr)) || (!find_desc_usb(o->devstr)))
 		{
@@ -1212,6 +1260,14 @@ static void *hidthread(void *arg)
 				if (!find_desc_usb(s)) break;
 			}
 			if (!*s)
+			{
+				ast_mutex_unlock(&usb_dev_lock);
+				usleep(500000);
+				continue;
+			}
+			usb_dev = hid_device_init(s);
+			if (usb_dev == NULL) continue;
+			if ((usb_dev->descriptor.idProduct & 0xff00) == N1KDO_PRODUCT_ID)
 			{
 				ast_mutex_unlock(&usb_dev_lock);
 				usleep(500000);
@@ -1236,6 +1292,16 @@ static void *hidthread(void *arg)
 			}
 			ast_log(LOG_NOTICE,"Assigned USB device %s to simpleusb channel %s\n",s,o->name);
 			strcpy(o->devstr,s);
+		}
+		for (ao = simpleusb_default.next; ao && ao->name ; ao = ao->next)
+		{
+			if (ao->usbass && (!strcmp(ao->devstr,s))) break;
+		}
+		if (ao)
+		{
+			ast_mutex_unlock(&usb_dev_lock);
+			usleep(500000);
+			continue;
 		}
 		i = usb_get_usbdev(o->devstr);
 		if (i < 0)
@@ -1285,6 +1351,8 @@ static void *hidthread(void *arg)
 		buf[1] = 0;
 		hid_set_outputs(usb_handle,buf);
 		memcpy(bufsave,buf,sizeof(buf));
+		if (o->pttkick[0] != -1) close(o->pttkick[0]);
+		if (o->pttkick[1] != -1) close(o->pttkick[1]);
 		if (pipe(o->pttkick) == -1)
 		{
 		    ast_log(LOG_ERROR,"Not able to create pipe\n");
@@ -1933,20 +2001,6 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 	#endif
 
         if (o->readerrs) ast_log(LOG_WARNING,"Nope, USB read channel [%s] wasn't stuck after all.\n",o->name);
-	if (o->devtype == C108AH_PRODUCT_ID)
-	{
-		short *sp = (short *)  (o->simpleusb_read_buf + o->readpos);
- 		short s;
-		int i;
-		
-		for(i = 0; i < res / 2; i++)
-		{
-			s = *sp >> 1;  /* gives us *.5 */
-			s += s >> 1;  /* adds .25, giving * .75 */
-			s += s >> 4;  /* adds .046875, giving * .796875 */
-			*sp = s;
-		}
-	}
 	o->readerrs = 0;
 	o->readpos += res;
 	if (o->readpos < sizeof(o->simpleusb_read_buf))	/* not enough samples */
@@ -1976,7 +2030,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 
 		                if (f1->datalen - src >= l) {       /* enough to fill a frame */
 		                        memcpy(o->simpleusb_write_buf + o->simpleusb_write_dst, (char *)f1->data + src, l);
-					if (o->devtype == C108AH_PRODUCT_ID)
+					if (o->devtype != C108_PRODUCT_ID)
 					{
 						int v;
 			
@@ -2773,7 +2827,7 @@ static void mixer_write(struct chan_simpleusb_pvt *o)
 /*
  * grab fields from the config file, init the descriptor and open the device.
  */
-static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg)
+static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg,int *indexp)
 {
 	struct ast_variable *v;
 	struct chan_simpleusb_pvt *o;
@@ -2796,6 +2850,9 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 				return NULL;
 			*o = simpleusb_default;
 			o->name = ast_strdup(ctg);
+			o->index = (*indexp)++;
+			o->pttkick[0] = -1;
+			o->pttkick[1] = -1;
 			if (!simpleusb_active) 
 				simpleusb_active = o->name;
 		}
@@ -3024,6 +3081,7 @@ static int load_module(void)
 {
 	struct ast_config *cfg = NULL;
 	char *ctg = NULL;
+	int n;
 #ifdef	NEW_ASTERISK
 	struct ast_flags zeroflag = {0};
 #endif
@@ -3050,8 +3108,9 @@ static int load_module(void)
 		return AST_MODULE_LOAD_DECLINE;
 	}
 
+	n = 0;
 	do {
-		store_config(cfg, ctg);
+		store_config(cfg, ctg, &n);
 	} while ( (ctg = ast_category_browse(cfg, ctg)) != NULL);
 
 	ast_config_destroy(cfg);
