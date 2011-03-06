@@ -180,6 +180,12 @@ struct voter_pvt {
 	struct timeval lastrxtime;
 	VTIME draintime;
 	int drainindex;
+#ifdef 	OLD_ASTERISK
+	AST_LIST_HEAD(, ast_frame) txq;
+#else
+	AST_LIST_HEAD_NOLOCK(, ast_frame) txq;
+#endif
+	ast_mutex_t  txqlock;
 };
 
 struct voter_client {
@@ -188,6 +194,9 @@ struct voter_client {
 	char name[VOTER_NAME_LEN];
 	uint8_t *audio;
 	uint8_t *rssi;
+	uint32_t respdigest;
+	struct sockaddr_in sin;
+	char heardfrom;
 	struct voter_client *next;
 } ;
 
@@ -483,9 +492,19 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 {
 	struct voter_pvt *p = ast->tech_pvt;
 	struct voter_client *client,*maxclient;
-	int i,j,k,maxrssi;
+	int i,j,k,n,maxrssi;
 	struct timeval tv;
+	struct ast_frame *f1;
   
+#pragma pack(push)
+#pragma pack(1)
+	struct {
+		VOTER_PACKET_HEADER vp;
+		char rssi;
+		char audio[FRAME_SIZE];
+	} audiopacket;
+#pragma pack(pop)
+
 	read(ast->fds[0],p->buf,FRAME_SIZE);
 	ast_mutex_lock(&voter_lock);
 	if(!p->draintime.vtime_sec)
@@ -503,6 +522,34 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 			p->draintime.vtime_nsec -= 1000000000;
 		}
 	}			
+	n = 0;
+	ast_mutex_lock(&p->txqlock);
+	AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
+	ast_mutex_unlock(&p->txqlock);
+	if (n && ((n > 3) || (!p->txkey)))
+	{
+		ast_mutex_lock(&p->txqlock);
+		f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
+		ast_mutex_unlock(&p->txqlock);
+		memset(&audiopacket,0,sizeof(audiopacket));
+		strcpy((char *)audiopacket.vp.challenge,challenge);
+		audiopacket.vp.payload_type = htons(1);
+		audiopacket.rssi = 0;
+		memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
+		ast_free(f1);
+		audiopacket.vp.curtime.vtime_sec = htonl(p->draintime.vtime_sec);
+		audiopacket.vp.curtime.vtime_nsec = htonl(p->draintime.vtime_nsec);
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (!client->respdigest) continue;
+			audiopacket.vp.digest = htonl(client->respdigest);
+			if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+			/* send em the empty packet to get things started */
+			sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+		}
+	}
+
 	maxrssi = 0;
 	maxclient = NULL;
 	for(client = clients; client; client = client->next)
@@ -614,12 +661,23 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 
 static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 {
-//	struct voter_pvt *p = ast->tech_pvt;
+	struct voter_pvt *p = ast->tech_pvt;
+	struct ast_frame *f1;
 
 	if (frame->frametype != AST_FRAME_VOICE) return 0;
 
+	if (!p->txkey) return 0;
+
+	if (fp != NULL) fwrite(frame->data,1,frame->datalen,fp);
+	f1 = ast_frdup(frame);
+	memset(&f1->frame_list,0,sizeof(f1->frame_list));
+	ast_mutex_lock(&p->txqlock);
+	AST_LIST_INSERT_TAIL(&p->txq,f1,frame_list);
+	ast_mutex_unlock(&p->txqlock);
+
 	return 0;
 }
+
 
 
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
@@ -642,6 +700,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	}
 	memset(p, 0, sizeof(struct voter_pvt));
 	p->nodenum = strtoul((char *)data,NULL,0);
+	ast_mutex_init(&p->txqlock);
 #ifdef	OLD_ASTERISK
 	tmp = ast_channel_alloc(1);
 	if (!tmp)
@@ -873,8 +932,13 @@ static void *voter_reader(void *data)
 						strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
 						ast_verbose("Time:      %s.%03d, RSSI: %d\n",timestr,ntohl(vph->curtime.vtime_nsec) / 1000000,(unsigned char)*(buf + sizeof(VOTER_PACKET_HEADER)));
 					}
+					if (client)
+					{
+						client->respdigest = crc32_bufs((char*)vph->challenge,password);
+						client->sin = sin;
+					}
 					/* if we know the dude, find the connection his audio belongs to and send it there */
-					if (client && (ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
+					if (client && client->heardfrom  && (ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1)))
 					{
 						for(p = pvts; p; p = p->next)
@@ -930,7 +994,7 @@ static void *voter_reader(void *data)
 						continue;
 					} 
 					/* if we know the dude, find the connection his audio belongs to and send it there */
-					if (client && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
+					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
 							(recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))))
 					{
 						if (debug >= 2)
@@ -948,6 +1012,7 @@ static void *voter_reader(void *data)
 							vgp->lat,vgp->lon,vgp->elev);
 						continue;
 					}
+					if (client) client->heardfrom = 1;
 				}
 				/* otherwise, we just need to send an empty packet to the dude */
 				memset(&authpacket,0,sizeof(authpacket));
@@ -958,7 +1023,7 @@ static void *voter_reader(void *data)
 				/* make our digest based on their challenge */
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
-				if (debug > 0) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,authpacket.vp.digest,password);
+				if (debug > 0) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
 				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
 				continue;
