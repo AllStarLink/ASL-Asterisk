@@ -321,8 +321,6 @@
 #endif
 
 	#include "TCPIP Stack/XEEPROM.h"
-	#include "TCPIP Stack/SPIFlash.h"
-	#include "TCPIP Stack/SPIRAM.h"
 
 #if defined(STACK_USE_UDP)
 	#include "TCPIP Stack/UDP.h"
