@@ -197,6 +197,7 @@ struct voter_client {
 	uint32_t respdigest;
 	struct sockaddr_in sin;
 	char heardfrom;
+	char totransmit;
 	struct voter_client *next;
 } ;
 
@@ -544,9 +545,12 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 			if (client->nodenum != p->nodenum) continue;
 			if (!client->respdigest) continue;
 			audiopacket.vp.digest = htonl(client->respdigest);
-			if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-			/* send em the empty packet to get things started */
-			sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+			if (client->totransmit)
+			{
+				if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+				/* send em the empty packet to get things started */
+				sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+			}
 		}
 	}
 
@@ -1008,7 +1012,7 @@ static void *voter_reader(void *data)
 							ast_verbose("SysTime:   %s.%03d\n",timestr,(int)timetv.tv_usec / 1000);
 						}
 						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
-						printf("Got GPS: Lat: %s, Lon: %s, Elev: %s\n",
+						if (debug > 0) printf("Got GPS: Lat: %s, Lon: %s, Elev: %s\n",
 							vgp->lat,vgp->lon,vgp->elev);
 						continue;
 					}
@@ -1124,6 +1128,7 @@ int load_module(void)
 			memset(client,0,sizeof(struct voter_client));
 			client->nodenum = strtoul(ctg,NULL,0);
 			ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
+			if (strchr(v->name,'!')) client->totransmit = 1;
 			client->digest = crc32_bufs(challenge,v->value);
 			client->audio = (uint8_t *)ast_malloc(buflen);
 			if (!client->audio)
