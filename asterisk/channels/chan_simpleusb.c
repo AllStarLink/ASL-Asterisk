@@ -1162,7 +1162,7 @@ static void kickptt(struct chan_simpleusb_pvt *o)
 /*
  * returns a pointer to the descriptor with the given name
  */
-static struct chan_simpleusb_pvt *find_desc(char *dev)
+static struct chan_simpleusb_pvt *_find_desc(char *dev)
 {
 	struct chan_simpleusb_pvt *o = NULL;
 
@@ -1173,11 +1173,24 @@ static struct chan_simpleusb_pvt *find_desc(char *dev)
 	if (!o)
 	{
 		ast_log(LOG_WARNING, "could not find <%s>\n", dev ? dev : "--no-device--");
-		pthread_exit(0);
+		return NULL;
 	}
 
 	return o;
 }
+
+/*
+ * returns a pointer to the descriptor with the given name
+ */
+static struct chan_simpleusb_pvt *find_desc(char *dev)
+{
+	struct chan_simpleusb_pvt *o;
+
+	o = _find_desc(dev);
+	if (!o) pthread_exit(NULL);
+	return o;
+}
+
 
 static struct chan_simpleusb_pvt *find_desc_usb(char *devstr)
 {
@@ -2391,7 +2404,7 @@ static struct ast_channel *simpleusb_new(struct chan_simpleusb_pvt *o, char *ext
 static struct ast_channel *simpleusb_request(const char *type, int format, void *data, int *cause)
 {
 	struct ast_channel *c;
-	struct chan_simpleusb_pvt *o = find_desc(data);
+	struct chan_simpleusb_pvt *o = _find_desc(data);
 
 	if (0)
 	{
@@ -2661,7 +2674,7 @@ static int radio_active(int fd, int argc, char *argv[])
 					o->name,o->devstr,usb_get_usbdev(o->devstr));
                         return RESULT_SUCCESS;
                 }
-                o = find_desc(argv[2]);
+                o = _find_desc(argv[2]);
                 if (o == NULL)
                         ast_cli(fd, "No device [%s] exists\n", argv[2]);
                 else
@@ -3115,7 +3128,7 @@ static int load_module(void)
 
 	ast_config_destroy(cfg);
 
-	if (find_desc(simpleusb_active) == NULL) {
+	if (_find_desc(simpleusb_active) == NULL) {
 		ast_log(LOG_NOTICE, "susb active device %s not found\n", simpleusb_active);
 		/* XXX we could default to 'dsp' perhaps ? */
 		/* XXX should cleanup allocated memory etc. */
