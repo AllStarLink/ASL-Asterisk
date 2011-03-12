@@ -224,7 +224,7 @@ void TelnetTask(void)
 			
 				// Search for the username -- case insensitive
 				w2 = TCPFindArray(MySocket, TELNET_USERNAME, strlen((char*)TELNET_USERNAME), 0, TRUE);
-				if((w2 < 0) || (w2 != ((w - strlen((char *)TELNET_USERNAME)) - 1)))
+				if((w2 < 0) || !((w2 == ((w - strlen((char *)TELNET_USERNAME)) - 1)) || (w2 == (w - strlen((char *)TELNET_USERNAME)))))
 				{
 					// Did not find the username, but let's pretend we did so we don't leak the user name validity
 					TelnetState = SM_GET_PASSWORD_BAD_LOGIN;	
@@ -263,7 +263,8 @@ void TelnetTask(void)
 	
 				// Search for the password -- case sensitive
 				w2 = TCPFindArray(MySocket, TELNET_PASSWORD, strlen((char *)TELNET_PASSWORD), 0, FALSE);
-				if((w2 != 3u) || ((strlen((char *)TELNET_PASSWORD) != w-4)) || (TelnetState == SM_GET_PASSWORD_BAD_LOGIN))
+				if((w2 != 3u) || !(((strlen((char *)TELNET_PASSWORD) == w-4)) || ((strlen((char *)TELNET_PASSWORD) == w-3)))
+					|| (TelnetState == SM_GET_PASSWORD_BAD_LOGIN))
 				{
 					// Did not find the password
 					TelnetState = SM_PRINT_LOGIN;	

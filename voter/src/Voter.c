@@ -775,9 +775,9 @@ long diff;
 						if (lockcnt >= LOCK_SECS) {
 							if (!gpssync) 
 							{
-								// Set for 20ms before actual time
-								system_time.vtime_sec = gps_time + 1;
-								system_time.vtime_nsec = 980001000;
+								// Set for 40ms before actual time
+								system_time.vtime_sec = gps_time;
+								system_time.vtime_nsec = 960001000;
 							}
 							gpssync = 1;
 						}
@@ -1151,7 +1151,7 @@ void process_gps(void)
 {
 int n;
 char *strs[30],gpgga[] = "$GPGGA",
-	gpgsv[] = "$GPGSV";
+	gpgsv[] = "$GPGSV", gprmc[] = "$GPRMC";
 BYTE buf[20];
 	
 #ifdef	SILLY1
@@ -1161,6 +1161,7 @@ BYTE buf[20];
 		printf("%lu\n",sillyval);
 	}
 #endif
+	if (gps_state == GPS_STATE_IDLE) gps_time = 0;
 	if (gpssync && (gps_state == GPS_STATE_VALID))
 	{
 		gps_state = GPS_STATE_SYNCED;
@@ -1188,6 +1189,22 @@ BYTE buf[20];
 		if (n >= 4) gps_nsat = atoi(strs[3]);
 		return;
 	}
+	if (!strcmp(strs[0],gprmc))
+	{
+		struct tm tm;
+
+		if (n < 10) return;
+		memset(&tm,0,sizeof(tm));
+		tm.tm_sec = twoascii(strs[1] + 4);
+		tm.tm_min = twoascii(strs[1] + 2);
+		tm.tm_hour = twoascii(strs[1]);
+		tm.tm_mday = twoascii(strs[9]);
+		tm.tm_mon = twoascii(strs[9] + 2);
+		tm.tm_year = twoascii(strs[9] + 4) + 100;
+		gps_time = (DWORD) mktime(&tm);
+		return;
+	}
+
 	if (n < 7) return;
 	if (strcmp(strs[0],gpgga)) return;
 	gpswarn = 0;
@@ -1213,9 +1230,7 @@ BYTE buf[20];
 		gpssync = 0;
 		gotpps = 0;
 	}
-	gps_time = (twoascii(strs[1]) * 3600) + 
-		(twoascii(strs[1] + 2) * 60) + twoascii(strs[1] + 4);
-	if ((gps_state == GPS_STATE_RECEIVED) && (gps_nsat > 0))
+	if ((gps_state == GPS_STATE_RECEIVED) && (gps_nsat > 0) && gps_time)
 	{
 		gps_state = GPS_STATE_VALID;
 
@@ -1239,7 +1254,6 @@ void process_udp(UDP_SOCKET *udpSocketUser,NODE_INFO *udpServerNode)
 
 	WORD mytxindex;
 	VTIME mysystem_time;
-	DWORD mytime;
 
 	mytxindex = last_drainindex;
 	mysystem_time = system_time;
@@ -1324,10 +1338,6 @@ void process_udp(UDP_SOCKET *udpSocketUser,NODE_INFO *udpServerNode)
 					{
 						digest = mydigest;
 						connected = 1;
-						mytime = (ntohl(audio_packet.vph.curtime.vtime_sec) / 86400);
-						mytime *= 86400;
-						mytime += system_time.vtime_sec % 86400;
-						system_time.vtime_sec = mytime;
 						if (n > sizeof(VOTER_PACKET_HEADER)) option_flags = audio_packet.rssi;
 						else option_flags = 0;
 						SetAudioSrc();
