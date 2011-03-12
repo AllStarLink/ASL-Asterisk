@@ -82,7 +82,7 @@
 //#define STACK_USE_TFTP_CLIENT			// Trivial File Transfer Protocol client
 //#define STACK_USE_GENERIC_TCP_CLIENT_EXAMPLE	// HTTP Client example in GenericTCPClient.c
 //#define STACK_USE_GENERIC_TCP_SERVER_EXAMPLE	// ToUpper server example in GenericTCPServer.c
-//#define STACK_USE_TELNET_SERVER			// Telnet server
+#define STACK_USE_TELNET_SERVER			// Telnet server
 //#define STACK_USE_ANNOUNCE				// Microchip Embedded Ethernet Device Discoverer server/client
 #define STACK_USE_DNS					// Domain Name Service Client for resolving hostname strings to IP addresses
 //#define STACK_USE_NBNS					// NetBIOS Name Service Server for repsonding to NBNS hostname broadcast queries
@@ -90,7 +90,7 @@
 //#define STACK_USE_SNTP_CLIENT			// Simple Network Time Protocol for obtaining current date/time from Internet
 //#define STACK_USE_UDP_PERFORMANCE_TEST	// Module for testing UDP TX performance characteristics.  NOTE: Enabling this will cause a huge amount of UDP broadcast packets to flood your network on the discard port.  Use care when enabling this on production networks, especially with VPNs (could tunnel broadcast traffic across a limited bandwidth connection).
 //#define STACK_USE_TCP_PERFORMANCE_TEST	// Module for testing TCP TX performance characteristics
-//#define STACK_USE_DYNAMICDNS_CLIENT		// Dynamic DNS client updater module
+#define STACK_USE_DYNAMICDNS_CLIENT		// Dynamic DNS client updater module
 //#define STACK_USE_BERKELEY_API			// Berekely Sockets APIs are available
 
 
@@ -291,7 +291,7 @@
  *   based on module selections above.  If your custom module
  *   requires them otherwise, enable them here.
  */
-//#define STACK_USE_TCP
+#define STACK_USE_TCP
 #define STACK_USE_UDP
 
 /* Client Mode Configuration
@@ -308,7 +308,7 @@
  */
 	// Allocate how much total RAM (in bytes) you want to allocate
 	// for use by your TCP TCBs, RX FIFOs, and TX FIFOs.
-	#define TCP_ETH_RAM_SIZE					(1774ul)
+	#define TCP_ETH_RAM_SIZE					(3900ul)
 	#define TCP_PIC_RAM_SIZE					(0ul)
 	#define TCP_SPI_RAM_SIZE					(0ul)
 	#define TCP_SPI_RAM_BASE_ADDRESS			(0x00)
@@ -353,7 +353,7 @@
 		{
 			//{TCP_PURPOSE_GENERIC_TCP_CLIENT, TCP_ETH_RAM, 125, 100},
 			{TCP_PURPOSE_GENERIC_TCP_SERVER, TCP_ETH_RAM, 20, 20},
-			//{TCP_PURPOSE_TELNET, TCP_ETH_RAM, 200, 150},
+			{TCP_PURPOSE_TELNET, TCP_ETH_RAM, 200, 150},
 			//{TCP_PURPOSE_TELNET, TCP_ETH_RAM, 200, 150},
 			//{TCP_PURPOSE_TELNET, TCP_ETH_RAM, 200, 150},
 			//{TCP_PURPOSE_FTP_COMMAND, TCP_ETH_RAM, 100, 40},
@@ -454,25 +454,6 @@
 	// definition, then the the lesser of the two quantities will be the
 	// actual limit.
 	#define MAX_TELNET_CONNECTIONS	(1u)
-
-	// Default local listening port for the Telnet server.  Port 23 is the
-	// protocol default.
-	#define TELNET_PORT				(23u)
-
-	// Default local listening port for the Telnet server when SSL secured.
-	// Port 992 is the telnets protocol default.
-	#define TELNETS_PORT			(992u)
-
-	// Force all connecting clients to be SSL secured and connected via
-	// TELNETS_PORT.  Connections on port TELNET_PORT will be ignored.  If
-	// STACK_USE_SSL_SERVER is undefined, this entire setting is ignored
-	// (server will accept unsecured connections on TELNET_PORT and won't even
-	// listen on TELNETS_PORT).
-	//#define TELNET_REJECT_UNSECURED
-
-	// Default username and password required to login to the Telnet server.
-	#define TELNET_USERNAME			"admin"
-	#define TELNET_PASSWORD			"microchip"
 
 
 // -- SNMP Options -------------------------------------------------------

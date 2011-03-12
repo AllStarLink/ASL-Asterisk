@@ -11,7 +11,7 @@
 *   the Free Software Foundation, either version 2 of the License, or
 *   (at your option) any later version.
 
-*   SSP is distributed in the hope that it will be useful,
+*   Voter System is distributed in the hope that it will be useful,
 *   but WITHOUT ANY WARRANTY; without even the implied warranty of
 *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 *   GNU General Public License for more details.
@@ -1056,48 +1056,6 @@ int     i,l,inquo;
 #define	memclr(x,y) memset(x,0,y)
 #define ARPIsTxReady()      MACIsTxReady()
 
-void putbytehex(BYTE c)
-{
-    WriteUART( (c > 0x9f) ? ((c >> 4) & 0x0f)+ 0x57 : ((c >> 4) & 0x0f) +'0' );
-    WriteUART( ((c & 0x0f) > 9) ? (c & 0x0f) + 0x57 : (c & 0x0f) +'0' );
-}
-
-void putdword(DWORD x)
-{
-unsigned char *cp = (unsigned char *)&x;
-
-	cp += 3;
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp);
-}
-
-void putqword(DWORD x)
-{
-unsigned char *cp = (unsigned char *)&x;
-
-	cp += 7;
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp--);
-	putbytehex(*cp);
-}
-
-void putword(WORD x)
-{
-unsigned char *cp = (unsigned char *)&x;
-
-	cp += 1;
-	putbytehex(*cp--);
-	putbytehex(*cp);
-}
-
-
 WORD htons(WORD x)
 {
 	WORD y;
@@ -1169,16 +1127,6 @@ BYTE	c;
 		return 0;
 }
 
-void WriteUARTDec(BYTE x)
-{
-BYTE y;
-
-	if (x > 99) WriteUART((x / 100) + 48);
-	y = x % 100;
-	if (x > 9) WriteUART((y / 10) + 48);
-	WriteUART((y % 10) + 48);
-}
-
 static DWORD twoascii(char *s)
 {
 DWORD rv;
@@ -1210,25 +1158,23 @@ BYTE buf[20];
 	if (silly)
 	{
 		silly = 0;
-		putdword(sillyval);
-		WriteUART(13);
-		WriteUART(10);
+		printf("%lu\n",sillyval);
 	}
 #endif
 	if (gpssync && (gps_state == GPS_STATE_VALID))
 	{
 		gps_state = GPS_STATE_SYNCED;
-		putsUART(logtime());
-		putrsUART(gpsmsg3);
+		printf(logtime());
+		printf(gpsmsg3);
 		ultoa(nsec_interval,buf);
-		putsUART((char *)buf);
-		putrsUART(gpsmsg4);
+		printf((char *)buf);
+		printf(gpsmsg4);
 	}
 	if ((!gpssync) && (gps_state == GPS_STATE_SYNCED))
 	{
 		gps_state = GPS_STATE_VALID;
-		putsUART(logtime());
-		putrsUART(gpsmsg5);
+		printf(logtime());
+		printf(gpsmsg5);
 		connected = 0;
 		resp_digest = 0;
 		digest = 0;
@@ -1251,15 +1197,15 @@ BYTE buf[20];
 		gps_state = GPS_STATE_RECEIVED;
 		gpstimer = 0;
 		gpswarn = 0;
-		putrsUART(gpsmsg1);
+		printf(gpsmsg1);
 	}
 	n = atoi(strs[6]);
 	if ((n < 1) || (n > 2)) 
 	{
 		if (gps_state == GPS_STATE_RECEIVED) return;
 		gps_state = GPS_STATE_IDLE;
-		putsUART(logtime());
-		putrsUART(gpsmsg6);
+		printf(logtime());
+		printf(gpsmsg6);
 		connected = 0;
 		resp_digest = 0;
 		digest = 0;
@@ -1273,10 +1219,8 @@ BYTE buf[20];
 	{
 		gps_state = GPS_STATE_VALID;
 
-		putrsUART(gpsmsg2);
-		WriteUARTDec(gps_nsat);
-		WriteUART(13);
-		WriteUART(10);
+		printf(gpsmsg2);
+		printf("%d\n",gps_nsat);
 	}
 	memclr(&gps_packet,sizeof(gps_packet));
 	strncpy(gps_packet.lat,strs[2],7);
@@ -1524,13 +1468,13 @@ void main_processing_loop(void)
 			if ((!gpswarn) && (gpstimer > GPS_WARN_TIME))
 			{
 				gpswarn = 1;
-				putsUART(logtime());
-				putrsUART(gpsmsg7);
+				printf(logtime());
+				printf(gpsmsg7);
 			}
 			if (gpstimer > GPS_MAX_TIME)
 			{
-				putsUART(logtime());
-				putrsUART(gpsmsg6);
+				printf(logtime());
+				printf(gpsmsg6);
 				gps_state = GPS_STATE_IDLE;
 				connected = 0;
 				resp_digest = 0;
@@ -1545,13 +1489,13 @@ void main_processing_loop(void)
 			if ((!ppswarn) && (ppstimer > GPS_WARN_TIME))
 			{
 				ppswarn = 1;
-				putsUART(logtime());
-				putrsUART(gpsmsg8);
+				printf(logtime());
+				printf(gpsmsg8);
 			}
 			if (ppstimer > PPS_MAX_TIME)
 			{
-				putsUART(logtime());
-				putrsUART(gpsmsg6);
+				printf(logtime());
+				printf(gpsmsg6);
 				gps_state = GPS_STATE_IDLE;
 				connected = 0;
 				resp_digest = 0;
@@ -1589,16 +1533,12 @@ void main_processing_loop(void)
 				AppConfig.SqlNoiseGain = noise_gain;
 				if (!WVF) AppConfig.SqlDiode = caldiode;
 				SaveAppConfig();
-				putrsUART(cfgwritten);
-				WriteUARTDec(noise_gain);
-				WriteUART(13);
-				WriteUART(10);
+				printf(cfgwritten);
+				printf("%d\r\n",noise_gain);
 				if (!WVF)
 				{
-					putrsUART(diodewritten);
-					putword(caldiode);
-					WriteUART(13);
-					WriteUART(10);
+					printf(diodewritten);
+					printf("%d\n",caldiode);
 				}
 			}
 			SetLED(SQLED,sqled);
@@ -1636,10 +1576,7 @@ void main_processing_loop(void)
 #ifdef	SILLY
 	if (!gpssync)
 	{
-		putdword(nsec_interval);
-		WriteUART(' ');
-		putdword(sillyval);
-		putrsUART((ROM char *)"\r\n");
+		printf("%lu %lu\n",nsec_interval,sillyval);
 	}
 #endif
 
@@ -1660,36 +1597,14 @@ void main_processing_loop(void)
 	{
 		dwLastIP = AppConfig.MyIPAddr.Val;
 		
-		putrsUART((ROM char*)"\r\nIP Configuration Info: \r\n");
+		printf((ROM char*)"\r\nIP Configuration Info: \r\n");
 		if (AppConfig.Flags.bIsDHCPEnabled)
-			putrsUART((ROM char *)"Configured With DHCP\r\n");
+			printf((ROM char *)"Configured With DHCP\r\n");
 		else
-			putrsUART((ROM char *)"Static IP Configuration\r\n");
-		putrsUART("IP Address: ");
-           WriteUARTDec(AppConfig.MyIPAddr.v[0]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyIPAddr.v[1]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyIPAddr.v[2]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyIPAddr.v[3]);
-		putrsUART((ROM char*)"\r\nSubnet Mask: ");
-           WriteUARTDec(AppConfig.MyMask.v[0]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyMask.v[1]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyMask.v[2]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyMask.v[3]);
-		putrsUART((ROM char*)"\r\nGateway Addr: ");
-           WriteUARTDec(AppConfig.MyGateway.v[0]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyGateway.v[1]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyGateway.v[2]);
-		WriteUART('.');
-           WriteUARTDec(AppConfig.MyGateway.v[3]);
-		putrsUART((ROM char*)"\r\n");
+			printf((ROM char *)"Static IP Configuration\r\n");
+		printf("IP Address: %d.%d.%d.%d\n",AppConfig.MyIPAddr.v[0],AppConfig.MyIPAddr.v[1],AppConfig.MyIPAddr.v[2],AppConfig.MyIPAddr.v[3]);
+		printf("Subnet Mask: %d.%d.%d.%d\n",AppConfig.MyMask.v[0],AppConfig.MyMask.v[1],AppConfig.MyMask.v[2],AppConfig.MyMask.v[3]);
+		printf("Gateway Addr: %d.%d.%d.%d\n",AppConfig.MyGateway.v[0],AppConfig.MyGateway.v[1],AppConfig.MyGateway.v[2],AppConfig.MyGateway.v[3]);
 
 		#if defined(STACK_USE_ANNOUNCE)
 			AnnounceIP();
@@ -1712,8 +1627,10 @@ BYTE *cp;
 				if (*cp == '\n')
 				{
 					WriteUART('\r');
+					while(!PutTelnetConsole('\r')) if (!inread) main_processing_loop();
 					while(BusyUART()) if (!inread) main_processing_loop();
 				}
+				if (!PutTelnetConsole(*cp)) if (!inread) main_processing_loop();
 				WriteUART(*cp++);
 			}
 		}
@@ -1748,14 +1665,31 @@ int count,x;
 	while(count < len)
 	{
 		dest[count] = 0;
-		while(!DataRdyUART()) main_processing_loop();
-		c = ReadUART() & 0x7f;
+		for(;;)
+		{
+			if (DataRdyUART())
+			{
+				c = ReadUART() & 0x7f;
+				if (c == '\r') c = '\n';
+				break;
+			}
+			c = GetTelnetConsole();
+			if (c == 4) 
+			{
+				CloseTelnetConsole();
+				continue;
+			}
+			if (c) break;
+			main_processing_loop();
+		}
 		if (c == 3) 
 		{
 			while(BusyUART()) main_processing_loop();
 			WriteUART('^');
+			while(!PutTelnetConsole('^')) main_processing_loop();
 			while(BusyUART()) main_processing_loop();
 			WriteUART('C');
+			while(!PutTelnetConsole('C')) main_processing_loop();
 			aborted = 1;
 			dest[0] = '\n';
 			dest[1] = 0;
@@ -1773,14 +1707,21 @@ int count,x;
 				dest[count] = 0;
 				while(BusyUART()) main_processing_loop();
 				WriteUART(8);
+				while(!PutTelnetConsole(8)) main_processing_loop();
 				while(BusyUART()) main_processing_loop();
 				WriteUART(' ');
+				while(!PutTelnetConsole(' ')) main_processing_loop();
 				while(BusyUART()) main_processing_loop();
 				WriteUART(8);
+				while(!PutTelnetConsole(8)) main_processing_loop();
 			}
 			continue;
 		}
-		if(c == '\r') c = '\n';
+		if (c == 4) 
+		{
+			CloseTelnetConsole();
+			continue;
+		}
 		if ((c != '\n') && (c < ' ')) continue;
 		if (c > 126) continue;
 		dest[count++] = c;
@@ -1788,13 +1729,35 @@ int count,x;
 		if (c == '\n') break;
 		while(BusyUART()) main_processing_loop();
 		WriteUART(c);
+		while(!PutTelnetConsole(c)) main_processing_loop();
+
 	}
 	while(BusyUART()) main_processing_loop();
 	WriteUART('\r');
+	while(!PutTelnetConsole('\r')) main_processing_loop();
 	while(BusyUART()) main_processing_loop();
 	WriteUART('\n');
+	while(!PutTelnetConsole('\n')) main_processing_loop();
 	inread = 0;
 	return(count);
+}
+
+static void SetDynDNS(void)
+{
+	static ROM BYTE checkip[] = "checkip.dyndns.com", update[] = "members.dyndns.org";
+	memset(&DDNSClient,0,sizeof(DDNSClient));
+	if (AppConfig.DynDNSEnable)
+	{
+		DDNSClient.CheckIPServer.szROM = checkip;
+		DDNSClient.ROMPointers.CheckIPServer = 1;
+		DDNSClient.CheckIPPort = 80;
+		DDNSClient.UpdateServer.szROM = update;
+		DDNSClient.ROMPointers.UpdateServer = 1;
+		DDNSClient.UpdatePort = 80;
+		DDNSClient.Username.szRAM = AppConfig.DynDNSUsername;
+		DDNSClient.Password.szRAM = AppConfig.DynDNSPassword;
+		DDNSClient.Host.szRAM = AppConfig.DynDNSHost;
+	}
 }
 
 int main(void)
@@ -1803,9 +1766,7 @@ int main(void)
 	BYTE sel;
 	time_t t;
 
-
-
-    static ROM char signon[] = "\r\nVOTER Client System verson 0.2            3/7/2011, Jim Dixon WB6NIL\r\n";
+    static ROM char signon[] = "\r\nVOTER Client System verson 0.3  3/12/2011, Jim Dixon WB6NIL\r\n";
 
 	static ROM char menu[] = "Select the following values to View/Modify:\n\n" 
 		"1  - Serial # (%d)\n"
@@ -1813,7 +1774,7 @@ int main(void)
 		"3  - (Static) Netmask (%d.%d.%d.%d)\n"
 		"4  - (Static) Gateway (%d.%d.%d.%d)\n"
 		"5  - (Static) Primary DNS Server (%d.%d.%d.%d)\n"
-		"6  - (Static) Secondary DNS Server (%d.%d.%d.%d)\n"
+		"6  - (Static) Secondary DNS Server (%d.%d.%d.%d),   "
 		"7  - DHCP Enable (%d)\n"
 		"8  - Voter Server Address (FQDN) (%s)\n"
 		"9  - Voter Server Port (%d),   "
@@ -1824,10 +1785,18 @@ int main(void)
 		"14 - Tx Buffer Delay (%d)\n"
 		"15 - GPS Serial Polarity (0=Non-Inverted, 1=Inverted) (%d)\n"
 		"16 - GPS PPS Polarity (0=Non-Inverted, 1=Inverted) (%d)\n"
-		"17 - GPS Baud Rate (%lu)\n"
-		"18 - Debug Level (%d)\n"
-		"98 - View Operational Data\n"
+		"17 - GPS Baud Rate (%lu),  "
+		"18 - Telnet Port (%d)\n"
+		"19 - Telnet Username (%s),  "
+		"20 - Telnet Password (%s)\n"
+		"21 - DynDNS Enable (%d),   "
+		"22 - DynDNS Username (%s)\n"
+		"23 - DynDNS Password (%s)\n"
+		"24 - DynDNS Host (%s)\n"
+		"25 - Debug Level (%d),   "
+		"98 - View Status,  "
 		"99 - Save Values to EEPROM\n"
+		"q - Disconnect Remote Console Session, r = reset system (reboot)\n"
 		"\nEnter Selection (1-17) : ";
 
 
@@ -1835,8 +1804,8 @@ int main(void)
 	static ROM char entnewval[] = "Enter New Value : ", newvalchanged[] = "Value Changed Successfully\n",
 		newvalerror[] = "Invalid Entry, Value Not Changed\n", newvalnotchanged[] = "No Entry Made, Value Not Changed\n",
 		saved[] = "Configuration Settings Written to EEPROM\n", invalselection[] = "Invalid Selection\n",
-		paktc[] = "\nPress The Any Key To Continue\n", defwritten[] = "\r\nDefault Values Written to EEPROM\r\n",
-		defdiode[] = "Diode Calibration Value Written to EEPROM\r\n";
+		paktc[] = "\nPress The Any Key (Enter) To Continue\n", defwritten[] = "\nDefault Values Written to EEPROM\n",
+		defdiode[] = "Diode Calibration Value Written to EEPROM\n", booting[] = "System Re-Booting...\n";
 
 	static ROM char oprdata[] = "IP Address: %d.%d.%d.%d\n"
 		"Netmask: %d.%d.%d.%d\n"
@@ -1962,13 +1931,13 @@ int main(void)
 			    SPIFlashWrite(0xFF);
 			    #endif
 
-				putrsUART(defwritten);
+				printf(defwritten);
 				if (!INITIALIZE_WVF) 
 				{
 					InitAppConfig();
 					AppConfig.SqlDiode = adcothers[ADCDIODE];
 					SaveAppConfig();
-					putrsUART(defdiode);
+					printf(defdiode);
 				}
 				SetLED(SYSLED,0);
 				while((LONG)(TickGet() - StartTime) <= (LONG)(9*TICK_SECOND/2));
@@ -2005,10 +1974,12 @@ int main(void)
     // down into smaller pieces so that other tasks can have CPU time.
 __builtin_nop();
 
-	putrsUART(signon);
+	printf(signon);
 
 	if (AppConfig.Flags.bIsDHCPEnabled)
 		dwLastIP = AppConfig.MyIPAddr.Val;
+
+	SetDynDNS();
 
     while(1) 
 	{
@@ -2025,13 +1996,25 @@ __builtin_nop();
 			AppConfig.DefaultSecondaryDNSServer.v[2],AppConfig.DefaultSecondaryDNSServer.v[3],AppConfig.Flags.bIsDHCPEnabled,
 			AppConfig.VoterServerFQDN,AppConfig.VoterServerPort,AppConfig.DefaultPort,AppConfig.Password,AppConfig.HostPassword,
 			AppConfig.TxBufferLength,AppConfig.TxBufferDelay,AppConfig.GPSPolarity,AppConfig.PPSPolarity,AppConfig.GPSBaudRate,
-			AppConfig.DebugLevel);
+			AppConfig.TelnetPort,AppConfig.TelnetUsername,AppConfig.TelnetPassword,AppConfig.DynDNSEnable,AppConfig.DynDNSUsername,
+			AppConfig.DynDNSPassword,AppConfig.DynDNSHost,AppConfig.DebugLevel);
 
 
 		if (!fgets(cmdstr,sizeof(cmdstr) - 1,stdin)) continue;
 		if (aborted) continue;
+		if ((strchr(cmdstr,'Q')) || strchr(cmdstr,'q'))
+		{
+				CloseTelnetConsole();
+				continue;
+		}
+		if ((strchr(cmdstr,'R')) || strchr(cmdstr,'r'))
+		{
+				CloseTelnetConsole();
+				printf(booting);
+				Reset();
+		}
 		sel = atoi(cmdstr);
-		if ((sel >= 1) && (sel <= 18))
+		if ((sel >= 1) && (sel <= 25))
 		{
 			printf(entnewval);
 			if (aborted) continue;
@@ -2189,7 +2172,71 @@ __builtin_nop();
 					ok = 1;
 				}
 				break;
-			case 18: // Tx Buffer Length
+
+			case 18: // Telnet Port
+				if (sscanf(cmdstr,"%u",&i1) == 1) 
+				{
+					AppConfig.TelnetPort = i1;
+					ok = 1;
+				}
+				break;
+			case 19: // Telnet Username
+				x = strlen(cmdstr);
+				if ((x > 2) && (x < sizeof(AppConfig.TelnetUsername)))
+				{
+					cmdstr[x - 1] = 0;
+					strcpy((char *)AppConfig.TelnetUsername,cmdstr);
+					ok = 1;
+				}
+				break;
+			case 20: // Telnet Password
+				x = strlen(cmdstr);
+				if ((x > 2) && (x < sizeof(AppConfig.TelnetPassword)))
+				{
+					cmdstr[x - 1] = 0;
+					strcpy((char *)AppConfig.TelnetPassword,cmdstr);
+					ok = 1;
+				}
+				break;
+			case 21: // DynDNS Enable
+				if ((sscanf(cmdstr,"%u",&i1) == 1) && (i1 < 2))
+				{
+					AppConfig.DynDNSEnable = i1;
+					ok = 1;
+					SetDynDNS();
+				}
+				break;
+			case 22: // DynDNS Username
+				x = strlen(cmdstr);
+				if ((x > 2) && (x < sizeof(AppConfig.DynDNSUsername)))
+				{
+					cmdstr[x - 1] = 0;
+					strcpy((char *)AppConfig.DynDNSUsername,cmdstr);
+					ok = 1;
+					SetDynDNS();
+				}
+				break;
+			case 23: // DynDNS Password
+				x = strlen(cmdstr);
+				if ((x > 2) && (x < sizeof(AppConfig.DynDNSPassword)))
+				{
+					cmdstr[x - 1] = 0;
+					strcpy((char *)AppConfig.DynDNSPassword,cmdstr);
+					ok = 1;
+					SetDynDNS();
+				}
+				break;
+			case 24: // DynDNS Host
+				x = strlen(cmdstr);
+				if ((x > 2) && (x < sizeof(AppConfig.DynDNSHost)))
+				{
+					cmdstr[x - 1] = 0;
+					strcpy((char *)AppConfig.DynDNSHost,cmdstr);
+					ok = 1;
+					SetDynDNS();
+				}
+				break;
+			case 25: // Debug Level
 				if ((sscanf(cmdstr,"%u",&i1) == 1) && (i1 <= 255))
 				{
 					AppConfig.DebugLevel = i1;
@@ -2378,6 +2425,13 @@ static void InitAppConfig(void)
 	strcpy(AppConfig.Password,"radios");
 	strcpy(AppConfig.HostPassword,"BLAH");
 	strcpy(AppConfig.VoterServerFQDN,"devel.lambdatel.com");
+	AppConfig.TelnetPort = 23;
+	strcpy((char *)AppConfig.TelnetUsername,"admin");
+	strcpy((char *)AppConfig.TelnetPassword,"radios");
+	AppConfig.DynDNSEnable = 1;
+	strcpy((char *)AppConfig.DynDNSUsername,"wb6nil");
+	strcpy((char *)AppConfig.DynDNSPassword,"radios42");
+	strcpy((char *)AppConfig.DynDNSHost,"voter-test.dyndns.org");
 
 	#if defined(EEPROM_CS_TRIS)
 	{

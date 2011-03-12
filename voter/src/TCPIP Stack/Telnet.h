@@ -1,10 +1,11 @@
 /*********************************************************************
  *
- *	Reboot Server Module Header
+ *  Telnet Server Module for Microchip TCP/IP Stack
+ *   -Listens on TCP Port 23
  *
  *********************************************************************
- * FileName:        Reboot.h
- * Dependencies:    None
+ * FileName:        Telnet.h
+ * Dependencies:    StackTsk.h
  * Processor:       PIC18, PIC24F, PIC24H, dsPIC30F, dsPIC33F, PIC32
  * Compiler:        Microchip C32 v1.05 or higher
  *					Microchip C30 v3.12 or higher
@@ -44,13 +45,22 @@
  * (INCLUDING NEGLIGENCE), BREACH OF WARRANTY, OR OTHERWISE.
  *
  *
- * Author               Date		Comment
+ * Author               Date    Comment
  *~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Howard Schlunder     02/26/07	Original
+ * Howard Schlunder     9/12/06	Original
  ********************************************************************/
-#ifndef __REBOOT_H
-#define __REBOOT_H
+#ifndef __TELNET_H
+#define __TELNET_H
 
-void RebootTask(void);
+#if defined(STACK_USE_TELNET_SERVER)
+	void TelnetTask(void);
+#else
+	#define TelnetTask()
+#endif	
 
-#endif
+BYTE GetTelnetConsole(void);
+BOOL PutTelnetConsole(char c);
+void CloseTelnetConsole(void);
+
+
+#endif	//#ifndef __TELNET_H

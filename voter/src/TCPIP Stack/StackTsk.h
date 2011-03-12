@@ -125,6 +125,13 @@ typedef struct __attribute__((__packed__))
 	BYTE PPSPolarity;
 	DWORD GPSBaudRate;
 	BYTE DebugLevel;
+	WORD TelnetPort;
+	BYTE TelnetUsername[20];
+	BYTE TelnetPassword[20];
+	BYTE DynDNSEnable;
+	BYTE DynDNSUsername[20];
+	BYTE DynDNSPassword[20];
+	BYTE DynDNSHost[50];
 } APP_CONFIG;
 
 #ifndef THIS_IS_STACK_APPLICATION
