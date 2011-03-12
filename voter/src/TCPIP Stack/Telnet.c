@@ -263,7 +263,6 @@ void TelnetTask(void)
 	
 				// Search for the password -- case sensitive
 				w2 = TCPFindArray(MySocket, TELNET_PASSWORD, strlen((char *)TELNET_PASSWORD), 0, FALSE);
-printf("w,w2 %d,%d\n",w,w2);
 				if((w2 != 3u) || ((strlen((char *)TELNET_PASSWORD) != w-4)) || (TelnetState == SM_GET_PASSWORD_BAD_LOGIN))
 				{
 					// Did not find the password
@@ -321,7 +320,12 @@ BOOL PutTelnetConsole(char c)
 		// Load up static state information for this session
 		MySocket = hTelnetSockets[vTelnetSession];
 		if (vTelnetStates[vTelnetSession] != SM_AUTHENTICATED) continue;
-		if (TCPIsPutReady(MySocket) < 10) return 0;
+		if (TCPIsPutReady(MySocket) < 1) 
+		{
+			StackTask();
+			StackApplications();
+			return 0;
+		}
 	}
 	for(vTelnetSession = 0; vTelnetSession < MAX_TELNET_CONNECTIONS; vTelnetSession++)
 	{

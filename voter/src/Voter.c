@@ -1630,8 +1630,9 @@ BYTE *cp;
 					while(!PutTelnetConsole('\r')) if (!inread) main_processing_loop();
 					while(BusyUART()) if (!inread) main_processing_loop();
 				}
-				if (!PutTelnetConsole(*cp)) if (!inread) main_processing_loop();
-				WriteUART(*cp++);
+				WriteUART(*cp);
+				while (!PutTelnetConsole(*cp)) if (!inread) main_processing_loop();
+				cp++;
 			}
 		}
 		else
@@ -1766,7 +1767,7 @@ int main(void)
 	BYTE sel;
 	time_t t;
 
-    static ROM char signon[] = "\r\nVOTER Client System verson 0.3  3/12/2011, Jim Dixon WB6NIL\r\n";
+    static ROM char signon[] = "\r\nVOTER Client System verson 0.4  3/12/2011, Jim Dixon WB6NIL\r\n";
 
 	static ROM char menu[] = "Select the following values to View/Modify:\n\n" 
 		"1  - Serial # (%d)\n"
@@ -1796,8 +1797,8 @@ int main(void)
 		"25 - Debug Level (%d),   "
 		"98 - View Status,  "
 		"99 - Save Values to EEPROM\n"
-		"q - Disconnect Remote Console Session, r = reset system (reboot)\n"
-		"\nEnter Selection (1-17) : ";
+		"q - Disconnect Remote Console Session, r = reset system (reboot)\n\n",
+		entsel[] = "Enter Selection (1-17) : ";
 
 
 
@@ -1999,8 +2000,13 @@ __builtin_nop();
 			AppConfig.TelnetPort,AppConfig.TelnetUsername,AppConfig.TelnetPassword,AppConfig.DynDNSEnable,AppConfig.DynDNSUsername,
 			AppConfig.DynDNSPassword,AppConfig.DynDNSHost,AppConfig.DebugLevel);
 
-
-		if (!fgets(cmdstr,sizeof(cmdstr) - 1,stdin)) continue;
+		aborted = 0;
+		while(!aborted)
+		{
+			printf(entsel);
+			if (!fgets(cmdstr,sizeof(cmdstr) - 1,stdin)) continue;
+			if (!strchr(cmdstr,'!')) break;
+		}
 		if (aborted) continue;
 		if ((strchr(cmdstr,'Q')) || strchr(cmdstr,'q'))
 		{
