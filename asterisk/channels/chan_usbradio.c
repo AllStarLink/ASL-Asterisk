@@ -1435,6 +1435,8 @@ static void *hidthread(void *arg)
 
         usb_dev = NULL;
         usb_handle = NULL;
+
+	if (haspp == 2) ioperm(pbase,1,1);
         while(!o->stophid)
         {
                 time(&o->lasthidtime);
