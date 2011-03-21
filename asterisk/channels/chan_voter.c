@@ -180,6 +180,7 @@ struct voter_pvt {
 	struct timeval lastrxtime;
 	VTIME draintime;
 	int drainindex;
+	char drained_once;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -199,6 +200,7 @@ struct voter_client {
 	char heardfrom;
 	char totransmit;
 	struct voter_client *next;
+	long long dtime;
 } ;
 
 #ifdef	OLD_ASTERISK
@@ -507,6 +509,13 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 #pragma pack(pop)
 
 	read(ast->fds[0],p->buf,FRAME_SIZE);
+	if (!p->drained_once)
+	{
+		p->drained_once = 1;
+		memset(&p->fr,0,sizeof(struct ast_frame));
+	        p->fr.frametype = AST_FRAME_NULL;
+	        return &p->fr;
+	}
 	ast_mutex_lock(&voter_lock);
 	if(!p->draintime.vtime_sec)
 	{
@@ -517,12 +526,12 @@ static struct ast_frame *voter_read(struct ast_channel *ast)
 	else 
 	{
 		p->draintime.vtime_nsec += 20000000;
-		if (p->draintime.vtime_nsec > 1000000000)
-		{
-			p->draintime.vtime_sec++;
-			p->draintime.vtime_nsec -= 1000000000;
-		}
-	}			
+	}
+	if (p->draintime.vtime_nsec >= 1000000000)
+	{
+		p->draintime.vtime_sec++;
+		p->draintime.vtime_nsec -= 1000000000;
+	}
 	n = 0;
 	ast_mutex_lock(&p->txqlock);
 	AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
@@ -1003,13 +1012,39 @@ static void *voter_reader(void *data)
 					{
 						if (debug >= 2)
 						{
+							long long gtime,stime;
+							double fdtime;
+							gettimeofday(&timetv,NULL);
 							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-							ast_verbose("GPSTime:   %s.%03d\n",timestr,ntohl(vph->curtime.vtime_nsec) / 1000000);
-							gettimeofday(&timetv,NULL);
+	
+							ast_verbose("GPSTime:   %s.%09d\n",timestr,ntohl(vph->curtime.vtime_nsec));
+							gtime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL)
+								 + (long long)ntohl(vph->curtime.vtime_nsec);
+							stime = ((long long)timetv.tv_sec * 1000000000LL) + (long long)(timetv.tv_usec * 1000);
+							client->dtime = ((client->dtime * 31) + (stime - gtime)) >> 5;
 							timestuff = (time_t) timetv.tv_sec;
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-							ast_verbose("SysTime:   %s.%03d\n",timestr,(int)timetv.tv_usec / 1000);
+							ast_verbose("SysTime:   %s.%09d\n",timestr,(int)timetv.tv_usec * 1000);
+							for(p = pvts; p; p = p->next)
+							{
+								if (p->nodenum == client->nodenum) break;
+							}
+							if (p)
+							{
+								timestuff = (time_t) p->draintime.vtime_sec;
+								strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
+								ast_verbose("DrainTime: %s.%03d\n",timestr,p->draintime.vtime_nsec / 1000000);
+								if (debug > 2)
+								{
+									fdtime = (double)client->dtime;
+									ast_verbose("DTime:   %f\n",fdtime / 1000000.0);
+									stime = ((long long)p->draintime.vtime_sec * 1000000000LL)
+										 + (long long)p->draintime.vtime_nsec;
+									fdtime = (double)(stime - gtime);
+									ast_verbose("DDTime:   %f\n",fdtime / 1000000.0);
+								}
+							}
 						}
 						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
 						if (debug > 0) printf("Got GPS: Lat: %s, Lon: %s, Elev: %s\n",
