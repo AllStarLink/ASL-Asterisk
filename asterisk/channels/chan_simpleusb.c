@@ -48,6 +48,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <stdint.h>
 #include <errno.h>
 #include <usb.h>
+#include <search.h>
 #include <alsa/asoundlib.h>
 
 #define DEBUG_CAPTURES	 		1
@@ -148,6 +149,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 
 #define	NTAPS 31
 #define	NTAPS_PL 6
+
+#define	DEFAULT_ECHO_MAX 1000  /* 20 secs of echo buffer, max */
+
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
 static struct ast_jb_conf default_jbconf =
@@ -363,6 +367,12 @@ static struct sound sounds[] = {
 
 #endif
 
+struct usbecho {
+struct qelem *q_forw;
+struct qelem *q_prev;
+short data[FRAME_SIZE];
+} ;
+
 /*
  * descriptor for one of our channels.
  * There is one used for 'default' values (from the [general] entry in
@@ -473,6 +483,7 @@ struct chan_simpleusb_pvt {
 	char lasttx;
 	char txkeyed;				// tx key request from upper layers 
 	char txtestkey;
+	char txclikey;
 
 	time_t lasthidtime;
 	struct ast_dsp *dsp;
@@ -501,6 +512,12 @@ struct chan_simpleusb_pvt {
 	float	rxvoiceadj;
 	int 	txmixaset;
 	int 	txmixbset;
+
+	int echomode;
+	int echoing;
+	ast_mutex_t	echolock;
+	struct qelem echoq;
+	int echomax;
 
 	int    	hdwtype;
 	int		hid_gpio_ctl;		
@@ -1480,7 +1497,7 @@ static void *hidthread(void *arg)
 			ast_mutex_lock(&o->txqlock);
 			txreq = !(AST_LIST_EMPTY(&o->txq));
 			ast_mutex_unlock(&o->txqlock);
-			txreq = txreq || o->txtestkey;
+			txreq = txreq || o->txtestkey || o->txclikey || o->echoing;
 			if (txreq && (!o->lasttx))
 			{
 				buf[o->hid_gpio_loc] = o->hid_io_ptt;
@@ -1936,7 +1953,9 @@ static int simpleusb_write(struct ast_channel *c, struct ast_frame *f)
 	}
 	#endif
 
-	if (!o->txkeyed) return 0;
+	if ((!o->txkeyed) && (!o->txtestkey)) return 0;
+
+	if ((!o->txtestkey) && o->echoing) return 0;
 
 	f1 = ast_frdup(f);
 	memset(&f1->frame_list,0,sizeof(f1->frame_list));
@@ -1987,6 +2006,50 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		}
                 return f;
         }
+
+	if (!o->echomode)
+	{
+		struct qelem *q;
+
+		ast_mutex_lock(&o->echolock);
+		o->echoing = 0;
+		while(o->echoq.q_forw != &o->echoq)
+		{
+			q = o->echoq.q_forw;
+			remque(q);
+			ast_free(q);
+		}
+		ast_mutex_unlock(&o->echolock);
+	}
+
+	if (o->echomode && (!o->rxkeyed))
+	{
+		struct usbecho *u;
+
+		ast_mutex_lock(&o->echolock);
+		/* if there is something in the queue */
+		if (o->echoq.q_forw != &o->echoq)
+		{
+			u = (struct usbecho *) o->echoq.q_forw;
+			remque((struct qelem *)u);
+		        f->frametype = AST_FRAME_VOICE;
+		        f->subclass = AST_FORMAT_SLINEAR;
+		        f->samples = FRAME_SIZE;
+		        f->datalen = FRAME_SIZE * 2;
+			f->offset = AST_FRIENDLY_OFFSET;
+		        f->data = o->simpleusb_read_frame_buf + AST_FRIENDLY_OFFSET;
+			memcpy(f->data,u->data,FRAME_SIZE * 2);
+			ast_free(u);
+			f1 = ast_frdup(f);
+			memset(&f1->frame_list,0,sizeof(f1->frame_list));
+			ast_mutex_lock(&o->txqlock);
+			AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
+			ast_mutex_unlock(&o->txqlock);
+			o->echoing = 1;
+		} else o->echoing = 0;
+		ast_mutex_unlock(&o->echolock);
+	}
+
 	res = read(o->sounddev, o->simpleusb_read_buf + o->readpos, 
 		sizeof(o->simpleusb_read_buf) - o->readpos);
 	if (res < 0)				/* audio data not ready, return a NULL frame */
@@ -2029,7 +2092,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		AST_LIST_TRAVERSE(&o->txq, f1,frame_list) n++;
 		ast_mutex_unlock(&o->txqlock);
 		i = used_blocks(o);
-		if (n && ((n > 3) || (!o->txkeyed)) && 
+		if (n && ((n > 3) || ((!o->txkeyed) && (!o->txtestkey))) && 
 			(i <= o->queuesize))
 		{
 			ast_mutex_lock(&o->txqlock);
@@ -2154,6 +2217,31 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 			*sp1++ = lpass(*sp++,o->flpr);
 		sp++;
 	}			
+
+	if (o->echomode && o->rxkeyed && (!o->echoing))
+	{
+		int x;
+		struct usbecho *u;
+
+		ast_mutex_lock(&o->echolock);
+		x = 0;
+		/* get count of frames */
+		for(u = (struct usbecho *) o->echoq.q_forw; 
+			u != (struct usbecho *) &o->echoq; u = (struct usbecho *)u->q_forw) x++;
+		if (x < o->echomax) 
+		{
+			u = (struct usbecho *) ast_malloc(sizeof(struct usbecho));
+			memset(u,0,sizeof(struct usbecho));
+			memcpy(u->data,(o->simpleusb_read_frame_buf + AST_FRIENDLY_OFFSET),FRAME_SIZE * 2);
+			if (u == NULL)
+
+				ast_log(LOG_ERROR,"Cannot malloc\n");
+			else
+				insque((struct qelem *)u,o->echoq.q_back);
+		}
+		ast_mutex_unlock(&o->echolock);
+	}
+
 	#if DEBUG_CAPTURES == 1
 	if (o->b.rxcapraw && frxcapcooked) 
 		fwrite(o->simpleusb_read_frame_buf + AST_FRIENDLY_OFFSET
@@ -2440,7 +2528,7 @@ static int console_key(int fd, int argc, char *argv[])
 
 	if (argc != 2)
 		return RESULT_SHOWUSAGE; 
-	o->txtestkey = 1;
+	o->txclikey = 1;
 	kickptt(o);
 	return RESULT_SUCCESS;
 }
@@ -2452,7 +2540,7 @@ static int console_unkey(int fd, int argc, char *argv[])
 
 	if (argc != 2)
 		return RESULT_SHOWUSAGE;
-	o->txtestkey = 0;
+	o->txclikey = 0;
 	kickptt(o);
 	return RESULT_SUCCESS;
 }
@@ -2517,6 +2605,308 @@ static void tune_rxdisplay(int fd, struct chan_simpleusb_pvt *o)
 	option_verbose = wasverbose;
 }
 
+static int usb_device_swap(int fd,char *other)
+{
+
+int	d;
+char	tmp[128];
+struct chan_simpleusb_pvt *p = NULL,*o = find_desc(simpleusb_active);
+
+	if (o == NULL) return -1;
+	if (!other) return -1;
+	p = find_desc(other);
+	if (p == NULL)
+	{
+		ast_cli(fd,"USB Device %s not found\n",other);
+		return -1;
+	}
+	if (p == o)
+	{
+		ast_cli(fd,"You cant swap active device with itself!!\n");
+		return -1;
+	}
+	ast_mutex_lock(&usb_dev_lock);
+	strcpy(tmp,p->devstr);
+	d = p->devicenum;
+	strcpy(p->devstr,o->devstr);
+	p->devicenum = o->devicenum;
+	strcpy(o->devstr,tmp);
+	o->devicenum = d;
+	o->hasusb = 0;
+	o->usbass = 0;
+	p->hasusb = 0;
+	o->usbass = 0;
+	ast_cli(fd,"USB Devices successfully swapped.\n");
+	ast_mutex_unlock(&usb_dev_lock);
+	return 0;
+}
+
+static int happy_mswait(int fd,int ms, int flag)
+{
+int	i;
+
+	if (!flag)
+	{
+		usleep(ms * 1000);
+		return(0);
+	}
+	i = 0;
+	if (ms >= 100) for(i = 0; i < ms; i += 100)
+	{
+		ast_cli(fd,"\r");
+		if (rad_rxwait(fd,100)) return(1);
+	}
+	if (rad_rxwait(fd,ms - i)) return(1);
+	ast_cli(fd,"\r");
+	return(0);
+}
+
+static int _send_tx_test_tone(int fd, struct chan_simpleusb_pvt *o,int ms, int intflag)
+{
+int	i,ret;
+
+        if (ast_tonepair_start(o->owner, 1004.0, 0, 99999999, 7200.0))
+	{
+		if (fd >= 0) ast_cli(fd,"Error starting test tone on %s!!\n",simpleusb_active);
+		return -1;
+	}
+	ast_clear_flag(o->owner, AST_FLAG_WRITE_INT);
+	o->txtestkey = 1;	
+	i = 0;
+	ret = 0;
+        while(o->owner->generatordata && (i < ms)) 
+	{
+		if (happy_mswait(fd,50,intflag)) 
+		{
+			ret = 1;
+			break;
+		}
+		i += 50;
+	}
+	ast_deactivate_generator(o->owner);
+	o->txtestkey = 0;	
+	return ret;
+}
+
+static void _menu_print(int fd, struct chan_simpleusb_pvt *o)
+{
+	ast_cli(fd,"Active radio interface is [%s]\n",simpleusb_active);
+	ast_mutex_lock(&usb_dev_lock);
+	ast_cli(fd,"Device String is %s\n",o->devstr);
+	ast_mutex_unlock(&usb_dev_lock);
+  	ast_cli(fd,"Card is %i\n",usb_get_usbdev(o->devstr));
+	ast_cli(fd,"Rx Level currently set to %d\n",o->rxmixerset);
+	ast_cli(fd,"Tx A Level currently set to %d\n",o->txmixaset);
+	ast_cli(fd,"Tx B Level currently set to %d\n",o->txmixbset);
+	return;
+}
+
+static void _menu_rx(int fd, struct chan_simpleusb_pvt *o, char *str)
+{
+int	i,x;
+
+	if (!str[0])
+	{
+		ast_cli(fd,"Current setting on Rx Channel is %d\n",o->rxmixerset);
+		return;
+	}
+	for(x = 0; str[x]; x++)
+	{
+		if (!isdigit(str[x])) break;
+	}
+	if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+	{
+		ast_cli(fd,"Entry Error, Rx Channel Level setting not changed\n");
+		return;
+	}
+ 	o->rxmixerset = i;
+	ast_cli(fd,"Changed setting on RX Channel to %d\n",o->rxmixerset);
+	mixer_write(o);
+	return;
+}
+
+static void _menu_txa(int fd, struct chan_simpleusb_pvt *o, char *str)
+{
+int	i,dokey;
+
+	if (!str[0])
+	{
+		ast_cli(fd,"Current setting on Tx Channel A is %d\n",o->txmixaset);
+		return;
+	}
+	dokey = 0;
+	if (str[0] == 'K')
+	{
+		dokey = 1;
+		str++;
+	}
+	if (str[0])
+	{
+		if ((sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+		{
+			ast_cli(fd,"Entry Error, Tx Channel A Level setting not changed\n");
+			return;
+		}
+	 	o->txmixaset = i;
+		ast_cli(fd,"Changed setting on TX Channel A to %d\n",o->txmixaset);
+		mixer_write(o);
+	}
+	if (dokey)
+	{
+		if (fd >= 0) ast_cli(fd,"Keying Transmitter and sending 1000 Hz tone for 5 seconds...\n");
+		 _send_tx_test_tone(fd,o,5000,1);
+	}
+	return;
+}
+
+static void _menu_txb(int fd, struct chan_simpleusb_pvt *o, char *str)
+{
+int	i,dokey;
+
+	if (!str[0])
+	{
+		ast_cli(fd,"Current setting on Tx Channel B is %d\n",o->txmixbset);
+		return;
+	}
+	dokey = 0;
+	if (str[0] == 'K')
+	{
+		dokey = 1;
+		str++;
+	}
+	if (str[0])
+	{
+		if ((sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+		{
+			ast_cli(fd,"Entry Error, Tx Channel B Level setting not changed\n");
+			return;
+		}
+	 	o->txmixbset = i;
+		ast_cli(fd,"Changed setting on TX Channel B to %d\n",o->txmixbset);
+		mixer_write(o);
+	}
+	if (dokey)
+	{
+		if (fd >= 0) ast_cli(fd,"Keying Transmitter and sending 1000 Hz tone for 5 seconds...\n");
+		 _send_tx_test_tone(fd,o,5000,1);
+	}
+	return;
+}
+
+static void tune_flash(int fd, struct chan_simpleusb_pvt *o, int intflag)
+{
+#define	NFLASH 3
+
+int	i;
+
+	if (fd > 0)
+		ast_cli(fd,"USB Device Flash starting on channel %s...\n",o->name);
+	for(i = 0; i < NFLASH; i++)
+	{
+		if (_send_tx_test_tone(fd,o,1000,intflag)) break;
+		if (happy_mswait(fd,1000,intflag)) break;
+	}
+	o->txtestkey = 0;
+	if (fd > 0)
+		ast_cli(fd,"USB Device Flash ending on channel %s...\n",o->name);
+	return;
+}
+
+static void tune_menusupport(int fd, struct chan_simpleusb_pvt *o, char *cmd)
+{
+int	x,oldverbose;
+struct chan_simpleusb_pvt *oy = NULL;
+
+	oldverbose = option_verbose;
+	option_verbose = 0;
+	switch(cmd[0])
+	{
+	    case '0': /* return audio processing configuration */
+		ast_cli(fd,"0,0,%d\n",o->echomode);
+		break;
+	    case '1': /* return usb device name list */
+		for (x = 0,oy = simpleusb_default.next; oy && oy->name ; oy = oy->next, x++)
+		{
+			if (x) ast_cli(fd,",");
+			ast_cli(fd,"%s",oy->name);
+		}
+		ast_cli(fd,"\n");
+		break;
+	    case '2': /* print parameters */
+		_menu_print(fd,o);
+		break;
+	    case '3': /* return usb device name list except current */
+		for (x = 0,oy = simpleusb_default.next; oy && oy->name ; oy = oy->next)
+		{
+			if (!strcmp(oy->name,o->name)) continue;
+			if (x) ast_cli(fd,",");
+			ast_cli(fd,"%s",oy->name);
+			x++;
+		}
+		ast_cli(fd,"\n");
+		break;
+	    case 'b':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		tune_rxdisplay(fd,o);
+		break;
+	    case 'c':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		_menu_rx(fd, o, cmd + 1);
+		break;
+	    case 'f':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		_menu_txa(fd,o,cmd + 1);
+		break;
+	    case 'g':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		_menu_txb(fd,o,cmd + 1);
+		break;
+	    case 'j':
+		tune_write(o);
+		ast_cli(fd,"Saved radio tuning settings to simpleusb_tune_%s.conf\n",o->name);
+		break;
+	    case 'k':
+		if (cmd[1])
+		{
+			if (cmd[1] > '0') o->echomode = 1;
+			else o->echomode = 0;
+			ast_cli(fd,"Echo Mode changed to %s\n",(o->echomode) ? "Enabled" : "Disabled");
+		}
+		else
+			ast_cli(fd,"Echo Mode is currently %s\n",(o->echomode) ? "Enabled" : "Disabled");
+		break;
+	    case 'l':
+		if (!o->hasusb)
+		{
+			ast_cli(fd,"Device %s currently not active\n",o->name);
+			break;
+		}
+		tune_flash(fd,o,1);
+		break;
+	    default:
+		ast_cli(fd,"Invalid Command\n");
+		break;
+	}
+	option_verbose = oldverbose;
+	return;
+}
+
 static int radio_tune(int fd, int argc, char *argv[])
 {
 	struct chan_simpleusb_pvt *o = find_desc(simpleusb_active);
@@ -2535,6 +2925,20 @@ static int radio_tune(int fd, int argc, char *argv[])
 		return RESULT_SHOWUSAGE;
 	}
 
+	else if (!strcasecmp(argv[2],"swap"))
+	{
+		if (argc > 3) 
+		{
+			usb_device_swap(fd,argv[3]);
+			return RESULT_SUCCESS;
+		}
+		return RESULT_SHOWUSAGE;
+	}
+	else if (!strcasecmp(argv[2],"menu-support"))
+	{
+		if (argc > 3) tune_menusupport(fd,o,argv[3]);
+		return RESULT_SUCCESS;
+	}
 	if (!o->hasusb)
 	{
 		ast_cli(fd,"Device %s currently not active\n",o->name);
@@ -2591,6 +2995,9 @@ static int radio_tune(int fd, int argc, char *argv[])
 			ast_cli(fd,"Changed setting on TX Channel A to %d\n",o->txmixbset);
 			mixer_write(o);
 		}
+	}
+	else if (!strcasecmp(argv[2],"flash")) {
+		tune_flash(fd,o,0);
 	}
 	else if (!strcasecmp(argv[2],"nocap")) 	
 	{
@@ -2870,8 +3277,11 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 				simpleusb_active = o->name;
 		}
 	}
+	o->echoq.q_forw = o->echoq.q_back = &o->echoq;
+	ast_mutex_init(&o->echolock);
 	ast_mutex_init(&o->eepromlock);
 	ast_mutex_init(&o->txqlock);
+	o->echomax = DEFAULT_ECHO_MAX;
 	strcpy(o->mohinterpret, "default");
 	/* fill other fields from configuration */
 	for (v = ast_variable_browse(cfg, ctg); v; v = v->next) {
