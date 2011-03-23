@@ -585,12 +585,12 @@ char	str[256];
 		if (astgetresp("radio active")) break;
 		printf("1) Select USB device\n");
 		if (flatrx) printf("2) Auto-Detect Rx Noise Level Value (with no carrier)\n");
-		else printf("2) Does not apply to thie USB device configuration\n");
+		else printf("2) Does not apply to this USB device configuration\n");
 		printf("3) Set Rx Voice Level (using display)\n");
 		if (flatrx) printf("4) Auto-Detect Rx CTCSS Level Value (with carrier + CTCSS)\n");
-		else printf("4) Does not apply to thie USB device configuration\n");
+		else printf("4) Does not apply to this USB device configuration\n");
 		if (flatrx) printf("5) Set Rx Squelch Level\n");
-		else printf("5) Does not apply to thie USB device configuration\n");
+		else printf("5) Does not apply to this USB device configuration\n");
 		if (keying)
 			printf("6) Set Transmit Voice Level and send test tone (no CTCSS)\n");
 		else
@@ -603,9 +603,9 @@ char	str[256];
 			else
 				printf("8) Set Transmit CTCSS Level\n");
 		}
-		else printf("8) Does not apply to thie USB device configuration\n");
+		else printf("8) Does not apply to this USB device configuration\n");
 		if (flatrx) printf("9) Auto-Detect Rx Voice Level Value (with carrier + 1KHz @ 3KHz Dev)\n");
-		else printf("9) Does not apply to thie USB device configuration\n");
+		else printf("9) Does not apply to this USB device configuration\n");
 		printf("E) Toggle Echo Mode (currently %s)\n",(echomode) ? "Enabled" : "Disabled");
 		printf("F) Flash (Toggle PTT and Tone output several times)\n");
 		printf("P) Print Current Parameter Values\n");
