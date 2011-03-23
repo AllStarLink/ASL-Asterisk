@@ -2665,6 +2665,7 @@ static int _send_tx_test_tone(int fd, struct chan_simpleusb_pvt *o,int ms, int i
 {
 int	i,ret;
 
+	ast_tonepair_stop(o->owner);
         if (ast_tonepair_start(o->owner, 1004.0, 0, 99999999, 7200.0))
 	{
 		if (fd >= 0) ast_cli(fd,"Error starting test tone on %s!!\n",simpleusb_active);
@@ -2683,7 +2684,8 @@ int	i,ret;
 		}
 		i += 50;
 	}
-	ast_deactivate_generator(o->owner);
+	ast_tonepair_stop(o->owner);
+ 	ast_set_flag(o->owner, AST_FLAG_WRITE_INT);
 	o->txtestkey = 0;	
 	return ret;
 }
