@@ -87,6 +87,7 @@ allows for the true 'connectionless-ness' of this protocol implementation.
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/timex.h>
 #include <ctype.h>
 #include <search.h>
 #include <arpa/inet.h>
@@ -95,6 +96,7 @@ allows for the true 'connectionless-ness' of this protocol implementation.
 #include <pthread.h>
 #include <signal.h>
 #include <fnmatch.h>
+#include <math.h>
 #include <zaptel/zaptel.h>
 
 #include "asterisk/lock.h"
@@ -134,9 +136,13 @@ AST_MUTEX_DEFINE_STATIC(voter_lock);
 int16_t listen_port = 667;				/* port to listen to UDP packets on */
 int udp_socket = -1;
 
+int voter_timing_fd = -1;
+
 char challenge[VOTER_CHALLENGE_LEN];
 char password[100];
 char context[100];
+
+double dnsec;
 
 #define	FRAME_SIZE 160
 
@@ -178,7 +184,6 @@ struct voter_pvt {
 	char rxkey;
 	struct ast_module_user *u;
 	struct timeval lastrxtime;
-	VTIME draintime;
 	int drainindex;
 	char drained_once;
 #ifdef 	OLD_ASTERISK
@@ -199,6 +204,7 @@ struct voter_client {
 	struct sockaddr_in sin;
 	char heardfrom;
 	char totransmit;
+	char ismaster;
 	struct voter_client *next;
 	long long dtime;
 } ;
@@ -223,6 +229,9 @@ struct voter_pvt *pvts = NULL;
 struct voter_client *clients = NULL;
 
 FILE *fp;
+
+VTIME master_time = {0,0};
+
 
 #ifdef OLD_ASTERISK
 #define ast_free free
@@ -494,181 +503,9 @@ static int voter_text(struct ast_channel *ast, const char *text)
 static struct ast_frame *voter_read(struct ast_channel *ast)
 {
 	struct voter_pvt *p = ast->tech_pvt;
-	struct voter_client *client,*maxclient;
-	int i,j,k,n,maxrssi;
-	struct timeval tv;
-	struct ast_frame *f1;
-  
-#pragma pack(push)
-#pragma pack(1)
-	struct {
-		VOTER_PACKET_HEADER vp;
-		char rssi;
-		char audio[FRAME_SIZE];
-	} audiopacket;
-#pragma pack(pop)
 
-	read(ast->fds[0],p->buf,FRAME_SIZE);
-	if (!p->drained_once)
-	{
-		p->drained_once = 1;
-		memset(&p->fr,0,sizeof(struct ast_frame));
-	        p->fr.frametype = AST_FRAME_NULL;
-	        return &p->fr;
-	}
-	ast_mutex_lock(&voter_lock);
-	if(!p->draintime.vtime_sec)
-	{
-		gettimeofday(&tv,NULL);
-		p->draintime.vtime_sec = tv.tv_sec;
-		p->draintime.vtime_nsec = tv.tv_usec * 1000;
-	}
-	else 
-	{
-		p->draintime.vtime_nsec += 20000000;
-	}
-	if (p->draintime.vtime_nsec >= 1000000000)
-	{
-		p->draintime.vtime_sec++;
-		p->draintime.vtime_nsec -= 1000000000;
-	}
-	n = 0;
-	ast_mutex_lock(&p->txqlock);
-	AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
-	ast_mutex_unlock(&p->txqlock);
-	if (n && ((n > 3) || (!p->txkey)))
-	{
-		ast_mutex_lock(&p->txqlock);
-		f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
-		ast_mutex_unlock(&p->txqlock);
-		memset(&audiopacket,0,sizeof(audiopacket));
-		strcpy((char *)audiopacket.vp.challenge,challenge);
-		audiopacket.vp.payload_type = htons(1);
-		audiopacket.rssi = 0;
-		memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
-		ast_free(f1);
-		audiopacket.vp.curtime.vtime_sec = htonl(p->draintime.vtime_sec);
-		audiopacket.vp.curtime.vtime_nsec = htonl(p->draintime.vtime_nsec);
-		for(client = clients; client; client = client->next)
-		{
-			if (client->nodenum != p->nodenum) continue;
-			if (!client->respdigest) continue;
-			audiopacket.vp.digest = htonl(client->respdigest);
-			if (client->totransmit)
-			{
-				if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-				/* send em the empty packet to get things started */
-				sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-			}
-		}
-	}
-
-	maxrssi = 0;
-	maxclient = NULL;
-	for(client = clients; client; client = client->next)
-	{
-		k = 0;
-		i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
-		if (i >= 0)
-		{
-			for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
-			{
-				k += client->rssi[j];
-				client->rssi[j] = 0;
-			}
-		}
-		else
-		{
-			for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
-			{
-				k += client->rssi[j];
-				client->rssi[j] = 0;
-			}
-			for(j = 0; j < -i; j++)
-			{
-				k += client->rssi[j];
-				client->rssi[j] = 0;
-			}
-		}			
-		if ((k / FRAME_SIZE) > maxrssi)
-		{
-			maxrssi = k / FRAME_SIZE;
-			maxclient = client;
-		}
-	}
-	if (!maxclient) /* if nothing there */
-	{
-		memset(&p->fr,0,sizeof(struct ast_frame));
-	        p->fr.frametype = 0;
-	        p->fr.subclass = 0;
-	        p->fr.datalen = 0;
-	        p->fr.samples = 0;
-	        p->fr.data =  NULL;
-	        p->fr.src = type;
-	        p->fr.offset = 0;
-	        p->fr.mallocd=0;
-	        p->fr.delivery.tv_sec = 0;
-	        p->fr.delivery.tv_usec = 0;
-		p->drainindex += FRAME_SIZE;
-		if (p->drainindex >= buflen) p->drainindex -= buflen;
-		ast_mutex_unlock(&voter_lock);
-	        return &p->fr;
-	}
-	i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
-	if (i >= 0)
-	{
-		memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE);
-	}
-	else
-	{
-		memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE + i);
-		memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),maxclient->audio,-i);
-	}
-	for(client = clients; client; client = client->next)
-	{
-		if (i >= 0)
-		{
-			memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
-		}
-		else
-		{
-			memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
-			memset(client->audio,0xff,-i);
-		}
-	}
-	if (debug > 0) ast_verbose("Sending from client %s RSSI %d\n",maxclient->name,maxrssi);
-
-	p->drainindex += FRAME_SIZE;
-	if (p->drainindex >= buflen) p->drainindex -= buflen;
-	gettimeofday(&p->lastrxtime,NULL);
-	ast_mutex_unlock(&voter_lock);
-	if (!p->rxkey)
-	{
-		memset(&p->fr,0,sizeof(p->fr));
-		p->fr.datalen = 0;
-		p->fr.samples = 0;
-		p->fr.frametype = AST_FRAME_CONTROL;
-		p->fr.subclass = AST_CONTROL_RADIO_KEY;
-		p->fr.data =  0;
-		p->fr.src = type;
-		p->fr.offset = 0;
-		p->fr.mallocd=0;
-		p->fr.delivery.tv_sec = 0;
-		p->fr.delivery.tv_usec = 0;
-		ast_queue_frame(p->owner,&p->fr);
-	}
-	p->rxkey = 1;
 	memset(&p->fr,0,sizeof(struct ast_frame));
-        p->fr.frametype = AST_FRAME_VOICE;
-        p->fr.subclass = AST_FORMAT_ULAW;
-        p->fr.datalen = FRAME_SIZE;
-        p->fr.samples = FRAME_SIZE;
-        p->fr.data =  p->buf + AST_FRIENDLY_OFFSET;
-        p->fr.src = type;
-        p->fr.offset = AST_FRIENDLY_OFFSET;
-        p->fr.mallocd = 0;
-        p->fr.delivery.tv_sec = 0;
-        p->fr.delivery.tv_usec = 0;
+        p->fr.frametype = AST_FRAME_NULL;
         return &p->fr;
 }
 
@@ -695,7 +532,7 @@ static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat,bs;
+	int oldformat;
 	struct voter_pvt *p;
 	struct ast_channel *tmp = NULL;
 	
@@ -747,22 +584,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	tmp->nativeformats = AST_FORMAT_ULAW;
 //	if (state == AST_STATE_RING) tmp->rings = 1;
 	tmp->tech_pvt = p;
-	tmp->fds[0] = open("/dev/zap/pseudo",O_RDWR | O_NONBLOCK);
-	if (tmp->fds[0] == -1)
-	{
-		ast_log(LOG_ERROR,"Cant open zap timing channel\n");
-		ast_free(tmp);
-		ast_free(p);
-		return NULL;
-	}
-	bs = FRAME_SIZE;
-	if (ioctl(tmp->fds[0], ZT_SET_BLOCKSIZE, &bs) == -1) 
-	{
-		ast_log(LOG_WARNING, "Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
-		ast_free(tmp);
-		ast_free(p);
-		return NULL;
-	}
 #ifdef	OLD_ASTERISK
 	ast_copy_string(tmp->language, "", sizeof(tmp->language));
 #else
@@ -863,16 +684,24 @@ static void *voter_reader(void *data)
 	char buf[4096],timestr[100];
 	struct sockaddr_in sin;
 	struct voter_pvt *p;
- 	int i;
-	struct ast_frame fr;
+	int i,j,k,n,maxrssi;
+	struct ast_frame *f1,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
 	fd_set fds;
-	struct voter_client *client;
+	struct voter_client *client,*maxclient;
 	VOTER_PACKET_HEADER *vph;
 	VOTER_GPS *vgp;
 	time_t timestuff;
+#pragma pack(push)
+#pragma pack(1)
+	struct {
+		VOTER_PACKET_HEADER vp;
+		char rssi;
+		char audio[FRAME_SIZE];
+	} audiopacket;
+#pragma pack(pop)
 
 	struct {
 		VOTER_PACKET_HEADER vp;
@@ -890,37 +719,34 @@ static void *voter_reader(void *data)
 		tmout.tv_usec = 50000;
 		i = select(udp_socket + 1,&fds,NULL,NULL,&tmout);
 		ast_mutex_lock(&voter_lock);
-		if (i == 0) 
-		{
-			gettimeofday(&tv,NULL);
-			for(p = pvts; p; p = p->next)
-			{
-				if (!p->rxkey) continue;
-				if (ast_tvdiff_ms(tv,p->lastrxtime) > RX_TIMEOUT_MS)
-				{
-					memset(&fr,0,sizeof(fr));
-					fr.datalen = 0;
-					fr.samples = 0;
-					fr.frametype = AST_FRAME_CONTROL;
-					fr.subclass = AST_CONTROL_RADIO_UNKEY;
-					fr.data =  0;
-					fr.src = type;
-					fr.offset = 0;
-					fr.mallocd=0;
-					fr.delivery.tv_sec = 0;
-					fr.delivery.tv_usec = 0;
-					ast_queue_frame(p->owner,&fr);
-					p->rxkey = 0;
-				}
-			}
-			continue;
-		}
 		if (i < 0)
 		{
 			ast_mutex_unlock(&voter_lock);
 			ast_log(LOG_ERROR,"Error in select()\n");
 			pthread_exit(NULL);
 		}
+		gettimeofday(&tv,NULL);
+		for(p = pvts; p; p = p->next)
+		{
+			if (!p->rxkey) continue;
+			if (ast_tvdiff_ms(tv,p->lastrxtime) > RX_TIMEOUT_MS)
+			{
+				memset(&fr,0,sizeof(fr));
+				fr.datalen = 0;
+				fr.samples = 0;
+				fr.frametype = AST_FRAME_CONTROL;
+				fr.subclass = AST_CONTROL_RADIO_UNKEY;
+				fr.data =  0;
+				fr.src = type;
+				fr.offset = 0;
+				fr.mallocd=0;
+				fr.delivery.tv_sec = 0;
+				fr.delivery.tv_usec = 0;
+				ast_queue_frame(p->owner,&fr);
+				p->rxkey = 0;
+			}
+		}
+		if (i == 0) continue;
 		if (FD_ISSET(udp_socket,&fds)) /* if we get a packet */
 		{
 			fromlen = sizeof(struct sockaddr_in);
@@ -939,7 +765,7 @@ static void *voter_reader(void *data)
 						if (client->digest == htonl(vph->digest)) break;
 					}
 
-					if ((debug >= 2) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
+					if ((debug >= 2) && client && (!client->ismaster) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
 					{
 						timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 						strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -961,17 +787,37 @@ static void *voter_reader(void *data)
 						if (p) /* if we found 'em */
 						{
 							long long btime,ptime,difftime;
-							int index;
+							int index,mdiff,mmax;
+							struct timeval mtv;
 
-							btime = ((long long)p->draintime.vtime_sec * 1000000000LL) + p->draintime.vtime_nsec;
+
+							if (client->ismaster)
+							{
+								master_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
+								master_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
+
+							}
+							else
+							{
+								if (!master_time.vtime_sec) continue;
+								gettimeofday(&tv,NULL);
+								mtv.tv_sec = master_time.vtime_sec;
+								mtv.tv_usec = master_time.vtime_nsec / 1000;
+								if ((mtv.tv_sec <= (tv.tv_sec - 2)) || (mtv.tv_sec >= (tv.tv_sec + 2))) continue;
+								mdiff = ast_tvdiff_ms(tv,mtv);
+								mmax = buflen / 8;
+								if ((mdiff > mmax) || (mdiff < -mmax)) continue;
+							}
+							btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
+							btime += 40000000;
 							ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
 							difftime = (ptime - btime) + (bufdelay * 125000LL);
 							index = (int)((long long)difftime / 125000LL);
-							if (debug >= 2)
+							if ((debug >= 2) && (!client->ismaster))
 							{
-								timestuff = (time_t) p->draintime.vtime_sec;
+								timestuff = (time_t) master_time.vtime_sec;
 								strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-								ast_verbose("DrainTime: %s.%03d\n",timestr,p->draintime.vtime_nsec / 1000000);
+								ast_verbose("DrainTime: %s.%03d\n",timestr,master_time.vtime_nsec / 1000000);
 								gettimeofday(&timetv,NULL);
 								timestuff = (time_t) timetv.tv_sec;
 								strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -998,10 +844,159 @@ static void *voter_reader(void *data)
 									memset(client->rssi,buf[sizeof(VOTER_PACKET_HEADER)],-i);
 								}
 							}
+							if (client->ismaster)
+							{
+								for(p = pvts; p; p = p->next)
+								{
+									if (!p->drained_once)
+									{
+										p->drained_once = 1;
+										continue;
+									}
+									ast_mutex_lock(&voter_lock);
+									n = 0;
+									ast_mutex_lock(&p->txqlock);
+									AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
+									ast_mutex_unlock(&p->txqlock);
+									if (n && ((n > 3) || (!p->txkey)))
+									{
+										ast_mutex_lock(&p->txqlock);
+										f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
+										ast_mutex_unlock(&p->txqlock);
+										memset(&audiopacket,0,sizeof(audiopacket));
+										strcpy((char *)audiopacket.vp.challenge,challenge);
+										audiopacket.vp.payload_type = htons(1);
+										audiopacket.rssi = 0;
+										memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
+										ast_free(f1);
+										audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+										audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
+										for(client = clients; client; client = client->next)
+										{
+											if (client->nodenum != p->nodenum) continue;
+											if (!client->respdigest) continue;
+											audiopacket.vp.digest = htonl(client->respdigest);
+											if (client->totransmit)
+											{
+												if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+												/* send em the empty packet to get things started */
+												sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+											}
+										}
+									}
+									maxrssi = 0;
+									maxclient = NULL;
+									for(client = clients; client; client = client->next)
+									{
+										k = 0;
+										i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+										if (i >= 0)
+										{
+											for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
+											{
+												k += client->rssi[j];
+												client->rssi[j] = 0;
+											}
+										}
+										else
+										{
+											for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
+											{
+												k += client->rssi[j];
+												client->rssi[j] = 0;
+											}
+											for(j = 0; j < -i; j++)
+											{
+												k += client->rssi[j];
+												client->rssi[j] = 0;
+											}
+										}			
+										if ((k / FRAME_SIZE) > maxrssi)
+										{
+											maxrssi = k / FRAME_SIZE;
+											maxclient = client;
+										}
+									}
+									if (!maxclient) /* if nothing there */
+									{
+										memset(&fr,0,sizeof(struct ast_frame));
+									        fr.frametype = 0;
+									        fr.subclass = 0;
+									        fr.datalen = 0;
+									        fr.samples = 0;
+									        fr.data =  NULL;
+									        fr.src = type;
+									        fr.offset = 0;
+									        fr.mallocd=0;
+									        fr.delivery.tv_sec = 0;
+									        fr.delivery.tv_usec = 0;
+										p->drainindex += FRAME_SIZE;
+										if (p->drainindex >= buflen) p->drainindex -= buflen;
+										ast_mutex_unlock(&voter_lock);
+										ast_queue_frame(p->owner,&fr);
+										continue;
+									}
+									i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+									if (i >= 0)
+									{
+										memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE);
+									}
+									else
+									{
+										memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE + i);
+										memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),maxclient->audio,-i);
+									}
+									for(client = clients; client; client = client->next)
+									{
+										if (i >= 0)
+										{
+											memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
+										}
+										else
+										{
+											memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+											memset(client->audio,0xff,-i);
+										}
+									}
+									if (debug > 0) ast_verbose("Sending from client %s RSSI %d\n",maxclient->name,maxrssi);
+									p->drainindex += FRAME_SIZE;
+									if (p->drainindex >= buflen) p->drainindex -= buflen;
+									gettimeofday(&p->lastrxtime,NULL);
+									ast_mutex_unlock(&voter_lock);
+									if (!p->rxkey)
+									{
+										memset(&fr,0,sizeof(fr));
+										fr.datalen = 0;
+										fr.samples = 0;
+										fr.frametype = AST_FRAME_CONTROL;
+										fr.subclass = AST_CONTROL_RADIO_KEY;
+										fr.data =  0;
+										fr.src = type;
+										fr.offset = 0;
+										fr.mallocd=0;
+										fr.delivery.tv_sec = 0;
+										fr.delivery.tv_usec = 0;
+										ast_queue_frame(p->owner,&fr);
+									}
+									p->rxkey = 1;
+									memset(&fr,0,sizeof(struct ast_frame));
+								        fr.frametype = AST_FRAME_VOICE;
+								        fr.subclass = AST_FORMAT_ULAW;
+								        fr.datalen = FRAME_SIZE;
+								        fr.samples = FRAME_SIZE;
+								        fr.data =  p->buf + AST_FRIENDLY_OFFSET;
+								        fr.src = type;
+								        fr.offset = AST_FRIENDLY_OFFSET;
+								        fr.mallocd = 0;
+								        fr.delivery.tv_sec = 0;
+								        fr.delivery.tv_usec = 0;
+									ast_queue_frame(p->owner,&fr);
+								}
+							}
 						}
 						else
 						{
-							ast_log(LOG_WARNING,"Request for voter client %s to unknown node %d\n",
+							if (debug > 0) ast_verbose("Request for voter client %s to unknown node %d\n",
 								client->name,client->nodenum);
 						}
 						continue;
@@ -1010,45 +1005,29 @@ static void *voter_reader(void *data)
 					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
 							(recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))))
 					{
-						if (debug >= 2)
+						if ((debug >= 2) /*&& (!client->ismaster)*/)
 						{
-							long long gtime,stime;
-							double fdtime;
 							gettimeofday(&timetv,NULL);
 							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
 	
 							ast_verbose("GPSTime:   %s.%09d\n",timestr,ntohl(vph->curtime.vtime_nsec));
-							gtime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL)
-								 + (long long)ntohl(vph->curtime.vtime_nsec);
-							stime = ((long long)timetv.tv_sec * 1000000000LL) + (long long)(timetv.tv_usec * 1000);
-							client->dtime = ((client->dtime * 31) + (stime - gtime)) >> 5;
+							timetv.tv_usec = ((timetv.tv_usec + 10000) / 20000) * 20000;
+							if (timetv.tv_usec >= 1000000)
+							{
+								timetv.tv_sec++;
+								timetv.tv_usec -= 1000000;
+							}
 							timestuff = (time_t) timetv.tv_sec;
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-							ast_verbose("SysTime:   %s.%09d\n",timestr,(int)timetv.tv_usec * 1000);
-							for(p = pvts; p; p = p->next)
-							{
-								if (p->nodenum == client->nodenum) break;
-							}
-							if (p)
-							{
-								timestuff = (time_t) p->draintime.vtime_sec;
-								strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-								ast_verbose("DrainTime: %s.%03d\n",timestr,p->draintime.vtime_nsec / 1000000);
-								if (debug > 2)
-								{
-									fdtime = (double)client->dtime;
-									ast_verbose("DTime:   %f\n",fdtime / 1000000.0);
-									stime = ((long long)p->draintime.vtime_sec * 1000000000LL)
-										 + (long long)p->draintime.vtime_nsec;
-									fdtime = (double)(stime - gtime);
-									ast_verbose("DDTime:   %f\n",fdtime / 1000000.0);
-								}
-							}
+							ast_verbose("SysTime:   %s.%06d\n",timestr,(int)timetv.tv_usec);
+							timestuff = (time_t) master_time.vtime_sec;
+							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
+							ast_verbose("DrainTime: %s.%03d\n",timestr,master_time.vtime_nsec / 1000000);
 						}
 						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
-						if (debug > 0) printf("Got GPS: Lat: %s, Lon: %s, Elev: %s\n",
-							vgp->lat,vgp->lon,vgp->elev);
+						if (debug > 0) printf("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
+							client->name,vgp->lat,vgp->lon,vgp->elev);
 						continue;
 					}
 					if (client) client->heardfrom = 1;
@@ -1062,6 +1041,7 @@ static void *voter_reader(void *data)
 				/* make our digest based on their challenge */
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
+				if (client && client->ismaster) authpacket.flags |= 2 | 8;
 				if (debug > 0) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
 				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
@@ -1089,6 +1069,7 @@ int load_module(void)
 	pthread_attr_t attr;
 	pthread_t voter_reader_thread;
 	unsigned int mynode;
+	int bs;
 	struct voter_client *client,*client1;
 	struct ast_variable *v;
 
@@ -1144,6 +1125,24 @@ int load_module(void)
                 return AST_MODULE_LOAD_DECLINE;
 	}
 
+	voter_timing_fd = open("/dev/zap/pseudo",O_RDWR);
+	if (voter_timing_fd == -1)
+	{
+		ast_log(LOG_ERROR,"Cant open zap timing channel\n");
+                close(udp_socket);
+		ast_config_destroy(cfg);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+	bs = FRAME_SIZE;
+	if (ioctl(voter_timing_fd, ZT_SET_BLOCKSIZE, &bs) == -1) 
+	{
+		ast_log(LOG_WARNING, "Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
+		close(voter_timing_fd);
+                close(udp_socket);
+		ast_config_destroy(cfg);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+
 	ctg = NULL;
         while ( (ctg = ast_category_browse(cfg, ctg)) != NULL)
 	{
@@ -1164,6 +1163,7 @@ int load_module(void)
 			client->nodenum = strtoul(ctg,NULL,0);
 			ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
 			if (strchr(v->name,'!')) client->totransmit = 1;
+			if (strchr(v->name,'@')) client->ismaster = 1;
 			client->digest = crc32_bufs(challenge,v->value);
 			client->audio = (uint8_t *)ast_malloc(buflen);
 			if (!client->audio)
