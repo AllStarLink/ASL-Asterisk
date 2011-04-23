@@ -72,6 +72,23 @@ next time those positions in the physical buffer are examined, they will not con
 put there, since all client's buffers are significant regardless of whether they were populated or not. This
 allows for the true 'connectionless-ness' of this protocol implementation.
 
+
+Voter Channel test modes:
+
+0 - Normal voting operation
+1 - Randomly pick which client of all that
+    are receving at the max rssi value to use.
+> 1 - Cycle thru all the clients that are receiving
+    at the max rssi value with a cycle time of (test mode - 1)
+    frames. In other words, if you set it to 2, it will
+    change every single time. If you set it to 11, it will
+    change every 10 times. This is serious torture test.
+< 1 - Explicitly select the client to use. Specify the
+    negative value of the client in the list in voter.conf
+    (reversed). In other words, if you want the last client
+    you specified in the list for the particular node, set
+    the value to -1. If you want the 3rd from the last, set
+    it to -4.
 */
 
 
@@ -186,6 +203,8 @@ struct voter_pvt {
 	struct timeval lastrxtime;
 	int drainindex;
 	char drained_once;
+	int testcycle;
+	int testindex;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -207,6 +226,7 @@ struct voter_client {
 	char ismaster;
 	struct voter_client *next;
 	long long dtime;
+	uint8_t lastrssi;
 } ;
 
 #ifdef	OLD_ASTERISK
@@ -215,6 +235,7 @@ AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
 
 int debug = 0;
+int voter_test = 0;
 
 unsigned int buflen = DEFAULT_BUFLEN * 8;
 
@@ -280,14 +301,27 @@ static const struct ast_channel_tech voter_tech = {
 static int voter_do_debug(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
-"Usage: voterx debug level {0-7}\n"
+"Usage: voter debug level {0-7}\n"
 "       Enables debug messages in chan_voter\n";
+
+
+/* Test */
+static int voter_do_test(int fd, int argc, char *argv[]);
+
+static char test_usage[] =
+"Usage: voter test {test value}\n"
+"       Specifies test mode for voter chan_voter\n";
+
+
 
 #ifndef	NEW_ASTERISK
 
 static struct ast_cli_entry  cli_debug =
         { { "voter", "debug", "level" }, voter_do_debug, 
 		"Enable voter debugging", debug_usage };
+static struct ast_cli_entry  cli_test =
+        { { "voter", "test" }, voter_do_test, 
+		"Specify voter test value", test_usage };
 
 #endif
 
@@ -623,6 +657,30 @@ static int voter_do_debug(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
+static int voter_do_test(int fd, int argc, char *argv[])
+{
+	int newlevel;
+
+	if (argc == 2)
+	{
+		if (voter_test)
+			ast_cli(fd,"voter Test: currently set to %d\n",voter_test);
+		else
+			ast_cli(fd,"voter Test: currently disabled\n");
+		return RESULT_SUCCESS;
+	}		
+        if (argc != 3)
+                return RESULT_SHOWUSAGE;
+        newlevel = atoi(argv[2]);
+        if(newlevel)
+                ast_cli(fd, "voter Test: previous level: %d, new level: %d\n", voter_test, newlevel);
+        else
+                ast_cli(fd, "voter Test disabled\n");
+
+        voter_test = newlevel;                                                                                                                          
+        return RESULT_SUCCESS;
+}
+
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -653,8 +711,23 @@ static char *handle_cli_debug(struct ast_cli_entry *e,
 	return res2cli(voter_do_debug(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_test(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter test";
+                e->usage = debug_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_test(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
-	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
+	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
+	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
 } ;
 
 #endif
@@ -672,6 +745,7 @@ int unload_module(void)
 #else
 	/* Unregister cli extensions */
 	ast_cli_unregister(&cli_debug);
+	ast_cli_unregister(&cli_test);
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -888,6 +962,7 @@ static void *voter_reader(void *data)
 									maxclient = NULL;
 									for(client = clients; client; client = client->next)
 									{
+										if (client->nodenum != p->nodenum) continue;
 										k = 0;
 										i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
 										if (i >= 0)
@@ -911,11 +986,93 @@ static void *voter_reader(void *data)
 												client->rssi[j] = 0;
 											}
 										}			
-										if ((k / FRAME_SIZE) > maxrssi)
+										client->lastrssi = k / FRAME_SIZE; 
+										if (client->lastrssi > maxrssi)
 										{
-											maxrssi = k / FRAME_SIZE;
+											maxrssi =  client->lastrssi;
 											maxclient = client;
 										}
+									}
+									if (!maxclient) /* if nothing there */
+									{
+										memset(&fr,0,sizeof(struct ast_frame));
+									        fr.frametype = 0;
+									        fr.subclass = 0;
+									        fr.datalen = 0;
+									        fr.samples = 0;
+									        fr.data =  NULL;
+									        fr.src = type;
+									        fr.offset = 0;
+									        fr.mallocd=0;
+									        fr.delivery.tv_sec = 0;
+									        fr.delivery.tv_usec = 0;
+										p->drainindex += FRAME_SIZE;
+										if (p->drainindex >= buflen) p->drainindex -= buflen;
+										ast_mutex_unlock(&voter_lock);
+										ast_queue_frame(p->owner,&fr);
+										continue;
+									}
+									/* if we are in test mode, we need to artifically affect the vote outcome */
+									if (voter_test < 0) /* force explicit selection */
+									{
+										p->testcycle = 0;
+										p->testindex = 0;
+										for(i = 0,client = clients; client; client = client->next)
+										{
+											if (client->nodenum != p->nodenum) continue;
+											maxclient = 0;
+											i++;
+											if (i == -voter_test)
+											{
+												if (client->lastrssi)
+												{
+													maxclient = client;
+													maxrssi = client->lastrssi;
+												}												
+												break;
+											}
+										}
+									}
+									else if (voter_test > 0) /* perform cyclic selection */
+									{
+										/* see how many are eligible */
+										for(i = 0,client = clients; client; client = client->next)
+										{
+//if (client->ismaster) continue;
+											if (client->nodenum != p->nodenum) continue;
+											if (client->lastrssi == maxrssi) i++;
+										}
+										if (voter_test == 1)
+										{
+											p->testindex = random() % i;
+										}
+										else
+										{
+											p->testcycle++;
+											if (p->testcycle >= (voter_test - 1))
+											{
+												p->testcycle = 0;
+												p->testindex++;
+												if (p->testindex >= i) p->testindex = 0;
+											}
+										}
+										for(i = 0,client = clients; client; client = client->next)
+										{
+											if (client->nodenum != p->nodenum) continue;
+											if (client->lastrssi != maxrssi) continue;
+//if (client->ismaster) continue;
+											if (i++ == p->testindex)
+											{
+												maxclient = client;
+												maxrssi = client->lastrssi;
+												break;
+											}
+										}
+									}
+									else
+									{
+										p->testcycle = 0;
+										p->testindex = 0;
 									}
 									if (!maxclient) /* if nothing there */
 									{
@@ -948,6 +1105,7 @@ static void *voter_reader(void *data)
 									}
 									for(client = clients; client; client = client->next)
 									{
+										if (client->nodenum != p->nodenum) continue;
 										if (i >= 0)
 										{
 											memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
@@ -1026,7 +1184,7 @@ static void *voter_reader(void *data)
 							ast_verbose("DrainTime: %s.%03d\n",timestr,master_time.vtime_nsec / 1000000);
 						}
 						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
-						if (debug > 0) printf("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
+						if (debug > 0) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
 							client->name,vgp->lat,vgp->lon,vgp->elev);
 						continue;
 					}
@@ -1213,6 +1371,7 @@ int load_module(void)
 #else
 	/* Register cli extensions */
 	ast_cli_register(&cli_debug);
+	ast_cli_register(&cli_test);
 #endif
 
         pthread_attr_init(&attr);
