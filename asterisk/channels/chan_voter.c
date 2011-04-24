@@ -185,6 +185,12 @@ typedef struct {
 	char lon[10];
 	char elev[6];
 } VOTER_GPS;
+
+typedef struct {
+	char name[32];
+	uint8_t audio[FRAME_SIZE];
+	uint8_t rssi;
+} VOTER_REC;	
 #pragma pack(pop)
 
 #define VOTER_PAYLOAD_NONE	0
@@ -236,6 +242,7 @@ AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 
 int debug = 0;
 int voter_test = 0;
+FILE *recfp = NULL;
 
 unsigned int buflen = DEFAULT_BUFLEN * 8;
 
@@ -313,6 +320,14 @@ static char test_usage[] =
 "       Specifies test mode for voter chan_voter\n";
 
 
+/* Record */
+static int voter_do_record(int fd, int argc, char *argv[]);
+
+static char record_usage[] =
+"Usage: voter record [record filename]\n"
+"       Enables/Specifies (or disables) recording file for chan_voter\n";
+
+
 
 #ifndef	NEW_ASTERISK
 
@@ -322,6 +337,9 @@ static struct ast_cli_entry  cli_debug =
 static struct ast_cli_entry  cli_test =
         { { "voter", "test" }, voter_do_test, 
 		"Specify voter test value", test_usage };
+static struct ast_cli_entry  cli_record =
+        { { "voter", "record" }, voter_do_record, 
+		"Enables/Specifies (or disables) voter recording file", record_usage };
 
 #endif
 
@@ -681,6 +699,27 @@ static int voter_do_test(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
+static int voter_do_record(int fd, int argc, char *argv[])
+{
+	if (argc == 2)
+	{
+		if (recfp) fclose(recfp);
+		recfp = NULL;
+		ast_cli(fd,"voter recording disabled\n");
+		return RESULT_SUCCESS;
+	}		
+        if (argc != 3)
+                return RESULT_SHOWUSAGE;
+	recfp = fopen(argv[2],"w");
+	if (!recfp)
+	{
+		ast_cli(fd,"voter Record: Could not open file %s\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+        ast_cli(fd, "voter Record: Recording enabled info file %s\n",argv[2]);
+        return RESULT_SUCCESS;
+}
+
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -717,7 +756,7 @@ static char *handle_cli_test(struct ast_cli_entry *e,
         switch (cmd) {
         case CLI_INIT:
                 e->command = "voter test";
-                e->usage = debug_usage;
+                e->usage = test_usage;
                 return NULL;
         case CLI_GENERATE:
                 return NULL;
@@ -725,9 +764,24 @@ static char *handle_cli_test(struct ast_cli_entry *e,
 	return res2cli(voter_do_test(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_record(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter record";
+                e->usage = record_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_record(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
+	AST_CLI_DEFINE(handle_cli_record,"Enable/Specify (or disable) voter recording file"),
 } ;
 
 #endif
@@ -746,6 +800,7 @@ int unload_module(void)
 	/* Unregister cli extensions */
 	ast_cli_unregister(&cli_debug);
 	ast_cli_unregister(&cli_test);
+	ast_cli_unregister(&cli_record);
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -755,7 +810,7 @@ int unload_module(void)
 
 static void *voter_reader(void *data)
 {
-	char buf[4096],timestr[100];
+ 	char buf[4096],timestr[100],hasmastered;
 	struct sockaddr_in sin;
 	struct voter_pvt *p;
 	int i,j,k,n,maxrssi;
@@ -767,6 +822,7 @@ static void *voter_reader(void *data)
 	struct voter_client *client,*maxclient;
 	VOTER_PACKET_HEADER *vph;
 	VOTER_GPS *vgp;
+	VOTER_REC rec;
 	time_t timestuff;
 #pragma pack(push)
 #pragma pack(1)
@@ -920,6 +976,7 @@ static void *voter_reader(void *data)
 							}
 							if (client->ismaster)
 							{
+								hasmastered = 0;
 								for(p = pvts; p; p = p->next)
 								{
 									if (!p->drained_once)
@@ -1106,6 +1163,30 @@ static void *voter_reader(void *data)
 									for(client = clients; client; client = client->next)
 									{
 										if (client->nodenum != p->nodenum) continue;
+										if (recfp)
+										{
+											if (!hasmastered)
+											{
+												hasmastered = 1;
+												memset(&rec,0,sizeof(rec));
+												memcpy(rec.audio,&master_time,sizeof(master_time));
+												fwrite(&rec,1,sizeof(rec),recfp);
+											}
+											ast_copy_string(rec.name,client->name,sizeof(rec.name) - 1);
+											rec.rssi = client->lastrssi;
+											if (i >= 0)
+											{
+												memcpy(rec.audio,client->audio + p->drainindex,FRAME_SIZE);
+											}
+											else
+
+											{
+												memcpy(rec.audio,client->audio + p->drainindex,FRAME_SIZE + i);												memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+												memcpy(rec.audio + FRAME_SIZE + i,client->audio,-i);												memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+
+											}
+											fwrite(&rec,1,sizeof(rec),recfp);
+										}
 										if (i >= 0)
 										{
 											memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
@@ -1372,6 +1453,7 @@ int load_module(void)
 	/* Register cli extensions */
 	ast_cli_register(&cli_debug);
 	ast_cli_register(&cli_test);
+	ast_cli_register(&cli_record);
 #endif
 
         pthread_attr_init(&attr);
