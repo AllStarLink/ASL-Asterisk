@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.281 01/17/2011
+ *  version 0.282 05/11/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -525,7 +525,7 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c" */
+#include "mdc_decode.c"
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
@@ -571,7 +571,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.281 01/17/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.282 05/11/2011";
 
 static char *app = "Rpt";
 
@@ -4553,7 +4553,8 @@ char	str[200];
 	/* otherwise, send it to all of em */
 	while(l != &myrpt->links)
 	{
-		if (l->name[0] == '0') 
+		/* Dont send to IAXRPT client, unless main channel is Voter */
+		if (((l->name[0] == '0') && strncasecmp(myrpt->rxchannel->name,"voter/", 6)) || (l->phonemode))
 		{
 			l = l->next;
 			continue;
@@ -19676,6 +19677,39 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						sprintf(buf,"RPT_BEAGLE_GPIO%d",i);
 						rpt_update_boolean(myrpt,buf,j);
+					}
+				}
+				/* if is a Voter device */
+				if (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0)
+				{
+					struct rpt_link *l;
+					struct	ast_frame wf;
+					char	str[200];
+
+
+					sprintf(str,"V %s %s",myrpt->name,(char *)f->data);
+					wf.frametype = AST_FRAME_TEXT;
+					wf.subclass = 0;
+					wf.offset = 0;
+					wf.mallocd = 0;
+					wf.datalen = strlen(str) + 1;
+					wf.samples = 0;
+					wf.src = "voter_text_send";
+
+
+					l = myrpt->links.next;
+					/* otherwise, send it to all of em */
+					while(l != &myrpt->links)
+					{
+						/* Dont send to other then IAXRPT client */
+						if ((l->name[0] != '0') || (l->phonemode))
+						{
+							l = l->next;
+							continue;
+						}
+						wf.data = str;
+						if (l->chan) rpt_qwrite(l,&wf); 
+						l = l->next;
 					}
 				}
 			}

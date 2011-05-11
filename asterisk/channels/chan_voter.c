@@ -142,6 +142,8 @@ Voter Channel test modes:
 #define	DELIMCHR ','
 #define	QUOTECHR 34
 
+#define	MAXSTREAMS 50
+
 static const char vdesc[] = "radio Voter channel driver";
 static char type[] = "voter";
 
@@ -191,6 +193,11 @@ typedef struct {
 	uint8_t audio[FRAME_SIZE];
 	uint8_t rssi;
 } VOTER_REC;	
+
+typedef struct {
+	uint8_t audio[FRAME_SIZE];
+	char str[160];
+} VOTER_STREAM;
 #pragma pack(pop)
 
 #define VOTER_PAYLOAD_NONE	0
@@ -211,6 +218,9 @@ struct voter_pvt {
 	char drained_once;
 	int testcycle;
 	int testindex;
+	char lastwon[VOTER_NAME_LEN];
+	char *streams[MAXSTREAMS];
+	int nstreams;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -249,8 +259,6 @@ unsigned int buflen = DEFAULT_BUFLEN * 8;
 unsigned int bufdelay = DEFAULT_BUFDELAY;
 
 static char *config = "voter.conf";
-
-struct ast_config *cfg = NULL;
 
 struct voter_pvt *pvts = NULL;
 
@@ -424,7 +432,7 @@ static void strupr(char *str)
 * limit- maximum number of substrings to process
 */
 	
-
+#endif
 
 static int finddelim(char *str, char *strp[], int limit)
 {
@@ -464,7 +472,6 @@ int     i,l,inquo;
         return(i);
 
 }
-#endif
 
 static int voter_call(struct ast_channel *ast, char *dest, int timeout)
 {
@@ -587,6 +594,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	int oldformat;
 	struct voter_pvt *p;
 	struct ast_channel *tmp = NULL;
+	char *val,*cp;
+	struct ast_config *cfg = NULL;
 	
 	oldformat = format;
 	format &= AST_FORMAT_ULAW;
@@ -650,6 +659,21 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 #else
 	p->u = ast_module_user_add(tmp);
 #endif
+#ifdef  NEW_ASTERISK
+        if (!(cfg = ast_config_load(config,zeroflag))) {
+#else
+        if (!(cfg = ast_config_load(config))) {
+#endif
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
+        } else {
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
+		if (val)
+		{
+			cp = ast_strdup(val);
+			p->nstreams = finddelim(cp,p->streams,MAXSTREAMS);
+		}		
+	}
+	ast_config_destroy(cfg);
 	return tmp;
 }
 
@@ -810,8 +834,8 @@ int unload_module(void)
 
 static void *voter_reader(void *data)
 {
- 	char buf[4096],timestr[100],hasmastered;
-	struct sockaddr_in sin;
+ 	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
+	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
 	int i,j,k,n,maxrssi;
 	struct ast_frame *f1,fr;
@@ -823,6 +847,7 @@ static void *voter_reader(void *data)
 	VOTER_PACKET_HEADER *vph;
 	VOTER_GPS *vgp;
 	VOTER_REC rec;
+	VOTER_STREAM stream;
 	time_t timestuff;
 #pragma pack(push)
 #pragma pack(1)
@@ -874,6 +899,7 @@ static void *voter_reader(void *data)
 				fr.delivery.tv_usec = 0;
 				ast_queue_frame(p->owner,&fr);
 				p->rxkey = 0;
+				p->lastwon[0] = 0;
 			}
 		}
 		if (i == 0) continue;
@@ -885,7 +911,7 @@ static void *voter_reader(void *data)
 			if (recvlen >= sizeof(VOTER_PACKET_HEADER)) /* if set got something worthwile */
 			{
 				vph = (VOTER_PACKET_HEADER *)buf;
-				if (debug > 2) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
+				if (debug > 3) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
 				client = NULL;
 				if (vph->digest)
 				{
@@ -895,7 +921,7 @@ static void *voter_reader(void *data)
 						if (client->digest == htonl(vph->digest)) break;
 					}
 
-					if ((debug >= 2) && client && (!client->ismaster) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
+					if ((debug >= 3) && client && (!client->ismaster) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
 					{
 						timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 						strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -943,7 +969,7 @@ static void *voter_reader(void *data)
 							ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
 							difftime = (ptime - btime) + (bufdelay * 125000LL);
 							index = (int)((long long)difftime / 125000LL);
-							if ((debug >= 2) && (!client->ismaster))
+							if ((debug >= 3) && (!client->ismaster))
 							{
 								timestuff = (time_t) master_time.vtime_sec;
 								strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -1009,7 +1035,7 @@ static void *voter_reader(void *data)
 											audiopacket.vp.digest = htonl(client->respdigest);
 											if (client->totransmit)
 											{
-												if (debug > 0) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+												if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
 												/* send em the empty packet to get things started */
 												sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 											}
@@ -1095,7 +1121,6 @@ static void *voter_reader(void *data)
 										/* see how many are eligible */
 										for(i = 0,client = clients; client; client = client->next)
 										{
-//if (client->ismaster) continue;
 											if (client->nodenum != p->nodenum) continue;
 											if (client->lastrssi == maxrssi) i++;
 										}
@@ -1117,7 +1142,6 @@ static void *voter_reader(void *data)
 										{
 											if (client->nodenum != p->nodenum) continue;
 											if (client->lastrssi != maxrssi) continue;
-//if (client->ismaster) continue;
 											if (i++ == p->testindex)
 											{
 												maxclient = client;
@@ -1197,7 +1221,46 @@ static void *voter_reader(void *data)
 											memset(client->audio,0xff,-i);
 										}
 									}
-									if (debug > 0) ast_verbose("Sending from client %s RSSI %d\n",maxclient->name,maxrssi);
+									memcpy(stream.audio,p->buf + AST_FRIENDLY_OFFSET,FRAME_SIZE);
+									sprintf(stream.str,"%s",maxclient->name);
+									for(client = clients; client; client = client->next)
+									{
+										if (client->nodenum != p->nodenum) continue;
+										sprintf(stream.str + strlen(stream.str),",%s=%d",client->name,client->lastrssi);
+									}
+									for(i = 0; i < p->nstreams; i++)
+									{
+										cp = ast_strdupa(p->streams[i]);
+										cp1 = strchr(cp,':');
+										if (cp1)
+										{
+											*cp1 = 0;
+											j = atoi(cp1 + 1);
+										} else j = listen_port;
+										sin_stream.sin_family = AF_INET;
+										sin_stream.sin_addr.s_addr = inet_addr(cp);
+										sin_stream.sin_port = htons(j);
+										sendto(udp_socket, &stream, sizeof(stream),0,(struct sockaddr *)&sin_stream,sizeof(sin_stream));
+									}
+									if (strcmp(maxclient->name,p->lastwon))
+									{
+										strcpy(p->lastwon,maxclient->name);
+										if (debug > 0)
+											ast_verbose("Voter client %s selected for node %d\n",maxclient->name,p->nodenum);
+										memset(&fr,0,sizeof(fr));
+										fr.datalen = strlen(maxclient->name) + 1;
+										fr.samples = 0;
+										fr.frametype = AST_FRAME_TEXT;
+										fr.subclass = 0;
+										fr.data =  maxclient->name;
+										fr.src = type;
+										fr.offset = 0;
+										fr.mallocd=0;
+										fr.delivery.tv_sec = 0;
+										fr.delivery.tv_usec = 0;
+										ast_queue_frame(p->owner,&fr);
+									}
+									if (debug > 1) ast_verbose("Sending from client %s RSSI %d\n",maxclient->name,maxrssi);
 									p->drainindex += FRAME_SIZE;
 									if (p->drainindex >= buflen) p->drainindex -= buflen;
 									gettimeofday(&p->lastrxtime,NULL);
@@ -1235,7 +1298,7 @@ static void *voter_reader(void *data)
 						}
 						else
 						{
-							if (debug > 0) ast_verbose("Request for voter client %s to unknown node %d\n",
+							if (debug > 1) ast_verbose("Request for voter client %s to unknown node %d\n",
 								client->name,client->nodenum);
 						}
 						continue;
@@ -1244,13 +1307,13 @@ static void *voter_reader(void *data)
 					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
 							(recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))))
 					{
-						if ((debug >= 2) /*&& (!client->ismaster)*/)
+						if ((debug >= 3) /*&& (!client->ismaster)*/)
 						{
 							gettimeofday(&timetv,NULL);
 							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
 	
-							ast_verbose("GPSTime:   %s.%09d\n",timestr,ntohl(vph->curtime.vtime_nsec));
+							ast_verbose("GPSTime (%s):   %s.%09d\n",client->name,timestr,ntohl(vph->curtime.vtime_nsec));
 							timetv.tv_usec = ((timetv.tv_usec + 10000) / 20000) * 20000;
 							if (timetv.tv_usec >= 1000000)
 							{
@@ -1265,7 +1328,7 @@ static void *voter_reader(void *data)
 							ast_verbose("DrainTime: %s.%03d\n",timestr,master_time.vtime_nsec / 1000000);
 						}
 						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
-						if (debug > 0) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
+						if (debug > 1) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
 							client->name,vgp->lat,vgp->lon,vgp->elev);
 						continue;
 					}
@@ -1281,7 +1344,7 @@ static void *voter_reader(void *data)
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
 				if (client && client->ismaster) authpacket.flags |= 2 | 8;
-				if (debug > 0) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
+				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
 				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
 				continue;
@@ -1310,6 +1373,7 @@ int load_module(void)
 	unsigned int mynode;
 	int bs;
 	struct voter_client *client,*client1;
+	struct ast_config *cfg = NULL;
 	struct ast_variable *v;
 
 #ifdef  NEW_ASTERISK
@@ -1329,6 +1393,7 @@ int load_module(void)
 
         val = (char *) ast_variable_retrieve(cfg,"general","port"); 
 	if (val) listen_port = (uint16_t) strtoul(val,NULL,0);
+
 
         val = (char *) ast_variable_retrieve(cfg,"general","buflen"); 
 	if (val) buflen = strtoul(val,NULL,0) * 8;
@@ -1390,6 +1455,7 @@ int load_module(void)
 		mynode = strtoul(ctg,NULL,0);
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
+			if (!strcmp(v->name,"streams")) continue;
 			client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
 			if (!client)
 			{
