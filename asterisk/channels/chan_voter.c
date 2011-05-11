@@ -195,8 +195,9 @@ typedef struct {
 } VOTER_REC;	
 
 typedef struct {
+	VTIME curtime;
 	uint8_t audio[FRAME_SIZE];
-	char str[160];
+	char str[152];
 } VOTER_STREAM;
 #pragma pack(pop)
 
@@ -1221,6 +1222,7 @@ static void *voter_reader(void *data)
 											memset(client->audio,0xff,-i);
 										}
 									}
+									stream.curtime = master_time;
 									memcpy(stream.audio,p->buf + AST_FRIENDLY_OFFSET,FRAME_SIZE);
 									sprintf(stream.str,"%s",maxclient->name);
 									for(client = clients; client; client = client->next)
