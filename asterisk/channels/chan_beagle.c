@@ -869,12 +869,12 @@ static int beagle_write(struct ast_channel *c, struct ast_frame *f)
 
 static struct ast_frame *beagle_read(struct ast_channel *c)
 {
-	int res,cd,sd,i,j,k,n,n0,n1,ismaster,chindex;
+	int res,cd,sd,i,j,k,m,n,n0,n1,ismaster,chindex;
 	unsigned int gv;
 	struct chan_beagle_pvt *o = c->tech_pvt;
 	struct ast_frame *f = &o->read_f,*f1,*f0;
 	struct ast_frame wf = { AST_FRAME_CONTROL };
-	short *sp,*sp0,*sp1;
+	short *sp,*sp0,*sp1,*sp2;
         snd_pcm_state_t state;
 	struct timeval tv,now;
 
@@ -892,288 +892,295 @@ static struct ast_frame *beagle_read(struct ast_channel *c)
 	f->frametype = AST_FRAME_NULL;
 	f->src = beagle_tech.type;
 
-	if (ismaster)
+	if (!ismaster) return f;
+
+	state = snd_pcm_state(alsa.icard);
+	if ((state != SND_PCM_STATE_PREPARED) && (state != SND_PCM_STATE_RUNNING)) {
+		snd_pcm_prepare(alsa.icard);
+	}
+
+	gettimeofday(&tv,NULL);
+
+	res = snd_pcm_readi(alsa.icard, beagle_read_buf,FRAME_SIZE);
+	if (res < 0)				/* audio data not ready, return a NULL frame */
 	{
-		state = snd_pcm_state(alsa.icard);
-		if ((state != SND_PCM_STATE_PREPARED) && (state != SND_PCM_STATE_RUNNING)) {
-			snd_pcm_prepare(alsa.icard);
-		}
-
-		gettimeofday(&tv,NULL);
-
-		res = snd_pcm_readi(alsa.icard, beagle_read_buf,FRAME_SIZE);
-		if (res < 0)				/* audio data not ready, return a NULL frame */
-		{
-	                return f;
-	        }
+                return f;
+        }
 #if DEBUG_CAPTURES == 1
-			if (frxcapraw) 
-				fwrite(beagle_read_buf,1,res,frxcapraw);
+	if (frxcapraw) fwrite(beagle_read_buf,1,res,frxcapraw);
 #endif
-		for(;;)
+	for(;;)
+	{
+		n0 = 0;
+		ast_mutex_lock(&pvts[0].txqlock);
+		AST_LIST_TRAVERSE(&pvts[0].txq, f1,frame_list) n0++;
+		ast_mutex_unlock(&pvts[0].txqlock);
+		n1 = 0;
+		ast_mutex_lock(&pvts[1].txqlock);
+		AST_LIST_TRAVERSE(&pvts[1].txq, f1,frame_list) n1++;
+		ast_mutex_unlock(&pvts[1].txqlock);
+		n = MAX(n0,n1);
+		if (n && ((n > 3) || (!o->txkeyed)))
 		{
-			n0 = 0;
-			ast_mutex_lock(&pvts[0].txqlock);
-			AST_LIST_TRAVERSE(&pvts[0].txq, f1,frame_list) n0++;
-			ast_mutex_unlock(&pvts[0].txqlock);
-			n1 = 0;
-			ast_mutex_lock(&pvts[1].txqlock);
-			AST_LIST_TRAVERSE(&pvts[1].txq, f1,frame_list) n1++;
-			ast_mutex_unlock(&pvts[1].txqlock);
-			n = MAX(n0,n1);
-			if (n && ((n > 3) || (!o->txkeyed)))
+			f0 = f1 = NULL;
+			if (n0)
 			{
-				f0 = f1 = NULL;
-				if (n0)
-				{
-					ast_mutex_lock(&pvts[0].txqlock);
-					f0 = AST_LIST_REMOVE_HEAD(&pvts[0].txq,frame_list);
-					ast_mutex_unlock(&pvts[0].txqlock);
-					n = f0->datalen;
-				}
-				if (n1)
-				{
-					ast_mutex_lock(&pvts[1].txqlock);
-					f1 = AST_LIST_REMOVE_HEAD(&pvts[1].txq,frame_list);
-					ast_mutex_unlock(&pvts[1].txqlock);
-					n = f1->datalen;
-				}
-				if (n0 && n1) n = MIN(f0->datalen,f1->datalen);
-				if (n > (FRAME_SIZE * 2)) n = FRAME_SIZE * 2;
-				sp = (short *) (beagle_write_buf);
-				sp0 = sp1 = NULL;
-				if (f0) sp0 = (short *) f0->data;
-				if (f1) sp1 = (short *) f1->data;
-				for(i = 0; i < (n / 2); i++)
-				{
-					if (f1) *sp++ = *sp1++;
-					else *sp++ = 0;						
-					if (f0) *sp++ = *sp0++;
-					else *sp++ = 0;					
-				}	
-				soundcard_writeframe((short *)beagle_write_buf);
-				if (f0) ast_frfree(f0);
-				if (f1) ast_frfree(f1);
-				continue;
+				ast_mutex_lock(&pvts[0].txqlock);
+				f0 = AST_LIST_REMOVE_HEAD(&pvts[0].txq,frame_list);
+				ast_mutex_unlock(&pvts[0].txqlock);
+				n = f0->datalen;
 			}
-			break;
-		}
-		gv = get_gpios();
-		pvts[0].rxhidsq = 0;
-		if (gv & MASK_GPIOS_COR0) pvts[0].rxhidsq = 1;
-		pvts[0].rxhidctcss = 0;
-		if (gv & MASK_GPIOS_CTCSS0) pvts[0].rxhidctcss = 1;
-		pvts[1].rxhidsq = 0;
-		if (gv & MASK_GPIOS_COR1) pvts[1].rxhidsq = 1;
-		pvts[1].rxhidctcss = 0;
-		if (gv & MASK_GPIOS_CTCSS1) pvts[1].rxhidctcss = 1;
-
-		ast_mutex_lock(&gpio_lock);
-		now = ast_tvnow();
-		j = ast_tvdiff_ms(now,gpio_then);
-		gpio_then = now;
-		/* make output inversion mask (for pulseage) */
-		gpio_lastmask = gpio_pulsemask;
-		gpio_pulsemask = 0;
-		for(i = 1; i <= 5; i++)
-		{
-			k = gpio_pulsetimer[i];
-			if (k)
+			if (n1)
 			{
-				k -= j;
-				if (k < 0) k = 0;
-				gpio_pulsetimer[i] = k;
+				ast_mutex_lock(&pvts[1].txqlock);
+				f1 = AST_LIST_REMOVE_HEAD(&pvts[1].txq,frame_list);
+				ast_mutex_unlock(&pvts[1].txqlock);
+				n = f1->datalen;
 			}
-			if (k) gpio_pulsemask |= gpios_mask[i];
+			if (n0 && n1) n = MIN(f0->datalen,f1->datalen);
+			if (n > (FRAME_SIZE * 2)) n = FRAME_SIZE * 2;
+			sp = (short *) (beagle_write_buf);
+			sp0 = sp1 = NULL;
+			if (f0) sp0 = (short *) f0->data;
+			if (f1) sp1 = (short *) f1->data;
+			for(i = 0; i < (n / 2); i++)
+			{
+				if (f1) *sp++ = *sp1++;
+				else *sp++ = 0;						
+				if (f0) *sp++ = *sp0++;
+				else *sp++ = 0;					
+			}	
+			soundcard_writeframe((short *)beagle_write_buf);
+			if (f0) ast_frfree(f0);
+			if (f1) ast_frfree(f1);
+			continue;
 		}
-		if (gpio_pulsemask != gpio_lastmask) /* if anything inverted (temporarily) */
-		{
-			gpio_val ^= gpio_lastmask ^ gpio_pulsemask;
-			set_gpios();
-		}
-		ast_mutex_unlock(&gpio_lock);
+		break;
 	}
-
-	o = c->tech_pvt;
-
-	cd = 1; /* assume CD */
-	if ((o->rxcdtype == CD_HID) && (!o->rxhidsq)) cd = 0;
-	else if ((o->rxcdtype == CD_HID_INVERT) && o->rxhidsq) cd = 0;
-
-	/* apply cd turn-on delay, if one specified */
-	if (o->rxondelay && cd && (o->rxoncnt++ < o->rxondelay)) cd = 0;
-	else if (!cd) o->rxoncnt = 0;
-
-	sd = 1; /* assume SD */
-	if ((o->rxsdtype == SD_HID) && (!o->rxhidctcss)) sd = 0;
-	else if ((o->rxsdtype == SD_HID_INVERT) && o->rxhidctcss) sd = 0;
-
-	o->rxkeyed = sd && cd && ((!o->lasttx) || o->radioduplex);
-
-	if (o->lastrx && (!o->rxkeyed))
-	{
-		o->lastrx = 0;
-		wf.subclass = AST_CONTROL_RADIO_UNKEY;
-		ast_queue_frame(o->owner, &wf);
-		if (o->debuglevel) ast_verbose("Channel %s RX UNKEY\n",o->name);
-	}
-	else if ((!o->lastrx) && (o->rxkeyed))
-	{
-		o->lastrx = 1;
-		wf.subclass = AST_CONTROL_RADIO_KEY;
-		ast_queue_frame(o->owner, &wf);
-		if (o->debuglevel) ast_verbose("Channel %s RX KEY\n",o->name);
-	}
-
-	n = o->txkeyed || o->txtestkey;
-	if (o->lasttx && (!n))
-	{
-		o->lasttx = 0;
-		ast_mutex_lock(&gpio_lock);
-		set_ptt(chindex,0);
-		ast_mutex_unlock(&gpio_lock);
-		if (o->debuglevel) ast_verbose("Channel %s TX UNKEY\n",o->name);
-	}
-	else if ((!o->lasttx) && n)
-	{
-		o->lasttx = 1;
-		ast_mutex_lock(&gpio_lock);
-		set_ptt(chindex,1);
-		ast_mutex_unlock(&gpio_lock);
-		if (o->debuglevel) ast_verbose("Channel %s TX KEY\n",o->name);
-	}
-
-	gv = get_gpios() & MASK_GPIOS_GPIOS;
+	gv = get_gpios();
+	pvts[0].rxhidsq = 0;
+	if (gv & MASK_GPIOS_COR0) pvts[0].rxhidsq = 1;
+	pvts[0].rxhidctcss = 0;
+	if (gv & MASK_GPIOS_CTCSS0) pvts[0].rxhidctcss = 1;
+	pvts[1].rxhidsq = 0;
+	if (gv & MASK_GPIOS_COR1) pvts[1].rxhidsq = 1;
+	pvts[1].rxhidctcss = 0;
+	if (gv & MASK_GPIOS_CTCSS1) pvts[1].rxhidctcss = 1;
+	ast_mutex_lock(&gpio_lock);
+	now = ast_tvnow();
+	j = ast_tvdiff_ms(now,gpio_then);
+	gpio_then = now;
+	/* make output inversion mask (for pulseage) */
+	gpio_lastmask = gpio_pulsemask;
+	gpio_pulsemask = 0;
 	for(i = 1; i <= 5; i++)
 	{
-		/* if a valid input bit, dont clear it */
-		if ((o->gpios[i]) && (!strcasecmp(o->gpios[i],"in"))) continue;
-		gv &= ~(gpios_mask[i]); /* clear the bit, since its not an input */
-	}
-	if (((!o->had_gpios_in) || (o->last_gpios_in != gv)) &&
-		(!ast_tvzero(o->starttime)) && (ast_tvdiff_ms(ast_tvnow(),o->starttime) >= 550))
-	{
-		char buf1[100];
-		struct ast_frame fr;
-
-		for(i = 1; i <= 5; i++)
+		k = gpio_pulsetimer[i];
+		if (k)
 		{
-			/* skip if not specified */
-			if (!o->gpios[i]) continue;
-			/* skip if not input */
-			if (strcasecmp(o->gpios[i],"in")) continue;
-			/* if bit has changed, or never reported */
-			if ((!o->had_gpios_in) || ((o->last_gpios_in & gpios_mask[i]) != (gv & (gpios_mask[i]))))
-			{
-				sprintf(buf1,"GPIO%d %d",i,(gv & (gpios_mask[i])) ? 1 : 0);
-				memset(&fr,0,sizeof(fr));
-				fr.data =  buf1;
-				fr.datalen = strlen(buf1) + 1;
-				fr.samples = 0;
-				fr.frametype = AST_FRAME_TEXT;
-				fr.subclass = 0;
-				fr.src = "chan_beagle";
-				fr.offset = 0;
-				fr.mallocd=0;
-				fr.delivery.tv_sec = 0;
-				fr.delivery.tv_usec = 0;
-				ast_queue_frame(o->owner,&fr);
-			}
+			k -= j;
+			if (k < 0) k = 0;
+			gpio_pulsetimer[i] = k;
 		}
-		o->had_gpios_in = 1;
-		o->last_gpios_in = gv;
+		if (k) gpio_pulsemask |= gpios_mask[i];
 	}
+	if (gpio_pulsemask != gpio_lastmask) /* if anything inverted (temporarily) */
+	{
+		gpio_val ^= gpio_lastmask ^ gpio_pulsemask;
+		set_gpios();
+	}
+	ast_mutex_unlock(&gpio_lock);
+
 	sp = (short *)beagle_read_buf;
-	if (!chindex) sp++;
-	sp1 = (short *)(o->beagle_read_frame_buf + AST_FRIENDLY_OFFSET);
+	sp1 = (short *)(pvts[1].beagle_read_frame_buf + AST_FRIENDLY_OFFSET);
+	sp2 = (short *)(pvts[0].beagle_read_frame_buf + AST_FRIENDLY_OFFSET);
 	for(n = 0; n < FRAME_SIZE; n++)
 	{
-		if (o->plfilter && o->deemphasis)
-			*sp1++ = hpass6(deemph(*sp++,&o->destate),o->hpx,o->hpy);
-		else if (o->deemphasis)
-			*sp1++ = deemph(*sp++,&o->destate);
-		else if (o->plfilter)
-			*sp1++ = hpass(*sp++,o->hpx,o->hpy);
+		if (pvts[1].plfilter && pvts[1].deemphasis)
+			*sp1++ = hpass6(deemph(*sp++,&pvts[1].destate),pvts[1].hpx,pvts[1].hpy);
+		else if (pvts[1].deemphasis)
+			*sp1++ = deemph(*sp++,&pvts[1].destate);
+		else if (pvts[1].plfilter)
+			*sp1++ = hpass(*sp++,pvts[1].hpx,pvts[1].hpy);
 		else
 			*sp1++ = *sp++;
-		sp++;
+		if (pvts[0].plfilter && pvts[0].deemphasis)
+			*sp2++ = hpass6(deemph(*sp++,&pvts[0].destate),pvts[0].hpx,pvts[0].hpy);
+		else if (pvts[0].deemphasis)
+			*sp2++ = deemph(*sp++,&pvts[0].destate);
+		else if (pvts[0].plfilter)
+			*sp2++ = hpass(*sp++,pvts[0].hpx,pvts[0].hpy);
+		else
+			*sp2++ = *sp++;
 	}			
-	f->offset = AST_FRIENDLY_OFFSET;
-        if (ismaster) readpos = 0;		       /* reset read pointer for next frame */
-        if (c->_state != AST_STATE_UP)  /* drop data if frame is not up */
-                return f;
-        /* ok we can build and deliver the frame to the caller */
-        f->frametype = AST_FRAME_VOICE;
-        f->subclass = AST_FORMAT_SLINEAR;
-        f->samples = FRAME_SIZE;
-        f->datalen = FRAME_SIZE * 2;
-        f->data = o->beagle_read_frame_buf + AST_FRIENDLY_OFFSET;
-//	if (!o->rxkeyed) memset(f->data,0,f->datalen);
-	if (o->usedtmf && o->dsp)
+        readpos = 0;		       /* reset read pointer for next frame */
+	for(m = 0; m < 2; m++)
 	{
-	    f1 = ast_dsp_process(c,o->dsp,f);
-	    if ((f1->frametype == AST_FRAME_DTMF_END) ||
-	      (f1->frametype == AST_FRAME_DTMF_BEGIN))
-	    {
-		if ((f1->subclass == 'm') || (f1->subclass == 'u'))
-		{
-			f1->frametype = AST_FRAME_NULL;
-			f1->subclass = 0;
-			return(f1);
-		}
-		if (f1->frametype == AST_FRAME_DTMF_END)
-			ast_log(LOG_NOTICE,"Got DTMF char %c\n",f1->subclass);
-		return(f1);
-	    }
-	}
-        if (o->rxvoiceadj > 1.0) {  /* scale and clip values */
-                int i, x;
-		float f1;
-                int16_t *p = (int16_t *) f->data;
+		o = &pvts[m];
 
-                for (i = 0; i < f->samples; i++) {
-			f1 = (float)p[i] * o->rxvoiceadj;
-			x = (int)f1;
-                        if (x > 32767)
-                                x = 32767;
-                        else if (x < -32768)
-                                x = -32768;
-                        p[i] = x;
-                }
-        }
-	if (o->measure_enabled)
-	{
-		int i;
-		int32_t accum;
-                int16_t *p = (int16_t *) f->data;
+		if (!o->owner) continue;
 
-		for(i = 0; i < f->samples; i++)
+		cd = 1; /* assume CD */
+		if ((o->rxcdtype == CD_HID) && (!o->rxhidsq)) cd = 0;
+		else if ((o->rxcdtype == CD_HID_INVERT) && o->rxhidsq) cd = 0;
+
+		/* apply cd turn-on delay, if one specified */
+		if (o->rxondelay && cd && (o->rxoncnt++ < o->rxondelay)) cd = 0;
+		else if (!cd) o->rxoncnt = 0;
+
+		sd = 1; /* assume SD */
+		if ((o->rxsdtype == SD_HID) && (!o->rxhidctcss)) sd = 0;
+		else if ((o->rxsdtype == SD_HID_INVERT) && o->rxhidctcss) sd = 0;
+
+		o->rxkeyed = sd && cd && ((!o->lasttx) || o->radioduplex);
+
+		if (o->lastrx && (!o->rxkeyed))
 		{
-			accum = p[i];
-			if (accum > o->amax)
-			{
-				o->amax = accum;
-				o->discounteru = o->discfactor;
-			}
-			else if (--o->discounteru <= 0)
-			{
-				o->discounteru = o->discfactor;
-				o->amax = (int32_t)((o->amax * 32700) / 32768);
-			}
-			if (accum < o->amin)
-			{
-				o->amin = accum;
-				o->discounterl = o->discfactor;
-			}
-			else if (--o->discounterl <= 0)
-			{
-				o->discounterl = o->discfactor;
-				o->amin= (int32_t)((o->amin * 32700) / 32768);
-			}
+			o->lastrx = 0;
+			wf.subclass = AST_CONTROL_RADIO_UNKEY;
+			ast_queue_frame(o->owner, &wf);
+			if (o->debuglevel) ast_verbose("Channel %s RX UNKEY\n",o->name);
 		}
-		o->apeak = (int32_t)(o->amax - o->amin) / 2;
+		else if ((!o->lastrx) && (o->rxkeyed))
+		{
+			o->lastrx = 1;
+			wf.subclass = AST_CONTROL_RADIO_KEY;
+			ast_queue_frame(o->owner, &wf);
+			if (o->debuglevel) ast_verbose("Channel %s RX KEY\n",o->name);
+		}
+
+		n = o->txkeyed || o->txtestkey;
+		if (o->lasttx && (!n))
+		{
+			o->lasttx = 0;
+			ast_mutex_lock(&gpio_lock);
+			set_ptt(m,0);
+			ast_mutex_unlock(&gpio_lock);
+			if (o->debuglevel) ast_verbose("Channel %s TX UNKEY\n",o->name);
+		}
+		else if ((!o->lasttx) && n)
+		{
+			o->lasttx = 1;
+			ast_mutex_lock(&gpio_lock);
+			set_ptt(m,1);
+			ast_mutex_unlock(&gpio_lock);
+			if (o->debuglevel) ast_verbose("Channel %s TX KEY\n",o->name);
+		}
+
+		gv = get_gpios() & MASK_GPIOS_GPIOS;
+		for(i = 1; i <= 5; i++)
+		{
+			/* if a valid input bit, dont clear it */
+			if ((o->gpios[i]) && (!strcasecmp(o->gpios[i],"in"))) continue;
+			gv &= ~(gpios_mask[i]); /* clear the bit, since its not an input */
+		}
+		if (((!o->had_gpios_in) || (o->last_gpios_in != gv)) &&
+			(!ast_tvzero(o->starttime)) && (ast_tvdiff_ms(ast_tvnow(),o->starttime) >= 550))
+		{
+			char buf1[100];
+			struct ast_frame fr;
+
+			for(i = 1; i <= 5; i++)
+			{
+				/* skip if not specified */
+				if (!o->gpios[i]) continue;
+				/* skip if not input */
+				if (strcasecmp(o->gpios[i],"in")) continue;
+				/* if bit has changed, or never reported */
+				if ((!o->had_gpios_in) || ((o->last_gpios_in & gpios_mask[i]) != (gv & (gpios_mask[i]))))
+				{
+					sprintf(buf1,"GPIO%d %d",i,(gv & (gpios_mask[i])) ? 1 : 0);
+					memset(&fr,0,sizeof(fr));
+					fr.data =  buf1;
+					fr.datalen = strlen(buf1) + 1;
+					fr.samples = 0;
+					fr.frametype = AST_FRAME_TEXT;
+					fr.subclass = 0;
+					fr.src = "chan_beagle";
+					fr.offset = 0;
+					fr.mallocd=0;
+					fr.delivery.tv_sec = 0;
+					fr.delivery.tv_usec = 0;
+					ast_queue_frame(o->owner,&fr);
+				}
+			}
+			o->had_gpios_in = 1;
+			o->last_gpios_in = gv;
+		}
+		f->offset = AST_FRIENDLY_OFFSET;
+	        if (c->_state != AST_STATE_UP)  /* drop data if frame is not up */
+			continue;
+	        /* ok we can build and deliver the frame to the caller */
+	        f->frametype = AST_FRAME_VOICE;
+	        f->subclass = AST_FORMAT_SLINEAR;
+	        f->samples = FRAME_SIZE;
+	        f->datalen = FRAME_SIZE * 2;
+	        f->data = o->beagle_read_frame_buf + AST_FRIENDLY_OFFSET;
+//		if (!o->rxkeyed) memset(f->data,0,f->datalen);
+		if (o->usedtmf && o->dsp)
+		{
+		    f1 = ast_dsp_process(c,o->dsp,f);
+		    if ((f1->frametype == AST_FRAME_DTMF_END) ||
+		      (f1->frametype == AST_FRAME_DTMF_BEGIN))
+		    {
+			if ((f1->subclass == 'm') || (f1->subclass == 'u')) continue;
+			if (f1->frametype == AST_FRAME_DTMF_END)
+				ast_log(LOG_NOTICE,"Got DTMF char %c\n",f1->subclass);
+			ast_queue_frame(o->owner,f1);
+			continue;
+		    }
+		}
+	        if (o->rxvoiceadj > 1.0) {  /* scale and clip values */
+	                int i, x;
+			float f1;
+	                int16_t *p = (int16_t *) f->data;
+
+	                for (i = 0; i < f->samples; i++) {
+				f1 = (float)p[i] * o->rxvoiceadj;
+				x = (int)f1;
+	                        if (x > 32767)
+	                                x = 32767;
+	                        else if (x < -32768)
+	                                x = -32768;
+	                        p[i] = x;
+	                }
+	        }
+		if (o->measure_enabled)
+		{
+			int i;
+			int32_t accum;
+	                int16_t *p = (int16_t *) f->data;
+
+			for(i = 0; i < f->samples; i++)
+			{
+				accum = p[i];
+				if (accum > o->amax)
+				{
+					o->amax = accum;
+					o->discounteru = o->discfactor;
+				}
+				else if (--o->discounteru <= 0)
+				{
+					o->discounteru = o->discfactor;
+					o->amax = (int32_t)((o->amax * 32700) / 32768);
+				}
+				if (accum < o->amin)
+				{
+					o->amin = accum;
+					o->discounterl = o->discfactor;
+				}
+				else if (--o->discounterl <= 0)
+				{
+					o->discounterl = o->discfactor;
+					o->amin= (int32_t)((o->amin * 32700) / 32768);
+				}
+			}
+			o->apeak = (int32_t)(o->amax - o->amin) / 2;
+		}
+	        f->offset = AST_FRIENDLY_OFFSET;
+		ast_queue_frame(o->owner,f);
 	}
-        f->offset = AST_FRIENDLY_OFFSET;
+	f->frametype = AST_FRAME_NULL;
         return f;
 }
 
@@ -1282,7 +1289,18 @@ static struct ast_channel *beagle_new(struct chan_beagle_pvt *o, char *ext, char
 	if (c == NULL)
 		return NULL;
 	c->tech = &beagle_tech;
-	c->fds[0] = readdev;
+
+	if (o == &pvts[0])
+	{
+		if (pvts[1].owner) pvts[1].owner->fds[0] = -1;
+		c->fds[0] = readdev;
+	}
+	else
+	{
+		if (!pvts[0].owner) 
+			c->fds[0] = readdev;
+	}
+
 	c->nativeformats = AST_FORMAT_SLINEAR;
 	c->readformat = AST_FORMAT_SLINEAR;
 	c->writeformat = AST_FORMAT_SLINEAR;
