@@ -128,6 +128,7 @@ Voter Channel test modes:
 #include "asterisk/translate.h"
 #include "asterisk/astdb.h"
 #include "asterisk/cli.h"
+#include "asterisk/ulaw.h"
 
 
 #ifdef	OLD_ASTERISK
@@ -143,6 +144,8 @@ Voter Channel test modes:
 #define	QUOTECHR 34
 
 #define	MAXSTREAMS 50
+
+#define	NTAPS_PL 6
 
 static const char vdesc[] = "radio Voter channel driver";
 static char type[] = "voter";
@@ -222,6 +225,9 @@ struct voter_pvt {
 	char lastwon[VOTER_NAME_LEN];
 	char *streams[MAXSTREAMS];
 	int nstreams;
+	float	hpx[NTAPS_PL + 1];
+	float	hpy[NTAPS_PL + 1];
+	char plfilter;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -414,16 +420,23 @@ static int32_t crc32_bufs(char *buf, char *buf1)
         return ~oldcrc32;
 }
 
-#if 0
-static void strupr(char *str)
+/* IIR 6 pole High pass filter, 300 Hz corner with 0.5 db ripple */
+
+#define GAIN1   1.745882764e+00
+
+static int16_t hpass6(int16_t input,float *xv,float *yv)
 {
-        while (*str)
-           {
-                *str = toupper(*str);
-                str++;
-           }
-        return;
+        xv[0] = xv[1]; xv[1] = xv[2]; xv[2] = xv[3]; xv[3] = xv[4]; xv[4] = xv[5]; xv[5] = xv[6];
+        xv[6] = ((float)input) / GAIN1;
+        yv[0] = yv[1]; yv[1] = yv[2]; yv[2] = yv[3]; yv[3] = yv[4]; yv[4] = yv[5]; yv[5] = yv[6];
+        yv[6] =   (xv[0] + xv[6]) - 6 * (xv[1] + xv[5]) + 15 * (xv[2] + xv[4])
+                     - 20 * xv[3]
+                     + ( -0.3491861578 * yv[0]) + (  2.3932556573 * yv[1])
+                     + ( -6.9905126572 * yv[2]) + ( 11.0685981760 * yv[3])
+                     + ( -9.9896695552 * yv[4]) + (  4.8664511065 * yv[5]);
+        return((int)yv[6]);
 }
+
 
 /*
 * Break up a delimited string into a table of substrings
@@ -433,8 +446,6 @@ static void strupr(char *str)
 * limit- maximum number of substrings to process
 */
 	
-#endif
-
 static int finddelim(char *str, char *strp[], int limit)
 {
 int     i,l,inquo;
@@ -673,6 +684,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 			cp = ast_strdup(val);
 			p->nstreams = finddelim(cp,p->streams,MAXSTREAMS);
 		}		
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
+		if (val) p->plfilter = ast_true(val);
 	}
 	ast_config_destroy(cfg);
 	return tmp;
@@ -1222,6 +1235,15 @@ static void *voter_reader(void *data)
 											memset(client->audio,0xff,-i);
 										}
 									}
+									if (p->plfilter) 
+									{
+										for(i = 0; i < FRAME_SIZE; i++)
+										{
+											j = p->buf[AST_FRIENDLY_OFFSET + i] & 0xff;
+											p->buf[AST_FRIENDLY_OFFSET + i] = 
+												AST_LIN2MU(hpass6(AST_MULAW(j),p->hpx,p->hpy));
+										}
+									}
 									stream.curtime = master_time;
 									memcpy(stream.audio,p->buf + AST_FRIENDLY_OFFSET,FRAME_SIZE);
 									sprintf(stream.str,"%s",maxclient->name);
@@ -1458,6 +1480,7 @@ int load_module(void)
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
 			if (!strcmp(v->name,"streams")) continue;
+			if (!strcmp(v->name,"plfilter")) continue;
 			client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
 			if (!client)
 			{
