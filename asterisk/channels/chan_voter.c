@@ -1254,7 +1254,12 @@ static void *voter_reader(void *data)
 									}
 									for(i = 0; i < p->nstreams; i++)
 									{
-										cp = ast_strdupa(p->streams[i]);
+										cp = ast_strdup(p->streams[i]);
+										if (!cp)
+										{
+											ast_log(LOG_NOTICE,"Malloc() failed!!\n");
+											break;
+										}
 										cp1 = strchr(cp,':');
 										if (cp1)
 										{
@@ -1265,6 +1270,7 @@ static void *voter_reader(void *data)
 										sin_stream.sin_addr.s_addr = inet_addr(cp);
 										sin_stream.sin_port = htons(j);
 										sendto(udp_socket, &stream, sizeof(stream),0,(struct sockaddr *)&sin_stream,sizeof(sin_stream));
+										ast_free(cp);
 									}
 									if (strcmp(maxclient->name,p->lastwon))
 									{
