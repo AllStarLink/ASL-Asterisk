@@ -939,7 +939,7 @@ static void *voter_reader(void *data)
 					{
 						timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 						strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
-						ast_verbose("Time:      %s.%03d, RSSI: %d\n",timestr,ntohl(vph->curtime.vtime_nsec) / 1000000,(unsigned char)*(buf + sizeof(VOTER_PACKET_HEADER)));
+						ast_verbose("Time:      %s.%03d, (%s) RSSI: %d\n",timestr,ntohl(vph->curtime.vtime_nsec) / 1000000,client->name,(unsigned char)*(buf + sizeof(VOTER_PACKET_HEADER)));
 					}
 					if (client)
 					{
@@ -957,8 +957,7 @@ static void *voter_reader(void *data)
 						if (p) /* if we found 'em */
 						{
 							long long btime,ptime,difftime;
-							int index,mdiff,mmax;
-							struct timeval mtv;
+							int index;
 
 
 							if (client->ismaster)
@@ -970,13 +969,6 @@ static void *voter_reader(void *data)
 							else
 							{
 								if (!master_time.vtime_sec) continue;
-								gettimeofday(&tv,NULL);
-								mtv.tv_sec = master_time.vtime_sec;
-								mtv.tv_usec = master_time.vtime_nsec / 1000;
-								if ((mtv.tv_sec <= (tv.tv_sec - 2)) || (mtv.tv_sec >= (tv.tv_sec + 2))) continue;
-								mdiff = ast_tvdiff_ms(tv,mtv);
-								mmax = buflen / 8;
-								if ((mdiff > mmax) || (mdiff < -mmax)) continue;
 							}
 							btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
 							btime += 40000000;
