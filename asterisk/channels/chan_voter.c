@@ -140,10 +140,13 @@ Voter Channel test modes:
 
 #define	RX_TIMEOUT_MS 200
 
+#define	DEFAULT_LINGER 6
+
 #define	DELIMCHR ','
 #define	QUOTECHR 34
 
 #define	MAXSTREAMS 50
+#define	MAXTHRESHOLDS 20
 
 #define	NTAPS_PL 6
 
@@ -208,34 +211,6 @@ typedef struct {
 #define VOTER_PAYLOAD_ULAW	1
 #define	VOTER_PAYLOAD_GPS	2
 
-struct voter_pvt {
-	struct ast_channel *owner;
-	unsigned int nodenum;				/* node # associated with instance */
-	struct voter_pvt *next;
-	struct ast_frame fr;
-	char buf[FRAME_SIZE + AST_FRIENDLY_OFFSET];
-	char txkey;
-	char rxkey;
-	struct ast_module_user *u;
-	struct timeval lastrxtime;
-	int drainindex;
-	char drained_once;
-	int testcycle;
-	int testindex;
-	char lastwon[VOTER_NAME_LEN];
-	char *streams[MAXSTREAMS];
-	int nstreams;
-	float	hpx[NTAPS_PL + 1];
-	float	hpy[NTAPS_PL + 1];
-	char plfilter;
-#ifdef 	OLD_ASTERISK
-	AST_LIST_HEAD(, ast_frame) txq;
-#else
-	AST_LIST_HEAD_NOLOCK(, ast_frame) txq;
-#endif
-	ast_mutex_t  txqlock;
-};
-
 struct voter_client {
 	uint32_t nodenum;
 	uint32_t digest;
@@ -251,6 +226,42 @@ struct voter_client {
 	long long dtime;
 	uint8_t lastrssi;
 } ;
+
+struct voter_pvt {
+	struct ast_channel *owner;
+	unsigned int nodenum;				/* node # associated with instance */
+	struct voter_pvt *next;
+	struct ast_frame fr;
+	char buf[FRAME_SIZE + AST_FRIENDLY_OFFSET];
+	char txkey;
+	char rxkey;
+	struct ast_module_user *u;
+	struct timeval lastrxtime;
+	int drainindex;
+	char drained_once;
+	int testcycle;
+	int testindex;
+	struct voter_client *lastwon;
+	char *streams[MAXSTREAMS];
+	int nstreams;
+	float	hpx[NTAPS_PL + 1];
+	float	hpy[NTAPS_PL + 1];
+	char plfilter;
+	int linger;
+	uint8_t rssi_thresh[MAXTHRESHOLDS];
+	uint16_t count_thresh[MAXTHRESHOLDS];
+	uint16_t linger_thresh[MAXTHRESHOLDS];
+	int nthresholds;
+	int threshold;
+	uint16_t threshcount;
+	uint16_t lingercount;
+#ifdef 	OLD_ASTERISK
+	AST_LIST_HEAD(, ast_frame) txq;
+#else
+	AST_LIST_HEAD_NOLOCK(, ast_frame) txq;
+#endif
+	ast_mutex_t  txqlock;
+};
 
 #ifdef	OLD_ASTERISK
 static int usecnt;
@@ -603,10 +614,10 @@ static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat;
+	int oldformat,i;
 	struct voter_pvt *p;
 	struct ast_channel *tmp = NULL;
-	char *val,*cp;
+	char *val,*cp,*cp1,*cp2,*strs[MAXTHRESHOLDS];
 	struct ast_config *cfg = NULL;
 	
 	oldformat = format;
@@ -678,14 +689,39 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 #endif
                 ast_log(LOG_ERROR, "Unable to load config %s\n", config);
         } else {
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"linger"); 
+		if (val) p->linger = atoi(val); else p->linger = DEFAULT_LINGER;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
+		if (val) p->plfilter = ast_true(val);
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
 		if (val)
 		{
 			cp = ast_strdup(val);
 			p->nstreams = finddelim(cp,p->streams,MAXSTREAMS);
 		}		
-	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
-		if (val) p->plfilter = ast_true(val);
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
+		if (val)
+		{
+			cp = ast_strdup(val);
+			p->nthresholds = finddelim(cp,strs,MAXTHRESHOLDS);
+			for(i = 0; i < p->nthresholds; i++)
+			{
+				cp1 = strchr(strs[i],'=');
+				p->linger_thresh[i] = p->linger;
+				if (cp1)
+				{
+					*cp1 = 0;
+					cp2 = strchr(cp1 + 1,':');
+					if (cp2)
+					{
+						*cp2 = 0;
+						if (cp2[1]) p->linger_thresh[i] = (uint16_t)atoi(cp2 + 1);
+					}
+					if (cp1[1]) p->count_thresh[i] = (uint16_t)atoi(cp1 + 1);
+				}
+				p->rssi_thresh[i] = (uint8_t)atoi(strs[i]);
+			}
+		}		
 	}
 	ast_config_destroy(cfg);
 	return tmp;
@@ -913,7 +949,7 @@ static void *voter_reader(void *data)
 				fr.delivery.tv_usec = 0;
 				ast_queue_frame(p->owner,&fr);
 				p->rxkey = 0;
-				p->lastwon[0] = 0;
+				p->lastwon = NULL;
 			}
 		}
 		if (i == 0) continue;
@@ -1084,6 +1120,9 @@ static void *voter_reader(void *data)
 									}
 									if (!maxclient) /* if nothing there */
 									{
+										p->threshold = 0;
+										p->threshcount = 0;
+										p->lingercount = 0;
 										memset(&fr,0,sizeof(struct ast_frame));
 									        fr.frametype = 0;
 									        fr.subclass = 0;
@@ -1100,6 +1139,53 @@ static void *voter_reader(void *data)
 										ast_mutex_unlock(&voter_lock);
 										ast_queue_frame(p->owner,&fr);
 										continue;
+									}
+									/* if not on same client, and we have thresholds */
+									if (p->lastwon /* && (p->lastwon != maxclient) */ && p->nthresholds /* && (!p->lingercount) */)
+									{
+										/* go thru all the thresholds */
+										for(i = 0; i < p->nthresholds; i++)
+										{
+											/* if meets criteria */
+											if (p->lastwon->lastrssi >= p->rssi_thresh[i])
+											{
+												/* if not at same threshold, change to new one */
+												if ((i + 1) != p->threshold)
+												{
+													p->threshold = i + 1;
+													p->threshcount = 0;
+													if (debug >= 3) ast_verbose("New threshold %d, client %s, rssi %d\n",p->threshold,p->lastwon->name,p->lastwon->lastrssi);
+												} 
+											 	/* at the same threshold still, if count is enabled and is met */
+												else if (p->count_thresh[i] && (p->threshcount++ >= p->count_thresh[i]))
+												{
+													if (debug >= 3) ast_verbose("Threshold %d time (%d) excedded, client %s, rssi %d\n",p->threshold,p->count_thresh[i],p->lastwon->name,p->lastwon->lastrssi);
+													p->threshold = 0;
+													p->threshcount = 0;
+													p->lingercount = 0;
+													continue;
+												}
+												p->lingercount = 0;
+												maxclient = p->lastwon;
+												maxrssi = maxclient->lastrssi;
+												break;
+											}
+											/* if doesnt match any criteria */
+											if (i == (p->nthresholds - 1))
+											{
+												if ((debug >= 3) && p->threshold) ast_verbose("Nothing matches criteria any more\n");
+												if (p->threshold) p->lingercount = p->linger_thresh[p->threshold - 1];
+												p->threshold = 0;
+												p->threshcount = 0;
+											}
+										}
+									}
+									if (p->lingercount) 
+									{
+										if (debug >= 3) ast_verbose("Lingering on client %s, rssi %d, Maxclient is %s, rssi %d\n",p->lastwon->name,p->lastwon->lastrssi,maxclient->name,maxrssi);
+										p->lingercount--;
+										maxclient = p->lastwon;
+										maxrssi = maxclient->lastrssi;
 									}
 									/* if we are in test mode, we need to artifically affect the vote outcome */
 									if (voter_test < 0) /* force explicit selection */
@@ -1163,6 +1249,9 @@ static void *voter_reader(void *data)
 									}
 									if (!maxclient) /* if nothing there */
 									{
+										p->threshold = 0;
+										p->threshcount = 0;
+										p->lingercount = 0;
 										memset(&fr,0,sizeof(struct ast_frame));
 									        fr.frametype = 0;
 									        fr.subclass = 0;
@@ -1264,9 +1353,9 @@ static void *voter_reader(void *data)
 										sendto(udp_socket, &stream, sizeof(stream),0,(struct sockaddr *)&sin_stream,sizeof(sin_stream));
 										ast_free(cp);
 									}
-									if (strcmp(maxclient->name,p->lastwon))
+									if (maxclient != p->lastwon)
 									{
-										strcpy(p->lastwon,maxclient->name);
+										p->lastwon = maxclient;
 										if (debug > 0)
 											ast_verbose("Voter client %s selected for node %d\n",maxclient->name,p->nodenum);
 										memset(&fr,0,sizeof(fr));
@@ -1478,7 +1567,9 @@ int load_module(void)
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
 			if (!strcmp(v->name,"streams")) continue;
+			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
+			if (!strcmp(v->name,"linger")) continue;
 			client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
 			if (!client)
 			{
