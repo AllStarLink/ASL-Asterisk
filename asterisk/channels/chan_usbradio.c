@@ -154,6 +154,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define C108_PRODUCT_ID  	0x000c
 #define C108AH_PRODUCT_ID  	0x013c
 #define C119_PRODUCT_ID  	0x0008
+#define C119A_PRODUCT_ID  	0x013a
 #define N1KDO_PRODUCT_ID  	0x6a00
 #define C108_HID_INTERFACE	3
 
@@ -1072,6 +1073,7 @@ static struct usb_device *hid_device_init(char *desired_device)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
@@ -1146,6 +1148,7 @@ static int hid_device_mklist(void)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
@@ -1284,7 +1287,7 @@ int	i;
 		o->hid_io_ctcss_loc 	=  0;	/* VOL UP CTCSS */
 		o->hid_io_ptt 		=  4;  	/* GPIO 3 is PTT */
 		o->hid_gpio_loc 	=  1;  	/* For ALL GPIO */
-		o->valid_gpios		=  11;   /* for GPIO 1,2,4 */
+		o->valid_gpios		=  0xfb;   /* for GPIO 1,2,4,5,6,7,8 (5,6,7,8 for CM-119 only) */
 	}
 	else if(o->hdwtype==2)	//NHRC (N1KDO) (dudeusb w/o user GPIO)
 	{
@@ -1318,7 +1321,7 @@ int	i;
 		/* skip if not out */
 		if (strncasecmp(o->gpios[i],"out",3)) continue;
 		/* skip if PTT */
-		if (i & o->hid_io_ptt)
+		if ((1 << i) & o->hid_io_ptt)
 		{
 			ast_log(LOG_ERROR,"You can't specify gpio%d, since its the PTT!!!\n",i + 1);
 			continue;
@@ -1775,7 +1778,7 @@ static void *hidthread(void *arg)
 			j = buf[o->hid_gpio_loc]; /* get the GPIO info */
 			/* if is a CM108AH, map the "HOOK" bit (which used to
 			   be GPIO2 in the CM108 into the GPIO position */
-				if (o->devtype != C108_PRODUCT_ID)
+				if (o->devtype == C108AH_PRODUCT_ID)
 			{
 				j |= 2;  /* set GPIO2 bit */
 				/* if HOOK is asserted, clear GPIO bit */
