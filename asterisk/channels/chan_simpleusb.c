@@ -124,6 +124,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define C108AH_PRODUCT_ID  	0x013c
 #define N1KDO_PRODUCT_ID  	0x6a00
 #define C119_PRODUCT_ID  	0x0008
+#define C119A_PRODUCT_ID  	0x013a
 #define C108_HID_INTERFACE	3
 
 #define HID_REPORT_GET		0x01
@@ -910,6 +911,7 @@ static struct usb_device *hid_device_init(char *desired_device)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
@@ -993,6 +995,7 @@ static int hid_device_mklist(void)
                   == C108_VENDOR_ID) &&
 		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
+		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
 		{
