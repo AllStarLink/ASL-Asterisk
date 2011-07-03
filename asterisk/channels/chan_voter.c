@@ -129,6 +129,7 @@ Voter Channel test modes:
 #include "asterisk/astdb.h"
 #include "asterisk/cli.h"
 #include "asterisk/ulaw.h"
+#include "asterisk/dsp.h"
 
 
 #ifdef	OLD_ASTERISK
@@ -255,6 +256,8 @@ struct voter_pvt {
 	int threshold;
 	uint16_t threshcount;
 	uint16_t lingercount;
+	struct ast_dsp *dsp;
+	struct ast_trans_pvt *xpath;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -520,6 +523,8 @@ static int voter_hangup(struct ast_channel *ast)
 		ast_log(LOG_WARNING, "Asked to hangup channel not connected\n");
 		return 0;
 	}
+	if (p->dsp) ast_dsp_free(p->dsp);
+	if (p->xpath) ast_translator_free_path(p->xpath);
 	ast_mutex_lock(&voter_lock);
 	for(q = pvts; q; q = q->next)
 	{
@@ -635,6 +640,28 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	memset(p, 0, sizeof(struct voter_pvt));
 	p->nodenum = strtoul((char *)data,NULL,0);
 	ast_mutex_init(&p->txqlock);
+	p->dsp = ast_dsp_new();
+	if (!p->dsp)
+	{
+		ast_log(LOG_ERROR,"Cannot get DSP!!\n");
+		ast_free(p);
+		return NULL;
+	}
+#ifdef  NEW_ASTERISK
+        ast_dsp_set_features(p->dsp,DSP_FEATURE_DIGIT_DETECT);
+        ast_dsp_set_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#else
+        ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
+        ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#endif
+	p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
+	if (!p->xpath)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
 #ifdef	OLD_ASTERISK
 	tmp = ast_channel_alloc(1);
 	if (!tmp)
@@ -887,8 +914,8 @@ static void *voter_reader(void *data)
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
-	int i,j,k,n,maxrssi;
-	struct ast_frame *f1,fr;
+	int i,j,k,n,x,maxrssi;
+	struct ast_frame *f1,*f2,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
@@ -1403,7 +1430,31 @@ static void *voter_reader(void *data)
 								        fr.mallocd = 0;
 								        fr.delivery.tv_sec = 0;
 								        fr.delivery.tv_usec = 0;
-									ast_queue_frame(p->owner,&fr);
+									x = 0;
+									if (p->dsp)
+									{
+										f2 = ast_translate(p->xpath,&fr,0);
+										f1 = ast_dsp_process(NULL,p->dsp,f2);
+										ast_frfree(f2);
+#ifdef	OLD_ASTERISK
+										if (f1->frametype == AST_FRAME_DTMF)
+#else
+										if ((f1->frametype == AST_FRAME_DTMF_END) ||
+											(f1->frametype == AST_FRAME_DTMF_BEGIN))
+#endif
+										{
+											if ((f1->subclass != 'm') && (f1->subclass != 'u'))
+											{
+#ifndef	OLD_ASTERISK
+												if (f1->frametype == AST_FRAME_DTMF_END)
+#endif
+													ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f1->subclass);
+												ast_queue_frame(p->owner,f1);
+												x = 1;
+											}
+										}
+									} 
+									if (!x) ast_queue_frame(p->owner,&fr);
 								}
 							}
 						}
