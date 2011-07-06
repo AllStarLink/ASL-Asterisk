@@ -89,6 +89,15 @@ Voter Channel test modes:
     you specified in the list for the particular node, set
     the value to -1. If you want the 3rd from the last, set
     it to -4.
+
+Note on ADPCM functionality:
+The original intent was to change this driver to use signed linear internally,
+but after some thought, it was determined that it was prudent to continue using
+mulaw as the "standard" internal audio format (with the understanding of the slight
+degradation in dynamic range when using ADPCM resulting in doing so).  This was 
+done becuase existing external entities (such as the recording files and the streaming
+stuff) use mulaw as their transport, and changing all of that to signed linear would
+be cumbersome, inefficient and undesirable.
 */
 
 
@@ -171,6 +180,7 @@ char context[100];
 double dnsec;
 
 #define	FRAME_SIZE 160
+#define	ADPCM_FRAME_SIZE 83
 
 #define	DEFAULT_BUFLEN 500 /* 500ms default buffer len */
 #define	DEFAULT_BUFDELAY ((DEFAULT_BUFLEN * 8) - FRAME_SIZE)
@@ -192,7 +202,7 @@ typedef struct {
 typedef struct {
 	char lat[9];
 	char lon[10];
-	char elev[6];
+	char elev[7];
 } VOTER_GPS;
 
 typedef struct {
@@ -211,6 +221,7 @@ typedef struct {
 #define VOTER_PAYLOAD_NONE	0
 #define VOTER_PAYLOAD_ULAW	1
 #define	VOTER_PAYLOAD_GPS	2
+#define VOTER_PAYLOAD_ADPCM	3
 
 struct voter_client {
 	uint32_t nodenum;
@@ -223,6 +234,7 @@ struct voter_client {
 	char heardfrom;
 	char totransmit;
 	char ismaster;
+	char doadpcm;
 	struct voter_client *next;
 	long long dtime;
 	uint8_t lastrssi;
@@ -258,6 +270,8 @@ struct voter_pvt {
 	uint16_t lingercount;
 	struct ast_dsp *dsp;
 	struct ast_trans_pvt *xpath;
+	struct ast_trans_pvt *adpcmin;
+	struct ast_trans_pvt *adpcmout;
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -271,7 +285,7 @@ static int usecnt;
 AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
 
-int debug = 0;
+int debug = 3;
 int voter_test = 0;
 FILE *recfp = NULL;
 
@@ -525,6 +539,8 @@ static int voter_hangup(struct ast_channel *ast)
 	}
 	if (p->dsp) ast_dsp_free(p->dsp);
 	if (p->xpath) ast_translator_free_path(p->xpath);
+	if (p->adpcmin) ast_translator_free_path(p->adpcmin);
+	if (p->adpcmout) ast_translator_free_path(p->adpcmout);
 	ast_mutex_lock(&voter_lock);
 	for(q = pvts; q; q = q->next)
 	{
@@ -657,7 +673,23 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
 	if (!p->xpath)
 	{
-		ast_log(LOG_ERROR,"Cannot get translator!!\n");
+		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->adpcmin = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_ADPCM);
+	if (!p->adpcmin)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from adpcm to ulaw!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->adpcmout = ast_translator_build_path(AST_FORMAT_ADPCM,AST_FORMAT_ULAW);
+	if (!p->adpcmout)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from ulaw to adpcm!!\n");
 		ast_dsp_free(p->dsp);
 		ast_free(p);
 		return NULL;
@@ -1010,8 +1042,11 @@ static void *voter_reader(void *data)
 						client->sin = sin;
 					}
 					/* if we know the dude, find the connection his audio belongs to and send it there */
-					if (client && client->heardfrom  && (ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
-						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1)))
+					if (client && client->heardfrom  && 
+					    (((ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
+						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1))) ||
+					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM) && 
+						(recvlen == (sizeof(VOTER_PACKET_HEADER) + ADPCM_FRAME_SIZE + 1)))))
 					{
 						for(p = pvts; p; p = p->next)
 						{
@@ -1021,7 +1056,6 @@ static void *voter_reader(void *data)
 						{
 							long long btime,ptime,difftime;
 							int index;
-
 
 							if (client->ismaster)
 							{
@@ -1051,23 +1085,48 @@ static void *voter_reader(void *data)
 							/* if in bounds */
 							if ((index > 0) && (index < (buflen - FRAME_SIZE)))
 							{
+
+								f1 = NULL;
+								/* if no RSSI, just make it quiet */
+								if (!buf[sizeof(VOTER_PACKET_HEADER)])
+								{
+									for(i = 0; i < FRAME_SIZE; i++) 
+										buf[sizeof(VOTER_PACKET_HEADER) + i + 1] = 0xff;
+								}
+								/* if otherwise (RSSI > 0), if ADPCM, translate it */
+								else if (ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM)
+								{
+									memset(&fr,0,sizeof(struct ast_frame));
+								        fr.frametype = AST_FRAME_VOICE;
+								        fr.subclass = AST_FORMAT_ADPCM;
+								        fr.datalen = ADPCM_FRAME_SIZE;
+								        fr.samples = FRAME_SIZE;
+								        fr.data =  buf + sizeof(VOTER_PACKET_HEADER) + 1;
+								        fr.src = type;
+								        fr.offset = 0;
+								        fr.mallocd = 0;
+								        fr.delivery.tv_sec = 0;
+								        fr.delivery.tv_usec = 0;
+									f1 = ast_translate(p->adpcmin,&fr,0);
+								}
 								index = (index + p->drainindex) % buflen;
 								i = (int)buflen - (index + FRAME_SIZE);
 								if (i >= 0)
 								{
 									memcpy(client->audio + index,
-										buf + sizeof(VOTER_PACKET_HEADER) + 1,FRAME_SIZE);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),FRAME_SIZE);
 									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],FRAME_SIZE);
 								}
 								else
 								{
 									memcpy(client->audio + index,
-										buf + sizeof(VOTER_PACKET_HEADER) + 1,FRAME_SIZE + i);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),FRAME_SIZE + i);
 									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],FRAME_SIZE + i);
 									memcpy(client->audio,
-										buf + sizeof(VOTER_PACKET_HEADER) + 1 + (FRAME_SIZE + i),-i);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1) + (FRAME_SIZE + i),-i);
 									memset(client->rssi,buf[sizeof(VOTER_PACKET_HEADER)],-i);
 								}
+								if (f1) ast_frfree(f1);
 							}
 							if (client->ismaster)
 							{
@@ -1094,6 +1153,7 @@ static void *voter_reader(void *data)
 										audiopacket.vp.payload_type = htons(1);
 										audiopacket.rssi = 0;
 										memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
+										f2 = ast_translate(p->adpcmout,f1,0);
 										ast_free(f1);
 										audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 										audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
@@ -1101,14 +1161,31 @@ static void *voter_reader(void *data)
 										{
 											if (client->nodenum != p->nodenum) continue;
 											if (!client->respdigest) continue;
+											if (client->doadpcm) continue;
 											audiopacket.vp.digest = htonl(client->respdigest);
 											if (client->totransmit)
 											{
 												if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-												/* send em the empty packet to get things started */
 												sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 											}
 										}
+										memcpy(audiopacket.audio,f2->data,f2->datalen);
+										audiopacket.vp.payload_type = htons(3);
+										for(client = clients; client; client = client->next)
+										{
+											if (client->nodenum != p->nodenum) continue;
+											if (!client->respdigest) continue;
+											if (!client->doadpcm) continue;
+											audiopacket.vp.digest = htonl(client->respdigest);
+											if (client->totransmit)
+											{
+												if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+												sendto(udp_socket, &audiopacket, sizeof(audiopacket) -
+												    (sizeof(audiopacket.audio) - f2->datalen),
+													0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+											}
+										}
+										ast_frfree(f2);
 									}
 									maxrssi = 0;
 									maxclient = NULL;
@@ -1467,9 +1544,11 @@ static void *voter_reader(void *data)
 					} 
 					/* if we know the dude, find the connection his audio belongs to and send it there */
 					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
-							(recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))))
+					    ((recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))) ||
+						(recvlen == ((sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS)) - 1))))
+
 					{
-						if ((debug >= 3) /*&& (!client->ismaster)*/)
+						if (debug >= 3) 
 						{
 							gettimeofday(&timetv,NULL);
 							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
@@ -1506,6 +1585,7 @@ static void *voter_reader(void *data)
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
 				if (client && client->ismaster) authpacket.flags |= 2 | 8;
+				if (client && client->doadpcm) authpacket.flags |= 16;
 				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
 				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
@@ -1529,11 +1609,11 @@ int load_module(void)
         struct ast_flags zeroflag = {0};
 #endif
 	struct sockaddr_in sin;
-	char *val,*ctg;
+	char *val,*ctg,*cp,*strs[40];
 	pthread_attr_t attr;
 	pthread_t voter_reader_thread;
 	unsigned int mynode;
-	int bs;
+	int i,n,bs;
 	struct voter_client *client,*client1;
 	struct ast_config *cfg = NULL;
 	struct ast_variable *v;
@@ -1621,10 +1701,21 @@ int load_module(void)
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
 			if (!strcmp(v->name,"linger")) continue;
+			cp = ast_strdup(v->value);
+			if (!cp)
+			{
+				ast_log(LOG_ERROR,"Cant Malloc()\n");
+                                close(udp_socket);
+                                ast_config_destroy(cfg);
+                                return AST_MODULE_LOAD_DECLINE;
+			}
+			n = finddelim(cp,strs,40);
+			if (n < 1) continue;
 			client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
 			if (!client)
 			{
 				ast_log(LOG_ERROR,"Cant malloc()\n");
+				ast_free(cp);
 		                close(udp_socket);
 				ast_config_destroy(cfg);
 		                return AST_MODULE_LOAD_DECLINE;
@@ -1632,9 +1723,17 @@ int load_module(void)
 			memset(client,0,sizeof(struct voter_client));
 			client->nodenum = strtoul(ctg,NULL,0);
 			ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
-			if (strchr(v->name,'!')) client->totransmit = 1;
-			if (strchr(v->name,'@')) client->ismaster = 1;
-			client->digest = crc32_bufs(challenge,v->value);
+			for(i = 1; i < n; i++)
+			{
+				if (!strcasecmp(strs[i],"transmit"))
+					client->totransmit = 1;
+				else if (!strcasecmp(strs[i],"master"))
+                                        client->ismaster = 1;
+				else if (!strcasecmp(strs[i],"adpcm"))
+                                        client->doadpcm = 1;
+			}
+			client->digest = crc32_bufs(challenge,strs[0]);
+			ast_free(cp);
 			client->audio = (uint8_t *)ast_malloc(buflen);
 			if (!client->audio)
 			{
