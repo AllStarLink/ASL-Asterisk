@@ -152,6 +152,8 @@ be cumbersome, inefficient and undesirable.
 
 #define	DEFAULT_LINGER 6
 
+#define MAX_MASTER_COUNT 3
+
 #define	DELIMCHR ','
 #define	QUOTECHR 34
 
@@ -172,6 +174,8 @@ int16_t listen_port = 667;				/* port to listen to UDP packets on */
 int udp_socket = -1;
 
 int voter_timing_fd = -1;
+unsigned long voter_timing_count = 0;
+unsigned long last_master_count = 0;
 
 char challenge[VOTER_CHALLENGE_LEN];
 char password[100];
@@ -285,7 +289,7 @@ static int usecnt;
 AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
 
-int debug = 3;
+int debug = 0;
 int voter_test = 0;
 FILE *recfp = NULL;
 
@@ -941,6 +945,27 @@ int unload_module(void)
 	return 0;
 }
 
+/* Maintain a relative time source that is *not* dependent on system time of day */
+
+static void *voter_timer(void *data)
+{
+	char buf[FRAME_SIZE];
+	int	i;
+
+	while(run_forever && (!ast_shutting_down()))
+	{
+		i = read(voter_timing_fd,buf,sizeof(buf));
+		if (i != FRAME_SIZE)
+		{
+			ast_log(LOG_ERROR,"error in read() for voter timer\n");
+			pthread_exit(NULL);
+		}
+		voter_timing_count++;
+	}
+	return(NULL);
+}	
+
+
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
@@ -952,12 +977,13 @@ static void *voter_reader(void *data)
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
 	fd_set fds;
-	struct voter_client *client,*maxclient;
+	struct voter_client *client,*client1,*maxclient;
 	VOTER_PACKET_HEADER *vph;
 	VOTER_GPS *vgp;
 	VOTER_REC rec;
 	VOTER_STREAM stream;
 	time_t timestuff;
+	unsigned long my_voter_time;
 #pragma pack(push)
 #pragma pack(1)
 	struct {
@@ -976,6 +1002,7 @@ static void *voter_reader(void *data)
 	ast_mutex_lock(&voter_lock);
 	while(run_forever && (!ast_shutting_down()))
 	{
+		my_voter_time = voter_timing_count;
 		ast_mutex_unlock(&voter_lock);
 		FD_ZERO(&fds);
 		FD_SET(udp_socket,&fds);
@@ -1038,8 +1065,21 @@ static void *voter_reader(void *data)
 					}
 					if (client)
 					{
+						if ((client->sin.sin_addr.s_addr && (client->sin.sin_addr.s_addr != sin.sin_addr.s_addr)) ||
+							(client->sin.sin_port && (client->sin.sin_port != sin.sin_port))) client->heardfrom = 0;
 						client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
+						if (!client->ismaster)
+						{
+							if (last_master_count && (voter_timing_count > (last_master_count + MAX_MASTER_COUNT)))
+							{
+								ast_log(LOG_NOTICE,"Voter lost master timing source!!\n");
+									last_master_count = 0;
+									master_time.vtime_sec = 0;
+									continue;
+							}
+							if (!master_time.vtime_sec) continue;
+						}
 					}
 					/* if we know the dude, find the connection his audio belongs to and send it there */
 					if (client && client->heardfrom  && 
@@ -1059,6 +1099,7 @@ static void *voter_reader(void *data)
 
 							if (client->ismaster)
 							{
+								last_master_count = voter_timing_count;
 								master_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 								master_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
 
@@ -1130,6 +1171,23 @@ static void *voter_reader(void *data)
 							}
 							if (client->ismaster)
 							{
+
+								for(client = clients; client; client = client->next)
+								{
+									if (!client->respdigest) continue;
+									for(client1 = client->next; client1; client1 = client1->next)
+									{
+										if ((client1->sin.sin_addr.s_addr == client->sin.sin_addr.s_addr) &&
+											(client1->sin.sin_port == client->sin.sin_port))
+										{
+											if (!client1->respdigest) continue;
+											client->respdigest = 0;
+											client->heardfrom = 0;
+											client1->respdigest = 0;
+											client1->heardfrom = 0;
+										}
+									}
+								}
 								hasmastered = 0;
 								for(p = pvts; p; p = p->next)
 								{
@@ -1161,6 +1219,7 @@ static void *voter_reader(void *data)
 										{
 											if (client->nodenum != p->nodenum) continue;
 											if (!client->respdigest) continue;
+											if (!client->heardfrom) continue;
 											if (client->doadpcm) continue;
 											audiopacket.vp.digest = htonl(client->respdigest);
 											if (client->totransmit)
@@ -1175,6 +1234,7 @@ static void *voter_reader(void *data)
 										{
 											if (client->nodenum != p->nodenum) continue;
 											if (!client->respdigest) continue;
+											if (!client->heardfrom) continue;
 											if (!client->doadpcm) continue;
 											audiopacket.vp.digest = htonl(client->respdigest);
 											if (client->totransmit)
@@ -1611,7 +1671,7 @@ int load_module(void)
 	struct sockaddr_in sin;
 	char *val,*ctg,*cp,*strs[40];
 	pthread_attr_t attr;
-	pthread_t voter_reader_thread;
+	pthread_t voter_reader_thread,voter_timer_thread;
 	unsigned int mynode;
 	int i,n,bs;
 	struct voter_client *client,*client1;
@@ -1789,6 +1849,7 @@ int load_module(void)
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         ast_pthread_create(&voter_reader_thread,&attr,voter_reader,NULL);
+        ast_pthread_create(&voter_timer_thread,&attr,voter_timer,NULL);
 
 	/* Make sure we can register our channel type */
 	if (ast_channel_register(&voter_tech)) {
