@@ -140,6 +140,8 @@ be cumbersome, inefficient and undesirable.
 #include "asterisk/ulaw.h"
 #include "asterisk/dsp.h"
 
+#define	XPMR_VOTER
+#include "xpmr/xpmr.h"
 
 #ifdef	OLD_ASTERISK
 #define	AST_MODULE_LOAD_DECLINE -1
@@ -273,9 +275,16 @@ struct voter_pvt {
 	uint16_t threshcount;
 	uint16_t lingercount;
 	struct ast_dsp *dsp;
-	struct ast_trans_pvt *xpath;
 	struct ast_trans_pvt *adpcmin;
 	struct ast_trans_pvt *adpcmout;
+	struct ast_trans_pvt *toast;
+	struct ast_trans_pvt *fromast;
+	t_pmr_chan	*pmrChan;
+	float	txctcssgain;
+	char	txctcssfreq[32];				// encode now
+	int	txctcsslevel;
+	int	txtoctype;
+
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
 #else
@@ -331,7 +340,7 @@ static int voter_text(struct ast_channel *c, const char *text);
 static const struct ast_channel_tech voter_tech = {
 	.type = type,
 	.description = vdesc,
-	.capabilities = AST_FORMAT_ULAW,
+	.capabilities = AST_FORMAT_SLINEAR,
 	.requester = voter_request,
 	.call = voter_call,
 	.hangup = voter_hangup,
@@ -374,6 +383,13 @@ static char record_usage[] =
 "Usage: voter record [record filename]\n"
 "       Enables/Specifies (or disables) recording file for chan_voter\n";
 
+/* Tone */
+static int voter_do_tone(int fd, int argc, char *argv[]);
+
+static char tone_usage[] =
+"Usage: voter tone instance_id [new_tone_level(0-250)]\n"
+"       Sets/Queries Tx CTCSS level for specified chan_voter instance\n";
+
 
 
 #ifndef	NEW_ASTERISK
@@ -387,6 +403,9 @@ static struct ast_cli_entry  cli_test =
 static struct ast_cli_entry  cli_record =
         { { "voter", "record" }, voter_do_record, 
 		"Enables/Specifies (or disables) voter recording file", record_usage };
+static struct ast_cli_entry  cli_tone =
+        { { "voter", "tone" }, voter_do_tone, 
+		"Sets/Queries Tx CTCSS level for specified chan_voter instance", tone_usage };
 
 #endif
 
@@ -542,9 +561,10 @@ static int voter_hangup(struct ast_channel *ast)
 		return 0;
 	}
 	if (p->dsp) ast_dsp_free(p->dsp);
-	if (p->xpath) ast_translator_free_path(p->xpath);
 	if (p->adpcmin) ast_translator_free_path(p->adpcmin);
 	if (p->adpcmout) ast_translator_free_path(p->adpcmout);
+	if (p->toast) ast_translator_free_path(p->toast);
+	if (p->fromast) ast_translator_free_path(p->fromast);
 	ast_mutex_lock(&voter_lock);
 	for(q = pvts; q; q = q->next)
 	{
@@ -636,7 +656,6 @@ static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 }
 
 
-
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
 {
 	int oldformat,i;
@@ -646,7 +665,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	struct ast_config *cfg = NULL;
 	
 	oldformat = format;
-	format &= AST_FORMAT_ULAW;
+	format &= AST_FORMAT_SLINEAR;
 	if (!format) {
 		ast_log(LOG_ERROR, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
@@ -674,14 +693,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
         ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
         ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
-	p->xpath = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
-	if (!p->xpath)
-	{
-		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
-		ast_dsp_free(p->dsp);
-		ast_free(p);
-		return NULL;
-	}
 	p->adpcmin = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_ADPCM);
 	if (!p->adpcmin)
 	{
@@ -694,6 +705,22 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	if (!p->adpcmout)
 	{
 		ast_log(LOG_ERROR,"Cannot get translator from ulaw to adpcm!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->toast = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
+	if (!p->adpcmin)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->fromast = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_SLINEAR);
+	if (!p->adpcmout)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from slinear to ulaw!!\n");
 		ast_dsp_free(p->dsp);
 		ast_free(p);
 		return NULL;
@@ -724,11 +751,11 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	pvts = p;
 	ast_mutex_unlock(&voter_lock);
 	tmp->tech = &voter_tech;
-	tmp->rawwriteformat = AST_FORMAT_ULAW;
-	tmp->writeformat = AST_FORMAT_ULAW;
-	tmp->rawreadformat = AST_FORMAT_ULAW;
-	tmp->readformat = AST_FORMAT_ULAW;
-	tmp->nativeformats = AST_FORMAT_ULAW;
+	tmp->rawwriteformat = AST_FORMAT_SLINEAR;
+	tmp->writeformat = AST_FORMAT_SLINEAR;
+	tmp->rawreadformat = AST_FORMAT_SLINEAR;
+	tmp->readformat = AST_FORMAT_SLINEAR;
+	tmp->nativeformats = AST_FORMAT_SLINEAR;
 //	if (state == AST_STATE_RING) tmp->rings = 1;
 	tmp->tech_pvt = p;
 #ifdef	OLD_ASTERISK
@@ -762,6 +789,17 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 			cp = ast_strdup(val);
 			p->nstreams = finddelim(cp,p->streams,MAXSTREAMS);
 		}		
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcss"); 
+		if (val) ast_copy_string(p->txctcssfreq,val,sizeof(p->txctcssfreq));
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcsslevel"); 
+		if (val) p->txctcsslevel = atoi(val); else p->txctcsslevel = 62;
+		p->txtoctype = TOC_NONE;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txtoctype"); 
+		if (val)
+		{
+			if (!strcasecmp(val,"phase")) p->txtoctype = TOC_PHASE;
+			else if (!strcasecmp(val,"notone")) p->txtoctype = TOC_NOTONE;
+		}
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
 		if (val)
 		{
@@ -785,6 +823,39 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 				p->rssi_thresh[i] = (uint8_t)atoi(strs[i]);
 			}
 		}		
+	}
+
+	if (p->txctcssfreq[0])
+	{
+		t_pmr_chan tChan;
+
+		memset(&tChan,0,sizeof(t_pmr_chan));
+
+		tChan.pTxCodeDefault = p->txctcssfreq;
+		tChan.pTxCodeSrc     = p->txctcssfreq;
+		tChan.pRxCodeSrc     = p->txctcssfreq;
+		tChan.txMod = 2;
+		tChan.txMixA = TX_OUT_COMPOSITE;
+		tChan.b.txboost = 1;
+
+		p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
+		p->pmrChan->radioDuplex = 1;//o->radioduplex;
+		p->pmrChan->b.loopback=0; 
+		p->pmrChan->b.radioactive= 1;
+		p->pmrChan->txrxblankingtime = 0;
+		p->pmrChan->rxCpuSaver = 0;
+		p->pmrChan->txCpuSaver = 0;
+		*(p->pmrChan->prxSquelchAdjust) = 0;
+		*(p->pmrChan->prxVoiceAdjust) = 0;
+		*(p->pmrChan->prxCtcssAdjust) = 0;
+		p->pmrChan->rxCtcss->relax = 0;
+		p->pmrChan->txTocType = p->txtoctype;
+		p->pmrChan->spsTxOutA->outputGain = 250;
+		*p->pmrChan->ptxCtcssAdjust = p->txctcsslevel;
+		p->pmrChan->pTxCodeDefault = p->txctcssfreq;
+		p->pmrChan->pTxCodeSrc = p->txctcssfreq;
+//		p->pmrChan->txfreq = p->txctcssfreq;
+			
 	}
 	ast_config_destroy(cfg);
 	return tmp;
@@ -857,6 +928,41 @@ static int voter_do_record(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
+static int voter_do_tone(int fd, int argc, char *argv[])
+{
+	int newlevel;
+	struct voter_pvt *p;
+
+        if (argc < 3)
+                return RESULT_SHOWUSAGE;
+        if((newlevel < 0) || (newlevel > 250))
+                return RESULT_SHOWUSAGE;
+	for(p = pvts; p; p = p->next)
+	{
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	if (!p->pmrChan)
+	{
+		ast_cli(fd,"voter instance %s does not have CTCSS enabled\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	if (argc == 3)
+	{
+		ast_cli(fd,"voter instance %d CTCSS tone level is %d\n",p->nodenum,p->txctcsslevel);
+		return RESULT_SUCCESS;
+	}
+        newlevel = atoi(argv[3]);
+        ast_cli(fd, "voter instance %d CTCSS tone level set to %d\n",p->nodenum,newlevel);
+	p->txctcsslevel = newlevel;
+	*p->pmrChan->ptxCtcssAdjust = newlevel;
+        return RESULT_SUCCESS;
+}
+
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -915,13 +1021,30 @@ static char *handle_cli_record(struct ast_cli_entry *e,
 	return res2cli(voter_do_record(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_tone(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter tone";
+                e->usage = tone_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_tone(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
 	AST_CLI_DEFINE(handle_cli_record,"Enable/Specify (or disable) voter recording file"),
+	AST_CLI_DEFINE(handle_cli_tone,"Sets/Queries Tx CTCSS level for specified chan_voter instance"),
 } ;
 
 #endif
+
+#include "xpmr/xpmr.c"
 
 #ifndef	OLD_ASTERISK
 static
@@ -938,6 +1061,7 @@ int unload_module(void)
 	ast_cli_unregister(&cli_debug);
 	ast_cli_unregister(&cli_test);
 	ast_cli_unregister(&cli_record);
+	ast_cli_unregister(&cli_tone);
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -969,6 +1093,8 @@ static void *voter_timer(void *data)
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
+	i16 dummybuf1[FRAME_SIZE * 12],xmtbuf1[FRAME_SIZE * 12];
+	i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE];
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
 	int i,j,k,n,x,maxrssi;
@@ -1197,22 +1323,67 @@ static void *voter_reader(void *data)
 										continue;
 									}
 									ast_mutex_lock(&voter_lock);
-									n = 0;
+									n = x = 0;
 									ast_mutex_lock(&p->txqlock);
 									AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
 									ast_mutex_unlock(&p->txqlock);
 									if (n && ((n > 3) || (!p->txkey)))
 									{
+										x = 1;
 										ast_mutex_lock(&p->txqlock);
-										f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
+										f2 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
 										ast_mutex_unlock(&p->txqlock);
+										if (p->pmrChan)
+										{
+											p->pmrChan->txPttIn = 1;
+											PmrTx(p->pmrChan,(i16*) f2->data);
+											ast_frfree(f2);
+										}
+									}
+									f1 = NULL;
+									// x will be set here is there was actual transmit activity
+									if ((!x) && (p->pmrChan)) p->pmrChan->txPttIn = 0;
+									if (x && (!p->pmrChan))
+									{
+										f1 = ast_translate(p->fromast,f2,1);
+										if (!f1)
+										{
+											ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
+											continue;
+										}
+									}
+									if (p->pmrChan)
+									{
+										PmrRx(p->pmrChan,dummybuf1,dummybuf2,xmtbuf1);
+										x = p->pmrChan->txPttOut;
+										for(i = 0; i < FRAME_SIZE; i++) xmtbuf[i] = xmtbuf1[i * 2];
+										memset(&fr,0,sizeof(struct ast_frame));
+									        fr.frametype = AST_FRAME_VOICE;
+									        fr.subclass = AST_FORMAT_SLINEAR;
+									        fr.datalen = ADPCM_FRAME_SIZE;
+									        fr.samples = FRAME_SIZE;
+									        fr.data = xmtbuf;
+									        fr.src = type;
+									        fr.offset = 0;
+									        fr.mallocd = 0;
+									        fr.delivery.tv_sec = 0;
+									        fr.delivery.tv_usec = 0;
+										f1 = ast_translate(p->fromast,&fr,0);
+										if (!f1)
+										{
+											ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
+											continue;
+										}
+									}
+									// x will now be set if we are to generate TX output
+									if (x)
+									{
 										memset(&audiopacket,0,sizeof(audiopacket));
 										strcpy((char *)audiopacket.vp.challenge,challenge);
 										audiopacket.vp.payload_type = htons(1);
 										audiopacket.rssi = 0;
 										memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
 										f2 = ast_translate(p->adpcmout,f1,0);
-										ast_free(f1);
 										audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 										audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
 										for(client = clients; client; client = client->next)
@@ -1247,6 +1418,7 @@ static void *voter_reader(void *data)
 										}
 										ast_frfree(f2);
 									}
+									if (f1) ast_frfree(f1);
 									maxrssi = 0;
 									maxclient = NULL;
 									for(client = clients; client; client = client->next)
@@ -1567,31 +1739,40 @@ static void *voter_reader(void *data)
 								        fr.mallocd = 0;
 								        fr.delivery.tv_sec = 0;
 								        fr.delivery.tv_usec = 0;
+									f1 = ast_translate(p->toast,&fr,0);
+									if (!f1)
+									{
+										ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
+										continue;
+									}
 									x = 0;
 									if (p->dsp)
 									{
-										f2 = ast_translate(p->xpath,&fr,0);
-										f1 = ast_dsp_process(NULL,p->dsp,f2);
-										ast_frfree(f2);
+										f2 = ast_dsp_process(NULL,p->dsp,f1);
 #ifdef	OLD_ASTERISK
-										if (f1->frametype == AST_FRAME_DTMF)
+										if (f2->frametype == AST_FRAME_DTMF)
 #else
-										if ((f1->frametype == AST_FRAME_DTMF_END) ||
-											(f1->frametype == AST_FRAME_DTMF_BEGIN))
+										if ((f2->frametype == AST_FRAME_DTMF_END) ||
+											(f2->frametype == AST_FRAME_DTMF_BEGIN))
 #endif
 										{
-											if ((f1->subclass != 'm') && (f1->subclass != 'u'))
+											if ((f2->subclass != 'm') && (f2->subclass != 'u'))
 											{
 #ifndef	OLD_ASTERISK
-												if (f1->frametype == AST_FRAME_DTMF_END)
+												if (f2->frametype == AST_FRAME_DTMF_END)
 #endif
-													ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f1->subclass);
-												ast_queue_frame(p->owner,f1);
-												x = 1;
+													ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f2->subclass);
 											}
+											else
+											{
+												f2->frametype = AST_FRAME_NULL;
+												f2->subclass = 0;
+											}
+											ast_queue_frame(p->owner,f2);
+											x = 1;
 										}
 									} 
-									if (!x) ast_queue_frame(p->owner,&fr);
+									if (!x) ast_queue_frame(p->owner,f1);
 								}
 							}
 						}
@@ -1757,6 +1938,9 @@ int load_module(void)
 		mynode = strtoul(ctg,NULL,0);
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
+			if (!strcmp(v->name,"txctcssadj")) continue;
+			if (!strcmp(v->name,"txctcss")) continue;
+			if (!strcmp(v->name,"txtoctype")) continue;
 			if (!strcmp(v->name,"streams")) continue;
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
@@ -1844,6 +2028,7 @@ int load_module(void)
 	ast_cli_register(&cli_debug);
 	ast_cli_register(&cli_test);
 	ast_cli_register(&cli_record);
+	ast_cli_register(&cli_tone);
 #endif
 
         pthread_attr_init(&attr);

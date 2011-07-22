@@ -1644,6 +1644,7 @@ i16 ctcss_detect(t_pmr_chan *pChan)
 	//TRACEX((" ctcss_detect() thit %i %i\n",thit,pChan->rxCtcss->decode));
 	return(0);
 }
+#ifndef	XPMR_VOTER
 /*
 	TxTestTone
 */
@@ -1662,6 +1663,7 @@ static i16	TxTestTone(t_pmr_chan *pChan, i16 function)
 	}
 	return 0;
 }
+#endif
 /*
 	assumes:
 	sampling rate is 48KS/s
@@ -2403,15 +2405,24 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pSps->numChanOut=2;
 	pSps->selChanOut=0;
 	pSps->nSamples=pChan->nSamplesTx;
+#ifdef	XPMR_VOTER
+	pSps->interpolate=1;
+	pSps->ncoef=taps_fir_lpf_3K_2;
+	pSps->size_coef=2;
+	pSps->coef=(void*)coef_fir_lpf_3K_2;
+	pSps->nx=taps_fir_lpf_3K_2;
+	pSps->calcAdjust=gain_fir_lpf_3K_2;
+#else
 	pSps->interpolate=6;
 	pSps->ncoef=taps_fir_lpf_3K_1;
 	pSps->size_coef=2;
 	pSps->coef=(void*)coef_fir_lpf_3K_1;
 	pSps->nx=taps_fir_lpf_3K_1;
+	pSps->calcAdjust=gain_fir_lpf_3K_1;
+#endif
 	pSps->size_x=2;
 	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
 	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-	pSps->calcAdjust=gain_fir_lpf_3K_1;
 	pSps->inputGain=(1*M_Q8);
 	pSps->outputGain=(1*M_Q8);
 	if(pChan->txMixA==pChan->txMixB)pSps->monoOut=1;
@@ -2454,15 +2465,24 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps->selChanOut=1;
 		pSps->mixOut=0;
 		pSps->nSamples=pChan->nSamplesTx;
+#ifdef	XPMR_VOTER
+		pSps->interpolate=1;
+		pSps->ncoef=taps_fir_lpf_3K_2;
+		pSps->size_coef=2;
+		pSps->coef=(void*)coef_fir_lpf_3K_2;
+		pSps->nx=taps_fir_lpf_3K_2;
+		pSps->calcAdjust=(gain_fir_lpf_3K_2);
+#else
 		pSps->interpolate=6;
 		pSps->ncoef=taps_fir_lpf_3K_1;
 		pSps->size_coef=2;
 		pSps->coef=(void*)coef_fir_lpf_3K_1;
 		pSps->nx=taps_fir_lpf_3K_1;
+		pSps->calcAdjust=(gain_fir_lpf_3K_1);
+#endif
 		pSps->size_x=2;
 		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
 		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		pSps->calcAdjust=(gain_fir_lpf_3K_1);
 		pSps->inputGain=(1*M_Q8);
 		pSps->outputGain=(1*M_Q8);
 	}
@@ -2662,6 +2682,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	}
 	#endif
 
+#ifndef XPMR_VOTER
 	pmr_sps=pChan->spsRx;		// first sps
 	pmr_sps->source=input;
 
@@ -2821,6 +2842,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	xpmrx(pChan,XXO_LSDCTL);
 	#endif
 
+#endif
 	//TRACEX(("PmrRx() tx portion.\n"));
 
 	// handle radio transmitter ptt input

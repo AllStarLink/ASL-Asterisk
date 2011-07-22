@@ -293,6 +293,40 @@ static const int16_t coef_fir_bpf_noise_2[] = {
           537
 };
 
+static const int16_t taps_fir_lpf_3K_2 = 28;
+static const int32_t gain_fir_lpf_3K_2 = 65536;
+static const int16_t coef_fir_lpf_3K_2[] = { 
+   545,
+  -329,
+  -579,
+   369,
+  -843,
+   465,
+  -121,
+  -779,
+  1523,
+ -2051,
+  1683,
+   -64,
+ -4016,
+ 19793,
+ 19793,
+ -4016,
+   -64,
+  1683,
+ -2051,
+  1523,
+  -779,
+  -121,
+   465,
+  -843,
+   369,
+  -579,
+  -329,
+   545
+
+} ;
+
 /*
 	tbd
 */
