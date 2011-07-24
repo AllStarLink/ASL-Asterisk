@@ -3,8 +3,8 @@
  *
  * Copyright (C) 1999 - 2006, Digium, Inc.
  *
- * Copyright (C) 2008, Jim Dixon
- * Jim Dixon <jim@lambdatel.com>
+ * Copyright (C) 2009, Scott Lawson
+ * Scott Lawson <ham44865@yahoo.com>
  *
  * See http://www.asterisk.org for more information about
  * the Asterisk project. Please do not directly contact
@@ -21,7 +21,7 @@
  *
  * \brief Ham Radio Bridging Channel support
  * 
- * \author Jim Dixon <jim@lambdatel.com>
+ * \author KI4LKF <ham44865@yahoo.com>
  *
  * \ingroup channel_drivers
  */
@@ -29,64 +29,25 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.6, 07/27/2008
+/* Version 0.6-NO-SEQUENCE-NUMBERS Sun Sep 28 12:03:31 EDT 2008.
+   PUT BACK THE WAY IT WAS BEFORE, SEQUENCE NUMBERS NOT NEEDED.
+   TEXT HANDLING IS OUT. IRLP DOES NOT PROCESS TEXT.
+   THIS DRIVER USES UNCOMPRESSED HIGH_QUALITY AUDIO.
 
-Channel connection for Asterisk to KI4LKF's RtpDir Echolink/IRLP/app_rpt
+Channel connection for Asterisk to KI4LKF's rtpDir/rtpDir_tm bridge Echolink-IRLP-Asterisk
 bridging program for Amateur Radio over VOIP.
 
 Its invoked as rtpdir/HISIP:HISPORT[:MYPORT] 	 
 	  	 
-HISIP is the IP address (or FQDN) of the RtpDir program 	 
+HISIP is the IP address (or FQDN) of the rtpDir/rtpDir_tm bridge.
 HISPORT is the UDP socket of the RtpDir program 	 
 MYPORT (optional) is the UDP socket that Asterisk listens on for this channel 	 
-
-This protocol sends UDP packets in both directions containing a longword
-(4 byte) packet serial number plus 4 frames of 33 byte (160 sample) GSM
-encoded payload every 80 ms (totalling 136 bytes). It indicates the presence
-of signal (PTT/COR) by sending audio packets, and no signal by not sending 
-audio packets. It also sends non-audio (control packets) which are deliniated
-by the fact that they are less then 136 bytes in length (typically 64) and
-do not have a serial number. The format for the control packets is:
-
-KEEPALIVE (for a keepalive packet)
-DTMF c  (c is a DTMF DIGIT, 1 of 1234567890*#ABCD)
-TEXT some kind text
-
-While not sending audio packets, it sends a "keep alive"
-packet (a 64 byte packet containing "KEEPALIVE") to indicate that
-the Asterisk system is still there. The Asterisk System will also receive
-and handle DTMF packets and ignore all other control packets (for testing
-purposes). The protocol is connectionless and is intended to be used to
-emulate "nailed-up" facilities. 
-
-Serial numbers: On transmit, send new (incremented) serial number with each
-audio paket. On reveive, keep a copy of the last serial number from a valid
-packet. If the next thing you receive is 25 or greater away from the last, then
-reset your last to zero and start the procedure again. If its within 25 and
-greater, its a valid packet, so save the "last heard" and process it. If its
-within 25 and less, then just ignore it.
-
-[Commentary by Jim Dixon]
-Admittedly, this is by no means a fully-robust protocol. By the nature of
-UDP and the Internet, doing it "properly" takes quite a bit more then
-this. This was not my specification, it was KI4LKF's. He wanted a simple,
-UDP based protocol that was able to be implemented simply and efficiently.
-For the most part, it should work more then sufficiently if both sides are
-in the same system, or even 2 systems on the same LAN (as long as its not
-a super-busy LAN). If all this turns out to work well, then give him all
-the credit for the protocol design. I just wrote the channel driver to his
-specifications.
-
-Also, the selection of using GSM and doing it in 4 packet-sized blocks came
-from experimentation and finding that it works the best under the condidions
-of the system. Again, it wasnt my first choice, but thats what works, and
-sometimes youve just gotta go with that.
 
 */
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 134039 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <string.h>
@@ -114,17 +75,12 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 134039 $")
 #define	MAX_RXKEY_TIME 4
 #define	KEEPALIVE_TIME 50 * 7
 
+#define LINEAR_FRAME_SIZE 160
 #define	BLOCKING_FACTOR 4
-#define	GSM_FRAME_SIZE 33
-#define	REALLY_WACKY_FRAMES 25
-#define	SSO sizeof(unsigned long)
-
 #define QUEUE_OVERLOAD_THRESHOLD 25
 
 static const char tdesc[] = "RTPDIR Ham Radio Bridging Driver";
-
-/* Only linear is allowed */
-static int prefformat = AST_FORMAT_GSM;
+static int prefformat = AST_FORMAT_SLINEAR;
 
 static char context[AST_MAX_EXTENSION] = "default";
 static char type[] = "rtpdir";
@@ -132,11 +88,10 @@ static char keepstr[] =
 	"KEEPALIVE I'm a packet that contains no useful data whatsoever.";
 
 /* rtpdir creates private structures on demand */
-   
 struct rtpdir_rxq {
 	struct rtpdir_rxq *qe_forw;
 	struct rtpdir_rxq *qe_back;
-	char buf[GSM_FRAME_SIZE];
+	char buf[LINEAR_FRAME_SIZE * 2];
 } ;
 
 struct rtpdir_pvt {
@@ -148,14 +103,11 @@ struct rtpdir_pvt {
 	char txkey;
 	int rxkey;
 	int keepalive;
+        char start_stop;
 	struct ast_frame fr;			/* "null" frame */
-	char txbuf[(GSM_FRAME_SIZE * BLOCKING_FACTOR) + SSO];
+	char txbuf[LINEAR_FRAME_SIZE * 2 * BLOCKING_FACTOR];
 	int txindex;
 	struct rtpdir_rxq rxq;
-	unsigned long rxseq;
-	unsigned long txseq;
-	unsigned long crxseq;
-	unsigned long ctxseq;
 	struct ast_module_user *u;		/*! for holding a reference to this module */
 };
 
@@ -173,7 +125,7 @@ static int rtpdir_text(struct ast_channel *c, const char *text);
 static const struct ast_channel_tech rtpdir_tech = {
 	.type = type,
 	.description = tdesc,
-	.capabilities = AST_FORMAT_GSM,
+	.capabilities = AST_FORMAT_SLINEAR,
 	.requester = rtpdir_request,
 	.call = rtpdir_call,
 	.hangup = rtpdir_hangup,
@@ -237,7 +189,8 @@ static struct rtpdir_pvt *rtpdir_alloc(void *data)
 	p = ast_malloc(sizeof(struct rtpdir_pvt));
 	if (p) {
 		memset(p, 0, sizeof(struct rtpdir_pvt));
-		
+
+                p->start_stop = 'B';
 		sprintf(stream,"%s:%d",args.hisip,atoi(args.hisport));
 		strcpy(p->stream,stream);
 		p->rxq.qe_forw = &p->rxq;
@@ -278,7 +231,8 @@ static struct rtpdir_pvt *rtpdir_alloc(void *data)
 
 		}
 		if (!p->rtpdir) {
-			ast_log(LOG_WARNING, "Unable to allocate new rtpdir stream '%s' with flags %d\n", stream, flags);
+			ast_log(LOG_WARNING, 
+                         "Unable to allocate new rtpdir stream '%s' with flags %d\n", stream, flags);
 			ast_free(p);
 			return NULL;
 		}
@@ -324,15 +278,6 @@ static int rtpdir_indicate(struct ast_channel *ast, int cond, const void *data, 
 
 static int rtpdir_text(struct ast_channel *ast, const char *text)
 {
-unsigned char	buf[64];
-
-	struct rtpdir_pvt *p = ast->tech_pvt;
-
-	memset(buf,0,sizeof(buf));
-	if ((strlen(text) < 1) || (strlen(text) > 59)) return -1;
-	sprintf((char *)buf,"TEXT %s",text);
-	if (sendto(p->rtpdir,buf,sizeof(buf),0,&p->si_other,sizeof(p->si_other)) == -1)
-		return -1;
 	return 0;
 }
 
@@ -341,41 +286,56 @@ static int rtpdir_digit_begin(struct ast_channel *ast, char digit)
 	return 0;
 }
 
-static int rtpdir_digit_end(struct ast_channel *ast, char digit, unsigned int duratiion)
+static int rtpdir_digit_end(struct ast_channel *ast, char digit, unsigned int duration)
 {
-unsigned char	buf[64];
 
-	struct rtpdir_pvt *p = ast->tech_pvt;
+        unsigned char   buf[64];
 
-	memset(buf,0,sizeof(buf));
-	sprintf((char *)buf,"DTMF %c",tolower(digit));
-	if (sendto(p->rtpdir,buf,sizeof(buf),0,&p->si_other,sizeof(p->si_other)) == -1)
-		return -1;
-	return 0;
+        struct rtpdir_pvt *p = ast->tech_pvt;
+
+        char digup = toupper(digit);
+
+        memset(buf,0,sizeof(buf));
+        sprintf((char *)buf,"DTMF %c",digup);
+
+        /* re-enable this node */
+        p->start_stop = 'B';
+
+        ast_log(LOG_NOTICE,"sending %s to rtpDir/rtpDir_tm bridge\n", buf);
+        if (sendto(p->rtpdir,buf,6,0,&p->si_other,sizeof(p->si_other)) == -1)
+                return -1;
+        return 0;
 }
 
 static struct ast_frame  *rtpdir_xread(struct ast_channel *ast)
 {
 
 	struct rtpdir_pvt *p = ast->tech_pvt;
-	char buf[512 + SSO];
+	char buf[LINEAR_FRAME_SIZE * 2 * BLOCKING_FACTOR];
 	struct sockaddr_in si_them;
 	unsigned int themlen;
-	unsigned long hseq,seq;
- 	int n,i,d;
+ 	int n,i;
 	struct ast_frame fr;
         struct rtpdir_rxq *qp;
 
 	themlen = sizeof(struct sockaddr_in);
 	if ((n = recvfrom(p->rtpdir,buf,sizeof(buf),0,&si_them,&themlen)) == -1)
 	{
-		ast_log(LOG_WARNING,"Cannot recvfrom()");
+		ast_log(LOG_WARNING,"Cannot recvfrom()\n");
 		return NULL;
 	}
-	if (memcmp(&si_them.sin_addr,&p->si_other.sin_addr,sizeof(si_them.sin_addr)))
+	if (n < LINEAR_FRAME_SIZE * 2 * BLOCKING_FACTOR)
 	{
-		ast_log(LOG_NOTICE,"Received packet from %s, expecting it from %s\n",
-			ast_inet_ntoa(si_them.sin_addr),ast_inet_ntoa(p->si_other.sin_addr));
+                if (n == 1)
+                {
+                   if (buf[0] == 'B')
+                      p->start_stop = 'B';
+                   else
+                   if (buf[0] == 'E')
+                      p->start_stop = 'E'; 
+                  
+                   ast_log(LOG_NOTICE, "received %c\n",buf[0]);
+                }
 		p->fr.frametype = 0;
 		p->fr.subclass = 0;
 		p->fr.datalen = 0;
@@ -388,122 +348,21 @@ static struct ast_frame  *rtpdir_xread(struct ast_channel *ast)
 		p->fr.delivery.tv_usec = 0;
 		return &p->fr;
 	}
-	if (n < 136)
-	{
-		if ((strlen(buf) >= 11) && 
-			(!strncasecmp(buf,"KEEPALIVE",9))) /* if its a keepalive */
-		{
-			p->fr.frametype = 0;
-			p->fr.subclass = 0;
-			p->fr.datalen = 0;
-			p->fr.samples = 0;
-			p->fr.data =  NULL;
-			p->fr.src = type;
-			p->fr.offset = 0;
-			p->fr.mallocd=0;
-			p->fr.delivery.tv_sec = 0;
-			p->fr.delivery.tv_usec = 0;
-			return &p->fr;
-		}
-		if ((strlen(buf) >= 6) && 
-			(!strncasecmp(buf,"DTMF",4))) /* its DTMF */
-		{
-			fr.frametype = AST_FRAME_DTMF_BEGIN;
-			fr.subclass = buf[5];
-			fr.data = 0;
-			fr.datalen = 0;
-			fr.samples = 0;
-			fr.src = type;
-			fr.offset = 0;
-			fr.mallocd=0;
-			fr.delivery.tv_sec = 0;
-			fr.delivery.tv_usec = 0;
-			ast_queue_frame(ast,ast_frdup(&fr));
-			fr.frametype = AST_FRAME_DTMF_END;
-			fr.subclass = buf[5];
-			fr.len = 50;
-			fr.data = 0;
-			fr.datalen = 0;
-			fr.samples = 0;
-			fr.src = type;
-			fr.offset = 0;
-			fr.mallocd=0;
-			fr.delivery.tv_sec = 0;
-			fr.delivery.tv_usec = 0;
-			ast_queue_frame(ast,ast_frdup(&fr));
-			p->fr.frametype = 0;
-			p->fr.subclass = 0;
-			p->fr.datalen = 0;
-			p->fr.samples = 0;
-			p->fr.data =  NULL;
-			p->fr.src = type;
-			p->fr.offset = 0;
-			p->fr.mallocd=0;
-			p->fr.delivery.tv_sec = 0;
-			p->fr.delivery.tv_usec = 0;
-			return &p->fr;
-		}
-		if ((strlen(buf) >= 6) && 
-			(!strncasecmp(buf,"TEXT",4))) /* its DTMF */
-		{
-			int l = strlen(buf);
 
-			fr.frametype = AST_FRAME_TEXT;
-			fr.subclass = 0;
-			fr.data = &buf[5];
-			fr.datalen = l - 5;
-			fr.samples = 0;
-			fr.src = type;
-			fr.offset = 0;
-			fr.mallocd=0;
-			fr.delivery.tv_sec = 0;
-			fr.delivery.tv_usec = 0;
-			return ast_frdup(&fr);
-		}
-		p->fr.frametype = 0;
-		p->fr.subclass = 0;
-		p->fr.datalen = 0;
-		p->fr.samples = 0;
-		p->fr.data =  NULL;
-		p->fr.src = type;
-		p->fr.offset = 0;
-		p->fr.mallocd=0;
-		p->fr.delivery.tv_sec = 0;
-		p->fr.delivery.tv_usec = 0;
-		return &p->fr;
-	}
-	memcpy(&hseq,buf,SSO);
-	seq = ntohl(hseq);
-
-	if (p->rxseq) d = seq - p->rxseq;
-		else d = 0;
-	if ((d < -REALLY_WACKY_FRAMES) ||
-	    (d > REALLY_WACKY_FRAMES))
-	{
-		ast_log(LOG_NOTICE,"Rx seq no waaay off!! exp=%lu, got=%lu\n",p->rxseq,seq);
-		p->rxseq = 0;
-		d = -1;
-	} 
-	else if (d < 0)
-	{
-		ast_log(LOG_NOTICE,"Rx seq no lags behind!! exp=%lu, got=%lu\n",p->rxseq,seq);
-	}
-
-	if (d >= 0)
-	{
-	    p->rxseq = seq;
-	    for(i = 0; i < BLOCKING_FACTOR; i++)
-	    {
-		qp = ast_malloc(sizeof(struct rtpdir_rxq));
-		if (!qp)
-		{
-			ast_log(LOG_NOTICE,"Cannot malloc for qp\n");
-			break;
-		}
-		memcpy(qp->buf,buf + SSO + (GSM_FRAME_SIZE * i),GSM_FRAME_SIZE);
-		insque((struct qelem *) qp,(struct qelem *) p->rxq.qe_back);
-	    }
-	}
+        if (p->start_stop == 'B')
+        {	
+           for (i = 0; i < BLOCKING_FACTOR; i++)
+	   {
+	      qp = ast_malloc(sizeof(struct rtpdir_rxq));
+	      if (!qp)
+	      {
+	         ast_log(LOG_NOTICE,"Cannot malloc for qp\n");
+	         break;
+	      }
+	      memcpy(qp->buf,buf + (LINEAR_FRAME_SIZE * 2 * i),LINEAR_FRAME_SIZE * 2);
+	      insque((struct qelem *) qp,(struct qelem *) p->rxq.qe_back);
+	   }
+        }
 	fr.datalen = 0;
 	fr.samples = 0;
 	fr.frametype = 0;
@@ -516,7 +375,6 @@ static struct ast_frame  *rtpdir_xread(struct ast_channel *ast)
 	fr.delivery.tv_usec = 0;
 
 	return &p->fr;
-
 }
 
 static int rtpdir_xwrite(struct ast_channel *ast, struct ast_frame *frame)
@@ -525,8 +383,7 @@ static int rtpdir_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	struct ast_frame fr;
 	struct rtpdir_rxq *qp;
 	int n;
-	char buf[GSM_FRAME_SIZE + AST_FRIENDLY_OFFSET + SSO];
-	unsigned long myseq;
+	char buf[(LINEAR_FRAME_SIZE * 2) + AST_FRIENDLY_OFFSET];
 
 	if (ast->_state != AST_STATE_UP) {
 		/* Don't try tos end audio on-hook */
@@ -571,13 +428,13 @@ static int rtpdir_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			p->rxkey = MAX_RXKEY_TIME;
 			qp = p->rxq.qe_forw;
 			remque((struct qelem *) qp);
-			memcpy(buf + AST_FRIENDLY_OFFSET,qp->buf,GSM_FRAME_SIZE);
+			memcpy(buf + AST_FRIENDLY_OFFSET,qp->buf,LINEAR_FRAME_SIZE * 2);
 			ast_free(qp);
 
-			fr.datalen = GSM_FRAME_SIZE;
-			fr.samples = 160;
+			fr.datalen = LINEAR_FRAME_SIZE * 2;
+			fr.samples =  LINEAR_FRAME_SIZE;
 			fr.frametype = AST_FRAME_VOICE;
-			fr.subclass = AST_FORMAT_GSM;
+			fr.subclass = AST_FORMAT_SLINEAR;
 			fr.data =  buf + AST_FRIENDLY_OFFSET;
 			fr.src = type;
 			fr.offset = AST_FRIENDLY_OFFSET;
@@ -603,32 +460,34 @@ static int rtpdir_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	} 
 	if (p->rxkey) p->rxkey--;
 
-	if (!(frame->subclass & (AST_FORMAT_GSM))) {
+	if (!(frame->subclass & (AST_FORMAT_SLINEAR))) {
 		ast_log(LOG_WARNING, "Cannot handle frames in %d format\n", frame->subclass);
 		return 0;
 	}
 	if (p->txkey || p->txindex) 
 	{
-
 		p->keepalive = KEEPALIVE_TIME;
-		memcpy(&p->txbuf[(GSM_FRAME_SIZE * p->txindex++) + SSO],
-			frame->data,GSM_FRAME_SIZE);
+		memcpy(&p->txbuf[LINEAR_FRAME_SIZE * 2 * p->txindex++],
+			frame->data,LINEAR_FRAME_SIZE * 2);
 	}	
 	if (p->txindex >= BLOCKING_FACTOR)
 	{
-		p->txseq++;
-		myseq = htonl(p->txseq);
-		memcpy(p->txbuf,&myseq,SSO);
-		if (sendto(p->rtpdir,p->txbuf,(GSM_FRAME_SIZE * BLOCKING_FACTOR) + SSO,
-			0,&p->si_other,sizeof(p->si_other)) == -1)
-				return -1;
+                if (p->start_stop == 'B')
+                {
+		   if (sendto(p->rtpdir,p->txbuf,LINEAR_FRAME_SIZE * 2 * BLOCKING_FACTOR,
+			      0,&p->si_other,sizeof(p->si_other)) == -1)
+		      return -1;
+                }
 		p->txindex = 0;
 	}
 	if (p->txkey) return 0;
 	if (p->keepalive--) return 0;
 	p->keepalive = KEEPALIVE_TIME;
-	if (sendto(p->rtpdir,keepstr,sizeof(keepstr),0,&p->si_other,sizeof(p->si_other)) == -1)
-		return -1;
+        if (p->start_stop == 'B')
+        {
+	   if (sendto(p->rtpdir,keepstr,sizeof(keepstr),0,&p->si_other,sizeof(p->si_other)) == -1)
+	      return -1;
+        }
 	return 0;
 }
 
@@ -671,7 +530,7 @@ static struct ast_channel *rtpdir_request(const char *type, int format, void *da
 	struct ast_channel *tmp = NULL;
 	
 	oldformat = format;
-	format &= (AST_FORMAT_GSM);
+	format &= (AST_FORMAT_SLINEAR);
 	if (!format) {
 		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
