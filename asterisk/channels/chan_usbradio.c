@@ -505,6 +505,8 @@ struct chan_usbradio_pvt {
 #endif
 	pthread_t hidthread;
 
+	char didpmrtx;
+	int notxcnt;
 	int stophid;
 	FILE *hkickhid;
 
@@ -2561,8 +2563,11 @@ static int usbradio_write(struct ast_channel *c, struct ast_frame *f)
 
 	// maw just take the data from the network and save it for PmrRx processing
 
-	if (!o->echoing) PmrTx(o->pmrChan,(i16*)f->data);
-	
+	if (!o->echoing)
+	{
+		PmrTx(o->pmrChan,(i16*)f->data);
+		o->didpmrtx = 1;
+	}
 	return 0;
 }
 
@@ -2632,6 +2637,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 			u = (struct usbecho *) o->echoq.q_forw;
 			remque((struct qelem *)u);
 			PmrTx(o->pmrChan,u->data);
+			o->didpmrtx = 1;
 			ast_free(u);
 			o->echoing = 1;
 		} else o->echoing = 0;
@@ -2699,6 +2705,16 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		if(o->debuglevel) ast_log(LOG_NOTICE,"txPttIn = %i, chan %s\n",o->pmrChan->txPttIn,o->owner->name);
 	}
 	oldpttout = o->pmrChan->txPttOut;
+
+	if (oldpttout && (!o->didpmrtx)) 
+	{
+		if (o->notxcnt > 1)
+		{
+			memset(o->usbradio_write_buf_1,0,sizeof(o->usbradio_write_buf_1));
+			PmrTx(o->pmrChan,(i16*)o->usbradio_write_buf_1);
+		} else o->notxcnt++;
+	} else o->notxcnt = 0;
+	o->didpmrtx = 0;
 
 	PmrRx(         o->pmrChan, 
 		   (i16 *)(o->usbradio_read_buf + AST_FRIENDLY_OFFSET),
