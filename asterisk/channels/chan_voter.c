@@ -186,10 +186,10 @@ char context[100];
 double dnsec;
 
 #define	FRAME_SIZE 160
-#define	ADPCM_FRAME_SIZE 83
+#define	ADPCM_FRAME_SIZE 163
 
 #define	DEFAULT_BUFLEN 500 /* 500ms default buffer len */
-#define	DEFAULT_BUFDELAY ((DEFAULT_BUFLEN * 8) - FRAME_SIZE)
+#define	DEFAULT_BUFDELAY ((DEFAULT_BUFLEN * 8) - (FRAME_SIZE * 2))
 
 #pragma pack(push)
 #pragma pack(1)
@@ -283,6 +283,7 @@ struct voter_pvt {
 	char	txctcssfreq[32];
 	int	txctcsslevel;
 	int	txtoctype;
+	struct	ast_frame *adpcmf1;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1089,6 +1090,45 @@ static void *voter_timer(void *data)
 }	
 
 
+static struct ast_frame *ast_frcat(struct ast_frame *f1, struct ast_frame *f2)
+{
+
+struct ast_frame *f;
+char *cp;
+int len;
+
+	if ((f1->subclass != f2->subclass) || (f1->frametype != f2->frametype))
+	{
+		ast_log(LOG_ERROR,"ast_frcat() called with non-matching frame types!!\n");
+		return NULL;
+	}
+	f = (struct ast_frame *)ast_malloc(sizeof(struct ast_frame));
+	if (!f)
+	{
+		ast_log(LOG_ERROR,"Cant malloc()\n");
+		return NULL;
+	}
+	memset(f,0,sizeof(struct ast_frame));
+	len = f1->datalen + f2->datalen + AST_FRIENDLY_OFFSET;
+	cp = malloc(len);
+	if (!cp)
+	{
+		ast_log(LOG_ERROR,"Cant malloc()\n");
+		return NULL;
+	}
+	memcpy(cp + AST_FRIENDLY_OFFSET,f1->data,f1->datalen);
+	memcpy(cp + AST_FRIENDLY_OFFSET + f1->datalen,f2->data,f2->datalen);
+	f->frametype = f1->frametype;
+	f->subclass = f1->subclass;
+	f->datalen = f1->datalen + f2->datalen;
+	f->samples = f1->samples + f2->samples;
+	f->data = cp + AST_FRIENDLY_OFFSET;;
+	f->mallocd = 1;
+	f->src = "ast_frcat";
+	f->offset = AST_FRIENDLY_OFFSET;
+	return(f);
+}
+
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
@@ -1097,7 +1137,7 @@ static void *voter_reader(void *data)
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
 	int i,j,k,n,x,maxrssi;
-	struct ast_frame *f1,*f2,fr;
+	struct ast_frame *f1,*f2,*f3,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
@@ -1114,7 +1154,7 @@ static void *voter_reader(void *data)
 	struct {
 		VOTER_PACKET_HEADER vp;
 		char rssi;
-		char audio[FRAME_SIZE];
+		char audio[FRAME_SIZE + 3];
 	} audiopacket;
 #pragma pack(pop)
 
@@ -1211,7 +1251,7 @@ static void *voter_reader(void *data)
 					    (((ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1))) ||
 					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM) && 
-						(recvlen == (sizeof(VOTER_PACKET_HEADER) + ADPCM_FRAME_SIZE + 1)))))
+						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 4)))))
 					{
 						for(p = pvts; p; p = p->next)
 						{
@@ -1220,7 +1260,7 @@ static void *voter_reader(void *data)
 						if (p) /* if we found 'em */
 						{
 							long long btime,ptime,difftime;
-							int index;
+							int index,flen;
 
 							if (client->ismaster)
 							{
@@ -1249,7 +1289,7 @@ static void *voter_reader(void *data)
 								ast_verbose("SysTime:   %s.%03d, diff: %lld,index: %d\n",timestr,(int)timetv.tv_usec / 1000,btime - ptime,index);
 							}
 							/* if in bounds */
-							if ((index > 0) && (index < (buflen - FRAME_SIZE)))
+							if ((index > 0) && (index < (buflen - (FRAME_SIZE * 2))))
 							{
 
 								f1 = NULL;
@@ -1262,11 +1302,24 @@ static void *voter_reader(void *data)
 								/* if otherwise (RSSI > 0), if ADPCM, translate it */
 								else if (ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM)
 								{
+
+#ifdef	ADPCM_LOOPBACK
+									memset(&audiopacket,0,sizeof(audiopacket));
+									strcpy((char *)audiopacket.vp.challenge,challenge);
+									audiopacket.vp.payload_type = htons(3);
+									audiopacket.rssi = 0;
+									memcpy(audiopacket.audio, buf + sizeof(VOTER_PACKET_HEADER) + 1,FRAME_SIZE + 3);
+									audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+									audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
+									audiopacket.vp.digest = htonl(client->respdigest);
+									sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+#endif
+
 									memset(&fr,0,sizeof(struct ast_frame));
 								        fr.frametype = AST_FRAME_VOICE;
 								        fr.subclass = AST_FORMAT_ADPCM;
 								        fr.datalen = ADPCM_FRAME_SIZE;
-								        fr.samples = FRAME_SIZE;
+								        fr.samples = FRAME_SIZE * 2;
 								        fr.data =  buf + sizeof(VOTER_PACKET_HEADER) + 1;
 								        fr.src = type;
 								        fr.offset = 0;
@@ -1276,20 +1329,21 @@ static void *voter_reader(void *data)
 									f1 = ast_translate(p->adpcmin,&fr,0);
 								}
 								index = (index + p->drainindex) % buflen;
-								i = (int)buflen - (index + FRAME_SIZE);
+								flen = (f1) ? f1->datalen : FRAME_SIZE;
+								i = (int)buflen - (index + flen);
 								if (i >= 0)
 								{
 									memcpy(client->audio + index,
-										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),FRAME_SIZE);
-									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],FRAME_SIZE);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),flen);
+									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],flen);
 								}
 								else
 								{
 									memcpy(client->audio + index,
-										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),FRAME_SIZE + i);
-									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],FRAME_SIZE + i);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1),flen + i);
+									memset(client->rssi + index,buf[sizeof(VOTER_PACKET_HEADER)],flen + i);
 									memcpy(client->audio,
-										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1) + (FRAME_SIZE + i),-i);
+										((f1) ? f1->data : buf + sizeof(VOTER_PACKET_HEADER) + 1) + (flen + i),-i);
 									memset(client->rssi,buf[sizeof(VOTER_PACKET_HEADER)],-i);
 								}
 								if (f1) ast_frfree(f1);
@@ -1387,7 +1441,6 @@ static void *voter_reader(void *data)
 										audiopacket.vp.payload_type = htons(1);
 										audiopacket.rssi = 0;
 										memcpy(audiopacket.audio,f1->data,FRAME_SIZE);
-										f2 = ast_translate(p->adpcmout,f1,0);
 										audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 										audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
 										for(client = clients; client; client = client->next)
@@ -1400,27 +1453,50 @@ static void *voter_reader(void *data)
 											if (client->totransmit)
 											{
 												if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-												sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+												sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 											}
 										}
-										memcpy(audiopacket.audio,f2->data,f2->datalen);
-										audiopacket.vp.payload_type = htons(3);
-										for(client = clients; client; client = client->next)
+									}
+									if (x || p->adpcmf1)
+									{
+										if (p->adpcmf1 == NULL) p->adpcmf1 = ast_frdup(f1);
+										else
 										{
-											if (client->nodenum != p->nodenum) continue;
-											if (!client->respdigest) continue;
-											if (!client->heardfrom) continue;
-											if (!client->doadpcm) continue;
-											audiopacket.vp.digest = htonl(client->respdigest);
-											if (client->totransmit)
+											memset(xmtbuf,0xff,sizeof(xmtbuf));
+											memset(&fr,0,sizeof(struct ast_frame));
+										        fr.frametype = AST_FRAME_VOICE;
+										        fr.subclass = AST_FORMAT_ULAW;
+										        fr.datalen = FRAME_SIZE;
+										        fr.samples = FRAME_SIZE;
+										        fr.data = xmtbuf;
+										        fr.src = type;
+										        fr.offset = 0;
+										        fr.mallocd = 0;
+										        fr.delivery.tv_sec = 0;
+										        fr.delivery.tv_usec = 0;
+											if (x) f3 = ast_frcat(p->adpcmf1,f1); else f3 = ast_frcat(p->adpcmf1,&fr);
+											ast_frfree(p->adpcmf1);
+											p->adpcmf1 = NULL;
+											f2 = ast_translate(p->adpcmout,f3,1);
+											memcpy(audiopacket.audio,f2->data,f2->datalen);
+											audiopacket.vp.payload_type = htons(3);
+											for(client = clients; client; client = client->next)
 											{
-												if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-												sendto(udp_socket, &audiopacket, sizeof(audiopacket) -
-												    (sizeof(audiopacket.audio) - f2->datalen),
-													0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+												if (client->nodenum != p->nodenum) continue;
+												if (!client->respdigest) continue;
+												if (!client->heardfrom) continue;
+												if (!client->doadpcm) continue;
+												audiopacket.vp.digest = htonl(client->respdigest);
+#ifndef	ADPCM_LOOPBACK
+												if (client->totransmit)
+												{
+													if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+													sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+												}
+#endif
 											}
+											ast_frfree(f2);
 										}
-										ast_frfree(f2);
 									}
 									if (f1) ast_frfree(f1);
 									maxrssi = 0;
