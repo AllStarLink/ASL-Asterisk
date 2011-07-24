@@ -585,20 +585,12 @@ static int voter_indicate(struct ast_channel *ast, int cond, const void *data, s
 #endif
 {
 	struct voter_pvt *p = ast->tech_pvt;
-	short dummybuf[FRAME_SIZE];
 
-	memset(dummybuf,0,sizeof(dummybuf));
 	switch (cond) {
 		case AST_CONTROL_RADIO_KEY:
 			p->txkey = 1;
 			break;
 		case AST_CONTROL_RADIO_UNKEY:
-			if (p->pmrChan && (p->txtoctype == TOC_NOTONE))
-			{
-				PmrTx(p->pmrChan,dummybuf);
-				PmrTx(p->pmrChan,dummybuf);
-				PmrTx(p->pmrChan,dummybuf);
-			}						
 			p->txkey = 0;
 			break;
 		case AST_CONTROL_HANGUP:
@@ -1361,6 +1353,11 @@ static void *voter_reader(void *data)
 									}
 									if (p->pmrChan)
 									{
+										if (p->pmrChan->txPttOut && (!x)) 
+										{
+											memset(xmtbuf,0,sizeof(xmtbuf));
+											if (p->pmrChan) PmrTx(p->pmrChan,xmtbuf);
+										}
 										PmrRx(p->pmrChan,dummybuf1,dummybuf2,xmtbuf1);
 										x = p->pmrChan->txPttOut;
 										for(i = 0; i < FRAME_SIZE; i++) xmtbuf[i] = xmtbuf1[i * 2];
