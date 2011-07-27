@@ -2024,7 +2024,8 @@ static void *voter_reader(void *data)
 					} 
 					/* if we know the dude, find the connection his audio belongs to and send it there */
 					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
-					    ((recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))) ||
+					    ((recvlen == sizeof(VOTER_PACKET_HEADER)) ||
+					       (recvlen == (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS))) ||
 						(recvlen == ((sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS)) - 1))))
 
 					{
@@ -2048,9 +2049,17 @@ static void *voter_reader(void *data)
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
 							ast_verbose("DrainTime: %s.%03d\n",timestr,master_time.vtime_nsec / 1000000);
 						}
-						vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
-						if (debug > 1) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
-							client->name,vgp->lat,vgp->lon,vgp->elev);
+						if (recvlen == sizeof(VOTER_PACKET_HEADER))
+						{
+							if (debug > 1) ast_verbose("Got GPS Keepalive from (%s)\n",
+								client->name);
+						}
+						else
+						{
+							vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
+							if (debug > 1) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
+								client->name,vgp->lat,vgp->lon,vgp->elev);
+						}
 						continue;
 					}
 					if (client) client->heardfrom = 1;
@@ -2071,8 +2080,18 @@ static void *voter_reader(void *data)
 				/* make our digest based on their challenge */
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
-				if (client && client->ismaster) authpacket.flags |= 2 | 8;
-				if (client && client->doadpcm) authpacket.flags |= 16;
+				if (client)
+				{
+					client->mix = 0;
+					/* if client is sending options */
+					if (recvlen > sizeof(VOTER_PACKET_HEADER))
+					{
+						if (buf[sizeof(VOTER_PACKET_HEADER)] & 32) client->mix = 1;
+					}
+					if (client->ismaster) authpacket.flags |= 2 | 8;
+					if (client->doadpcm) authpacket.flags |= 16;
+					if (client->mix) authpacket.flags |= 32;
+				}
 				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
 				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
@@ -2221,8 +2240,6 @@ int load_module(void)
                                         client->ismaster = 1;
 				else if (!strcasecmp(strs[i],"adpcm"))
                                         client->doadpcm = 1;
-				else if (!strcasecmp(strs[i],"mix"))
-                                        client->mix = 1;
 			}
 			client->digest = crc32_bufs(challenge,strs[0]);
 			ast_free(cp);
