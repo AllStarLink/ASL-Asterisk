@@ -283,6 +283,7 @@ struct voter_pvt {
 	struct ast_trans_pvt *adpcmin;
 	struct ast_trans_pvt *adpcmout;
 	struct ast_trans_pvt *toast;
+	struct ast_trans_pvt *toast1;
 	struct ast_trans_pvt *fromast;
 	t_pmr_chan	*pmrChan;
 	char	txctcssfreq[32];
@@ -569,6 +570,7 @@ static int voter_hangup(struct ast_channel *ast)
 	if (p->adpcmin) ast_translator_free_path(p->adpcmin);
 	if (p->adpcmout) ast_translator_free_path(p->adpcmout);
 	if (p->toast) ast_translator_free_path(p->toast);
+	if (p->toast) ast_translator_free_path(p->toast1);
 	if (p->fromast) ast_translator_free_path(p->fromast);
 	ast_mutex_lock(&voter_lock);
 	for(q = pvts; q; q = q->next)
@@ -715,7 +717,15 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		return NULL;
 	}
 	p->toast = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
-	if (!p->adpcmin)
+	if (!p->toast)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->toast1 = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
+	if (!p->toast1)
 	{
 		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
 		ast_dsp_free(p->dsp);
@@ -723,7 +733,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		return NULL;
 	}
 	p->fromast = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_SLINEAR);
-	if (!p->adpcmout)
+	if (!p->fromast)
 	{
 		ast_log(LOG_ERROR,"Cannot get translator from slinear to ulaw!!\n");
 		ast_dsp_free(p->dsp);
@@ -1915,7 +1925,7 @@ static void *voter_reader(void *data)
 									        fr.mallocd = 0;
 									        fr.delivery.tv_sec = 0;
 									        fr.delivery.tv_usec = 0;
-										f2 = ast_translate(p->toast,&fr,0);
+										f2 = ast_translate(p->toast1,&fr,0);
 										if (!f2)
 										{
 											ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
