@@ -180,7 +180,9 @@ z - WinAPRS
 #define	GPS_DEFAULT_ICON '>' /* car */
 #define	GPS_WORK_FILE "/tmp/gps.tmp"
 #define	GPS_DATA_FILE "/tmp/gps.dat"
+#define	GPS_SUB_FILE "/tmp/gps_%s.dat"
 #define	GPS_UPDATE_SECS 30
+#define	GPS_VALID_SECS 60
 #define	SERIAL_MAXMS 10000
 
 static char *config = "gps.conf";
@@ -193,9 +195,8 @@ static char *descrip = "Interfaces app_rpt to a NMEA 0183 (GGA records) complian
 
 static  pthread_t gps_thread = 0;
 static int run_forever = 1;
-static char *call,*password,*server,*port,*comment,*comport,icon;
-static char *deflat,*deflon,*defelev;
-char power,height,gain,dir;
+static char *comport,*server,*port;
+static char *general_deflat,*general_deflon,*general_defelev;
 static int baudrate;
 static int debug = 0;
 
@@ -304,21 +305,152 @@ char	c;
 	return(i);
 }
 
+static int report_aprs(char *ctg,char *lat,char *lon)
+{
+
+struct ast_config *cfg = NULL;
+char *call,*password,*comment,icon;
+char power,height,gain,dir,*val,basecall[300],buf[300],*cp;
+int sockfd;
+struct ast_hostent ahp;
+struct hostent *hp;
+struct sockaddr_in servaddr;
+
+#ifdef  NEW_ASTERISK
+        struct ast_flags zeroflag = {0};
+#endif
+
+	call = NULL;
+	password = NULL;
+	comment = NULL;
+#ifdef  NEW_ASTERISK
+        if (!(cfg = ast_config_load(config,zeroflag))) {
+#else
+        if (!(cfg = ast_config_load(config))) {
+#endif
+                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+                return -1;
+        }
+	val = (char *) ast_variable_retrieve(cfg,ctg,"call");	
+	if (val) call = ast_strdup(val); else call = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"password");	
+	if (val) password = ast_strdup(val); else password = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"comment");	
+	if (val) comment = ast_strdup(val); else comment = ast_strdup(GPS_DEFAULT_COMMENT);
+	val = (char *) ast_variable_retrieve(cfg,ctg,"power");	
+	if (val) power = (char)strtol(val,NULL,0); else power = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"height");	
+	if (val) height = (char)strtol(val,NULL,0); else height = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"gain");	
+	if (val) gain = (char)strtol(val,NULL,0); else gain = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"dir");	
+	if (val) dir = (char)strtol(val,NULL,0); else dir = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"icon");	
+	if (val && *val) icon = *val; else icon = GPS_DEFAULT_ICON;
+	if (icon == '?') icon = ';';  /* allow for entry of portable tent */
+
+	if ((!call) || (!password))
+	{
+		ast_log(LOG_ERROR,"You must specify call and password\n");
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (comment) ast_free(comment);
+		return -1;
+	}		
+        ast_config_destroy(cfg);
+        cfg = NULL; 
+
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sockfd < 0)
+	{
+		ast_log(LOG_ERROR,"Error opening socket\n");
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (comment) ast_free(comment);
+		return -1;
+	}
+	bzero(&servaddr, sizeof(servaddr));
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_port = htons(atoi(port));
+	hp = ast_gethostbyname(server, &ahp);
+	if (!hp)
+	{
+		ast_log(LOG_WARNING, "server %s cannot be found!!\n",server);
+		close(sockfd);
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (server) ast_free(server);
+		if (port) ast_free(port);
+		if (comment) ast_free(comment);
+		return -1;
+	}
+	memcpy(&servaddr.sin_addr,hp->h_addr,sizeof(in_addr_t));
+	if (connect(sockfd,(struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
+	{
+		ast_log(LOG_WARNING, "server %s cannot be found!!\n",server);
+		close(sockfd);
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (comment) ast_free(comment);
+		return -1;
+	}
+	strncpy(basecall,call,sizeof(basecall) - 1);
+	cp = strchr(basecall,'-');
+	if (cp) *cp = 0;
+	cp = strchr(lat,'.');
+	if (cp && (strlen(cp) >= 3))
+	{
+		*(cp + 3) = lat[strlen(lat) - 1];
+		*(cp + 4) = 0;
+	}
+	cp = strchr(lon,'.');
+	if (cp && (strlen(cp) >= 3)) 
+	{
+		*(cp + 3) = lon[strlen(lon) - 1];
+		*(cp + 4) = 0;
+	}
+	sprintf(buf,"user %s pass %s vers \"Asterisk app_gps\"\n",
+		call,password);
+	if (send(sockfd,buf,strlen(buf),0) < 0)
+	{
+		ast_log(LOG_WARNING, "Can not send signon to server\n");
+		close(sockfd);
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (comment) ast_free(comment);
+		return -1;
+	}
+	if (debug) ast_log(LOG_NOTICE,"sent packet(%s): %s",ctg,buf);
+	sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%cPHG%d%d%d%d/%s\n",
+		call,basecall,lat,lon,icon,power,height,gain,dir,comment);
+	if (send(sockfd,buf,strlen(buf),0) < 0)
+	{
+		ast_log(LOG_WARNING, "Can not send signon to server\n");
+		close(sockfd);
+		if (call) ast_free(call);
+		if (password) ast_free(password);
+		if (comment) ast_free(comment);
+		return -1;
+	}
+	if (debug) ast_log(LOG_NOTICE,"sent packet(%s): %s",ctg,buf);
+	close(sockfd);	
+	if (call) ast_free(call);
+	if (password) ast_free(password);
+	if (comment) ast_free(comment);
+	return 0;
+}
+
+
 static void *gpsthread(void *data)
 {
-char	buf[300],c,*strs[100],lat[100],lon[100],basecall[20];
-char	*cp,latc,lonc,astr[50];
-int	res,i,n,fd,sockfd,has_comport = 0;
+char	buf[300],c,*strs[100],lat[100],lon[100];
+char	latc,lonc,astr[50];
+int	res,i,n,fd,has_comport = 0;
 float	mylat,lata,latb,latd;
 float	mylon,lona,lonb,lond;
 FILE	*fp;
 time_t	t,lastupdate;
 struct termios mode;
-struct ast_hostent ahp;
-struct hostent *hp;
-struct sockaddr_in servaddr;
-
-
 
 
 	if (comport) has_comport = 1;
@@ -365,30 +497,22 @@ struct sockaddr_in servaddr;
 
 	while(run_forever)
 	{
-		if (has_comport)
+		res = getserial(fd,buf,sizeof(buf) - 1);
+		if (res < 0)
 		{
-			res = getserial(fd,buf,sizeof(buf) - 1);
-			if (res < 0)
-			{
-				ast_log(LOG_ERROR,"GPS fatal error!!\n");
-				continue;
-			}
-		}
-		else
-		{
-			sleep(10);
-			res = 0;
+			ast_log(LOG_ERROR,"GPS fatal error!!\n");
+			continue;
 		}
 		if (!res)
 		{
-			if ((!deflat) || (!deflon)) 
+			if ((!general_deflat) || (!general_deflon))
 			{
-				if (has_comport) ast_log(LOG_WARNING,"GPS timeout\n");
+				ast_log(LOG_WARNING,"GPS timeout!!\n");
 				continue;
 			}
-			if (has_comport) ast_log(LOG_WARNING,"GPS timeout -- Using default (fixed location) parameters instead\n");
-			mylat = strtof(deflat,NULL);
-			mylon = strtof(deflon,NULL);
+			ast_log(LOG_WARNING,"GPS timeout -- Using default (fixed location) parameters instead\n");
+			mylat = strtof(general_deflat,NULL);
+			mylon = strtof(general_deflon,NULL);
 			latc = (mylat >= 0.0) ? 'N' : 'S';
 			lonc = (mylon >= 0.0) ? 'E' : 'W';
 			lata = fabs(mylat);
@@ -399,9 +523,9 @@ struct sockaddr_in servaddr;
                         lond = (lonb - floor(lonb)) * 100 + 0.5;
 			sprintf(lat,"%02d%02d.%02d%c",(int)lata,(int)latb,(int)latd,latc);
 			sprintf(lon,"%03d%02d.%02d%c",(int)lona,(int)lonb,(int)lond,lonc);
-			if (defelev)
+			if (general_defelev)
 			{
-				mylat = strtof(defelev,NULL);
+				mylat = strtof(general_defelev,NULL);
 				lata = (mylat - floor(mylat)) * 10 + 0.5;
 				sprintf(astr,"%03d.%1d",(int)mylat,(int)lata);
 				strs[9] = astr;
@@ -466,83 +590,100 @@ struct sockaddr_in servaddr;
 		fclose(fp);
 		sprintf(buf,"/bin/mv %s %s > /dev/null 2>&1",GPS_WORK_FILE,GPS_DATA_FILE);
 		ast_safe_system(buf);
-		if (t < (lastupdate + GPS_UPDATE_SECS)) continue;
-		lastupdate = t;	
-
-		sockfd = socket(AF_INET, SOCK_STREAM, 0);
-		if (sockfd < 0)
-		{
-			ast_log(LOG_ERROR,"Error opening socket\n");
-			break;
-		}
-		bzero(&servaddr, sizeof(servaddr));
-		servaddr.sin_family = AF_INET;
-		servaddr.sin_port = htons(atoi(port));
-		hp = ast_gethostbyname(server, &ahp);
-		if (!hp)
-		{
-			ast_log(LOG_WARNING, "server %s cannot be found!!\n",server);
-			close(sockfd);
-			continue;
-		}
-		memcpy(&servaddr.sin_addr,hp->h_addr,sizeof(in_addr_t));
-		if (connect(sockfd,(struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
-		{
-			ast_log(LOG_WARNING, "server %s cannot be found!!\n",server);
-			close(sockfd);
-			continue;
-		}
-		strncpy(basecall,call,sizeof(basecall) - 1);
-		cp = strchr(basecall,'-');
-		if (cp) *cp = 0;
-		cp = strchr(lat,'.');
-		if (cp && (strlen(cp) >= 3))
-		{
-			*(cp + 3) = lat[strlen(lat) - 1];
-			*(cp + 4) = 0;
-		}
-		cp = strchr(lon,'.');
-		if (cp && (strlen(cp) >= 3)) 
-		{
-			*(cp + 3) = lon[strlen(lon) - 1];
-			*(cp + 4) = 0;
-		}
-		sprintf(buf,"user %s pass %s vers \"Asterisk app_gps\"\n",
-			call,password);
-		if (send(sockfd,buf,strlen(buf),0) < 0)
-		{
-			ast_log(LOG_WARNING, "Can not send signon to server\n");
-			close(sockfd);
-			continue;
-		}
-		if (debug) ast_log(LOG_NOTICE,"sent packet: %s",buf);
-		sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%cPHG%d%d%d%d/%s\n",
-			call,basecall,lat,lon,icon,power,height,gain,dir,comment);
-		if (send(sockfd,buf,strlen(buf),0) < 0)
-		{
-			ast_log(LOG_WARNING, "Can not send signon to server\n");
-			close(sockfd);
-			continue;
-		}
-		if (debug) ast_log(LOG_NOTICE,"sent packet: %s",buf);
-		close(sockfd);	
 	}
 	close(fd);
-
-
-
-
-
 err:
-	if (call) ast_free(call);
-	if (password) ast_free(password);
-	if (server) ast_free(server);
-	if (port) ast_free(port);
-	if (comment) ast_free(comment);
-	if (comport) ast_free(comport);
 	pthread_exit(NULL);
 	return NULL;
 }
+
+
+static void *gps_sub_thread(void *data)
+{
+struct ast_config *cfg = NULL;
+char *ctg = (char *)data,gotfiledata;
+char *val,*deflat,*deflon,*defelev,latc,lonc;
+char fname[200],lat[300],lon[300];
+FILE *fp;
+unsigned int u;
+float	mylat,lata,latb,latd;
+float	mylon,lona,lonb,lond;
+struct stat mystat;
+time_t	now,was,lastupdate;
+
+
+#ifdef  NEW_ASTERISK
+        if (!(cfg = ast_config_load(config,zeroflag))) {
+#else
+        if (!(cfg = ast_config_load(config))) {
+#endif
+                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+		pthread_exit(NULL);
+		return NULL;
+        }
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lat");	
+	if (val) deflat = ast_strdup(val); else deflat = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
+	if (val) deflon = ast_strdup(val); else deflon = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"elev");	
+	if (val) defelev = ast_strdup(val); else defelev = NULL;
+        ast_config_destroy(cfg);
+        cfg = NULL; 
+	time(&lastupdate);
+	while(run_forever)
+	{
+		gotfiledata = 0;
+		if (!strcmp(ctg,"general"))
+			strcpy(fname,GPS_DATA_FILE);
+		else
+			snprintf(fname,sizeof(fname) - 1,GPS_SUB_FILE,ctg);
+		time(&now);
+		fp = fopen(fname,"r");
+		if (fp && (fstat(fileno(fp),&mystat) != -1) &&
+			(mystat.st_size < 100))
+		{
+			if (fscanf(fp,"%u %s %s",&u,lat,lon) == 3)
+			{
+				was = (time_t) u;
+				if ((was + GPS_VALID_SECS) >= now)
+				{
+					gotfiledata = 1;
+					if (now >= (lastupdate + GPS_UPDATE_SECS))
+					{
+						report_aprs(ctg,lat,lon);
+						lastupdate = now;
+					}
+				}
+			}
+		}
+		if ((!gotfiledata) && deflat && deflon)
+		{
+			if (now >= (lastupdate + GPS_UPDATE_SECS))
+			{
+				mylat = strtof(deflat,NULL);
+				mylon = strtof(deflon,NULL);
+				latc = (mylat >= 0.0) ? 'N' : 'S';
+				lonc = (mylon >= 0.0) ? 'E' : 'W';
+				lata = fabs(mylat);
+				lona = fabs(mylon);
+				latb = (lata - floor(lata)) * 60;
+	                        latd = (latb - floor(latb)) * 100 + 0.5;
+	                        lonb = (lona - floor(lona)) * 60;
+	                        lond = (lonb - floor(lonb)) * 100 + 0.5;
+				sprintf(lat,"%02d%02d.%02d%c",(int)lata,(int)latb,(int)latd,latc);
+				sprintf(lon,"%03d%02d.%02d%c",(int)lona,(int)lonb,(int)lond,lonc);
+				report_aprs(ctg,lat,lon);
+				lastupdate = now;
+			}
+
+		}
+		if (fp) fclose(fp);
+		sleep(10);
+	}
+	pthread_exit(NULL);
+	return NULL;
+}
+
 
 static int gps_exec(struct ast_channel *chan, void *data)
 {
@@ -584,32 +725,19 @@ int load_module(void)
                 ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
                 return AST_MODULE_LOAD_DECLINE;
         }
-	val = (char *) ast_variable_retrieve(cfg,ctg,"call");	
-	if (val) call = ast_strdup(val); else call = NULL;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"password");	
-	if (val) password = ast_strdup(val); else password = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"comport");	
+	if (val) comport = ast_strdup(val); else comport = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lat");	
+	if (val) general_deflat = ast_strdup(val); else general_deflat = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
+	if (val) general_deflon = ast_strdup(val); else general_deflon = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"elev");	
+	if (val) general_defelev = ast_strdup(val); else general_defelev = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"server");	
 	if (val) server = ast_strdup(val); else server = ast_strdup(GPS_DEFAULT_SERVER);
 	val = (char *) ast_variable_retrieve(cfg,ctg,"port");	
 	if (val) port = ast_strdup(val); else port = ast_strdup(GPS_DEFAULT_PORT);
-	val = (char *) ast_variable_retrieve(cfg,ctg,"comment");	
-	if (val) comment = ast_strdup(val); else comment = ast_strdup(GPS_DEFAULT_COMMENT);
-	val = (char *) ast_variable_retrieve(cfg,ctg,"comport");	
-	if (val) comport = ast_strdup(val); else comport = NULL;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"lat");	
-	if (val) deflat = ast_strdup(val); else deflat = NULL;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
-	if (val) deflon = ast_strdup(val); else deflon = NULL;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"elev");	
-	if (val) defelev = ast_strdup(val); else defelev = NULL;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"power");	
-	if (val) power = (char)strtol(val,NULL,0); else power = 0;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"height");	
-	if (val) height = (char)strtol(val,NULL,0); else height = 0;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"gain");	
-	if (val) gain = (char)strtol(val,NULL,0); else gain = 0;
-	val = (char *) ast_variable_retrieve(cfg,ctg,"dir");	
-	if (val) dir = (char)strtol(val,NULL,0); else dir = 0;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"baudrate");	
 	if (val)
 	{
 	    switch(atoi(val))
@@ -636,21 +764,18 @@ int load_module(void)
 	} else baudrate = GPS_DEFAULT_BAUDRATE;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"debug");	
 	if (val) debug = ast_true(val);
-	val = (char *) ast_variable_retrieve(cfg,ctg,"icon");	
-	if (val && *val) icon = *val; else icon = GPS_DEFAULT_ICON;
-	if (icon == '?') icon = ';';  /* allow for entry of portable tent */
-
-	if ((!call) || (!password))
-	{
-		ast_log(LOG_ERROR,"You must specify call and password\n");
-                return AST_MODULE_LOAD_DECLINE;
-	}		
-        ast_config_destroy(cfg);
-        cfg = NULL; 
 
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-        ast_pthread_create(&gps_thread,&attr,gpsthread,NULL);
+        if (comport) ast_pthread_create(&gps_thread,&attr,gpsthread,NULL);
+        ast_pthread_create(&gps_thread,&attr,gps_sub_thread,ast_strdup("general"));
+        while ( (ctg = ast_category_browse(cfg, ctg)) != NULL)
+	{
+		if (ctg == NULL) continue;
+	        ast_pthread_create(&gps_thread,&attr,gps_sub_thread,ast_strdup(ctg));
+	}
+        ast_config_destroy(cfg);
+        cfg = NULL; 
 	res = ast_register_application(app, gps_exec, synopsis, descrip);
 	return res;
 }
@@ -658,7 +783,7 @@ int load_module(void)
 #ifdef	OLD_ASTERISK
 char *description()
 {
-	return (char *)el_tech.description;
+	return (char *)gps_tech.description;
 }
 
 int usecount()

@@ -164,6 +164,9 @@ be cumbersome, inefficient and undesirable.
 #define	MAXSTREAMS 50
 #define	MAXTHRESHOLDS 20
 
+#define	GPS_WORK_FILE "/tmp/gps%s.tmp"
+#define	GPS_DATA_FILE "/tmp/gps%s.dat"
+
 #define	NTAPS_PL 6
 
 static const char vdesc[] = "radio Voter channel driver";
@@ -252,6 +255,7 @@ struct voter_client {
 	int rxseqno;
 	char rxseqadpcm;
 	time_t warntime;
+	char *gpsid;
 } ;
 
 struct voter_pvt {
@@ -1331,6 +1335,7 @@ static void *voter_timer(void *data)
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
+	char gps0[300],gps1[300],gps2[300];
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
 	int i,j,k,x,maxrssi;
@@ -1338,6 +1343,7 @@ static void *voter_reader(void *data)
         socklen_t fromlen;
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
+	FILE *gpsfp;
 	fd_set fds;
 	struct voter_client *client,*client1,*maxclient;
 	VOTER_PACKET_HEADER *vph;
@@ -2075,6 +2081,22 @@ static void *voter_reader(void *data)
 						else
 						{
 							vgp = (VOTER_GPS *)(buf + sizeof(VOTER_PACKET_HEADER));
+							if (client->gpsid)
+							{
+								snprintf(gps1,sizeof(gps1) - 1,GPS_WORK_FILE,client->gpsid);
+								snprintf(gps2,sizeof(gps2) - 1,GPS_DATA_FILE,client->gpsid);
+								gpsfp = fopen(gps1,"w");
+								if (!gpsfp)
+								{
+									ast_log(LOG_ERROR,"Unable to open GPS work file %s!!\n",gps1);
+									continue;
+								}
+								time(&t);
+								fprintf(gpsfp,"%u %s %s %sM\n",(unsigned int) t,vgp->lat,vgp->lon,vgp->elev);
+								fclose(gpsfp);
+								snprintf(gps0,sizeof(gps0) - 1,"/bin/mv %s %s > /dev/null 2>&1",gps1,gps2);
+								ast_safe_system(gps0);
+							}
 							if (debug > 1) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
 								client->name,vgp->lat,vgp->lon,vgp->elev);
 						}
@@ -2278,6 +2300,19 @@ int load_module(void)
 				}
 				else if (!strcasecmp(strs[i],"adpcm"))
                                         client->doadpcm = 1;
+				else if (!strncasecmp(strs[i],"gpsid",5))
+				{
+					cp = strchr(strs[i],'=');
+					if (!cp)
+					{
+						client->gpsid = ast_strdup("");
+					}
+					else
+					{
+						client->gpsid = ast_strdup(cp);
+						*client->gpsid = '_';
+					}
+				}
 			}
 			client->digest = crc32_bufs(challenge,strs[0]);
 			ast_free(cp);
