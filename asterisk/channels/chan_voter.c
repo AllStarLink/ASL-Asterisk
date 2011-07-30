@@ -2171,7 +2171,7 @@ int load_module(void)
         struct ast_flags zeroflag = {0};
 #endif
 	struct sockaddr_in sin;
-	char *val,*ctg,*cp,*strs[40];
+	char *val,*ctg,*cp,*cp1,*strs[40];
 	pthread_attr_t attr;
 	pthread_t voter_reader_thread,voter_timer_thread;
 	unsigned int mynode;
@@ -2302,14 +2302,14 @@ int load_module(void)
                                         client->doadpcm = 1;
 				else if (!strncasecmp(strs[i],"gpsid",5))
 				{
-					cp = strchr(strs[i],'=');
-					if (!cp)
+					cp1 = strchr(strs[i],'=');
+					if (!cp1)
 					{
 						client->gpsid = ast_strdup("");
 					}
 					else
 					{
-						client->gpsid = ast_strdup(cp);
+						client->gpsid = ast_strdup(cp1);
 						*client->gpsid = '_';
 					}
 				}
