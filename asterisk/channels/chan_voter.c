@@ -156,6 +156,8 @@ be cumbersome, inefficient and undesirable.
 
 #define MAX_MASTER_COUNT 3
 
+#define CLIENT_WARN_SECS 60
+
 #define	DELIMCHR ','
 #define	QUOTECHR 34
 
@@ -247,8 +249,9 @@ struct voter_client {
 	uint8_t lastrssi;
 	int txseqno;
 	int txseqno_rxkeyed;
-	int start_txseqno;
 	int rxseqno;
+	char rxseqadpcm;
+	time_t warntime;
 } ;
 
 struct voter_pvt {
@@ -307,6 +310,7 @@ AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 int debug = 0;
 int voter_test = 0;
 FILE *recfp = NULL;
+int hasmaster = 0;
 
 unsigned int buflen = DEFAULT_BUFLEN * 8;
 
@@ -1084,27 +1088,6 @@ int unload_module(void)
 	return 0;
 }
 
-/* Maintain a relative time source that is *not* dependent on system time of day */
-
-static void *voter_timer(void *data)
-{
-	char buf[FRAME_SIZE];
-	int	i;
-
-	while(run_forever && (!ast_shutting_down()))
-	{
-		i = read(voter_timing_fd,buf,sizeof(buf));
-		if (i != FRAME_SIZE)
-		{
-			ast_log(LOG_ERROR,"error in read() for voter timer\n");
-			pthread_exit(NULL);
-		}
-		ast_atomic_fetchadd_int(&voter_timing_count,1);
-	}
-	return(NULL);
-}	
-
-
 static struct ast_frame *ast_frcat(struct ast_frame *f1, struct ast_frame *f2)
 {
 
@@ -1170,6 +1153,15 @@ struct voter_client *client;
 		if (!client->heardfrom) continue;
 		if (!client->mix) continue;
 		client->txseqno++;
+		if (client->rxseqno)
+		{
+			if (!client->doadpcm) client->rxseqno++;
+			else
+			{
+				if (client->rxseqadpcm) client->rxseqno += 2;
+				client->rxseqadpcm = !client->rxseqadpcm;
+			}
+		}
 	}
 	for(p = pvts; p; p = p->next)
 	{
@@ -1178,7 +1170,6 @@ struct voter_client *client;
 			p->drained_once = 1;
 			continue;
 		}
-		ast_mutex_lock(&voter_lock);
 		n = x = 0;
 		ast_mutex_lock(&p->txqlock);
 		AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
@@ -1310,6 +1301,33 @@ struct voter_client *client;
 
 
 
+/* Maintain a relative time source that is *not* dependent on system time of day */
+
+static void *voter_timer(void *data)
+{
+	char buf[FRAME_SIZE];
+	int	i;
+	time_t	t;
+
+	while(run_forever && (!ast_shutting_down()))
+	{
+		i = read(voter_timing_fd,buf,sizeof(buf));
+		if (i != FRAME_SIZE)
+		{
+			ast_log(LOG_ERROR,"error in read() for voter timer\n");
+			pthread_exit(NULL);
+		}
+		ast_mutex_lock(&voter_lock);
+		time(&t);
+		master_time.vtime_sec = (uint32_t) t;
+		voter_timing_count++;
+		if (!hasmaster) voter_xmit();
+		ast_mutex_unlock(&voter_lock);
+	}
+	return(NULL);
+}	
+
+
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
@@ -1326,7 +1344,7 @@ static void *voter_reader(void *data)
 	VOTER_GPS *vgp;
 	VOTER_REC rec;
 	VOTER_STREAM stream;
-	time_t timestuff;
+	time_t timestuff,t;
 	unsigned long my_voter_time;
 #ifdef	ADPCM_LOOPBACK
 #pragma pack(push)
@@ -1414,7 +1432,7 @@ static void *voter_reader(void *data)
 							(client->sin.sin_port && (client->sin.sin_port != sin.sin_port))) client->heardfrom = 0;
 						client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
-						if (!client->ismaster)
+						if ((!client->ismaster) && hasmaster)
 						{
 							if (last_master_count && (voter_timing_count > (last_master_count + MAX_MASTER_COUNT)))
 							{
@@ -1457,12 +1475,12 @@ static void *voter_reader(void *data)
 							{
 								if (client->txseqno > (client->txseqno_rxkeyed + 2))
 								{
-									client->start_txseqno = client->txseqno;
 									client->rxseqno = 0;
+									client->rxseqadpcm = 0;
 								}
 								client->txseqno_rxkeyed = client->txseqno;
 								if  (!client->rxseqno) client->rxseqno = ntohl(vph->curtime.vtime_nsec);
-								index = (ntohl(vph->curtime.vtime_nsec) - client->rxseqno) - (client->txseqno - client->start_txseqno);
+								index = ntohl(vph->curtime.vtime_nsec) - client->rxseqno;
 								index *= FRAME_SIZE;
 								index += bufdelay;
 								index -= (FRAME_SIZE * 2);
@@ -2069,9 +2087,9 @@ static void *voter_reader(void *data)
 				if (client)
 				{
 					client->txseqno = 0;
-					client->start_txseqno = 0;
 					client->txseqno_rxkeyed = 0;
 					client->rxseqno = 0;
+					client->rxseqadpcm = 0;
 				}
 				strcpy((char *)authpacket.vp.challenge,challenge);
 				gettimeofday(&tv,NULL);
@@ -2088,9 +2106,25 @@ static void *voter_reader(void *data)
 					{
 						if (buf[sizeof(VOTER_PACKET_HEADER)] & 32) client->mix = 1;
 					}
-					if (client->ismaster) authpacket.flags |= 2 | 8;
-					if (client->doadpcm) authpacket.flags |= 16;
-					if (client->mix) authpacket.flags |= 32;
+					if ((!client->mix) && (!hasmaster))
+					{
+						time(&t);
+						if (t >= (client->warntime + CLIENT_WARN_SECS))
+						{
+							client->warntime = t;
+							ast_log(LOG_WARNING,"Voter client %s attempting to authenticate as GPS-timing-based with no master timing source defined!!\n",
+								client->name);
+						}
+						authpacket.vp.digest = 0;
+						client->heardfrom = 0;
+						client->respdigest = 0;
+					}
+					else
+					{
+						if (client->ismaster) authpacket.flags |= 2 | 8;
+						if (client->doadpcm) authpacket.flags |= 16;
+						if (client->mix) authpacket.flags |= 32;
+					}
 				}
 				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
@@ -2195,6 +2229,7 @@ int load_module(void)
                 return AST_MODULE_LOAD_DECLINE;
 	}
 
+	hasmaster = 0;
 	ctg = NULL;
         while ( (ctg = ast_category_browse(cfg, ctg)) != NULL)
 	{
@@ -2237,7 +2272,10 @@ int load_module(void)
 				if (!strcasecmp(strs[i],"transmit"))
 					client->totransmit = 1;
 				else if (!strcasecmp(strs[i],"master"))
+				{
                                         client->ismaster = 1;
+					hasmaster = 1;
+				}
 				else if (!strcasecmp(strs[i],"adpcm"))
                                         client->doadpcm = 1;
 			}
