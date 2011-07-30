@@ -296,6 +296,7 @@ struct voter_pvt {
 	char	txctcssfreq[32];
 	int	txctcsslevel;
 	int	txtoctype;
+	char 	duplex;
 	struct	ast_frame *adpcmf1;
 
 #ifdef 	OLD_ASTERISK
@@ -806,6 +807,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		if (val) p->linger = atoi(val); else p->linger = DEFAULT_LINGER;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
 		if (val) p->plfilter = ast_true(val);
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
+		if (val) p->duplex = ast_true(val); else p->duplex = 1;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
 		if (val)
 		{
@@ -1810,6 +1813,29 @@ static void *voter_reader(void *data)
 												memset(client->audio,0xff,-i);
 											}
 										}
+										if ((!p->duplex) && p->txkey)
+										{
+											p->rxkey = 0;
+											p->threshold = 0;
+											p->threshcount = 0;
+											p->lingercount = 0;
+											memset(&fr,0,sizeof(struct ast_frame));
+										        fr.frametype = 0;
+										        fr.subclass = 0;
+										        fr.datalen = 0;
+										        fr.samples = 0;
+										        fr.data =  NULL;
+										        fr.src = type;
+										        fr.offset = 0;
+										        fr.mallocd=0;
+										        fr.delivery.tv_sec = 0;
+										        fr.delivery.tv_usec = 0;
+											p->drainindex += FRAME_SIZE;
+											if (p->drainindex >= buflen) p->drainindex -= buflen;
+											ast_mutex_unlock(&voter_lock);
+											ast_queue_frame(p->owner,&fr);
+											continue;
+										}
 										if (p->plfilter) 
 										{
 											for(i = 0; i < FRAME_SIZE; i++)
@@ -1866,6 +1892,29 @@ static void *voter_reader(void *data)
 											ast_queue_frame(p->owner,&fr);
 										}
 										if (debug > 1) ast_verbose("Sending from client %s RSSI %d\n",maxclient->name,maxrssi);
+									}
+									if ((!p->duplex) && p->txkey)
+									{
+										p->rxkey = 0;
+										p->threshold = 0;
+										p->threshcount = 0;
+										p->lingercount = 0;
+										memset(&fr,0,sizeof(struct ast_frame));
+									        fr.frametype = 0;
+									        fr.subclass = 0;
+									        fr.datalen = 0;
+									        fr.samples = 0;
+									        fr.data =  NULL;
+									        fr.src = type;
+									        fr.offset = 0;
+									        fr.mallocd=0;
+									        fr.delivery.tv_sec = 0;
+									        fr.delivery.tv_usec = 0;
+										p->drainindex += FRAME_SIZE;
+										if (p->drainindex >= buflen) p->drainindex -= buflen;
+										ast_mutex_unlock(&voter_lock);
+										ast_queue_frame(p->owner,&fr);
+										continue;
 									}
 									memset(&fr,0,sizeof(struct ast_frame));
 								        fr.frametype = AST_FRAME_VOICE;
@@ -2266,6 +2315,7 @@ int load_module(void)
 			if (!strcmp(v->name,"streams")) continue;
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
+			if (!strcmp(v->name,"duplex")) continue;
 			if (!strcmp(v->name,"linger")) continue;
 			cp = ast_strdup(v->value);
 			if (!cp)
