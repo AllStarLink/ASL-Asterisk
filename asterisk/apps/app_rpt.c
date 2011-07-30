@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.282 05/11/2011
+ *  version 0.283 07/30/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -319,6 +319,7 @@
 #define	MAX_TEXTMSG_SIZE 160
 
 #define	MAX_EXTNODEFILES 50
+#define	MAX_LOCALLINKNODES 50
 
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
@@ -571,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.282 05/11/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.283 07/30/2011";
 
 static char *app = "Rpt";
 
@@ -1111,6 +1112,8 @@ static struct rpt
 		char *outstreamcmd;
 		char dopfxtone;
 		char *events;
+		char *locallinknodes[MAX_LOCALLINKNODES];
+		int locallinknodesn;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -5858,6 +5861,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	if (!val) val = EXTNODEFILE;
 	rpt_vars[n].p.extnodefilesn = 
 	    explode_string(val,rpt_vars[n].p.extnodefiles,MAX_EXTNODEFILES,',',0);
+	val = (char *) ast_variable_retrieve(cfg,this,"locallinknodes");
+	if (val) rpt_vars[n].p.locallinknodesn = explode_string(ast_strdup(val),rpt_vars[n].p.locallinknodes,MAX_LOCALLINKNODES,',',0);
 	val = (char *) ast_variable_retrieve(cfg,this,"patchconnect");
 	rpt_vars[n].p.patchconnect = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"archivedir");
@@ -8639,16 +8644,17 @@ struct	mdcparams *mdcp;
 			rpt_mutex_lock(&myrpt->lock);
 			while(l != &myrpt->links)
 			{
+				int v,w;
+
 				if (l->name[0] == '0')
 				{
 					l = l->next;
 					continue;
 				}
+				w = 1;
 				if (myrpt->p.nolocallinkct)
 				{
-					int v,w;
 
-					w = 1;
 					for(v = 0; v < nrpts; v++)
 					{
 						if (&rpt_vars[v] == myrpt) continue;
@@ -8657,8 +8663,17 @@ struct	mdcparams *mdcp;
 						w = 0;
 						break;
 					}
-					if (w) haslink = 1;
-				} else haslink = 1;
+				} 
+				if (myrpt->p.locallinknodesn)
+				{
+					for(v = 0; v < myrpt->p.locallinknodesn; v++)
+					{
+						if (strcmp(l->name,myrpt->p.locallinknodes[v])) continue;
+						w = 0;
+						break;
+					}
+				}
+				if (w) haslink = 1;
 				if (l->mode == 1) {
 					hastx++;
 					if (l->isremote) hasremote++;
