@@ -2309,7 +2309,7 @@ int load_module(void)
 		mynode = strtoul(ctg,NULL,0);
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
-			if (!strcmp(v->name,"txctcssadj")) continue;
+			if (!strcmp(v->name,"txctcsslevel")) continue;
 			if (!strcmp(v->name,"txctcss")) continue;
 			if (!strcmp(v->name,"txtoctype")) continue;
 			if (!strcmp(v->name,"streams")) continue;
