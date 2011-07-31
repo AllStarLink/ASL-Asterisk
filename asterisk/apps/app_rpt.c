@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.284 07/31/2011
+ *  version 0.285 07/31/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -572,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.284 07/31/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.285 07/31/2011";
 
 static char *app = "Rpt";
 
@@ -8625,6 +8625,7 @@ struct	mdcparams *mdcp;
 		myrpt->totalkerchunks++;
 		rpt_mutex_unlock(&myrpt->lock);
 	
+treataslocal:
 		if ((mytele->mode == LOCUNKEY) &&
 		    ((ct = (char *) ast_variable_retrieve(myrpt->cfg, nodename, "localct")))) { /* Local override ct */
 			ct_copy = ast_strdup(ct);
@@ -8790,6 +8791,65 @@ struct	mdcparams *mdcp;
 		if(myrpt->patchnoct && myrpt->callmode){ /* If no CT during patch configured, then don't send one */
 			imdone = 1;
 			break;
+		}
+		if (myrpt->p.locallinknodesn)
+		{
+			int v,w;
+
+			w = 0;
+			for(v = 0; v < myrpt->p.locallinknodesn; v++)
+			{
+				if (strcmp(mytele->mylink.name,myrpt->p.locallinknodes[v])) continue;
+				w = 1;
+				break;
+			}
+			if (w) 
+			{
+				/*
+				* If there's one already queued, don't do another
+				*/
+
+				tlist = myrpt->tele.next;
+				unkeys_queued = 0;
+		                if (tlist != &myrpt->tele)
+		                {
+		                        rpt_mutex_lock(&myrpt->lock);
+		                        while(tlist != &myrpt->tele){
+		                                if ((tlist->mode == UNKEY) || 
+						    (tlist->mode == LOCUNKEY)) unkeys_queued++;
+		                                tlist = tlist->next;
+		                        }
+		                        rpt_mutex_unlock(&myrpt->lock);
+				}
+				if( unkeys_queued > 1){
+					imdone = 1;
+					break;
+				}
+
+				x = get_wait_interval(myrpt, DLY_UNKEY);
+				rpt_mutex_lock(&myrpt->lock);
+				myrpt->unkeytocttimer = x; /* Must be protected as it is changed below */
+				rpt_mutex_unlock(&myrpt->lock);
+
+				/* Wait for the telemetry timer to expire */
+				/* Periodically check the timer since it can be re-initialized above */
+				while(myrpt->unkeytocttimer)
+				{
+					int ctint;
+					if(myrpt->unkeytocttimer > 100)
+						ctint = 100;
+					else
+						ctint = myrpt->unkeytocttimer;
+					ast_safe_sleep(mychannel, ctint);
+					rpt_mutex_lock(&myrpt->lock);
+					if(myrpt->unkeytocttimer < ctint)
+						myrpt->unkeytocttimer = 0;
+					else
+						myrpt->unkeytocttimer -= ctint;
+					rpt_mutex_unlock(&myrpt->lock);
+				}
+			}
+			goto treataslocal;
 		}
 		if (myrpt->p.nolocallinkct) /* if no CT if this guy is on local system */
 		{
@@ -9920,6 +9980,20 @@ struct rpt_link *l;
 		  (!(v2 && telem_lookup(myrpt,NULL, myrpt->name, v2)))) return;
 		break;
 	    case LINKUNKEY:
+ 		mylink = (struct rpt_link *) data;
+		if (myrpt->p.locallinknodesn)
+		{
+			int v,w;
+
+			w = 0;
+			for(v = 0; v < myrpt->p.locallinknodesn; v++)
+			{
+				if (strcmp(mylink->name,myrpt->p.locallinknodes[v])) continue;
+				w = 1;
+				break;
+			}
+			if (w) break;
+		}
 		if (!ast_variable_retrieve(myrpt->cfg, myrpt->name, "linkunkeyct"))
 			return;
 		break;
