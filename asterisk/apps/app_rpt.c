@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.283 07/30/2011
+ *  version 0.284 07/31/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -572,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.283 07/30/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.284 07/31/2011";
 
 static char *app = "Rpt";
 
@@ -1114,6 +1114,7 @@ static struct rpt
 		char *events;
 		char *locallinknodes[MAX_LOCALLINKNODES];
 		int locallinknodesn;
+		char *eloutbound;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -5979,6 +5980,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.dtmfkeys = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"outstreamcmd");
 	rpt_vars[n].p.outstreamcmd = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"eloutbound");
+	rpt_vars[n].p.eloutbound = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"events");
 	if (!val) val = "events";
 	rpt_vars[n].p.events = val;
@@ -10639,7 +10642,10 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			if (strlen(node) < 7) return 1;
 			sprintf(str2,"%d",atoi(node + 1));
 			if (elink_db_get(str2,'n',NULL,NULL,str1) < 1) return -1;
-			sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
+			if (myrpt->p.eloutbound)
+				sprintf(tmp,"echolink/%s/%s,%s",myrpt->p.eloutbound,str1,str1);
+			else
+				sprintf(tmp,"echolink/el0/%s,%s",str1,str1);
 		}
 	}
 
