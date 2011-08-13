@@ -1326,7 +1326,7 @@ static void *voter_timer(void *data)
 		}
 		ast_mutex_lock(&voter_lock);
 		time(&t);
-		master_time.vtime_sec = (uint32_t) t;
+		if (!hasmaster) master_time.vtime_sec = (uint32_t) t;
 		voter_timing_count++;
 		if (!hasmaster) voter_xmit();
 		ast_mutex_unlock(&voter_lock);
@@ -2317,6 +2317,10 @@ int load_module(void)
 			if (!strcmp(v->name,"plfilter")) continue;
 			if (!strcmp(v->name,"duplex")) continue;
 			if (!strcmp(v->name,"linger")) continue;
+			if (!strncasecmp(v->name,"transmit",8)) continue;
+			if (!strncasecmp(v->name,"master",6)) continue;
+			if (!strncasecmp(v->name,"adpcm",5)) continue;
+			if (!strncasecmp(v->name,"gpsid",5)) continue;
 			cp = ast_strdup(v->value);
 			if (!cp)
 			{
