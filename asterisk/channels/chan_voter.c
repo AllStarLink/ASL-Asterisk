@@ -961,8 +961,6 @@ static int voter_do_tone(int fd, int argc, char *argv[])
 
         if (argc < 3)
                 return RESULT_SHOWUSAGE;
-        if((newlevel < 0) || (newlevel > 250))
-                return RESULT_SHOWUSAGE;
 	for(p = pvts; p; p = p->next)
 	{
 		if (p->nodenum == atoi(argv[2])) break;
@@ -983,6 +981,8 @@ static int voter_do_tone(int fd, int argc, char *argv[])
 		return RESULT_SUCCESS;
 	}
         newlevel = atoi(argv[3]);
+        if((newlevel < 0) || (newlevel > 250))
+                return RESULT_SHOWUSAGE;
         ast_cli(fd, "voter instance %d CTCSS tone level set to %d\n",p->nodenum,newlevel);
 	p->txctcsslevel = newlevel;
 	*p->pmrChan->ptxCtcssAdjust = newlevel;
