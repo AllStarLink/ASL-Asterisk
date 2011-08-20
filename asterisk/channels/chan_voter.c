@@ -247,6 +247,8 @@ struct voter_client {
 	char ismaster;
 	char doadpcm;
 	char mix;
+	char nodeemp;
+	char noplfilter;
 	struct voter_client *next;
 	long long dtime;
 	uint8_t lastrssi;
@@ -2195,6 +2197,8 @@ static void *voter_reader(void *data)
 						if (client->ismaster) authpacket.flags |= 2 | 8;
 						if (client->doadpcm) authpacket.flags |= 16;
 						if (client->mix) authpacket.flags |= 32;
+						if (client->nodeemp) authpacket.flags |= 1;
+						if (client->noplfilter) authpacket.flags |= 4;
 					}
 				}
 				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
@@ -2321,6 +2325,8 @@ int load_module(void)
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
 			if (!strncasecmp(v->name,"gpsid",5)) continue;
+			if (!strncasecmp(v->name,"nodeemp",7)) continue;
+			if (!strncasecmp(v->name,"noplfilter",10)) continue;
 			cp = ast_strdup(v->value);
 			if (!cp)
 			{
@@ -2354,6 +2360,10 @@ int load_module(void)
 				}
 				else if (!strcasecmp(strs[i],"adpcm"))
                                         client->doadpcm = 1;
+				else if (!strcasecmp(strs[i],"nodeemp"))
+                                        client->nodeemp = 1;
+				else if (!strcasecmp(strs[i],"noplfilter"))
+                                        client->noplfilter = 1;
 				else if (!strncasecmp(strs[i],"gpsid",5))
 				{
 					cp1 = strchr(strs[i],'=');

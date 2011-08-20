@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.285 07/31/2011
+ *  version 0.286 08/18/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -572,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.285 07/31/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.286 08/18/2011";
 
 static char *app = "Rpt";
 
@@ -670,6 +670,7 @@ static char *remote_rig_kenwood="kenwood";
 static char *remote_rig_tm271="tm271";
 static char *remote_rig_tmd700="tmd700";
 static char *remote_rig_ic706="ic706";
+static char *remote_rig_xcat="xcat";
 static char *remote_rig_rtx150="rtx150";
 static char *remote_rig_rtx450="rtx450";
 static char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
@@ -1109,6 +1110,7 @@ static struct rpt
 		int default_split_70cm;
 		int dtmfkey;
 		char dias;
+		char dusbabek;
 		char *outstreamcmd;
 		char dopfxtone;
 		char *events;
@@ -2125,6 +2127,7 @@ static int set_ft897(struct rpt *myrpt);
 static int set_ft100(struct rpt *myrpt);
 static int set_ft950(struct rpt *myrpt);
 static int set_ic706(struct rpt *myrpt);
+static int set_xcat(struct rpt *myrpt);
 static int setkenwood(struct rpt *myrpt);
 static int set_tm271(struct rpt *myrpt);
 static int set_tmd700(struct rpt *myrpt);
@@ -6096,6 +6099,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		rpt_vars[n].p.iospeed = B4800;
 	val = (char *) ast_variable_retrieve(cfg,this,"dias");
 	if (val) rpt_vars[n].p.dias = ast_true(val);
+	val = (char *) ast_variable_retrieve(cfg,this,"dusbabek");
+	if (val) rpt_vars[n].p.dusbabek = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg,this,"iospeed");
 	if (val)
 	{
@@ -9077,6 +9082,10 @@ treataslocal:
 		else if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 		{
 			res = set_ic706(myrpt);
+		}
+		else if(!strcmp(myrpt->remoterig, remote_rig_xcat))
+		{
+			res = set_xcat(myrpt);
 		}
 		else if(!strcmp(myrpt->remoterig, remote_rig_rbi)||!strcmp(myrpt->remoterig, remote_rig_ppp16))
 		{
@@ -13198,7 +13207,7 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
 				strcpy((char *)rxbuf,(char *)txbuf);
 				return(strlen((char *)rxbuf));
 #else
-                                ast_log(LOG_WARNING,"Serial device not responding on node %s\n",myrpt->name);
+                                ast_log(LOG_WARNING,"%d Serial device not responding on node %s\n",j,myrpt->name);
                                 return(j);
 #endif
                         }
@@ -13304,8 +13313,16 @@ static int civ_cmd(struct rpt *myrpt,unsigned char *cmd, int cmdlen)
 unsigned char rxbuf[100];
 int	i,rv ;
 
-	rv = serial_remote_io(myrpt,cmd,cmdlen,rxbuf,cmdlen + 6,0);
+	rv = serial_remote_io(myrpt,cmd,cmdlen,rxbuf,(myrpt->p.dusbabek) ? 6 : cmdlen + 6,0);
 	if (rv == -1) return(-1);
+	if (myrpt->p.dusbabek)
+	{
+		if (rxbuf[0] != 0xfe) return(1);
+		if (rxbuf[1] != 0xfe) return(1);
+		if (rxbuf[4] != 0xfb) return(1);
+		if (rxbuf[5] != 0xfd) return(1);
+		return(0);
+	}
 	if (rv != (cmdlen + 6)) return(1);
 	for(i = 0; i < 6; i++)
 		if (rxbuf[i] != cmd[i]) return(1);
@@ -16125,6 +16142,198 @@ static int multimode_bump_freq_ic706(struct rpt *myrpt, int interval)
 	return(serial_remote_io(myrpt,cmdstr,11,NULL,0,0));
 }
 
+/*
+* XCAT I/O handlers
+*/
+
+/* Check to see that the frequency is valid */
+/* returns 0 if frequency is valid          */
+
+
+static int check_freq_xcat(int m, int d, int *defmode)
+{
+	int dflmd = REM_MODE_FM;
+
+	if (m == 144){ /* 2 meters */
+		if(d < 10100)
+			return -1;
+	}
+	if (m == 29){ /* 10 meters */
+		if(d > 70000)
+			return -1;
+	}
+	else if((m >= 28) && (m < 30)){
+		;
+	}
+	else if((m >= 50) && (m < 54)){
+		;
+	}
+	else if((m >= 145) && (m < 148)){
+		;
+	}
+	else if((m >= 420) && (m < 450)){ /* 70 centimeters */
+		;
+	}
+	else
+		return -1;
+	
+	if(defmode)
+		*defmode = dflmd;	
+
+
+	return 0;
+}
+
+static int simple_command_xcat(struct rpt *myrpt, char command, char subcommand)
+{
+	unsigned char cmdstr[10];
+	
+	cmdstr[0] = cmdstr[1] = 0xfe;
+	cmdstr[2] = myrpt->p.civaddr;
+	cmdstr[3] = 0xe0;
+	cmdstr[4] = command;
+	cmdstr[5] = subcommand;
+	cmdstr[6] = 0xfd;
+
+	return(civ_cmd(myrpt,cmdstr,7));
+}
+
+/*
+* Set a new frequency for the xcat
+*/
+
+static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
+{
+	unsigned char cmdstr[20];
+	char mhz[MAXREMSTR], decimals[MAXREMSTR];
+	int fd,m,d;
+
+	fd = 0;
+	if(debug) 
+		ast_log(LOG_NOTICE,"newfreq:%s\n",newfreq); 			
+
+	if(split_freq(mhz, decimals, newfreq))
+		return -1; 
+
+	m = atoi(mhz);
+	d = atoi(decimals);
+
+	/* The ic-706 likes packed BCD frequencies */
+
+	cmdstr[0] = cmdstr[1] = 0xfe;
+	cmdstr[2] = myrpt->p.civaddr;
+	cmdstr[3] = 0xe0;
+	cmdstr[4] = 5;
+	cmdstr[5] = ((d % 10) << 4);
+	cmdstr[6] = (((d % 1000)/ 100) << 4) + ((d % 100)/10);
+	cmdstr[7] = ((d / 10000) << 4) + ((d % 10000)/1000);
+	cmdstr[8] = (((m % 100)/10) << 4) + (m % 10);
+	cmdstr[9] = (m / 100);
+	cmdstr[10] = 0xfd;
+
+	return(civ_cmd(myrpt,cmdstr,11));
+}
+
+static int set_offset_xcat(struct rpt *myrpt, char offset)
+{
+	unsigned char c;
+
+	switch(offset){
+		case	REM_SIMPLEX:
+			c = 0x10;
+			break;
+
+		case	REM_MINUS:
+			c = 0x11;
+			break;
+		
+		case	REM_PLUS:
+			c = 0x12;
+			break;	
+
+		default:
+			return -1;
+	}
+
+	return simple_command_xcat(myrpt,0x0f,c);
+
+}
+
+/* Set transmit and receive ctcss tone frequencies */
+
+static int set_ctcss_freq_xcat(struct rpt *myrpt, char *txtone, char *rxtone)
+{
+	unsigned char cmdstr[10];
+	char hertz[MAXREMSTR],decimal[MAXREMSTR];
+	int h,d,rv;
+
+	memset(cmdstr, 0, 5);
+
+	if(debug > 6)
+		ast_log(LOG_NOTICE,"txtone=%s  rxtone=%s \n",txtone,rxtone);
+
+	if(split_ctcss_freq(hertz, decimal, txtone))
+		return -1; 
+
+	h = atoi(hertz);
+	d = atoi(decimal);
+	
+	cmdstr[0] = cmdstr[1] = 0xfe;
+	cmdstr[2] = myrpt->p.civaddr;
+	cmdstr[3] = 0xe0;
+	cmdstr[4] = 0x1b;
+	cmdstr[5] = 0;
+	cmdstr[6] = ((h / 100) << 4) + (h % 100)/ 10;
+	cmdstr[7] = ((h % 10) << 4) + (d % 10);
+	cmdstr[8] = 0xfd;
+
+	rv = civ_cmd(myrpt,cmdstr,9);
+	if (rv) return(-1);
+
+	if (!rxtone) return(0);
+
+	if(split_ctcss_freq(hertz, decimal, rxtone))
+		return -1; 
+
+	h = atoi(hertz);
+	d = atoi(decimal);
+
+	cmdstr[0] = cmdstr[1] = 0xfe;
+	cmdstr[2] = myrpt->p.civaddr;
+	cmdstr[3] = 0xe0;
+	cmdstr[4] = 0x1b;
+	cmdstr[5] = 1;
+	cmdstr[6] = ((h / 100) << 4) + (h % 100)/ 10;
+	cmdstr[7] = ((h % 10) << 4) + (d % 10);
+	cmdstr[8] = 0xfd;
+	return(civ_cmd(myrpt,cmdstr,9));
+}	
+
+static int set_xcat(struct rpt *myrpt)
+{
+	int res = 0;
+	
+	/* set Mode */
+	if(debug)
+		printf("Mode\n");
+	if (!res)
+		res = simple_command_xcat(myrpt,8,1);
+	/* set Freq */
+	if(debug)
+		printf("Frequency\n");
+	if(!res)
+		res = set_freq_xcat(myrpt, myrpt->freq);		/* Frequency */
+	if(debug)
+		printf("Offset\n");
+	if(!res)
+		res = set_offset_xcat(myrpt, myrpt->offset);	/* Offset */
+	if(debug)
+		printf("CTCSS\n");
+	if (!res)
+		res = set_ctcss_freq_xcat(myrpt, myrpt->txplon ? myrpt->txpl : "0.0", 
+			myrpt->rxplon ? myrpt->rxpl : "0.0"); /* Tx/Rx CTCSS */
+	return res;
+}
 
 
 /*
@@ -16200,6 +16409,11 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
 		res = 0;
 	}
+	if(!strcmp(myrpt->remoterig, remote_rig_xcat))
+	{
+		rpt_telemetry(myrpt,SETREMOTE,NULL);
+		res = 0;
+	}
 	if(!strcmp(myrpt->remoterig, remote_rig_tm271))
 	{
 		rpt_telemetry(myrpt,SETREMOTE,NULL);
@@ -16260,6 +16474,8 @@ static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
 		return check_freq_ft950(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 		return check_freq_ic706(m, d, defmode,myrpt->p.remote_mars);
+	else if(!strcmp(myrpt->remoterig, remote_rig_xcat))
+		return check_freq_xcat(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_rbi))
 		return check_freq_rbi(m, d, defmode);
 	else if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
@@ -20760,7 +20976,8 @@ char *this,*val;
 		if (rpt_vars[i].remote)
 		{
 			if(retrieve_memory(&rpt_vars[i],"init")){ /* Try to retrieve initial memory channel */
-				if (!strcmp(rpt_vars[i].remoterig,remote_rig_rtx450))
+				if ((!strcmp(rpt_vars[i].remoterig,remote_rig_rtx450)) ||
+				    (!strcmp(rpt_vars[i].remoterig,remote_rig_xcat)))
 					strncpy(rpt_vars[i].freq, "446.500", sizeof(rpt_vars[i].freq) - 1);
 					
 				else
@@ -22005,6 +22222,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		   ((!strcmp(myrpt->remoterig,remote_rig_ft897)) ||
 		    (!strcmp(myrpt->remoterig,remote_rig_ft950)) ||
 		    (!strcmp(myrpt->remoterig,remote_rig_ft100)) ||
+		      (!strcmp(myrpt->remoterig,remote_rig_xcat)) ||
 		      (!strcmp(myrpt->remoterig,remote_rig_ic706)) ||
 		         (!strcmp(myrpt->remoterig,remote_rig_tm271))))
 		{
