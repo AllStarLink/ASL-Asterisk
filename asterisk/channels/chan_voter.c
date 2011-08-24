@@ -2399,8 +2399,12 @@ int load_module(void)
 			}
 			memset(client->rssi,0,buflen);
 			ast_mutex_lock(&voter_lock);
-			if (clients != NULL) client->next = clients;
-			clients = client;
+			if (clients == NULL) clients = client;
+			else
+			{
+				for(client1 = clients; client1->next; client1 = client1->next) ;
+				client1->next = client;
+			}
 			ast_mutex_unlock(&voter_lock);
 		}
 	}
