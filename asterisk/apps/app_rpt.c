@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.286 08/18/2011
+ *  version 0.287 08/26/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -572,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.286 08/18/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.287 08/26/2011";
 
 static char *app = "Rpt";
 
@@ -16332,6 +16332,11 @@ static int set_xcat(struct rpt *myrpt)
 	if (!res)
 		res = set_ctcss_freq_xcat(myrpt, myrpt->txplon ? myrpt->txpl : "0.0", 
 			myrpt->rxplon ? myrpt->rxpl : "0.0"); /* Tx/Rx CTCSS */
+	/* set Freq */
+	if(debug)
+		printf("Frequency\n");
+	if(!res)
+		res = set_freq_xcat(myrpt, myrpt->freq);		/* Frequency */
 	return res;
 }
 
