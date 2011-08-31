@@ -1137,6 +1137,187 @@ int len;
 }
 
 
+static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclient, int maxrssi)
+{
+
+	int i,j,k,x;
+	struct ast_frame fr,*f1,*f2;
+	struct voter_client *client;
+
+
+	memset(&fr,0,sizeof(struct ast_frame));
+        fr.frametype = AST_FRAME_VOICE;
+        fr.subclass = AST_FORMAT_ULAW;
+        fr.datalen = FRAME_SIZE;
+        fr.samples = FRAME_SIZE;
+        fr.data =  p->buf + AST_FRIENDLY_OFFSET;
+        fr.src = type;
+        fr.offset = AST_FRIENDLY_OFFSET;
+        fr.mallocd = 0;
+        fr.delivery.tv_sec = 0;
+        fr.delivery.tv_usec = 0;
+	f1 = ast_translate(p->toast,&fr,0);
+	if (!f1)
+	{
+		ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
+		return(0);
+	}
+	/* f1 now contains the voted-upon audio in slinear */
+	for(client = clients; client; client = client->next)
+	{
+		short *sp1,*sp2;
+		if (client->nodenum != p->nodenum) continue;
+		if (!client->mix) continue;
+		i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+		if (i >= 0)
+		{
+			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE);
+		}
+		else
+		{
+			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE + i);
+			memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),client->audio,-i);
+		}
+		if (i >= 0)
+		{
+			memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
+		}
+		else
+		{
+			memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+			memset(client->audio,0xff,-i);
+		}
+		k = 0;
+		if (i >= 0)
+		{
+			for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
+			{
+				k += client->rssi[j];
+				client->rssi[j] = 0;
+			}
+		}
+		else
+		{
+			for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
+			{
+				k += client->rssi[j];
+				client->rssi[j] = 0;
+			}
+			for(j = 0; j < -i; j++)
+			{
+				k += client->rssi[j];
+				client->rssi[j] = 0;
+			}
+		}			
+		client->lastrssi = k / FRAME_SIZE; 
+		if (client->lastrssi > maxrssi)
+		{
+			maxrssi = client->lastrssi;
+			maxclient = client;
+		}
+		memset(&fr,0,sizeof(struct ast_frame));
+	        fr.frametype = AST_FRAME_VOICE;
+	        fr.subclass = AST_FORMAT_ULAW;
+	        fr.datalen = FRAME_SIZE;
+	        fr.samples = FRAME_SIZE;
+	        fr.data =  p->buf + AST_FRIENDLY_OFFSET;
+	        fr.src = type;
+	        fr.offset = AST_FRIENDLY_OFFSET;
+	        fr.mallocd = 0;
+	        fr.delivery.tv_sec = 0;
+	        fr.delivery.tv_usec = 0;
+		f2 = ast_translate(p->toast1,&fr,0);
+		if (!f2)
+		{
+			ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
+			return(0);
+		}
+		sp1 = f1->data;
+		sp2 = f2->data;
+		for(i = 0; i < FRAME_SIZE; i++)
+		{
+			j = sp1[i] + sp2[i];
+			if (j > 32767) j = 32767;
+			if (j < -32767) j = -32767;
+			sp1[i] = j;
+		}
+		ast_frfree(f2);
+	}
+	if (!maxclient) /* if nothing there */
+	{
+		p->threshold = 0;
+		p->threshcount = 0;
+		p->lingercount = 0;
+		memset(&fr,0,sizeof(struct ast_frame));
+	        fr.frametype = 0;
+	        fr.subclass = 0;
+	        fr.datalen = 0;
+	        fr.samples = 0;
+	        fr.data =  NULL;
+	        fr.src = type;
+	        fr.offset = 0;
+	        fr.mallocd=0;
+	        fr.delivery.tv_sec = 0;
+	        fr.delivery.tv_usec = 0;
+		p->drainindex += FRAME_SIZE;
+		if (p->drainindex >= buflen) p->drainindex -= buflen;
+		ast_mutex_unlock(&voter_lock);
+		ast_queue_frame(p->owner,&fr);
+		return(0);
+	}
+	p->drainindex += FRAME_SIZE;
+	if (p->drainindex >= buflen) p->drainindex -= buflen;
+	gettimeofday(&p->lastrxtime,NULL);
+	ast_mutex_unlock(&voter_lock);
+	if (!p->rxkey)
+	{
+		memset(&fr,0,sizeof(fr));
+		fr.datalen = 0;
+		fr.samples = 0;
+		fr.frametype = AST_FRAME_CONTROL;
+		fr.subclass = AST_CONTROL_RADIO_KEY;
+		fr.data =  0;
+		fr.src = type;
+		fr.offset = 0;
+		fr.mallocd=0;
+		fr.delivery.tv_sec = 0;
+		fr.delivery.tv_usec = 0;
+		ast_queue_frame(p->owner,&fr);
+	}
+	p->rxkey = 1;
+	x = 0;
+	if (p->dsp)
+	{
+		f2 = ast_dsp_process(NULL,p->dsp,f1);
+#ifdef	OLD_ASTERISK
+		if (f2->frametype == AST_FRAME_DTMF)
+#else
+		if ((f2->frametype == AST_FRAME_DTMF_END) ||
+			(f2->frametype == AST_FRAME_DTMF_BEGIN))
+#endif
+		{
+			if ((f2->subclass != 'm') && (f2->subclass != 'u'))
+			{
+#ifndef	OLD_ASTERISK
+				if (f2->frametype == AST_FRAME_DTMF_END)
+#endif
+					ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f2->subclass);
+			}
+			else
+			{
+				f2->frametype = AST_FRAME_NULL;
+				f2->subclass = 0;
+			}
+			ast_queue_frame(p->owner,f2);
+			x = 1;
+		}
+	}
+	if (!x) ast_queue_frame(p->owner,f1);
+	return(1);
+}
+
+	
+
 static void voter_xmit(void)
 {
 
@@ -1317,6 +1498,7 @@ static void *voter_timer(void *data)
 	char buf[FRAME_SIZE];
 	int	i;
 	time_t	t;
+	struct voter_pvt *p;
 
 	while(run_forever && (!ast_shutting_down()))
 	{
@@ -1330,7 +1512,15 @@ static void *voter_timer(void *data)
 		time(&t);
 		if (!hasmaster) master_time.vtime_sec = (uint32_t) t;
 		voter_timing_count++;
-		if (!hasmaster) voter_xmit();
+		if (!hasmaster)
+		{
+			for(p = pvts; p; p = p->next)
+			{
+				memset(p->buf + AST_FRIENDLY_OFFSET,0xff,FRAME_SIZE);
+				voter_mix_and_send(p,NULL,0);
+			}
+			voter_xmit();
+		}
 		ast_mutex_unlock(&voter_lock);
 	}
 	return(NULL);
@@ -1343,8 +1533,8 @@ static void *voter_reader(void *data)
 	char gps0[300],gps1[300],gps2[300];
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
-	int i,j,k,x,maxrssi;
-	struct ast_frame *f1,*f2,fr;
+	int i,j,k,maxrssi;
+	struct ast_frame *f1,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
 	struct timeval tmout,tv,timetv;
@@ -1918,175 +2108,7 @@ static void *voter_reader(void *data)
 										ast_queue_frame(p->owner,&fr);
 										continue;
 									}
-									memset(&fr,0,sizeof(struct ast_frame));
-								        fr.frametype = AST_FRAME_VOICE;
-								        fr.subclass = AST_FORMAT_ULAW;
-								        fr.datalen = FRAME_SIZE;
-								        fr.samples = FRAME_SIZE;
-								        fr.data =  p->buf + AST_FRIENDLY_OFFSET;
-								        fr.src = type;
-								        fr.offset = AST_FRIENDLY_OFFSET;
-								        fr.mallocd = 0;
-								        fr.delivery.tv_sec = 0;
-								        fr.delivery.tv_usec = 0;
-									f1 = ast_translate(p->toast,&fr,0);
-									if (!f1)
-									{
-										ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
-										continue;
-									}
-									/* f1 now contains the voted-upon audio in slinear */
-									for(client = clients; client; client = client->next)
-									{
-										short *sp1,*sp2;
-
-										if (client->nodenum != p->nodenum) continue;
-										if (!client->mix) continue;
-										i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
-										if (i >= 0)
-										{
-											memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE);
-										}
-										else
-										{
-											memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE + i);
-											memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),client->audio,-i);
-										}
-										if (i >= 0)
-										{
-											memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
-										}
-										else
-										{
-											memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
-											memset(client->audio,0xff,-i);
-										}
-										k = 0;
-										if (i >= 0)
-										{
-											for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
-											{
-												k += client->rssi[j];
-												client->rssi[j] = 0;
-											}
-										}
-										else
-										{
-											for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
-											{
-												k += client->rssi[j];
-												client->rssi[j] = 0;
-											}
-											for(j = 0; j < -i; j++)
-											{
-												k += client->rssi[j];
-												client->rssi[j] = 0;
-											}
-										}			
-										client->lastrssi = k / FRAME_SIZE; 
-										if (client->lastrssi > maxrssi)
-										{
-											maxrssi = client->lastrssi;
-											maxclient = client;
-										}
-										memset(&fr,0,sizeof(struct ast_frame));
-									        fr.frametype = AST_FRAME_VOICE;
-									        fr.subclass = AST_FORMAT_ULAW;
-									        fr.datalen = FRAME_SIZE;
-									        fr.samples = FRAME_SIZE;
-									        fr.data =  p->buf + AST_FRIENDLY_OFFSET;
-									        fr.src = type;
-									        fr.offset = AST_FRIENDLY_OFFSET;
-									        fr.mallocd = 0;
-									        fr.delivery.tv_sec = 0;
-									        fr.delivery.tv_usec = 0;
-										f2 = ast_translate(p->toast1,&fr,0);
-										if (!f2)
-										{
-											ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
-											continue;
-										}
-										sp1 = f1->data;
-										sp2 = f2->data;
-										for(i = 0; i < FRAME_SIZE; i++)
-										{
-											j = sp1[i] + sp2[i];
-											if (j > 32767) j = 32767;
-											if (j < -32767) j = -32767;
-											sp1[i] = j;
-										}
-										ast_frfree(f2);
-									}
-									if (!maxclient) /* if nothing there */
-									{
-										p->threshold = 0;
-										p->threshcount = 0;
-										p->lingercount = 0;
-										memset(&fr,0,sizeof(struct ast_frame));
-									        fr.frametype = 0;
-									        fr.subclass = 0;
-									        fr.datalen = 0;
-									        fr.samples = 0;
-									        fr.data =  NULL;
-									        fr.src = type;
-									        fr.offset = 0;
-									        fr.mallocd=0;
-									        fr.delivery.tv_sec = 0;
-									        fr.delivery.tv_usec = 0;
-										p->drainindex += FRAME_SIZE;
-										if (p->drainindex >= buflen) p->drainindex -= buflen;
-										ast_mutex_unlock(&voter_lock);
-										ast_queue_frame(p->owner,&fr);
-										continue;
-									}
-									p->drainindex += FRAME_SIZE;
-									if (p->drainindex >= buflen) p->drainindex -= buflen;
-									gettimeofday(&p->lastrxtime,NULL);
-									ast_mutex_unlock(&voter_lock);
-									if (!p->rxkey)
-									{
-										memset(&fr,0,sizeof(fr));
-										fr.datalen = 0;
-										fr.samples = 0;
-										fr.frametype = AST_FRAME_CONTROL;
-										fr.subclass = AST_CONTROL_RADIO_KEY;
-										fr.data =  0;
-										fr.src = type;
-										fr.offset = 0;
-										fr.mallocd=0;
-										fr.delivery.tv_sec = 0;
-										fr.delivery.tv_usec = 0;
-										ast_queue_frame(p->owner,&fr);
-									}
-									p->rxkey = 1;
-									x = 0;
-									if (p->dsp)
-									{
-										f2 = ast_dsp_process(NULL,p->dsp,f1);
-#ifdef	OLD_ASTERISK
-										if (f2->frametype == AST_FRAME_DTMF)
-#else
-										if ((f2->frametype == AST_FRAME_DTMF_END) ||
-											(f2->frametype == AST_FRAME_DTMF_BEGIN))
-#endif
-										{
-											if ((f2->subclass != 'm') && (f2->subclass != 'u'))
-											{
-#ifndef	OLD_ASTERISK
-												if (f2->frametype == AST_FRAME_DTMF_END)
-#endif
-													ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f2->subclass);
-											}
-											else
-											{
-												f2->frametype = AST_FRAME_NULL;
-												f2->subclass = 0;
-											}
-											ast_queue_frame(p->owner,f2);
-											x = 1;
-										}
-									} 
-									if (!x) ast_queue_frame(p->owner,f1);
+									if (!voter_mix_and_send(p,maxclient,maxrssi)) continue;
 								}
 							}
 						}
