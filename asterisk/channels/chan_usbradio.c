@@ -844,7 +844,7 @@ unsigned char c;
 	}
 	if (haspp == 2) /* if its a direct I/O */
 	{
-		c = inb(pbase);
+		c = inb(pbase + 1);
 	}
 	return(c);
 }
@@ -1441,7 +1441,7 @@ static void *hidthread(void *arg)
         usb_dev = NULL;
         usb_handle = NULL;
 
-	if (haspp == 2) ioperm(pbase,1,1);
+	if (haspp == 2) ioperm(pbase,2,1);
         while(!o->stophid)
         {
                 time(&o->lasthidtime);
@@ -5723,7 +5723,7 @@ static int load_module(void)
 			} 
 			else
 			{
-				if (ioperm(pbase,1,1) == -1)
+				if (ioperm(pbase,2,1) == -1)
 				{
 					ast_log(LOG_ERROR,"Cant get io permission on IO port %04x hex, disabling pp support\n",pbase);
 					haspp = 0;
