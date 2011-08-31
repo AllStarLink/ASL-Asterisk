@@ -1388,8 +1388,12 @@ static void *pulserthread(void *arg)
 struct	timeval now,then;
 int	i,j,k;
 
+	if (haspp == 2) ioperm(pbase,2,1);
 	stoppulser = 0;
 	pp_lastmask = 0;
+	ast_mutex_lock(&pp_lock);
+	ppwrite(pp_val);
+	ast_mutex_unlock(&pp_lock);
 	then = ast_tvnow();
 	while(!stoppulser)
 	{
@@ -5733,7 +5737,6 @@ static int load_module(void)
 			}
 		}
 	}
-
 	if (option_verbose > 2)
 	{
 		if (haspp == 1) ast_verbose(VERBOSE_PREFIX_3 "Parallel port is %s\n",pport);
