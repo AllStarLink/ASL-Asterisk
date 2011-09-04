@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.287 08/26/2011
+ *  version 0.288 09/03/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -572,7 +572,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.287 08/26/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.288 09/03/2011";
 
 static char *app = "Rpt";
 
@@ -1117,6 +1117,7 @@ static struct rpt
 		char *locallinknodes[MAX_LOCALLINKNODES];
 		int locallinknodesn;
 		char *eloutbound;
+		int elke;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1159,7 +1160,7 @@ static struct rpt
 	pthread_t rpt_call_thread,rpt_thread;
 	time_t dtmf_time,rem_dtmf_time,dtmf_time_rem;
 	int calldigittimer;
-	int tailtimer,totimer,idtimer,txconf,conf,callmode,cidx,scantimer,tmsgtimer,skedtimer,linkactivitytimer;
+	int tailtimer,totimer,idtimer,txconf,conf,callmode,cidx,scantimer,tmsgtimer,skedtimer,linkactivitytimer,elketimer;
 	int mustid,tailid;
 	int rptinacttimer;
 	int tailevent;
@@ -5788,6 +5789,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.duplex = retrieve_astcfgint(&rpt_vars[n],this,"duplex",0,4,2);
 	rpt_vars[n].p.idtime = retrieve_astcfgint(&rpt_vars[n],this, "idtime", -60000, 2400000, IDTIME);	/* Enforce a min max including zero */
 	rpt_vars[n].p.politeid = retrieve_astcfgint(&rpt_vars[n],this, "politeid", 30000, 300000, POLITEID); /* Enforce a min max */
+	j  = retrieve_astcfgint(&rpt_vars[n],this, "elke", 0, 40000000, 0);
+	rpt_vars[n].p.elke  = j * 1210;
 	val = (char *) ast_variable_retrieve(cfg,this,"tonezone");
 	if (val) rpt_vars[n].p.tonezone = val;
 	rpt_vars[n].p.tailmessages[0] = 0;
@@ -18420,6 +18423,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->totimer = myrpt->p.totime;
 	myrpt->tmsgtimer = myrpt->p.tailmessagetime;
 	myrpt->idtimer = myrpt->p.politeid;
+	myrpt->elketimer = myrpt->p.elke;
 	myrpt->mustid = myrpt->tailid = 0;
 	myrpt->callmode = 0;
 	myrpt->tounkeyed = 0;
@@ -18891,6 +18895,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		totx = totx || (!AST_LIST_EMPTY(&myrpt->txq));
 		/* if in 1/2 or 3/4 duplex, give rx priority */
 		if ((myrpt->p.duplex < 2) && (!myrpt->p.linktolink) && (!myrpt->p.dias) && (myrpt->keyed)) totx = 0;
+		if (myrpt->p.elke && (myrpt->elketimer > myrpt->p.elke)) totx = 0;
 		if (totx && (!lasttx))
 		{
 			char mydate[100],myfname[100];
@@ -19468,6 +19473,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (myrpt->tmsgtimer < 0) myrpt->tmsgtimer = 0;
 		if (myrpt->voxtotimer) myrpt->voxtotimer -= elap;
 		if (myrpt->voxtotimer < 0) myrpt->voxtotimer = 0;
+		myrpt->elketimer += elap;
 		if ((myrpt->telemmode != 0x7fffffff) && (myrpt->telemmode > 1))
 		{
 			myrpt->telemmode -= elap;
@@ -19860,6 +19866,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						donodelog(myrpt,"RXKEY,MAIN");
 					}
 					rpt_update_boolean(myrpt,"RPT_RXKEYED",1);
+					myrpt->elketimer = 0;
 					myrpt->localoverride = 0;
 					if (f->datalen && f->data)
 					{

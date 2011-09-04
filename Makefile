@@ -86,7 +86,7 @@ upgrade:	llastate /usr/include/linux llastate/zaptel-installed llastate/libpri-i
 # Asterisk test build without install
 #
 ast-build-only: llastate llastate/zaptel-installed llastate/libpri-installed llastate/asterisk-configured
-	$(MAKE)  menuco.nfig
+	$(MAKE)  menuconfig
 	$(MAKE) -C asterisk DEBUG=
 #
 # Build and install for Quad Radio PCI card
