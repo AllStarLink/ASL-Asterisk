@@ -501,6 +501,8 @@ struct chan_simpleusb_pvt {
 
 	char rxkeyed;	  			// indicates rx signal present
 
+	char rxctcssoverride;
+
 	char lasttx;
 	char txkeyed;				// tx key request from upper layers 
 	char txtestkey;
@@ -2179,6 +2181,15 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 	/* print received messages */
 	if(o->debuglevel) ast_verbose(" << Console Received simpleusb text %s >> \n", text);
 
+	if (!strncmp(text,"RXCTCSS",7))
+	{
+		cnt = sscanf(text,"%s %d",cmd,&i);
+		if (cnt < 2) return 0;
+		o->rxctcssoverride = !i;
+	        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio RXCTCSS cmd: %s\n",text);
+		return 0;		
+	}
+
 	if (!strncmp(text,"GPIO",4))
 	{
 		cnt = sscanf(text,"%s %d %d",cmd,&i,&j);
@@ -2563,6 +2574,8 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 	else if ((o->rxsdtype == SD_HID_INVERT) && o->rxhidctcss) sd = 0;
 	else if ((o->rxsdtype == SD_PP) && (!o->rxppctcss)) sd = 0;
 	else if ((o->rxsdtype == SD_PP_INVERT) && o->rxppctcss) sd = 0;
+
+	if (o->rxctcssoverride) sd = 1;
 
 	o->rxkeyed = sd && cd && ((!o->lasttx) || o->duplex);
 
