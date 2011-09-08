@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.288 09/03/2011
+ *  version 0.289 09/03/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -130,6 +130,8 @@
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
  *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
+ *  62 - Send Message to USB to control GPIO pins, quietly (cop,61,GPIO1=0[,GPIO4=1].....)
+ *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
  *
  *
  * ilink cmds:
@@ -254,6 +256,7 @@
 #define	LINKPOSTSHORTTIME 200
 #define	KEYPOSTTIME 30000
 #define	KEYPOSTSHORTTIME 200
+#define	KEYTIMERTIME 250
 #define	MACROTIME 100
 #define	MACROPTIME 500
 #define	DTMF_TIMEOUT 3
@@ -270,6 +273,9 @@
 #define	DISC_TIME 10000  /* report disc after 10 seconds of no connect */
 #define	MAX_RETRIES 5
 #define	MAX_RETRIES_PERM 1000000000
+
+#define	APRSTT_PIPE "/tmp/aprs_ttfifo"
+#define	APRSTT_SUB_PIPE "/tmp/aprs_ttfifo_%s"
 
 #define	REDUNDANT_TX_TIME 2000
 
@@ -572,7 +578,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.288 09/03/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.289 09/03/2011";
 
 static char *app = "Rpt";
 
@@ -1118,6 +1124,7 @@ static struct rpt
 		int locallinknodesn;
 		char *eloutbound;
 		int elke;
+		char *aprstt;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -1229,6 +1236,7 @@ static struct rpt
 	char voxtostate;
 	int linkposttimer;			
 	int keyposttimer;			
+	int lastkeytimer;			
 	char newkey;
 	char iaxkey;
 	char inpadtest;
@@ -4688,6 +4696,79 @@ static char *eatwhite(char *s)
 	return s;
 }
 
+static char aprstt_xlat(char *instr,char *outstr)
+{
+int	i,j;
+char	b,c,lastnum,overlay,cksum;
+static char a_xlat[] = {0,0,'A','D','G','J','M','P','T','W'};
+static char b_xlat[] = {0,0,'B','E','H','K','N','Q','U','X'};
+static char c_xlat[] = {0,0,'C','F','I','L','O','R','V','Y'};
+static char d_xlat[] = {0,0,0,0,0,0,0,'S',0,'Z'};
+
+	if (strlen(instr) < 4) return 0;
+	lastnum = 0;
+	for(i = 1; instr[i + 2]; i++)
+	{
+		c = instr[i];
+		switch (c)
+		{
+		    case 'A' :
+			if (!lastnum) return 0;
+			b = a_xlat[lastnum - '0'];
+			if (!b) return 0;
+			*outstr++ = b;
+			lastnum = 0;
+			break;
+		    case 'B' :
+			if (!lastnum) return 0;
+			b = b_xlat[lastnum - '0'];
+			if (!b) return 0;
+			*outstr++ = b;
+			lastnum = 0;
+			break;
+		    case 'C' :
+			if (!lastnum) return 0;
+			b = c_xlat[lastnum - '0'];
+			if (!b) return 0;
+			*outstr++ = b;
+			lastnum = 0;
+			break;
+		    case 'D' :
+			if (!lastnum) return 0;
+			b = d_xlat[lastnum - '0'];
+			if (!b) return 0;
+			*outstr++ = b;
+			lastnum = 0;
+			break;
+		    case '0':
+		    case '1':
+		    case '2':
+		    case '3':
+		    case '4':
+		    case '5':
+		    case '6':
+		    case '7':
+		    case '8':
+		    case '9':
+			if (lastnum) *outstr++ = lastnum;
+			lastnum = c;
+			break;
+		    default:
+			return 0;
+		}
+	}
+	*outstr = 0;
+	overlay = instr[i++];
+	cksum = instr[i];	
+	for(i = 0,j = 0; instr[i + 1]; i++)
+	{
+		if ((instr[i] >= '0') && (instr[i] <= '9')) j += (instr[i] - '0');
+		else if ((instr[i] >= 'A') && (instr[i] <= 'D')) j += (instr[i] - 'A') + 10;
+	}
+	if ((cksum - '0') != (j % 10)) return 0;
+	return overlay;
+}
+
 /*
 * Break up a delimited string into a table of substrings
 *
@@ -5797,6 +5878,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	rpt_vars[n].p.tailmessagemax = 0;
 	val = (char *) ast_variable_retrieve(cfg,this,"tailmessagelist");
 	if (val) rpt_vars[n].p.tailmessagemax = finddelim(val, rpt_vars[n].p.tailmessages, 500);
+	rpt_vars[n].p.aprstt = (char *) ast_variable_retrieve(cfg,this,"aprstt");
 	val = (char *) ast_variable_retrieve(cfg,this,"memory");
 	if (!val) val = MEMORY;
 	rpt_vars[n].p.memory = val;
@@ -8703,7 +8785,7 @@ treataslocal:
 			
 		
 			/* if in remote cmd mode, indicate it */
-			if (myrpt->cmdnode[0])
+			if (myrpt->cmdnode[0] && strcmp(myrpt->cmdnode,"aprstt"))
 			{
 				ast_safe_sleep(mychannel,200);
 				res = telem_lookup(myrpt,mychannel, myrpt->name, "cmdmode");
@@ -8724,7 +8806,7 @@ treataslocal:
 			if(res)
 			 	ast_log(LOG_WARNING, "telem_lookup:ctx failed on %s\n", mychannel->name);		
 		}	
-		if (hasremote && (!myrpt->cmdnode[0]))
+		if (hasremote && ((!myrpt->cmdnode[0]) || (!strcmp(myrpt->cmdnode,"aprstt"))))
 		{
 			/* set for all to hear */
 			ci.chan = 0;
@@ -11558,9 +11640,10 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
-	char string[50];
+	char string[50],fname[50];
 	char paramcopy[500];
 	int  argc;
+	FILE *fp;
 	char *argv[101],*cp;
 	int i, j, k, r, src;
 #ifdef	_MDC_ENCODE_H_
@@ -12135,6 +12218,23 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			}
 			if (myatoi(argv[0]) == 61) rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
+		case 63: /* send pre-configured APRSTT notification */
+		case 64: 
+			if (argc < 2) break;
+			if (!myrpt->p.aprstt) break;
+			if (!myrpt->p.aprstt[0]) ast_copy_string(fname,APRSTT_PIPE,sizeof(fname) - 1);
+			else snprintf(fname,sizeof(fname) - 1,APRSTT_SUB_PIPE,myrpt->p.aprstt);
+			fp = fopen(fname,"w");
+			if (!fp)
+			{
+				ast_log(LOG_WARNING,"Can not open APRSTT pipe %s\n",fname);
+				break;
+			}
+			if (argc > 2) fprintf(fp,"%s %c\n",argv[1],*argv[2]);
+			else fprintf(fp,"%s\n",argv[1]);
+			fclose(fp);
+			if (myatoi(argv[0]) == 63) rpt_telemetry(myrpt, ARB_ALPHA, (void *) argv[1]);
+			return DC_COMPLETE;
 	}	
 	return DC_INDETERMINATE;
 }
@@ -12654,8 +12754,34 @@ struct	ast_frame wf;
 		if (c == myrpt->p.endchar) myrpt->cmdnode[0] = 0;
 		else if (myrpt->cmdnode[0])
 		{
+			cmd[0] = 0;
+			if (!strcmp(myrpt->cmdnode,"aprstt"))
+			{
+				char overlay,aprscall[100],fname[100];
+				FILE *fp;
+
+				snprintf(cmd, sizeof(cmd) - 1,"A%s", myrpt->dtmfbuf);
+				overlay = aprstt_xlat(cmd,aprscall);
+				if (overlay)
+				{
+					if (debug) ast_log(LOG_WARNING,"aprstt got string %s call %s overlay %c\n",cmd,aprscall,overlay);
+					if (!myrpt->p.aprstt[0]) ast_copy_string(fname,APRSTT_PIPE,sizeof(fname) - 1);
+					else snprintf(fname,sizeof(fname) - 1,APRSTT_SUB_PIPE,myrpt->p.aprstt);
+					fp = fopen(fname,"w");
+					if (!fp)
+					{
+						ast_log(LOG_WARNING,"Can not open APRSTT pipe %s\n",fname);
+					}
+					else
+					{
+						fprintf(fp,"%s %c\n",aprscall,overlay);
+						fclose(fp);
+						rpt_telemetry(myrpt, ARB_ALPHA, (void *) aprscall);
+					}
+				}
+			}
 			rpt_mutex_unlock(&myrpt->lock);
-			send_link_dtmf(myrpt,c);
+			if (strcmp(myrpt->cmdnode,"aprstt")) send_link_dtmf(myrpt,c);
 			return;
 		}
 	}		
@@ -12691,7 +12817,16 @@ struct	ast_frame wf;
 			myrpt->callmode = 4;
 		}
 	}
-	if ((!myrpt->inpadtest) &&(c == myrpt->p.funcchar))
+	if ((!myrpt->inpadtest) && myrpt->p.aprstt && (!myrpt->cmdnode[0]) && (c == 'A'))
+	{
+		strcpy(myrpt->cmdnode,"aprstt");
+		myrpt->dtmfidx = 0;
+		myrpt->dtmfbuf[myrpt->dtmfidx] = 0;
+		rpt_mutex_unlock(&myrpt->lock);
+		time(&myrpt->dtmf_time);
+		return;
+	}
+	if ((!myrpt->inpadtest) && (c == myrpt->p.funcchar))
 	{
 		myrpt->rem_dtmfidx = 0;
 		myrpt->rem_dtmfbuf[myrpt->rem_dtmfidx] = 0;
@@ -12807,6 +12942,32 @@ int	res;
 			myrpt->stopgen = 1;
 			if (myrpt->cmdnode[0])
 			{
+				cmd[0] = 0;
+				if (!strcmp(myrpt->cmdnode,"aprstt"))
+				{
+					char overlay,aprscall[100],fname[100];
+					FILE *fp;
+
+					snprintf(cmd, sizeof(cmd) - 1,"A%s", myrpt->dtmfbuf);
+					overlay = aprstt_xlat(cmd,aprscall);
+					if (overlay)
+					{
+						if (debug) ast_log(LOG_WARNING,"aprstt got string %s call %s overlay %c\n",cmd,aprscall,overlay);
+						if (!myrpt->p.aprstt[0]) ast_copy_string(fname,APRSTT_PIPE,sizeof(fname) - 1);
+						else snprintf(fname,sizeof(fname) - 1,APRSTT_SUB_PIPE,myrpt->p.aprstt);
+						fp = fopen(fname,"w");
+						if (!fp)
+						{
+							ast_log(LOG_WARNING,"Can not open APRSTT pipe %s\n",fname);
+						}
+						else
+						{
+							fprintf(fp,"%s %c\n",aprscall,overlay);
+							fclose(fp);
+							rpt_telemetry(myrpt, ARB_ALPHA, (void *) aprscall);
+						}
+					}
+				}
 				myrpt->cmdnode[0] = 0;
 				myrpt->dtmfidx = -1;
 				myrpt->dtmfbuf[0] = 0;
@@ -12823,7 +12984,7 @@ int	res;
 #endif
 		}
 	}
-	if (myrpt->cmdnode[0])
+	if (myrpt->cmdnode[0] && strcmp(myrpt->cmdnode,"aprstt"))
 	{
 		rpt_mutex_unlock(&myrpt->lock);
 		send_link_dtmf(myrpt,c);
@@ -12865,6 +13026,15 @@ int	res;
 	    ((myrpt->callmode == 2) || (myrpt->callmode == 3)))
 	{
 		myrpt->mydtmf = c;
+	}
+	if ((!myrpt->inpadtest) && myrpt->p.aprstt && (!myrpt->cmdnode[0]) && (c == 'A'))
+	{
+		strcpy(myrpt->cmdnode,"aprstt");
+		myrpt->dtmfidx = 0;
+		myrpt->dtmfbuf[myrpt->dtmfidx] = 0;
+		rpt_mutex_unlock(&myrpt->lock);
+		time(&myrpt->dtmf_time);
+		return;
 	}
 	if ((!myrpt->inpadtest) && (c == myrpt->p.funcchar))
 	{
@@ -17661,11 +17831,37 @@ char	cmd[MAXDTMF+1] = "",c;
 		myrpt->stopgen = 1;
 		if (myrpt->cmdnode[0])
 		{
+			cmd[0] = 0;
+			if (!strcmp(myrpt->cmdnode,"aprstt"))
+			{
+				char overlay,aprscall[100],fname[100];
+				FILE *fp;
+
+				snprintf(cmd, sizeof(cmd) - 1,"A%s", myrpt->dtmfbuf);
+				overlay = aprstt_xlat(cmd,aprscall);
+				if (overlay)
+				{
+					if (debug) ast_log(LOG_WARNING,"aprstt got string %s call %s overlay %c\n",cmd,aprscall,overlay);
+					if (!myrpt->p.aprstt[0]) ast_copy_string(fname,APRSTT_PIPE,sizeof(fname) - 1);
+					else snprintf(fname,sizeof(fname) - 1,APRSTT_SUB_PIPE,myrpt->p.aprstt);
+					fp = fopen(fname,"w");
+					if (!fp)
+					{
+						ast_log(LOG_WARNING,"Can not open APRSTT pipe %s\n",fname);
+					}
+					else
+					{
+						fprintf(fp,"%s %c\n",aprscall,overlay);
+						fclose(fp);
+						rpt_telemetry(myrpt, ARB_ALPHA, (void *) aprscall);
+					}
+				}
+			}
 			myrpt->cmdnode[0] = 0;
 			myrpt->dtmfidx = -1;
 			myrpt->dtmfbuf[0] = 0;
 			rpt_mutex_unlock(&myrpt->lock);
-			rpt_telemetry(myrpt,COMPLETE,NULL);
+			if (!cmd[0]) rpt_telemetry(myrpt,COMPLETE,NULL);
 			return;
 		} 
 		else if(!myrpt->inpadtest)
@@ -17686,7 +17882,7 @@ char	cmd[MAXDTMF+1] = "",c;
 		}
 	}
 	rpt_mutex_lock(&myrpt->lock);
-	if (myrpt->cmdnode[0])
+	if (myrpt->cmdnode[0] && strcmp(myrpt->cmdnode,"aprstt"))
 	{
 		rpt_mutex_unlock(&myrpt->lock);
 		send_link_dtmf(myrpt,c);
@@ -17694,7 +17890,16 @@ char	cmd[MAXDTMF+1] = "",c;
 	}
 	if (!myrpt->p.simple)
 	{
-		if ((!myrpt->inpadtest)&&(c == myrpt->p.funcchar))
+		if ((!myrpt->inpadtest) && myrpt->p.aprstt && (!myrpt->cmdnode[0]) && (c == 'A'))
+		{
+			strcpy(myrpt->cmdnode,"aprstt");
+			myrpt->dtmfidx = 0;
+			myrpt->dtmfbuf[myrpt->dtmfidx] = 0;
+			rpt_mutex_unlock(&myrpt->lock);
+			time(&myrpt->dtmf_time);
+			return;
+		}
+		if ((!myrpt->inpadtest) && (c == myrpt->p.funcchar))
 		{
 			if (myrpt->p.dopfxtone && (myrpt->dtmfidx == -1))
 				rpt_telemetry(myrpt,PFXTONE,NULL);
@@ -17704,7 +17909,7 @@ char	cmd[MAXDTMF+1] = "",c;
 			time(&myrpt->dtmf_time);
 			return;
 		} 
-		else if (((myrpt->inpadtest)||(c != myrpt->p.endchar)) && (myrpt->dtmfidx >= 0))
+		else if (((myrpt->inpadtest) || (c != myrpt->p.endchar)) && (myrpt->dtmfidx >= 0))
 		{
 			time(&myrpt->dtmf_time);
 			cancel_pfxtone(myrpt);
@@ -17719,6 +17924,7 @@ char	cmd[MAXDTMF+1] = "",c;
 				strncpy(cmd, myrpt->dtmfbuf, sizeof(cmd) - 1);
 				
 				rpt_mutex_unlock(&myrpt->lock);
+				if (myrpt->cmdnode[0]) return;
 				src = SOURCE_RPT;
 				if (c_in & 0x80) src = SOURCE_ALT;
 				res = collect_function_digits(myrpt, cmd, src, NULL);
@@ -18769,7 +18975,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (myrpt->p.duplex > 1) 
 		{
 			totx = totx || (myrpt->dtmfidx > -1) ||
-				myrpt->cmdnode[0];
+				(myrpt->cmdnode[0] && strcmp(myrpt->cmdnode,"aprstt"));
 		}
 		/* add in parrot stuff */
 		totx = totx || (myrpt->parrotstate > 1);
@@ -18962,11 +19168,13 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		}
 		time(&t);
 		/* if DTMF timeout */
-		if ((!myrpt->cmdnode[0]) && (myrpt->dtmfidx >= 0) && ((myrpt->dtmf_time + DTMF_TIMEOUT) < t))
+		if (((!myrpt->cmdnode[0]) || (!strcmp(myrpt->cmdnode,"aprstt"))) && 
+			(myrpt->dtmfidx >= 0) && ((myrpt->dtmf_time + DTMF_TIMEOUT) < t))
 		{
 			cancel_pfxtone(myrpt);
 			myrpt->inpadtest = 0;
 			myrpt->dtmfidx = -1;
+			myrpt->cmdnode[0] = 0;
 			myrpt->dtmfbuf[0] = 0;
 		}			
 		/* if remote DTMF timeout */
@@ -19473,6 +19681,12 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (myrpt->tmsgtimer < 0) myrpt->tmsgtimer = 0;
 		if (myrpt->voxtotimer) myrpt->voxtotimer -= elap;
 		if (myrpt->voxtotimer < 0) myrpt->voxtotimer = 0;
+		if (myrpt->keyed) myrpt->lastkeytimer = KEYTIMERTIME;
+		else
+		{
+			if (myrpt->lastkeytimer) myrpt->lastkeytimer -= elap;
+			if (myrpt->lastkeytimer < 0) myrpt->lastkeytimer = 0;
+		}
 		myrpt->elketimer += elap;
 		if ((myrpt->telemmode != 0x7fffffff) && (myrpt->telemmode > 1))
 		{
@@ -19805,7 +20019,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (myrpt->lastf2)
 					memset(myrpt->lastf2->data,0,myrpt->lastf2->datalen);
 				dtmfed = 1;
-				if ((!myrpt->keyed) && (!myrpt->localoverride)) 
+				if ((!myrpt->lastkeytimer) && (!myrpt->localoverride)) 
 				{
 					if (myrpt->p.dtmfkey) local_dtmfkey_helper(myrpt,c);
 					continue;
