@@ -1143,6 +1143,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	int i,j,k,x;
 	struct ast_frame fr,*f1,*f2;
 	struct voter_client *client;
+	short  silbuf[FRAME_SIZE];
 
 
 	memset(&fr,0,sizeof(struct ast_frame));
@@ -1245,6 +1246,64 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	}
 	if (!maxclient) /* if nothing there */
 	{
+		if (p->rxkey && p->dsp)
+		{
+			memset(silbuf,0,sizeof(silbuf));
+			memset(&fr,0,sizeof(struct ast_frame));
+		        fr.frametype = AST_FRAME_VOICE;
+		        fr.subclass = AST_FORMAT_SLINEAR;
+		        fr.datalen = FRAME_SIZE * 2;
+		        fr.samples = FRAME_SIZE;
+		        fr.data =  silbuf;
+		        fr.src = type;
+		        fr.offset = 0;
+		        fr.mallocd = 0;
+		        fr.delivery.tv_sec = 0;
+		        fr.delivery.tv_usec = 0;
+			f2 = ast_dsp_process(NULL,p->dsp,&fr);
+#ifdef	OLD_ASTERISK
+			if (f2->frametype == AST_FRAME_DTMF)
+#else
+			if ((f2->frametype == AST_FRAME_DTMF_END) ||
+				(f2->frametype == AST_FRAME_DTMF_BEGIN))
+#endif
+			{
+				if ((f2->subclass != 'm') && (f2->subclass != 'u'))
+				{
+#ifndef	OLD_ASTERISK
+					if (f2->frametype == AST_FRAME_DTMF_END)
+#endif
+						ast_log(LOG_NOTICE,"Voter %d Got DTMF char %c\n",p->nodenum,f2->subclass);
+				}
+				else
+				{
+					f2->frametype = AST_FRAME_NULL;
+					f2->subclass = 0;
+				}
+				ast_queue_frame(p->owner,f2);
+				gettimeofday(&p->lastrxtime,NULL);
+			}
+			memset(silbuf,0,sizeof(silbuf));
+			memset(&fr,0,sizeof(struct ast_frame));
+		        fr.frametype = AST_FRAME_VOICE;
+		        fr.subclass = AST_FORMAT_SLINEAR;
+		        fr.datalen = FRAME_SIZE * 2;
+		        fr.samples = FRAME_SIZE;
+		        fr.data =  silbuf;
+		        fr.src = type;
+		        fr.offset = 0;
+		        fr.mallocd = 0;
+		        fr.delivery.tv_sec = 0;
+		        fr.delivery.tv_usec = 0;
+			p->threshold = 0;
+			p->threshcount = 0;
+			p->lingercount = 0;
+			p->drainindex += FRAME_SIZE;
+			if (p->drainindex >= buflen) p->drainindex -= buflen;
+			ast_mutex_unlock(&voter_lock);
+			ast_queue_frame(p->owner,&fr);
+			return(0);
+		}
 		p->threshold = 0;
 		p->threshcount = 0;
 		p->lingercount = 0;
@@ -1313,6 +1372,22 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		}
 	}
 	if (!x) ast_queue_frame(p->owner,f1);
+	else
+	{
+		memset(silbuf,0,sizeof(silbuf));
+		memset(&fr,0,sizeof(struct ast_frame));
+	        fr.frametype = AST_FRAME_VOICE;
+	        fr.subclass = AST_FORMAT_SLINEAR;
+	        fr.datalen = FRAME_SIZE * 2;
+	        fr.samples = FRAME_SIZE;
+	        fr.data =  silbuf;
+	        fr.src = type;
+	        fr.offset = 0;
+	        fr.mallocd = 0;
+	        fr.delivery.tv_sec = 0;
+	        fr.delivery.tv_usec = 0;
+		ast_queue_frame(p->owner,&fr);
+	}
 	return(1);
 }
 
