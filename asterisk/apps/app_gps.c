@@ -155,6 +155,7 @@ z - WinAPRS
 #include <signal.h>
 #include <termios.h>
 #include <math.h>
+#include <sys/mman.h>
 
 #include "asterisk/lock.h"
 #include "asterisk/channel.h"
@@ -188,6 +189,8 @@ z - WinAPRS
 #define	GPS_SUB_FILE "/tmp/gps_%s.dat"
 #define	TT_PIPE "/tmp/aprs_ttfifo"
 #define	TT_SUB_PIPE "/tmp/aprs_ttfifo_%s"
+#define	TT_COMMON "/tmp/aprs_ttcommon"
+#define	TT_SUB_COMMON "/tmp/aprs_ttcommon_%s"
 #define	GPS_UPDATE_SECS 30
 #define	GPS_VALID_SECS 60
 #define	SERIAL_MAXMS 10000
@@ -834,15 +837,15 @@ static void *gps_tt_thread(void *data)
 struct ast_config *cfg = NULL;
 int i,j,ttlist,ttoffset,ttslot,myoffset;
 char *ctg = (char *)data,gotfiledata,c;
-char *val,*deflat,*deflon,latc,lonc,ttsplit;
+char *val,*deflat,*deflon,latc,lonc,ttsplit,*ttlat,*ttlon;
 char fname[200],lat[300],lon[300],buf[100],theircall[100],overlay;
-FILE *fp,*fp1;
+FILE *fp,*fp1,*mfp;
 unsigned int u;
 float	mylat,lata,latb,latd;
 float	mylon,lona,lonb,lond;
 struct stat mystat;
 time_t	now,was,lastupdate;
-struct ttentry *ttentries;
+struct ttentry *ttentries,ttempty;
 
 
 #ifdef  NEW_ASTERISK
@@ -858,6 +861,10 @@ struct ttentry *ttentries;
 	if (val) deflat = ast_strdup(val); else deflat = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
 	if (val) deflon = ast_strdup(val); else deflon = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"ttlat");	
+	if (val) ttlat = ast_strdup(val); else ttlat = NULL;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"ttlon");	
+	if (val) ttlon = ast_strdup(val); else ttlon = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"ttlist");	
 	if (val) ttlist = atoi(val); else ttlist = DEFAULT_TTLIST;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"ttoffset");	
@@ -866,13 +873,78 @@ struct ttentry *ttentries;
 	if (val) ttsplit = ast_true(val); else ttsplit = 0;
 
 
-	ttentries = ast_malloc(sizeof(struct ttentry) * ttlist);
-	if (ttentries == NULL)
+	mfp = NULL;
+	if (!strcmp(ctg,"general"))
+		strcpy(fname,TT_COMMON);
+	else
+		snprintf(fname,sizeof(fname) - 1,TT_SUB_COMMON,ctg);
+	if (stat(fname,&mystat) == -1)
 	{
-		ast_log(LOG_ERROR,"Cannot malloc!!\n");
+		mfp = fopen(fname,"w");
+		if (!mfp)
+		{
+			ast_log(LOG_ERROR,"Can not create aprstt common block file %s\n",fname);
+			pthread_exit(NULL);
+		}
+		memset(&ttempty,0,sizeof(ttempty));
+		for(i = 0; i < ttlist; i++)
+		{
+			if (fwrite(&ttempty,1,sizeof(ttempty),mfp) != sizeof(ttempty))
+			{
+				ast_log(LOG_ERROR,"Error initializing aprtss common block file %s\n",fname);
+				fclose(mfp);
+				pthread_exit(NULL);
+			}
+		}
+		fclose(mfp);
+		if (stat(fname,&mystat) == -1)
+		{
+			ast_log(LOG_ERROR,"Unable to stat new aprstt common block file %s\n",fname);
+			pthread_exit(NULL);
+		}
+	}
+	if (mystat.st_size < (sizeof(struct ttentry) * ttlist))
+	{
+		mfp = fopen(fname,"r+");
+		if (!mfp)
+		{
+			ast_log(LOG_ERROR,"Can not open aprstt common block file %s\n",fname);
+			pthread_exit(NULL);
+		}
+		memset(&ttempty,0,sizeof(ttempty));
+		if (fseek(mfp,0,SEEK_END))
+		{
+			ast_log(LOG_ERROR,"Can not seek aprstt common block file %s\n",fname);
+			pthread_exit(NULL);
+		}
+		for(i = mystat.st_size; i < (sizeof(struct ttentry) * ttlist); i += sizeof(struct ttentry))
+		{
+			if (fwrite(&ttempty,1,sizeof(ttempty),mfp) != sizeof(ttempty))
+			{
+				ast_log(LOG_ERROR,"Error growing aprtss common block file %s\n",fname);
+				fclose(mfp);
+				pthread_exit(NULL);
+			}
+		}
+		fclose(mfp);
+		if (stat(fname,&mystat) == -1)
+		{
+			ast_log(LOG_ERROR,"Unable to stat updated aprstt common block file %s\n",fname);
+			pthread_exit(NULL);
+		}
+	}
+	mfp = fopen(fname,"r+");
+	if (!mfp)
+	{
+		ast_log(LOG_ERROR,"Can not open aprstt common block file %s\n",fname);
 		pthread_exit(NULL);
 	}
-	memset(ttentries,0,sizeof(struct ttentry) * ttlist);
+	ttentries = mmap(NULL,mystat.st_size,PROT_READ | PROT_WRITE,MAP_SHARED,fileno(mfp),0);
+	if (ttentries == NULL)
+	{
+		ast_log(LOG_ERROR,"Cannot map aprtss common file %s!!\n",fname);
+		pthread_exit(NULL);
+	}
         ast_config_destroy(cfg);
         cfg = NULL; 
 	time(&lastupdate);
@@ -927,6 +999,7 @@ struct ttentry *ttentries;
 				continue;
 			}
 		}
+		msync(ttentries,mystat.st_size,MS_SYNC);
 		if (ttsplit)
 		{
 			myoffset = ttoffset * ((ttslot >> 1) + 1);
@@ -974,8 +1047,8 @@ struct ttentry *ttentries;
 		}
 		if ((!gotfiledata) && deflat && deflon)
 		{
-			mylat = strtof(deflat,NULL);
-			mylon = strtof(deflon,NULL);
+			mylat = strtof((ttlat) ? ttlat : deflat,NULL);
+			mylon = strtof((ttlon) ? ttlon : deflon,NULL);
 			if (mylat >= 0.0)
 			{
 				mylat -= ((float) myoffset) * 0.00016666666666666666666666666666667;
@@ -1000,7 +1073,8 @@ struct ttentry *ttentries;
 		}
 		if (fp) fclose(fp);
 	}
-	ast_free(ttentries);
+	munmap(ttentries,mystat.st_size);
+	if (mfp) fclose(mfp);
 	pthread_exit(NULL);
 	return NULL;
 }
