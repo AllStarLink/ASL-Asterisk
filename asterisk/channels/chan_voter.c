@@ -479,11 +479,11 @@ static int32_t crc32_bufs(char *buf, char *buf1)
         oldcrc32 = 0xFFFFFFFF;
         while(buf && *buf)
         {
-                oldcrc32 = crc_32_tab[(oldcrc32 ^ *buf++) & 0xff] ^ ((unsigned long)oldcrc32 >> 8);
+                oldcrc32 = crc_32_tab[(oldcrc32 ^ *buf++) & 0xff] ^ ((uint32_t)oldcrc32 >> 8);
         }
         while(buf1 && *buf1)
         {
-                oldcrc32 = crc_32_tab[(oldcrc32 ^ *buf1++) & 0xff] ^ ((unsigned long)oldcrc32 >> 8);
+                oldcrc32 = crc_32_tab[(oldcrc32 ^ *buf1++) & 0xff] ^ ((uint32_t)oldcrc32 >> 8);
         }
         return ~oldcrc32;
 }
@@ -1686,7 +1686,7 @@ static void *voter_reader(void *data)
 			if (recvlen >= sizeof(VOTER_PACKET_HEADER)) /* if set got something worthwile */
 			{
 				vph = (VOTER_PACKET_HEADER *)buf;
-				if (debug > 3) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
+				if (debug > 3) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
 				client = NULL;
 				if (vph->digest)
 				{
