@@ -948,7 +948,7 @@ static struct usb_device *hid_device_init(char *desired_device)
              dev = dev->next) {
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
-		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(((dev->descriptor.idProduct & 0xfffc) == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
@@ -1032,7 +1032,7 @@ static int hid_device_mklist(void)
              dev = dev->next) {
             if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
-		((dev->descriptor.idProduct == C108_PRODUCT_ID) ||
+		(((dev->descriptor.idProduct & 0xfffc) == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108AH_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119A_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
@@ -1540,7 +1540,10 @@ static void *hidthread(void *arg)
 		    ast_log(LOG_ERROR,"Not able to create pipe\n");
 			pthread_exit(NULL);
 		}
-		o->devtype = usb_dev->descriptor.idProduct;
+		if ((usb_dev->descriptor.idProduct & 0xfffc) == C108_PRODUCT_ID)
+			o->devtype = C108_PRODUCT_ID;
+		else
+			o->devtype = usb_dev->descriptor.idProduct;
 		traceusb1(("hidthread: Starting normally on %s!!\n",o->name));
 		lastrx = 0;
                 if (option_verbose > 1)
