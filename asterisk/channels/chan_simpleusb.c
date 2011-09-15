@@ -2179,6 +2179,8 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 	char *cmd;
 	int cnt,i,j;
 
+	if (haspp == 2) ioperm(pbase,2,1);
+
 	cmd = alloca(strlen(text) + 10);
 
 	/* print received messages */

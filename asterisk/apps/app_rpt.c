@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.289 09/03/2011
+ *  version 0.290 09/15/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -326,6 +326,7 @@
 
 #define	MAX_EXTNODEFILES 50
 #define	MAX_LOCALLINKNODES 50
+#define	MAX_LSTUFF 20
 
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
@@ -578,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.289 09/03/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.290 09/15/2011";
 
 static char *app = "Rpt";
 
@@ -1125,6 +1126,10 @@ static struct rpt
 		char *eloutbound;
 		int elke;
 		char *aprstt;
+		char *lconn[MAX_LSTUFF];
+		int nlconn;
+		char *ldisc[MAX_LSTUFF];
+		int nldisc;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -2389,9 +2394,7 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
 static int matchkeyword(char *string, char **param, char *keywords[]);
 static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
 static void *uchameleon_monitor_thread(void *this);
-
-
-
+static char *strupr(char *str);
 
 
 /*
@@ -4769,6 +4772,17 @@ static char d_xlat[] = {0,0,0,0,0,0,0,'S',0,'Z'};
 	return overlay;
 }
 
+static char *strupr(char *instr)
+{
+char *str = instr;
+        while (*str)
+           {
+                *str = toupper(*str);
+                str++;
+           }
+        return(instr);
+}
+
 /*
 * Break up a delimited string into a table of substrings
 *
@@ -5952,6 +5966,10 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	    explode_string(val,rpt_vars[n].p.extnodefiles,MAX_EXTNODEFILES,',',0);
 	val = (char *) ast_variable_retrieve(cfg,this,"locallinknodes");
 	if (val) rpt_vars[n].p.locallinknodesn = explode_string(ast_strdup(val),rpt_vars[n].p.locallinknodes,MAX_LOCALLINKNODES,',',0);
+	val = (char *) ast_variable_retrieve(cfg,this,"lconn");
+	if (val) rpt_vars[n].p.nlconn = explode_string(strupr(ast_strdup(val)),rpt_vars[n].p.lconn,MAX_LSTUFF,',',0);
+	val = (char *) ast_variable_retrieve(cfg,this,"ldisc");
+	if (val) rpt_vars[n].p.nldisc = explode_string(strupr(ast_strdup(val)),rpt_vars[n].p.ldisc,MAX_LSTUFF,',',0);
 	val = (char *) ast_variable_retrieve(cfg,this,"patchconnect");
 	rpt_vars[n].p.patchconnect = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"archivedir");
@@ -22468,6 +22486,28 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 		}
 	}
+	if ((myrpt->p.nlconn) && ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) ||
+	    (strncasecmp(myrpt->rxchannel->name,"beagle/", 7) == 0) ||
+		    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)))
+	{
+		/* go thru all the specs */
+		for(i = 0; i < myrpt->p.nlconn; i++)
+		{
+			int j,k;
+			char string[100];
+
+			if (sscanf(myrpt->p.lconn[i],"GPIO%d=%d",&j,&k) == 2)
+			{
+				sprintf(string,"GPIO %d %d",j,k);
+				ast_sendtext(myrpt->rxchannel,string);
+			}
+			else if (sscanf(myrpt->p.lconn[i],"PP%d=%d",&j,&k) == 2)
+			{
+				sprintf(string,"PP %d %d",j,k);
+				ast_sendtext(myrpt->rxchannel,string);
+			}
+		}
+	}
 	myrpt->remoterx = 0;
 	myrpt->remotetx = 0;
 	myrpt->retxtimer = 0;
@@ -23218,6 +23258,28 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		{
 			ast_log(LOG_ERROR,"Cannot set hook\n");
 			return -1;
+		}
+	}
+	if ((myrpt->p.nldisc) && ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) ||
+	    (strncasecmp(myrpt->rxchannel->name,"beagle/", 7) == 0) ||
+		    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)))
+	{
+		/* go thru all the specs */
+		for(i = 0; i < myrpt->p.nldisc; i++)
+		{
+			int j,k;
+			char string[100];
+
+			if (sscanf(myrpt->p.ldisc[i],"GPIO%d=%d",&j,&k) == 2)
+			{
+				sprintf(string,"GPIO %d %d",j,k);
+				ast_sendtext(myrpt->rxchannel,string);
+			}
+			else if (sscanf(myrpt->p.ldisc[i],"PP%d=%d",&j,&k) == 2)
+			{
+				sprintf(string,"PP %d %d",j,k);
+ 				ast_sendtext(myrpt->rxchannel,string);
+			}
 		}
 	}
 	if (myrpt->iofd) close(myrpt->iofd);

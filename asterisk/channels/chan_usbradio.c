@@ -2347,6 +2347,8 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 	char cnt,rxs[16],txs[16],txpl[16],rxpl[16];
 	char pwr,*cmd;
 
+	if (haspp == 2) ioperm(pbase,2,1);
+
 	cmd = alloca(strlen(text) + 10);
 
 	/* print received messages */
