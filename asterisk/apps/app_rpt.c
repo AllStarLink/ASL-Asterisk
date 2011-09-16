@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.290 09/15/2011
+ *  version 0.291 09/16/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.290 09/15/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.291 09/16/2011";
 
 static char *app = "Rpt";
 
@@ -16359,7 +16359,7 @@ static int check_freq_xcat(int m, int d, int *defmode)
 	else if((m >= 50) && (m < 54)){
 		;
 	}
-	else if((m >= 145) && (m < 148)){
+	else if((m >= 144) && (m < 148)){
 		;
 	}
 	else if((m >= 420) && (m < 450)){ /* 70 centimeters */
@@ -17173,6 +17173,9 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 				strncpy(myrpt->freq, savestr, sizeof(myrpt->freq) - 1);
 				goto invalid_freq;
 			}
+			if (strcmp(myrpt->remoterig, remote_rig_tm271) &&
+			   strcmp(myrpt->remoterig, remote_rig_kenwood))
+				rpt_telemetry(myrpt,COMPLETE,NULL);
 			return DC_COMPLETE;
 
 invalid_freq:
