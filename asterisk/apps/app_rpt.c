@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.291 09/16/2011
+ *  version 0.292 09/16/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.291 09/16/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.292 09/16/2011";
 
 static char *app = "Rpt";
 
@@ -16568,7 +16568,7 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 			if (cp && (*(cp + 1)))
 			{
 				cp1 = strchr(cp + 2,'0');
-				*cp1 = 0;
+				if (cp1) *cp1 = 0;
 			}
 			sprintf(str,"J Remote Frequency\n%s FM\n%s Offset\n",
 				(cp) ? myfreq : myrpt->freq,offsets[(int)myrpt->offset]);
