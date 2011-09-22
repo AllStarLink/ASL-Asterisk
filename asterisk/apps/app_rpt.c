@@ -21,7 +21,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.292 09/16/2011
+ *  version 0.293 09/22/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.292 09/16/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.293 09/22/2011";
 
 static char *app = "Rpt";
 
@@ -16427,7 +16427,34 @@ static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
 
 static int set_offset_xcat(struct rpt *myrpt, char offset)
 {
-	unsigned char c;
+	unsigned char c,cmdstr[20];
+        int mysplit;
+        char mhz[MAXREMSTR],decimal[MAXREMSTR];
+
+        if(split_freq(mhz, decimal, myrpt->freq))
+                return -1;
+
+        mysplit = myrpt->splitkhz * 1000;
+        if (!mysplit)
+        {
+                if (atoi(mhz) > 400)
+                        mysplit = myrpt->p.default_split_70cm * 1000;
+                else
+                        mysplit = myrpt->p.default_split_2m * 1000;
+        }
+
+        cmdstr[0] = cmdstr[1] = 0xfe;
+        cmdstr[2] = myrpt->p.civaddr;
+        cmdstr[3] = 0xe0;
+        cmdstr[4] = 0xaa;
+        cmdstr[5] = 0x06;
+        cmdstr[6] = mysplit & 0xff;
+        cmdstr[7] = (mysplit >> 8) & 0xff;
+        cmdstr[8] = (mysplit >> 16) & 0xff;
+        cmdstr[9] = (mysplit >> 24) & 0xff;
+        cmdstr[10] = 0xfd;
+
+        if (civ_cmd(myrpt,cmdstr,11) < 0) return -1;
 
 	switch(offset){
 		case	REM_SIMPLEX:
@@ -16509,6 +16536,10 @@ static int set_xcat(struct rpt *myrpt)
 		printf("Mode\n");
 	if (!res)
 		res = simple_command_xcat(myrpt,8,1);
+        if(debug)
+                printf("Offset Initial/Simplex\n");
+        if(!res)
+                res = set_offset_xcat(myrpt, REM_SIMPLEX);      /* Offset */
 	/* set Freq */
 	if(debug)
 		printf("Frequency\n");
