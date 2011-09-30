@@ -2271,8 +2271,8 @@ static void *voter_reader(void *data)
 				if (client)
 				{
 					client->mix = 0;
-					/* if client is sending options */
-					if (recvlen > sizeof(VOTER_PACKET_HEADER))
+					/* if client is authing and sending options */
+					if ((recvlen > sizeof(VOTER_PACKET_HEADER)) && (!vph->payload_type))
 					{
 						if (buf[sizeof(VOTER_PACKET_HEADER)] & 32) client->mix = 1;
 					}
