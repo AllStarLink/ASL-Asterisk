@@ -200,7 +200,8 @@ double dnsec;
 #define	ADPCM_FRAME_SIZE 163
 
 #define	DEFAULT_BUFLEN 500 /* 500ms default buffer len */
-#define	DEFAULT_BUFDELAY ((DEFAULT_BUFLEN * 8) - (FRAME_SIZE * 2))
+
+#define BUFDELAY(p) (p->buflen - (FRAME_SIZE * 2))
 
 #pragma pack(push)
 #pragma pack(1)
@@ -248,6 +249,8 @@ struct voter_client {
 	uint8_t *rssi;
 	uint32_t respdigest;
 	struct sockaddr_in sin;
+	int drainindex;
+	int buflen;
 	char heardfrom;
 	char totransmit;
 	char ismaster;
@@ -276,7 +279,6 @@ struct voter_pvt {
 	char rxkey;
 	struct ast_module_user *u;
 	struct timeval lastrxtime;
-	int drainindex;
 	char drained_once;
 	int testcycle;
 	int testindex;
@@ -329,8 +331,6 @@ FILE *recfp = NULL;
 int hasmaster = 0;
 
 unsigned int buflen = DEFAULT_BUFLEN * 8;
-
-unsigned int bufdelay = DEFAULT_BUFDELAY;
 
 static char *config = "voter.conf";
 
@@ -562,6 +562,20 @@ int     i,l,inquo;
 
 }
 
+/* must be called with voter_lock locked */
+ static void incr_drainindex(struct voter_pvt *p)
+{
+struct voter_client *client;
+
+	if (p == NULL) return;
+	for(client = clients; client; client = client->next)
+	{
+		if (client->nodenum != p->nodenum) continue;
+		client->drainindex += FRAME_SIZE;
+		if (client->drainindex >= client->buflen) client->drainindex -= client->buflen;
+	}
+}
+
 static int voter_call(struct ast_channel *ast, char *dest, int timeout)
 {
 	if ((ast->_state != AST_STATE_DOWN) && (ast->_state != AST_STATE_RESERVED)) {
@@ -722,6 +736,7 @@ int len;
 }
 
 
+/* must be called with voter_lock locked */
 static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclient, int maxrssi)
 {
 
@@ -754,29 +769,29 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		short *sp1,*sp2;
 		if (client->nodenum != p->nodenum) continue;
 		if (!client->mix) continue;
-		i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+		i = (int)client->buflen - ((int)client->drainindex + FRAME_SIZE);
 		if (i >= 0)
 		{
-			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE);
+			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + client->drainindex,FRAME_SIZE);
 		}
 		else
 		{
-			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + p->drainindex,FRAME_SIZE + i);
-			memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),client->audio,-i);
+			memcpy(p->buf + AST_FRIENDLY_OFFSET,client->audio + client->drainindex,FRAME_SIZE + i);
+			memcpy(p->buf + AST_FRIENDLY_OFFSET + (client->buflen - i),client->audio,-i);
 		}
 		if (i >= 0)
 		{
-			memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
+			memset(client->audio + client->drainindex,0xff,FRAME_SIZE);
 		}
 		else
 		{
-			memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+			memset(client->audio + client->drainindex,0xff,FRAME_SIZE + i);
 			memset(client->audio,0xff,-i);
 		}
 		k = 0;
 		if (i >= 0)
 		{
-			for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
+			for(j = client->drainindex; j < client->drainindex + FRAME_SIZE; j++)
 			{
 				k += client->rssi[j];
 				client->rssi[j] = 0;
@@ -784,7 +799,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		}
 		else
 		{
-			for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
+			for(j = client->drainindex; j < client->drainindex + (FRAME_SIZE + i); j++)
 			{
 				k += client->rssi[j];
 				client->rssi[j] = 0;
@@ -883,9 +898,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 			p->threshold = 0;
 			p->threshcount = 0;
 			p->lingercount = 0;
-			p->drainindex += FRAME_SIZE;
-			if (p->drainindex >= buflen) p->drainindex -= buflen;
-			ast_mutex_unlock(&voter_lock);
+			incr_drainindex(p);
 			ast_queue_frame(p->owner,&fr);
 			return(0);
 		}
@@ -903,16 +916,12 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	        fr.mallocd=0;
 	        fr.delivery.tv_sec = 0;
 	        fr.delivery.tv_usec = 0;
-		p->drainindex += FRAME_SIZE;
-		if (p->drainindex >= buflen) p->drainindex -= buflen;
-		ast_mutex_unlock(&voter_lock);
+		incr_drainindex(p);
 		ast_queue_frame(p->owner,&fr);
 		return(0);
 	}
-	p->drainindex += FRAME_SIZE;
-	if (p->drainindex >= buflen) p->drainindex -= buflen;
+	incr_drainindex(p);
 	gettimeofday(&p->lastrxtime,NULL);
-	ast_mutex_unlock(&voter_lock);
 	if (!p->rxkey)
 	{
 		memset(&fr,0,sizeof(fr));
@@ -1793,7 +1802,7 @@ static void *voter_reader(void *data)
 								if  (!client->rxseqno) client->rxseqno = ntohl(vph->curtime.vtime_nsec);
 								index = ntohl(vph->curtime.vtime_nsec) - client->rxseqno;
 								index *= FRAME_SIZE;
-								index += bufdelay;
+								index += BUFDELAY(client);
 								index -= (FRAME_SIZE * 2);
 							}
 							else
@@ -1802,7 +1811,7 @@ static void *voter_reader(void *data)
 
 								btime += 40000000;
 								ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
-								difftime = (ptime - btime) + (bufdelay * 125000LL);
+								difftime = (ptime - btime) + (BUFDELAY(client) * 125000LL);
 								index = (int)((long long)difftime / 125000LL);
 								if ((debug >= 3) && (!client->ismaster))
 								{
@@ -1816,7 +1825,7 @@ static void *voter_reader(void *data)
 								}
 							}
 							/* if in bounds */
-							if ((index > 0) && (index < (buflen - (FRAME_SIZE * 2))))
+							if ((index > 0) && (index < (client->buflen - (FRAME_SIZE * 2))))
 							{
 
 								f1 = NULL;
@@ -1855,9 +1864,9 @@ static void *voter_reader(void *data)
 								        fr.delivery.tv_usec = 0;
 									f1 = ast_translate(p->adpcmin,&fr,0);
 								}
-								index = (index + p->drainindex) % buflen;
+								index = (index + client->drainindex) % client->buflen;
 								flen = (f1) ? f1->datalen : FRAME_SIZE;
-								i = (int)buflen - (index + flen);
+								i = (int)client->buflen - (index + flen);
 								if (i >= 0)
 								{
 									memcpy(client->audio + index,
@@ -1908,10 +1917,10 @@ static void *voter_reader(void *data)
 										if (client->nodenum != p->nodenum) continue;
 										if (client->mix) continue;
 										k = 0;
-										i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+										i = (int)client->buflen - ((int)client->drainindex + FRAME_SIZE);
 										if (i >= 0)
 										{
-											for(j = p->drainindex; j < p->drainindex + FRAME_SIZE; j++)
+											for(j = client->drainindex; j < client->drainindex + FRAME_SIZE; j++)
 											{
 												k += client->rssi[j];
 												client->rssi[j] = 0;
@@ -1919,7 +1928,7 @@ static void *voter_reader(void *data)
 										}
 										else
 										{
-											for(j = p->drainindex; j < p->drainindex + (FRAME_SIZE + i); j++)
+											for(j = client->drainindex; j < client->drainindex + (FRAME_SIZE + i); j++)
 											{
 												k += client->rssi[j];
 												client->rssi[j] = 0;
@@ -2067,21 +2076,19 @@ static void *voter_reader(void *data)
 										        fr.mallocd=0;
 										        fr.delivery.tv_sec = 0;
 										        fr.delivery.tv_usec = 0;
-											p->drainindex += FRAME_SIZE;
-											if (p->drainindex >= buflen) p->drainindex -= buflen;
-											ast_mutex_unlock(&voter_lock);
+											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
 											continue;
 										}
-										i = (int)buflen - ((int)p->drainindex + FRAME_SIZE);
+										i = (int)maxclient->buflen - ((int)maxclient->drainindex + FRAME_SIZE);
 										if (i >= 0)
 										{
-											memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE);
+											memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + maxclient->drainindex,FRAME_SIZE);
 										}
 										else
 										{
-											memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + p->drainindex,FRAME_SIZE + i);
-											memcpy(p->buf + AST_FRIENDLY_OFFSET + (buflen - i),maxclient->audio,-i);
+											memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + maxclient->drainindex,FRAME_SIZE + i);
+											memcpy(p->buf + AST_FRIENDLY_OFFSET + (client->buflen - i),maxclient->audio,-i);
 										}
 										for(client = clients; client; client = client->next)
 										{
@@ -2100,22 +2107,24 @@ static void *voter_reader(void *data)
 												rec.rssi = client->lastrssi;
 												if (i >= 0)
 												{
-													memcpy(rec.audio,client->audio + p->drainindex,FRAME_SIZE);
+													memcpy(rec.audio,client->audio + client->drainindex,FRAME_SIZE);
 												}
 												else
 												{
-													memcpy(rec.audio,client->audio + p->drainindex,FRAME_SIZE + i);												memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
-													memcpy(rec.audio + FRAME_SIZE + i,client->audio,-i);												memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+													memcpy(rec.audio,client->audio + client->drainindex,FRAME_SIZE + i);
+													memset(client->audio + client->drainindex,0xff,FRAME_SIZE + i);
+													memcpy(rec.audio + FRAME_SIZE + i,client->audio,-i);
+													memset(client->audio + client->drainindex,0xff,FRAME_SIZE + i);
 												}
 												fwrite(&rec,1,sizeof(rec),recfp);
 											}
 											if (i >= 0)
 											{
-												memset(client->audio + p->drainindex,0xff,FRAME_SIZE);
+												memset(client->audio + client->drainindex,0xff,FRAME_SIZE);
 											}
 											else
 											{
-												memset(client->audio + p->drainindex,0xff,FRAME_SIZE + i);
+												memset(client->audio + client->drainindex,0xff,FRAME_SIZE + i);
 												memset(client->audio,0xff,-i);
 											}
 										}
@@ -2136,9 +2145,7 @@ static void *voter_reader(void *data)
 										        fr.mallocd=0;
 										        fr.delivery.tv_sec = 0;
 										        fr.delivery.tv_usec = 0;
-											p->drainindex += FRAME_SIZE;
-											if (p->drainindex >= buflen) p->drainindex -= buflen;
-											ast_mutex_unlock(&voter_lock);
+											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
 											continue;
 										}
@@ -2216,9 +2223,7 @@ static void *voter_reader(void *data)
 									        fr.mallocd=0;
 									        fr.delivery.tv_sec = 0;
 									        fr.delivery.tv_usec = 0;
-										p->drainindex += FRAME_SIZE;
-										if (p->drainindex >= buflen) p->drainindex -= buflen;
-										ast_mutex_unlock(&voter_lock);
+										incr_drainindex(p);
 										ast_queue_frame(p->owner,&fr);
 										continue;
 									}
@@ -2364,7 +2369,7 @@ int load_module(void)
 	pthread_attr_t attr;
 	pthread_t voter_reader_thread,voter_timer_thread;
 	unsigned int mynode;
-	int i,n,bs;
+	int i,n,bs,instance_buflen;
 	struct voter_client *client,*client1;
 	struct ast_config *cfg = NULL;
 	struct ast_variable *v;
@@ -2390,15 +2395,10 @@ int load_module(void)
         val = (char *) ast_variable_retrieve(cfg,"general","buflen"); 
 	if (val) buflen = strtoul(val,NULL,0) * 8;
 
-        val = (char *) ast_variable_retrieve(cfg,"general","bufdelay"); 
-	if (val) bufdelay = strtoul(val,NULL,0) * 8;
-
         val = (char *) ast_variable_retrieve(cfg,"general","sanity"); 
 	if (val) check_client_sanity = ast_true(val);
 
 	if (buflen < (FRAME_SIZE * 2)) buflen = FRAME_SIZE * 2;
-
-	if (bufdelay > (buflen - FRAME_SIZE)) bufdelay = buflen - FRAME_SIZE;
 
 	snprintf(challenge, sizeof(challenge), "%ld", ast_random());
 
@@ -2452,6 +2452,10 @@ int load_module(void)
 		if (ctg == NULL) continue;
 		if (!strcmp(ctg,"general")) continue;
 		mynode = strtoul(ctg,NULL,0);
+	        val = (char *) ast_variable_retrieve(cfg,ctg,"buflen"); 
+		if (val) instance_buflen = strtoul(val,NULL,0) * 8;
+		else instance_buflen = buflen;
+		if (instance_buflen < (FRAME_SIZE * 2)) instance_buflen = FRAME_SIZE * 2;
 		for (v = ast_variable_browse(cfg, ctg); v; v = v->next)
 		{
 			if (!strcmp(v->name,"txctcsslevel")) continue;
@@ -2466,6 +2470,7 @@ int load_module(void)
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
 			if (!strncasecmp(v->name,"gpsid",5)) continue;
+			if (!strncasecmp(v->name,"buflen",6)) continue;
 			if (!strncasecmp(v->name,"nodeemp",7)) continue;
 			if (!strncasecmp(v->name,"noplfilter",10)) continue;
 			cp = ast_strdup(v->value);
@@ -2490,6 +2495,7 @@ int load_module(void)
 			memset(client,0,sizeof(struct voter_client));
 			client->nodenum = strtoul(ctg,NULL,0);
 			ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
+			client->buflen = instance_buflen;
 			for(i = 1; i < n; i++)
 			{
 				if (!strcasecmp(strs[i],"transmit"))
@@ -2518,10 +2524,19 @@ int load_module(void)
 						*client->gpsid = '_';
 					}
 				}
+				else if (!strncasecmp(strs[i],"buflen",6))
+				{
+					cp1 = strchr(strs[i],'=');
+					if (cp1)
+					{
+						client->buflen = strtoul(cp1 + 1,NULL,0) * 8;
+						if (client->buflen < (FRAME_SIZE * 2)) client->buflen = FRAME_SIZE * 2;
+					}
+				}
 			}
 			client->digest = crc32_bufs(challenge,strs[0]);
 			ast_free(cp);
-			client->audio = (uint8_t *)ast_malloc(buflen);
+			client->audio = (uint8_t *)ast_malloc(client->buflen);
 			if (!client->audio)
 			{
 				ast_log(LOG_ERROR,"Cant malloc()\n");
@@ -2529,8 +2544,8 @@ int load_module(void)
 				ast_config_destroy(cfg);
 		                return AST_MODULE_LOAD_DECLINE;
 			}
-			memset(client->audio,0xff,buflen);
-			client->rssi = (uint8_t *)ast_malloc(buflen);
+			memset(client->audio,0xff,client->buflen);
+			client->rssi = (uint8_t *)ast_malloc(client->buflen);
 			if (!client->rssi)
 			{
 				ast_log(LOG_ERROR,"Cant malloc()\n");
@@ -2538,7 +2553,7 @@ int load_module(void)
 				ast_config_destroy(cfg);
 		                return AST_MODULE_LOAD_DECLINE;
 			}
-			memset(client->rssi,0,buflen);
+			memset(client->rssi,0,client->buflen);
 			ast_mutex_lock(&voter_lock);
 			if (clients == NULL) clients = client;
 			else
