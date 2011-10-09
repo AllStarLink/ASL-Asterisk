@@ -196,6 +196,9 @@ char context[100];
 
 double dnsec;
 
+static pthread_t voter_reader_thread = 0;
+static pthread_t voter_timer_thread = 0;
+
 #define	FRAME_SIZE 160
 #define	ADPCM_FRAME_SIZE 163
 
@@ -267,6 +270,8 @@ struct voter_client {
 	char rxseqadpcm;
 	time_t warntime;
 	char *gpsid;
+	int reload;
+	int old_buflen;
 } ;
 
 struct voter_pvt {
@@ -321,6 +326,12 @@ struct voter_pvt {
 };
 
 #ifdef	OLD_ASTERISK
+int reload();
+#else
+static int reload(void);
+#endif
+
+#ifdef	OLD_ASTERISK
 static int usecnt;
 AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
@@ -329,8 +340,6 @@ int debug = 0;
 int voter_test = 0;
 FILE *recfp = NULL;
 int hasmaster = 0;
-
-unsigned int buflen = DEFAULT_BUFLEN * 8;
 
 static char *config = "voter.conf";
 
@@ -416,6 +425,13 @@ static char tone_usage[] =
 "Usage: voter tone instance_id [new_tone_level(0-250)]\n"
 "       Sets/Queries Tx CTCSS level for specified chan_voter instance\n";
 
+/* Reload */
+static int voter_do_reload(int fd, int argc, char *argv[]);
+
+static char reload_usage[] =
+"Usage: voter reload\n"
+"       Reload chan_voter parameters\n";
+
 
 
 #ifndef	NEW_ASTERISK
@@ -432,6 +448,9 @@ static struct ast_cli_entry  cli_record =
 static struct ast_cli_entry  cli_tone =
         { { "voter", "tone" }, voter_do_tone, 
 		"Sets/Queries Tx CTCSS level for specified chan_voter instance", tone_usage };
+static struct ast_cli_entry  cli_reload =
+        { { "voter", "reload" }, voter_do_reload, 
+		"Reloads chan_voter parameters", reload_usage };
 
 #endif
 
@@ -1325,6 +1344,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 				}
 				p->rssi_thresh[i] = (uint8_t)atoi(strs[i]);
 			}
+			ast_free(cp);
 		}		
 	}
 
@@ -1340,7 +1360,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		tChan.txMod = 2;
 		tChan.txMixA = TX_OUT_COMPOSITE;
 		tChan.b.txboost = 1;
-
 		p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
 		p->pmrChan->radioDuplex = 1;//o->radioduplex;
 		p->pmrChan->b.loopback=0; 
@@ -1470,6 +1489,13 @@ static int voter_do_tone(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
+static int voter_do_reload(int fd, int argc, char *argv[])
+{
+        if (argc != 2)
+                return RESULT_SHOWUSAGE;
+	reload();
+        return RESULT_SUCCESS;
+}
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -1542,11 +1568,26 @@ static char *handle_cli_tone(struct ast_cli_entry *e,
 	return res2cli(voter_do_tone(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_reload(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter reload";
+                e->usage = reload_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_reload(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
 	AST_CLI_DEFINE(handle_cli_record,"Enable/Specify (or disable) voter recording file"),
 	AST_CLI_DEFINE(handle_cli_tone,"Sets/Queries Tx CTCSS level for specified chan_voter instance"),
+	AST_CLI_DEFINE(handle_cli_reload,"Reloads chan_voter parameters"),
 } ;
 
 #endif
@@ -1569,6 +1610,7 @@ int unload_module(void)
 	ast_cli_unregister(&cli_test);
 	ast_cli_unregister(&cli_record);
 	ast_cli_unregister(&cli_tone);
+	ast_cli_unregister(&cli_reload);
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -2355,24 +2397,30 @@ static void *voter_reader(void *data)
 	return NULL;
 }
 
-#ifndef	OLD_ASTERISK
-static
+#ifdef	OLD_ASTERISK
+int reload()
+#else
+static int reload(void)
 #endif
-int load_module(void)
 {
-
 #ifdef  NEW_ASTERISK
         struct ast_flags zeroflag = {0};
 #endif
-	struct sockaddr_in sin;
-	char *val,*ctg,*cp,*cp1,*strs[40];
-	pthread_attr_t attr;
-	pthread_t voter_reader_thread,voter_timer_thread;
 	unsigned int mynode;
-	int i,n,bs,instance_buflen;
+	int i,n,instance_buflen,buflen;
+	char *val,*ctg,*cp,*cp1,*cp2,*strs[40],newclient,data[100],oldctcss[100];
+	struct voter_pvt *p;
 	struct voter_client *client,*client1;
 	struct ast_config *cfg = NULL;
 	struct ast_variable *v;
+
+	
+	ast_mutex_lock(&voter_lock);
+	for(client = clients; client; client = client->next)
+	{
+		client->reload = 0;
+		client->old_buflen = client->buflen;
+	}
 
 #ifdef  NEW_ASTERISK
         if (!(cfg = ast_config_load(config,zeroflag))) {
@@ -2380,7 +2428,8 @@ int load_module(void)
         if (!(cfg = ast_config_load(config))) {
 #endif
                 ast_log(LOG_ERROR, "Unable to load config %s\n", config);
-                return AST_MODULE_LOAD_DECLINE;
+		ast_mutex_unlock(&voter_lock);
+		return -1;
         }
 
         val = (char *) ast_variable_retrieve(cfg,"general","password"); 
@@ -2389,62 +2438,103 @@ int load_module(void)
         val = (char *) ast_variable_retrieve(cfg,"general","context"); 
 	if (val) ast_copy_string(context,val,sizeof(context) - 1);
 
-        val = (char *) ast_variable_retrieve(cfg,"general","port"); 
-	if (val) listen_port = (uint16_t) strtoul(val,NULL,0);
-
         val = (char *) ast_variable_retrieve(cfg,"general","buflen"); 
-	if (val) buflen = strtoul(val,NULL,0) * 8;
+	if (val) buflen = strtoul(val,NULL,0) * 8; else buflen = DEFAULT_BUFLEN * 8;
 
         val = (char *) ast_variable_retrieve(cfg,"general","sanity"); 
 	if (val) check_client_sanity = ast_true(val);
 
 	if (buflen < (FRAME_SIZE * 2)) buflen = FRAME_SIZE * 2;
 
-	snprintf(challenge, sizeof(challenge), "%ld", ast_random());
-
-	if ((udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+	for(p = pvts; p; p = p->next)
 	{
-		ast_log(LOG_ERROR,"Unable to create new socket for voter audio connection\n");
-		ast_config_destroy(cfg);
-                return AST_MODULE_LOAD_DECLINE;
-	}
-	memset((char *) &sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
-        val = (char *) ast_variable_retrieve(cfg,"general","bindaddr"); 
-	if (!val)
-		sin.sin_addr.s_addr = htonl(INADDR_ANY);
-        else
-		sin.sin_addr.s_addr = inet_addr(val);
-	sin.sin_port = htons(listen_port);               
-	if (bind(udp_socket, &sin, sizeof(sin)) == -1) 
-	{
-		ast_log(LOG_ERROR, "Unable to bind port for voter audio connection\n");
-                close(udp_socket);
-		ast_config_destroy(cfg);
-                return AST_MODULE_LOAD_DECLINE;
-	}
+		oldctcss[0] = 0;
+		strcpy(oldctcss,p->txctcssfreq);
+		sprintf(data,"%d",p->nodenum);
+		if (ast_variable_browse(cfg, data) == NULL) continue;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"linger"); 
+		if (val) p->linger = atoi(val); else p->linger = DEFAULT_LINGER;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
+		if (val) p->plfilter = ast_true(val); else p->plfilter = 0;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
+		if (val) p->duplex = ast_true(val); else p->duplex = 1;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
+		if (p->nstreams && p->streams[0]) ast_free(p->streams[0]);
+		p->nstreams = 0;
+		if (val)
+		{
+			cp = ast_strdup(val);
+			p->nstreams = finddelim(cp,p->streams,MAXSTREAMS);
+		}		
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcss"); 
+		if (val) ast_copy_string(p->txctcssfreq,val,sizeof(p->txctcssfreq)); else p->txctcssfreq[0] = 0;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcsslevel"); 
+		if (val) p->txctcsslevel = atoi(val); else p->txctcsslevel = 62;
+		p->txtoctype = TOC_NONE;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txtoctype"); 
+		if (val)
+		{
+			if (!strcasecmp(val,"phase")) p->txtoctype = TOC_PHASE;
+			else if (!strcasecmp(val,"notone")) p->txtoctype = TOC_NOTONE;
+		}
+		p->nthresholds = 0;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
+		if (val)
+		{
+			cp = ast_strdup(val);
+			p->nthresholds = finddelim(cp,strs,MAXTHRESHOLDS);
+			for(i = 0; i < p->nthresholds; i++)
+			{
+				cp1 = strchr(strs[i],'=');
+				p->linger_thresh[i] = p->linger;
+				if (cp1)
+				{
+					*cp1 = 0;
+					cp2 = strchr(cp1 + 1,':');
+					if (cp2)
+					{
+						*cp2 = 0;
+						if (cp2[1]) p->linger_thresh[i] = (uint16_t)atoi(cp2 + 1);
+					}
+					if (cp1[1]) p->count_thresh[i] = (uint16_t)atoi(cp1 + 1);
+				}
+				p->rssi_thresh[i] = (uint8_t)atoi(strs[i]);
+			}
+			ast_free(cp);
+		}		
+		/* if new CTCSS freq */
+		if (p->txctcssfreq[0] && strcmp(oldctcss,p->txctcssfreq))
+		{
+			t_pmr_chan tChan;
 
-	i = fcntl(udp_socket,F_GETFL,0);              // Get socket flags
-	fcntl(udp_socket,F_SETFL,i | O_NONBLOCK);   // Add non-blocking flag
+			memset(&tChan,0,sizeof(t_pmr_chan));
 
-	voter_timing_fd = open(DAHDI_PSEUDO_DEV_NAME,O_RDWR);
-	if (voter_timing_fd == -1)
-	{
-		ast_log(LOG_ERROR,"Cant open DAHDI timing channel\n");
-                close(udp_socket);
-		ast_config_destroy(cfg);
-                return AST_MODULE_LOAD_DECLINE;
+			tChan.pTxCodeDefault = p->txctcssfreq;
+			tChan.pTxCodeSrc     = p->txctcssfreq;
+			tChan.pRxCodeSrc     = p->txctcssfreq;
+			tChan.txMod = 2;
+			tChan.txMixA = TX_OUT_COMPOSITE;
+			tChan.b.txboost = 1;
+			if (p->pmrChan) destroyPmrChannel(p->pmrChan);
+			p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
+			p->pmrChan->radioDuplex = 1;//o->radioduplex;
+			p->pmrChan->b.loopback=0; 
+			p->pmrChan->b.radioactive= 1;
+			p->pmrChan->txrxblankingtime = 0;
+			p->pmrChan->rxCpuSaver = 0;
+			p->pmrChan->txCpuSaver = 0;
+			*(p->pmrChan->prxSquelchAdjust) = 0;
+			*(p->pmrChan->prxVoiceAdjust) = 0;
+			*(p->pmrChan->prxCtcssAdjust) = 0;
+			p->pmrChan->rxCtcss->relax = 0;
+			p->pmrChan->txTocType = p->txtoctype;
+			p->pmrChan->spsTxOutA->outputGain = 250;
+			*p->pmrChan->ptxCtcssAdjust = p->txctcsslevel;
+			p->pmrChan->pTxCodeDefault = p->txctcssfreq;
+			p->pmrChan->pTxCodeSrc = p->txctcssfreq;
+	//		p->pmrChan->txfreq = p->txctcssfreq;
+		}
 	}
-	bs = FRAME_SIZE;
-	if (ioctl(voter_timing_fd, DAHDI_SET_BLOCKSIZE, &bs) == -1) 
-	{
-		ast_log(LOG_WARNING, "Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
-		close(voter_timing_fd);
-                close(udp_socket);
-		ast_config_destroy(cfg);
-                return AST_MODULE_LOAD_DECLINE;
-	}
-
 	hasmaster = 0;
 	ctg = NULL;
         while ( (ctg = ast_category_browse(cfg, ctg)) != NULL)
@@ -2479,23 +2569,47 @@ int load_module(void)
 				ast_log(LOG_ERROR,"Cant Malloc()\n");
                                 close(udp_socket);
                                 ast_config_destroy(cfg);
-                                return AST_MODULE_LOAD_DECLINE;
+				ast_mutex_unlock(&voter_lock);
+				return -1;
 			}
 			n = finddelim(cp,strs,40);
 			if (n < 1) continue;
-			client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
+			/* see if we "know" this client already */
+			for(client = clients; client; client = client->next)
+			{
+				/* if this is the one whose digest matches one currently being looked at */
+				if (client->digest == crc32_bufs(challenge,strs[0]))
+				{
+					/* if has moved to another instance, free this one, and treat as new */
+					if (client->nodenum != strtoul(ctg,NULL,0))
+					{
+						client->reload = 0;
+						client = NULL;
+					}
+					break;
+				}
+			}
+			newclient = 0;
+			/* if a new one, alloc its space */
 			if (!client)
 			{
-				ast_log(LOG_ERROR,"Cant malloc()\n");
-				ast_free(cp);
-		                close(udp_socket);
-				ast_config_destroy(cfg);
-		                return AST_MODULE_LOAD_DECLINE;
+				client = (struct voter_client *)ast_malloc(sizeof(struct voter_client));
+				if (!client)
+				{
+					ast_log(LOG_ERROR,"Cant malloc()\n");
+					ast_free(cp);
+			                close(udp_socket);
+					ast_config_destroy(cfg);
+					ast_mutex_unlock(&voter_lock);
+					return -1;
+				}
+				memset(client,0,sizeof(struct voter_client));
+				ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
+				newclient = 1;
 			}
-			memset(client,0,sizeof(struct voter_client));
-			client->nodenum = strtoul(ctg,NULL,0);
-			ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
+			client->reload = 1;
 			client->buflen = instance_buflen;
+			client->nodenum = strtoul(ctg,NULL,0);
 			for(i = 1; i < n; i++)
 			{
 				if (!strcasecmp(strs[i],"transmit"))
@@ -2536,52 +2650,192 @@ int load_module(void)
 			}
 			client->digest = crc32_bufs(challenge,strs[0]);
 			ast_free(cp);
-			client->audio = (uint8_t *)ast_malloc(client->buflen);
-			if (!client->audio)
+			if (client->old_buflen && (client->buflen != client->old_buflen))
+				client->drainindex = 0;
+			if (client->audio && client->old_buflen && (client->buflen != client->old_buflen))
 			{
-				ast_log(LOG_ERROR,"Cant malloc()\n");
-		                close(udp_socket);
-				ast_config_destroy(cfg);
-		                return AST_MODULE_LOAD_DECLINE;
+				client->audio = (uint8_t *)ast_realloc(client->audio,client->buflen);
+				if (!client->audio)
+				{
+					ast_log(LOG_ERROR,"Cant realloc()\n");
+			                close(udp_socket);
+					ast_config_destroy(cfg);
+					ast_mutex_unlock(&voter_lock);
+					return -1;
+				}
+				memset(client->audio,0xff,client->buflen);
 			}
-			memset(client->audio,0xff,client->buflen);
-			client->rssi = (uint8_t *)ast_malloc(client->buflen);
-			if (!client->rssi)
+			else if (!client->audio) 
 			{
-				ast_log(LOG_ERROR,"Cant malloc()\n");
-		                close(udp_socket);
-				ast_config_destroy(cfg);
-		                return AST_MODULE_LOAD_DECLINE;
+				client->audio = (uint8_t *)ast_malloc(client->buflen);
+				if (!client->audio)
+				{
+					ast_log(LOG_ERROR,"Cant malloc()\n");
+			                close(udp_socket);
+					ast_config_destroy(cfg);
+					ast_mutex_unlock(&voter_lock);
+					return -1;
+				}
+				memset(client->audio,0xff,client->buflen);
 			}
-			memset(client->rssi,0,client->buflen);
-			ast_mutex_lock(&voter_lock);
-			if (clients == NULL) clients = client;
-			else
+			if (client->rssi && client->old_buflen && (client->buflen != client->old_buflen))
 			{
-				for(client1 = clients; client1->next; client1 = client1->next) ;
-				client1->next = client;
+				client->rssi = (uint8_t *)ast_realloc(client->rssi,client->buflen);
+				if (!client->rssi)
+				{
+					ast_log(LOG_ERROR,"Cant realloc()\n");
+			                close(udp_socket);
+					ast_config_destroy(cfg);
+					ast_mutex_unlock(&voter_lock);
+					return -1;
+				}
+				memset(client->rssi,0,client->buflen);
 			}
-			ast_mutex_unlock(&voter_lock);
+			else if (!client->rssi)
+			{
+				client->rssi = (uint8_t *)ast_malloc(client->buflen);
+				if (!client->rssi)
+				{
+					ast_log(LOG_ERROR,"Cant malloc()\n");
+			                close(udp_socket);
+					ast_config_destroy(cfg);
+					ast_mutex_unlock(&voter_lock);
+					return -1;
+				}
+				memset(client->rssi,0,client->buflen);
+			}
+			/* if a new client, add it into list */
+			if (newclient)
+			{
+				if (clients == NULL) clients = client;
+				else
+				{
+					for(client1 = clients; client1->next; client1 = client1->next) ;
+					client1->next = client;
+				}
+			}
 		}
 	}
 	ast_config_destroy(cfg);
 	for(client = clients; client; client = client->next)
 	{
+		if (!client->reload) continue;
 		for(client1 = clients; client1; client1 = client1->next)
 		{
+			if (!client1->reload) continue;
 			if (client->digest == 0)
 			{
-				ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER client %s has invalid authetication digest (can not be 0)!!!\n",client->name);
-		                return AST_MODULE_LOAD_DECLINE;
+				ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER client %s has invalid authentication digest (can not be 0)!!!\n",client->name);
+				ast_mutex_unlock(&voter_lock);
+				return -1;
 			}
 			if (client == client1) continue;
 			if (client->digest == client1->digest)
 			{
-				ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER clients %s and %s have same authetication digest!!!\n",client->name,client1->name);
-		                return AST_MODULE_LOAD_DECLINE;
+				ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER clients %s and %s have same authentication digest!!!\n",client->name,client1->name);
+				ast_mutex_unlock(&voter_lock);
+				return -1;
 			}
 		}
 	}
+	/* remove all the clients that are no longer in the config */
+	for(client = clients; client; client = client->next)
+	{
+		if (client->reload) continue;
+		if (client->audio) ast_free(client->audio);
+		if (client->rssi) ast_free(client->rssi);
+		if (client->gpsid) ast_free(client->gpsid);
+		for(client1 = clients; client1; client1 = client1->next)
+		{
+			if (client1->next == client) break;
+		}
+		if (client1) client1->next = client->next;
+		else clients = NULL;
+		ast_free(client);
+		client = clients;
+	}
+	ast_mutex_unlock(&voter_lock);
+	return(0);
+}
+
+#ifndef	OLD_ASTERISK
+static
+#endif
+int load_module(void)
+{
+
+	pthread_attr_t attr;
+	struct sockaddr_in sin;
+	int i,bs;
+	struct ast_config *cfg = NULL;
+	char *val;
+#ifdef  NEW_ASTERISK
+        struct ast_flags zeroflag = {0};
+#endif
+
+
+	snprintf(challenge, sizeof(challenge), "%ld", ast_random());
+	hasmaster = 0;
+
+#ifdef  NEW_ASTERISK
+        if (!(cfg = ast_config_load(config,zeroflag))) {
+#else
+        if (!(cfg = ast_config_load(config))) {
+#endif
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
+		ast_mutex_unlock(&voter_lock);
+		return 1;
+        }
+
+	if ((udp_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+	{
+		ast_log(LOG_ERROR,"Unable to create new socket for voter audio connection\n");
+		ast_config_destroy(cfg);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+	memset((char *) &sin, 0, sizeof(sin));
+	sin.sin_family = AF_INET;
+        val = (char *) ast_variable_retrieve(cfg,"general","port"); 
+	if (val) listen_port = (uint16_t) strtoul(val,NULL,0);
+
+        val = (char *) ast_variable_retrieve(cfg,"general","bindaddr"); 
+	if (!val)
+		sin.sin_addr.s_addr = htonl(INADDR_ANY);
+        else
+		sin.sin_addr.s_addr = inet_addr(val);
+	sin.sin_port = htons(listen_port);               
+	if (bind(udp_socket, &sin, sizeof(sin)) == -1) 
+	{
+		ast_log(LOG_ERROR, "Unable to bind port for voter audio connection\n");
+                close(udp_socket);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+
+	i = fcntl(udp_socket,F_GETFL,0);              // Get socket flags
+	fcntl(udp_socket,F_SETFL,i | O_NONBLOCK);   // Add non-blocking flag
+
+	voter_timing_fd = open(DAHDI_PSEUDO_DEV_NAME,O_RDWR);
+	if (voter_timing_fd == -1)
+	{
+		ast_log(LOG_ERROR,"Cant open DAHDI timing channel\n");
+                close(udp_socket);
+		ast_config_destroy(cfg);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+	bs = FRAME_SIZE;
+	if (ioctl(voter_timing_fd, DAHDI_SET_BLOCKSIZE, &bs) == -1) 
+	{
+		ast_log(LOG_WARNING, "Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
+		close(voter_timing_fd);
+                close(udp_socket);
+		ast_config_destroy(cfg);
+                return AST_MODULE_LOAD_DECLINE;
+	}
+	ast_config_destroy(cfg);
+
+
+	if (reload()) return AST_MODULE_LOAD_DECLINE;
+
 #ifdef	NEW_ASTERISK
 	ast_cli_register_multiple(voter_cli,sizeof(voter_cli) / 
 		sizeof(struct ast_cli_entry));
@@ -2591,6 +2845,7 @@ int load_module(void)
 	ast_cli_register(&cli_test);
 	ast_cli_register(&cli_record);
 	ast_cli_register(&cli_tone);
+	ast_cli_register(&cli_reload);
 #endif
 
         pthread_attr_init(&attr);
@@ -2624,5 +2879,9 @@ char *key()
 	return ASTERISK_GPL_KEY;
 }
 #else
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "radio Voter channel driver");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "radio Voter channel driver",
+		.load = load_module,
+		.unload = unload_module,
+		.reload = reload,
+	       );
 #endif

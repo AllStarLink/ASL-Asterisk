@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.294 10/04/2011
+ *  version 0.295 10/08/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -565,12 +565,21 @@ static int mdc1200gen_start(struct ast_channel *chan, char *type, short UnitID, 
 
 #endif
 
+
+#ifdef	OLD_ASTERISK
+int reload();
+#else
+static int reload(void);
+#endif
+
+AST_MUTEX_DEFINE_STATIC(rpt_master_lock);
+
 /* Start a tone-list going */
 int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist, int interruptible);
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.294 10/04/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.295 10/08/2011";
 
 static char *app = "Rpt";
 
@@ -989,6 +998,8 @@ static struct rpt
 	ast_mutex_t statpost_lock;
 	struct ast_config *cfg;
 	char reload;
+	char reload1;
+	char deleted;
 	char xlink;		 							// cross link state of a share repeater/remote radio
 	unsigned int statpost_seqno;
 
@@ -6859,7 +6870,8 @@ static int rpt_do_local_nodes(int fd, int argc, char *argv[])
     ast_cli(fd, "\nNode\n----\n");
     for (i=0; i< nrpts; i++)
     {
-        ast_cli(fd, "%s\n", rpt_vars[i].name);        
+	if (rpt_vars[i].name[0])
+	        ast_cli(fd, "%s\n", rpt_vars[i].name);        
     } /* for i */
     ast_cli(fd,"\n");
     return RESULT_SUCCESS;
@@ -6872,11 +6884,9 @@ static int rpt_do_local_nodes(int fd, int argc, char *argv[])
 
 static int rpt_do_reload(int fd, int argc, char *argv[])
 {
-int	n;
-
         if (argc > 2) return RESULT_SHOWUSAGE;
 
-	for(n = 0; n < nrpts; n++) rpt_vars[n].reload = 1;
+	reload();
 
 	return RESULT_FAILURE;
 }
@@ -21279,7 +21289,12 @@ char *this,*val;
 			if((this[i] < '0') || (this[i] > '9'))
 				break;
 		}
-		if(i != strlen(this)) continue; /* Not a node defn */
+		if (i != strlen(this)) continue; /* Not a node defn */
+		if (n >= MAXRPTS)
+		{
+			ast_log(LOG_ERROR,"Attempting to add repeater node %s would exceed max. number of repeaters (%d)\n",this,MAXRPTS);
+			continue;
+		}
 		memset(&rpt_vars[n],0,sizeof(rpt_vars[n]));
 		rpt_vars[n].name = ast_strdup(this);
 		val = (char *) ast_variable_retrieve(cfg,this,"rxchannel");
@@ -21369,19 +21384,26 @@ char *this,*val;
 	}
 	usleep(500000);
 	time(&starttime);
+	ast_mutex_lock(&rpt_master_lock);
 	for(;;)
 	{
 		/* Now monitor each thread, and restart it if necessary */
-		for(i = 0; i < n; i++)
+		for(i = 0; i < nrpts; i++)
 		{ 
 			int rv;
 			if (rpt_vars[i].remote) continue;
-			if (rpt_vars[i].rpt_thread == AST_PTHREADT_STOP) 
+			if ((rpt_vars[i].rpt_thread == AST_PTHREADT_STOP) 
+				|| (rpt_vars[i].rpt_thread == AST_PTHREADT_NULL))
 				rv = -1;
 			else
 				rv = pthread_kill(rpt_vars[i].rpt_thread,0);
 			if (rv)
 			{
+				if (rpt_vars[i].deleted)
+				{
+					rpt_vars[i].name[0] = 0;
+					continue;
+				}
 				if(time(NULL) - rpt_vars[i].lastthreadrestarttime <= 5)
 				{
 					if(rpt_vars[i].threadrestarts >= 5)
@@ -21407,8 +21429,9 @@ char *this,*val;
 			}
 
 		}
-		for(i = 0; i < n; i++)
+		for(i = 0; i < nrpts; i++)
 		{ 
+			if (rpt_vars[i].deleted) continue;
 			if (rpt_vars[i].remote) continue;
 			if (!rpt_vars[i].p.outstreamcmd) continue;
 			if (rpt_vars[i].outstreampid && 
@@ -21459,8 +21482,11 @@ char *this,*val;
 			close(fd);
 			ast_free(nodep);
 		}
+		ast_mutex_unlock(&rpt_master_lock);
 		usleep(2000000);
+		ast_mutex_lock(&rpt_master_lock);
 	}
+	ast_mutex_unlock(&rpt_master_lock);
 	ast_config_destroy(cfg);
 	pthread_exit(NULL);
 }
@@ -23424,7 +23450,8 @@ static int manager_rpt_local_nodes(struct mansession *s, const struct message *m
     astman_append(s, "<nodes>\r\n");
     for (i=0; i< nrpts; i++)
     {
-        astman_append(s, "  <node>%s</node>\r\n", rpt_vars[i].name);        
+	if (rpt_vars[i].name[0])
+	        astman_append(s, "  <node>%s</node>\r\n", rpt_vars[i].name);        
     } /* for i */
     astman_append(s, "</nodes>\r\n");
     astman_append(s, "\r\n");	/* Properly terminate Manager output */
@@ -24260,9 +24287,87 @@ int reload()
 static int reload(void)
 #endif
 {
-int	n;
+int	i,n;
+struct ast_config *cfg;
+char	*val,*this;
 
-	for(n = 0; n < nrpts; n++) rpt_vars[n].reload = 1;
+#ifdef	NEW_ASTERISK
+	cfg = ast_config_load("rpt.conf",config_flags);
+#else
+	cfg = ast_config_load("rpt.conf");
+#endif
+	if (!cfg) {
+		ast_log(LOG_NOTICE, "Unable to open radio repeater configuration rpt.conf.  Radio Repeater disabled.\n");
+		pthread_exit(NULL);
+	}
+
+	ast_mutex_lock(&rpt_master_lock);
+	for(n = 0; n < nrpts; n++) rpt_vars[n].reload1 = 0;
+	this = NULL;
+	while((this = ast_category_browse(cfg,this)) != NULL)
+	{
+		for(i = 0 ; i < strlen(this) ; i++){
+			if((this[i] < '0') || (this[i] > '9'))
+				break;
+		}
+		if (i != strlen(this)) continue; /* Not a node defn */
+		for(n = 0; n < nrpts; n++) 
+		{
+			if (!strcmp(this,rpt_vars[n].name))
+			{
+				rpt_vars[n].reload1 = 1;
+				break;
+			}
+		}
+		if (n >= nrpts) /* no such node, yet */
+		{
+			/* find an empty hole or the next one */
+			for(n = 0; n < nrpts; n++) if (rpt_vars[n].deleted) break;
+			if (n >= MAXRPTS)
+			{
+				ast_log(LOG_ERROR,"Attempting to add repeater node %s would exceed max. number of repeaters (%d)\n",this,MAXRPTS);
+				continue;
+			}
+			memset(&rpt_vars[n],0,sizeof(rpt_vars[n]));
+			rpt_vars[n].name = ast_strdup(this);
+			val = (char *) ast_variable_retrieve(cfg,this,"rxchannel");
+			if (val) rpt_vars[n].rxchanname = ast_strdup(val);
+			val = (char *) ast_variable_retrieve(cfg,this,"txchannel");
+			if (val) rpt_vars[n].txchanname = ast_strdup(val);
+			rpt_vars[n].remote = 0;
+			rpt_vars[n].remoterig = "";
+			rpt_vars[n].p.iospeed = B9600;
+			rpt_vars[n].ready = 0;
+			val = (char *) ast_variable_retrieve(cfg,this,"remote");
+			if (val) 
+			{
+				rpt_vars[n].remoterig = ast_strdup(val);
+				rpt_vars[n].remote = 1;
+			}
+			val = (char *) ast_variable_retrieve(cfg,this,"radiotype");
+			if (val) rpt_vars[n].remoterig = ast_strdup(val);
+			ast_mutex_init(&rpt_vars[n].lock);
+			ast_mutex_init(&rpt_vars[n].remlock);
+			ast_mutex_init(&rpt_vars[n].statpost_lock);
+			rpt_vars[n].tele.next = &rpt_vars[n].tele;
+			rpt_vars[n].tele.prev = &rpt_vars[n].tele;
+			rpt_vars[n].rpt_thread = AST_PTHREADT_NULL;
+			rpt_vars[n].tailmessagen = 0;
+#ifdef	_MDC_DECODE_H_
+			rpt_vars[n].mdc = mdc_decoder_new(8000);
+#endif
+			rpt_vars[n].reload1 = 1;
+			if (n >= nrpts) nrpts = n + 1;
+		}
+	}
+	for(n = 0; n < nrpts; n++)
+	{
+		if (rpt_vars[n].reload1) continue;
+		if (rpt_vars[n].rxchannel) ast_softhangup(rpt_vars[n].rxchannel,AST_SOFTHANGUP_DEV);
+		rpt_vars[n].deleted = 1;
+	}
+	for(n = 0; n < nrpts; n++) if (!rpt_vars[n].deleted) rpt_vars[n].reload = 1;
+	ast_mutex_unlock(&rpt_master_lock);
 	return(0);
 }
 
