@@ -1691,7 +1691,7 @@ static void *voter_reader(void *data)
 	char gps0[300],gps1[300],gps2[300];
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
-	int i,j,k,maxrssi;
+	int i,j,k,maxrssi,master_port;
 	struct ast_frame *f1,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
@@ -1722,6 +1722,7 @@ static void *voter_reader(void *data)
 
 	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "voter: reader thread started.\n");
 	ast_mutex_lock(&voter_lock);
+	master_port = 0;
 	while(run_forever && (!ast_shutting_down()))
 	{
 		my_voter_time = voter_timing_count;
@@ -1771,6 +1772,7 @@ static void *voter_reader(void *data)
 				vph = (VOTER_PACKET_HEADER *)buf;
 				if (debug > 3) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
 				client = NULL;
+				if ((!check_client_sanity) && master_port) sin.sin_port = htons(master_port);
 				if (vph->digest)
 				{
 					
@@ -1791,7 +1793,7 @@ static void *voter_reader(void *data)
 						{
 							if ((client->sin.sin_addr.s_addr && (client->sin.sin_addr.s_addr != sin.sin_addr.s_addr)) ||
 								(client->sin.sin_port && (client->sin.sin_port != sin.sin_port))) client->heardfrom = 0;
-						}
+						} 
 						client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
 						if ((!client->ismaster) && hasmaster)
@@ -1827,7 +1829,7 @@ static void *voter_reader(void *data)
 								last_master_count = voter_timing_count;
 								master_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 								master_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
-
+								if (!master_port) master_port = ntohs(sin.sin_port);
 							}
 							else
 							{
