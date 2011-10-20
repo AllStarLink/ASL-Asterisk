@@ -5429,13 +5429,19 @@ static int pbx_builtin_answer(struct ast_channel *chan, void *data)
 	int res;
 
 	if (chan->_state == AST_STATE_UP)
-		delay = 0;
-	else if (!ast_strlen_zero(data))
-		delay = atoi(data);
+		data = "0";
 
 	res = ast_answer(chan);
 	if (res)
 		return res;
+
+	if (!ast_strlen_zero(data)) {
+		if (!strcasecmp(data,"radio")) {
+			ast_safe_sleep(chan,15000);
+			ast_indicate(chan,AST_CONTROL_RADIO_KEY);
+			delay = 1000;
+		} else delay = atoi(data);
+	}
 
 	if (delay)
 		res = ast_safe_sleep(chan, delay);
@@ -5486,18 +5492,25 @@ static int pbx_builtin_hangup(struct ast_channel *chan, void *data)
 		int cause;
 		char *endptr;
 
-		if ((cause = ast_str2cause(data)) > -1) {
-			chan->hangupcause = cause;
-			return -1;
-		}
-		
-		cause = strtol((const char *) data, &endptr, 10);
-		if (cause != 0 || (data != endptr)) {
-			chan->hangupcause = cause;
-			return -1;
-		}
+
+		if (!strcasecmp(data,"radio")) {
+			ast_safe_sleep(chan,2000);
+			ast_sendtext(chan,"!!DISCONNECT!!");
+			ast_safe_sleep(chan,100);
+		} else {
+			if ((cause = ast_str2cause(data)) > -1) {
+				chan->hangupcause = cause;
+				return -1;
+			}
 			
-		ast_log(LOG_NOTICE, "Invalid cause given to Hangup(): \"%s\"\n", (char *) data);
+			cause = strtol((const char *) data, &endptr, 10);
+			if (cause != 0 || (data != endptr)) {
+				chan->hangupcause = cause;
+				return -1;
+			}
+				
+			ast_log(LOG_NOTICE, "Invalid cause given to Hangup(): \"%s\"\n", (char *) data);
+		}
 	}
 
 	if (!chan->hangupcause) {
