@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.295 10/08/2011
+ *  version 0.296 10/20/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.295 10/08/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.296 10/20/2011";
 
 static char *app = "Rpt";
 
@@ -1757,6 +1757,7 @@ static int rpt_do_dump(int fd, int argc, char *argv[]);
 static int rpt_do_stats(int fd, int argc, char *argv[]);
 static int rpt_do_lstats(int fd, int argc, char *argv[]);
 static int rpt_do_nodes(int fd, int argc, char *argv[]);
+static int rpt_do_xnode(int fd, int argc, char *argv[]);
 static int rpt_do_local_nodes(int fd, int argc, char *argv[]);
 static int rpt_do_reload(int fd, int argc, char *argv[]);
 static int rpt_do_restart(int fd, int argc, char *argv[]);
@@ -1790,6 +1791,10 @@ static char dump_lstats[] =
 static char dump_nodes[] =
 "Usage: rpt nodes <nodename>\n"
 "       Dumps a list of directly and indirectly connected nodes to the console\n";
+
+static char dump_xnode[] =
+"Usage: rpt xnode <nodename>\n"
+"       Dumps extended node info to the console\n";
 
 static char usage_local_nodes[] =
 "Usage: rpt localnodes\n"
@@ -1858,6 +1863,10 @@ static struct ast_cli_entry  cli_stats =
 static struct ast_cli_entry  cli_nodes =
         { { "rpt", "nodes" }, rpt_do_nodes,
 		"Dump node list", dump_nodes };
+
+static struct ast_cli_entry  cli_xnode =
+        { { "rpt", "xnode" }, rpt_do_xnode,
+		"Dump extended info", dump_xnode };
 
 static struct ast_cli_entry  cli_local_nodes =
         { { "rpt", "localnodes" }, rpt_do_local_nodes,
@@ -6809,6 +6818,242 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 	return RESULT_FAILURE;
 }
 
+static int rpt_do_xnode(int fd, int argc, char *argv[])
+{
+	int i,j;
+	char ns;
+	char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
+	struct rpt *myrpt;
+	struct ast_var_t *newvariable;
+	char *connstate;
+	struct rpt_link *l;
+	struct rpt_lstat *s,*t;
+	struct rpt_lstat s_head;
+	if(argc != 3)
+		return RESULT_SHOWUSAGE;
+
+	s = NULL;
+	s_head.next = &s_head;
+	s_head.prev = &s_head;
+
+
+	char *parrot_ena, *sys_ena, *tot_ena, *link_ena, *patch_ena, *patch_state;
+	char *sch_ena, *user_funs, *tail_type, *iconns, *tot_state, *ider_state, *tel_mode; 
+
+	for(i = 0; i < nrpts; i++)
+	{
+		if (!strcmp(argv[2],rpt_vars[i].name)){
+			/* Make a copy of all stat variables while locked */
+			myrpt = &rpt_vars[i];
+			rpt_mutex_lock(&myrpt->lock); /* LOCK */
+
+//### GET RPT STATUS STATES WHILE LOCKED ########################
+			if(myrpt->p.parrotmode)
+				parrot_ena = "1";	//"ENABLED";
+			else
+				parrot_ena = "0";	//"DISABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].txdisable)
+				sys_ena = "0";	//"DISABLED";
+			else
+				sys_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].totdisable)
+				tot_ena = "0";	//"DISABLED";
+			else
+				tot_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].linkfundisable)
+				link_ena = "0";	//"DISABLED";
+			else
+				link_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].autopatchdisable)
+				patch_ena = "0";	//"DISABLED";
+			else
+				patch_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].schedulerdisable)
+				sch_ena = "0";	//"DISABLED";
+			else
+				sch_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].userfundisable)
+				user_funs = "0";	//"DISABLED";
+			else
+				user_funs = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].alternatetail)
+				tail_type = "1";	//"ALTERNATE";
+			else
+				tail_type = "0";	//"STANDARD";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns)
+				iconns = "0";	//"DISABLED";
+			else
+				iconns = "1";	//"ENABLED";
+
+			if(!myrpt->totimer)
+				tot_state = "0";	//"TIMED OUT!";
+			else if(myrpt->totimer != myrpt->p.totime)
+				tot_state = "1";	//"ARMED";
+			else
+				tot_state = "2";	//"RESET";
+
+			if(myrpt->tailid)
+				ider_state = "0";	//"QUEUED IN TAIL";
+			else if(myrpt->mustid)
+				ider_state = "1";	//"QUEUED FOR CLEANUP";
+			else
+				ider_state = "2";	//"CLEAN";
+
+
+			switch(myrpt->callmode){
+				case 1:
+					patch_state = "0";		//"DIALING";
+					break;
+				case 2:
+					patch_state = "1";		//"CONNECTING";
+					break;
+				case 3:
+					patch_state = "2";		//"UP";
+					break;
+
+				case 4:
+					patch_state = "3";		//"CALL FAILED";
+					break;
+
+				default:
+					patch_state = "4";		//"DOWN";
+			}
+
+
+			if (myrpt->p.telemdynamic)
+			{
+				if(myrpt->telemmode == 0x7fffffff)
+					tel_mode = "1";
+				else if(myrpt->telemmode == 0x00)
+					tel_mode = "0";
+				else
+					tel_mode = "2";
+			}
+			else{
+				tel_mode= "3";
+			}
+
+
+//### GET CONNECTED NODE INFO ####################
+			// Traverse the list of connected nodes 
+
+			__mklinklist(myrpt,NULL,lbuf,0);
+
+			j = 0;
+			l = myrpt->links.next;
+			while(l && (l != &myrpt->links)){
+				if (l->name[0] == '0'){ // Skip '0' nodes 
+					l = l->next;
+					continue;
+				}
+				if((s = (struct rpt_lstat *) ast_malloc(sizeof(struct rpt_lstat))) == NULL){
+					ast_log(LOG_ERROR, "Malloc failed in rpt_do_lstats\n");
+					rpt_mutex_unlock(&myrpt->lock); // UNLOCK 
+					return RESULT_FAILURE;
+				}
+				memset(s, 0, sizeof(struct rpt_lstat));
+				strncpy(s->name, l->name, MAXREMSTR - 1);
+				if (l->chan) pbx_substitute_variables_helper(l->chan, "${IAXPEER(CURRENTCHANNEL)}", s->peer, MAXPEERSTR - 1);
+				else strcpy(s->peer,"(none)");
+				s->mode = l->mode;
+				s->outbound = l->outbound;
+				s->reconnects = l->reconnects;
+				s->connecttime = l->connecttime;
+				s->thisconnected = l->thisconnected;
+				memcpy(s->chan_stat,l->chan_stat,NRPTSTAT * sizeof(struct rpt_chan_stat));
+				insque((struct qelem *) s, (struct qelem *) s_head.next);
+				memset(l->chan_stat,0,NRPTSTAT * sizeof(struct rpt_chan_stat));
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock); // UNLOCK 
+			for(s = s_head.next; s != &s_head; s = s->next){
+				int hours, minutes, seconds;
+				long long connecttime = s->connecttime;
+				char conntime[21];
+				hours = (int) connecttime/3600000;
+				connecttime %= 3600000;
+				minutes = (int) connecttime/60000;
+				connecttime %= 60000;
+				seconds = (int)  connecttime/1000;
+				connecttime %= 1000;
+				snprintf(conntime, 20, "%02d:%02d:%02d",
+					hours, minutes, seconds);
+				conntime[20] = 0;
+				if(s->thisconnected)
+					connstate  = "ESTABLISHED";
+				else
+					connstate = "CONNECTING";
+				ast_cli(fd, "%-10s%-20s%-12d%-11s%-20s%-20s~",
+					s->name, s->peer, s->reconnects, (s->outbound)? "OUT":"IN", conntime, connstate);
+			}	
+			ast_cli(fd,"\n\n");
+			// destroy our local link queue 
+			s = s_head.next;
+			while(s != &s_head){
+				t = s;
+				s = s->next;
+				remque((struct qelem *)t);
+				ast_free(t);
+			}	
+
+//### GET ALL LINKED NODES INFO ####################
+			/* parse em */
+			ns = finddelim(lbuf,strs,MAXLINKLIST);
+			/* sort em */
+			if (ns) qsort((void *)strs,ns,sizeof(char *),mycompar);
+			for(j = 0 ;; j++){
+				if(!strs[j]){
+					if(!j){
+						ast_cli(fd,"<NONE>");
+					}
+					break;
+				}
+				ast_cli(fd, "%s", strs[j]);
+				if(strs[j + 1])
+					ast_cli(fd, ", ");
+
+			}
+			ast_cli(fd,"\n\n");
+
+//### GET VARIABLES INFO ####################
+			j = 0;
+			ast_channel_lock(rpt_vars[i].rxchannel);
+			AST_LIST_TRAVERSE (&rpt_vars[i].rxchannel->varshead, newvariable, entries) {
+				j++;
+				ast_cli(fd,"%s=%s\n", ast_var_name(newvariable), ast_var_value(newvariable));
+			}
+			ast_channel_unlock(rpt_vars[i].rxchannel);
+			ast_cli(fd,"\n");
+
+//### OUTPUT RPT STATUS STATES ##############
+			ast_cli(fd, "parrot_ena=%s\n", parrot_ena);
+			ast_cli(fd, "sys_ena=%s\n", sys_ena);
+			ast_cli(fd, "tot_ena=%s\n", tot_ena);
+			ast_cli(fd, "link_ena=%s\n", link_ena);
+			ast_cli(fd, "patch_ena=%s\n", patch_ena);
+			ast_cli(fd, "patch_state=%s\n", patch_state);
+			ast_cli(fd, "sch_ena=%s\n", sch_ena);
+			ast_cli(fd, "user_funs=%s\n", user_funs);
+			ast_cli(fd, "tail_type=%s\n", tail_type);
+			ast_cli(fd, "iconns=%s\n", iconns);
+			ast_cli(fd, "tot_state=%s\n", tot_state);
+			ast_cli(fd, "ider_state=%s\n", ider_state);
+			ast_cli(fd, "tel_mode=%s\n\n", tel_mode);
+
+			return RESULT_SUCCESS;
+		}
+	}
+	return RESULT_FAILURE;
+}
+
 /*
 * List all nodes connected, directly or indirectly
 */
@@ -7355,6 +7600,20 @@ static char *handle_cli_nodes(struct ast_cli_entry *e,
 	return res2cli(rpt_do_nodes(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_xnode(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "rpt xnode";
+                e->usage = dump_xnode;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_xnode(a->fd,a->argc,a->argv));
+}
+
 static char *handle_cli_local_nodes(struct ast_cli_entry *e,
 	int cmd, struct ast_cli_args *a)
 {
@@ -7556,6 +7815,7 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_dump,"Dump app_rpt structs for debugging"),
 	AST_CLI_DEFINE(handle_cli_stats,"Dump node statistics"),
 	AST_CLI_DEFINE(handle_cli_nodes,"Dump node list"),
+	AST_CLI_DEFINE(handle_cli_xnode,"Dump extended node info"),
 	AST_CLI_DEFINE(handle_cli_local_nodes,	"Dump list of local node numbers"),
 	AST_CLI_DEFINE(handle_cli_lstats,"Dump link statistics"),
 	AST_CLI_DEFINE(handle_cli_reload,"Reload app_rpt config"),
@@ -23472,6 +23732,245 @@ static void rpt_manager_success(struct mansession *s, const struct message *m)
 	astman_append(s, "Response: Success\r\n");
 }
 
+
+static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m, char *str)
+{
+	int i,j;
+	char ns;
+	char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
+	struct rpt *myrpt;
+	struct ast_var_t *newvariable;
+	char *connstate;
+	struct rpt_link *l;
+	struct rpt_lstat *s,*t;
+	struct rpt_lstat s_head;
+	const char *node = astman_get_header(m, "Node");
+
+	s = NULL;
+	s_head.next = &s_head;
+	s_head.prev = &s_head;
+
+
+	char *parrot_ena, *sys_ena, *tot_ena, *link_ena, *patch_ena, *patch_state;
+	char *sch_ena, *user_funs, *tail_type, *iconns, *tot_state, *ider_state, *tel_mode; 
+
+	for(i = 0; i < nrpts; i++)
+	{
+		if ((node)&&(!strcmp(node,rpt_vars[i].name))){
+			rpt_manager_success(ses,m);
+			astman_append(ses,"Node: %s\r\n",node);
+
+			/* Make a copy of all stat variables while locked */
+			myrpt = &rpt_vars[i];
+			rpt_mutex_lock(&myrpt->lock); /* LOCK */
+
+//### GET RPT STATUS STATES WHILE LOCKED ########################
+			if(myrpt->p.parrotmode)
+				parrot_ena = "1";	//"ENABLED";
+			else
+				parrot_ena = "0";	//"DISABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].txdisable)
+				sys_ena = "0";	//"DISABLED";
+			else
+				sys_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].totdisable)
+				tot_ena = "0";	//"DISABLED";
+			else
+				tot_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].linkfundisable)
+				link_ena = "0";	//"DISABLED";
+			else
+				link_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].autopatchdisable)
+				patch_ena = "0";	//"DISABLED";
+			else
+				patch_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].schedulerdisable)
+				sch_ena = "0";	//"DISABLED";
+			else
+				sch_ena = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].userfundisable)
+				user_funs = "0";	//"DISABLED";
+			else
+				user_funs = "1";	//"ENABLED";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].alternatetail)
+				tail_type = "1";	//"ALTERNATE";
+			else
+				tail_type = "0";	//"STANDARD";
+
+			if(myrpt->p.s[myrpt->p.sysstate_cur].noincomingconns)
+				iconns = "0";	//"DISABLED";
+			else
+				iconns = "1";	//"ENABLED";
+
+			if(!myrpt->totimer)
+				tot_state = "0";	//"TIMED OUT!";
+			else if(myrpt->totimer != myrpt->p.totime)
+				tot_state = "1";	//"ARMED";
+			else
+				tot_state = "2";	//"RESET";
+
+			if(myrpt->tailid)
+				ider_state = "0";	//"QUEUED IN TAIL";
+			else if(myrpt->mustid)
+				ider_state = "1";	//"QUEUED FOR CLEANUP";
+			else
+				ider_state = "2";	//"CLEAN";
+
+
+			switch(myrpt->callmode){
+				case 1:
+					patch_state = "0";		//"DIALING";
+					break;
+				case 2:
+					patch_state = "1";		//"CONNECTING";
+					break;
+				case 3:
+					patch_state = "2";		//"UP";
+					break;
+
+				case 4:
+					patch_state = "3";		//"CALL FAILED";
+					break;
+
+				default:
+					patch_state = "4";		//"DOWN";
+			}
+
+
+			if (myrpt->p.telemdynamic)
+			{
+				if(myrpt->telemmode == 0x7fffffff)
+					tel_mode = "1";
+				else if(myrpt->telemmode == 0x00)
+					tel_mode = "0";
+				else
+					tel_mode = "2";
+			}
+			else{
+				tel_mode= "3";
+			}
+
+
+//### GET CONNECTED NODE INFO ####################
+			// Traverse the list of connected nodes 
+
+			__mklinklist(myrpt,NULL,lbuf,0);
+
+			j = 0;
+			l = myrpt->links.next;
+			while(l && (l != &myrpt->links)){
+				if (l->name[0] == '0'){ // Skip '0' nodes 
+					l = l->next;
+					continue;
+				}
+				if((s = (struct rpt_lstat *) ast_malloc(sizeof(struct rpt_lstat))) == NULL){
+					ast_log(LOG_ERROR, "Malloc failed in rpt_do_lstats\r\n");
+					rpt_mutex_unlock(&myrpt->lock); // UNLOCK 
+					return -1;
+				}
+				memset(s, 0, sizeof(struct rpt_lstat));
+				strncpy(s->name, l->name, MAXREMSTR - 1);
+				if (l->chan) pbx_substitute_variables_helper(l->chan, "${IAXPEER(CURRENTCHANNEL)}", s->peer, MAXPEERSTR - 1);
+				else strcpy(s->peer,"(none)");
+				s->mode = l->mode;
+				s->outbound = l->outbound;
+				s->reconnects = l->reconnects;
+				s->connecttime = l->connecttime;
+				s->thisconnected = l->thisconnected;
+				memcpy(s->chan_stat,l->chan_stat,NRPTSTAT * sizeof(struct rpt_chan_stat));
+				insque((struct qelem *) s, (struct qelem *) s_head.next);
+				memset(l->chan_stat,0,NRPTSTAT * sizeof(struct rpt_chan_stat));
+				l = l->next;
+			}
+			rpt_mutex_unlock(&myrpt->lock); // UNLOCK 
+			for(s = s_head.next; s != &s_head; s = s->next){
+				int hours, minutes, seconds;
+				long long connecttime = s->connecttime;
+				char conntime[21];
+				hours = (int) connecttime/3600000;
+				connecttime %= 3600000;
+				minutes = (int) connecttime/60000;
+				connecttime %= 60000;
+				seconds = (int)  connecttime/1000;
+				connecttime %= 1000;
+				snprintf(conntime, 20, "%02d:%02d:%02d",
+					hours, minutes, seconds);
+				conntime[20] = 0;
+				if(s->thisconnected)
+					connstate  = "ESTABLISHED";
+				else
+					connstate = "CONNECTING";
+				astman_append(ses, "Conn: %-10s%-20s%-12d%-11s%-20s%-20s\r\n",
+					s->name, s->peer, s->reconnects, (s->outbound)? "OUT":"IN", conntime, connstate);
+			}	
+			// destroy our local link queue 
+			s = s_head.next;
+			while(s != &s_head){
+				t = s;
+				s = s->next;
+				remque((struct qelem *)t);
+				ast_free(t);
+			}	
+
+			astman_append(ses,"LinkedNodes: ");
+//### GET ALL LINKED NODES INFO ####################
+			/* parse em */
+			ns = finddelim(lbuf,strs,MAXLINKLIST);
+			/* sort em */
+			if (ns) qsort((void *)strs,ns,sizeof(char *),mycompar);
+			for(j = 0 ;; j++){
+				if(!strs[j]){
+					if(!j){
+						astman_append(ses,"<NONE>");
+					}
+					break;
+				}
+				astman_append(ses, "%s", strs[j]);
+				if(strs[j + 1])
+					astman_append(ses, ", ");
+
+			}
+			astman_append(ses,"\r\n");
+
+//### GET VARIABLES INFO ####################
+			j = 0;
+			ast_channel_lock(rpt_vars[i].rxchannel);
+			AST_LIST_TRAVERSE (&rpt_vars[i].rxchannel->varshead, newvariable, entries) {
+				j++;
+				astman_append(ses,"Var: %s=%s\r\n", ast_var_name(newvariable), ast_var_value(newvariable));
+			}
+			ast_channel_unlock(rpt_vars[i].rxchannel);
+
+//### OUTPUT RPT STATUS STATES ##############
+			astman_append(ses, "parrot_ena: %s\r\n", parrot_ena);
+			astman_append(ses, "sys_ena: %s\r\n", sys_ena);
+			astman_append(ses, "tot_ena: %s\r\n", tot_ena);
+			astman_append(ses, "link_ena: %s\r\n", link_ena);
+			astman_append(ses, "patch_ena: %s\r\n", patch_ena);
+			astman_append(ses, "patch_state: %s\r\n", patch_state);
+			astman_append(ses, "sch_ena: %s\r\n", sch_ena);
+			astman_append(ses, "user_funs: %s\r\n", user_funs);
+			astman_append(ses, "tail_type: %s\r\n", tail_type);
+			astman_append(ses, "iconns: %s\r\n", iconns);
+			astman_append(ses, "tot_state: %s\r\n", tot_state);
+			astman_append(ses, "ider_state: %s\r\n", ider_state);
+			astman_append(ses, "tel_mode: %s\r\n\r\n", tel_mode);
+
+			return 0;
+		}
+	}
+	return -1;
+}
+
+
 /*
 * Dump statistics to manager session
 */
@@ -23828,7 +24327,7 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 	time_t now;
 	const char *cmd = astman_get_header(m, "Command");
 	char *str;
-	enum {MGRCMD_RPTSTAT,MGRCMD_NODESTAT};
+	enum {MGRCMD_RPTSTAT,MGRCMD_NODESTAT,MGRCMD_XSTAT};
 	struct mgrcmdtbl{
 		const char *cmd;
 		int index;
@@ -23836,6 +24335,7 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 	static struct mgrcmdtbl mct[] = {
 		{"RptStat",MGRCMD_RPTSTAT},
 		{"NodeStat",MGRCMD_NODESTAT},
+		{"XStat",MGRCMD_XSTAT},
 		{NULL,0} /* NULL marks end of command table */
 	};
 
@@ -23912,6 +24412,11 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 
 		case	MGRCMD_NODESTAT:
 			res = rpt_manager_do_stats(s,m,str);
+			ast_free(str);
+			return res;
+
+		case	MGRCMD_XSTAT:
+			res = rpt_manager_do_xstat(s,m,str);
 			ast_free(str);
 			return res;
 
@@ -24163,6 +24668,7 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_stats);
 	ast_cli_unregister(&cli_lstats);
 	ast_cli_unregister(&cli_nodes);
+	ast_cli_unregister(&cli_xnode);
 	ast_cli_unregister(&cli_local_nodes);
 	ast_cli_unregister(&cli_reload);
 	ast_cli_unregister(&cli_restart);
@@ -24236,6 +24742,7 @@ static int load_module(void)
 	ast_cli_register(&cli_stats);
 	ast_cli_register(&cli_lstats);
 	ast_cli_register(&cli_nodes);
+	ast_cli_register(&cli_xnode);
 	ast_cli_register(&cli_local_nodes);
 	ast_cli_register(&cli_reload);
 	ast_cli_register(&cli_restart);
