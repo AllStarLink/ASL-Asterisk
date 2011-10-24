@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.296 10/20/2011
+ *  version 0.297 10/24/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.296 10/20/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.297 10/24/2011";
 
 static char *app = "Rpt";
 
@@ -23967,7 +23967,8 @@ static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m,
 			return 0;
 		}
 	}
-	return -1;
+	astman_send_error(ses, m, "RptStatus unknown or missing node");
+	return 0;
 }
 
 
@@ -24311,7 +24312,7 @@ static int rpt_manager_do_stats(struct mansession *s, const struct message *m, c
 		}
 	}
 	astman_send_error(s, m, "RptStatus unknown or missing node");
-	return -1;
+	return 0;
 }
 
 
