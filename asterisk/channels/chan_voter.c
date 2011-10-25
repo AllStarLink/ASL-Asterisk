@@ -2132,7 +2132,7 @@ static void *voter_reader(void *data)
 										else
 										{
 											memcpy(p->buf + AST_FRIENDLY_OFFSET,maxclient->audio + maxclient->drainindex,FRAME_SIZE + i);
-											memcpy(p->buf + AST_FRIENDLY_OFFSET + (client->buflen - i),maxclient->audio,-i);
+											memcpy(p->buf + AST_FRIENDLY_OFFSET + (maxclient->buflen - i),maxclient->audio,-i);
 										}
 										for(client = clients; client; client = client->next)
 										{
