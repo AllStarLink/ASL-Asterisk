@@ -956,8 +956,7 @@ static int el_call(struct ast_channel *ast, char *dest, int timeout)
 	}
 	/* When we call, it just works, really, there's no destination...  Just
 	   ring the phone and wait for someone to answer */
-//	if (option_debug)
-		ast_log(LOG_NOTICE, "Calling %s on %s\n", dest, ast->name);
+	if (option_debug) ast_log(LOG_DEBUG, "Calling %s on %s\n", dest, ast->name);
 	if (*dest)  /* if number specified */
 	{
 		char *str,*cp;
@@ -1009,7 +1008,7 @@ static struct el_pvt *el_alloc(void *data)
 	}
 	if (n >= ninstances)
 	{
-		ast_log(LOG_NOTICE,"Cannot find echolink channel %s\n",(char *)data);
+		ast_log(LOG_ERROR,"Cannot find echolink channel %s\n",(char *)data);
 		return NULL;
 	}
 
@@ -1295,11 +1294,6 @@ void send_audio_all_but_one(const void *nodep, const VISIT which, const int dept
          instp->audio_all_but_one.time = htonl(0);
          instp->audio_all_but_one.ssrc = htonl(instp->mynode);
 
-         /*
-         ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct el_node **)nodep)->call, (*(struct el_node **)nodep)->ip);
-         */
-        
          sendto(instp->audio_sock, (char *)&instp->audio_all_but_one, sizeof(instp->audio_all_but_one),
                 0,(struct sockaddr *)&sin,sizeof(sin));
       }
@@ -1327,10 +1321,6 @@ static void send_audio_only_one(const void *nodep, const VISIT which, const int 
       instp->audio_all.time = htonl(0);
       instp->audio_all.ssrc = htonl(instp->mynode);
 
-      /*
-      ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct el_node **)nodep)->call, (*(struct el_node **)nodep)->ip);
-      */
       sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
              0,(struct sockaddr *)&sin,sizeof(sin));
       }
@@ -1358,10 +1348,6 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
       instp->audio_all.time = htonl(0);
       instp->audio_all.ssrc = htonl(instp->mynode);
 
-      /*
-      ast_log(LOG_NOTICE, "sending to %s(%s)\n", 
-                  (*(struct el_node **)nodep)->call, (*(struct el_node **)nodep)->ip);
-      */
       sendto(instp->audio_sock, (char *)&instp->audio_all, sizeof(instp->audio_all), 
              0,(struct sockaddr *)&sin,sizeof(sin));
    }
@@ -1370,7 +1356,7 @@ void send_audio_all(const void *nodep, const VISIT which, const int depth)
 static void print_users(const void *nodep, const VISIT which, const int depth)
 {
    if ((which == leaf) || (which == postorder)) {
-      ast_log(LOG_NOTICE,"call=%s,ip=%s,name=%s\n",
+      ast_verbose("Echolink user: call=%s,ip=%s,name=%s\n",
              (*(struct el_node **)nodep)->call,
              (*(struct el_node **)nodep)->ip,
              (*(struct el_node **)nodep)->name);
@@ -1437,7 +1423,7 @@ static void send_heartbeat(const void *nodep, const VISIT which, const int depth
       if ((*(struct el_node **)nodep)->countdown < 0) {
          strncpy(instp->el_node_test.ip,(*(struct el_node **)nodep)->ip,EL_IP_SIZE);
          strncpy(instp->el_node_test.call,(*(struct el_node **)nodep)->call,EL_CALL_SIZE);
-         ast_log(LOG_NOTICE,"countdown for %s(%s) negative\n",instp->el_node_test.call,instp->el_node_test.ip);
+         ast_log(LOG_WARNING,"countdown for %s(%s) negative\n",instp->el_node_test.call,instp->el_node_test.ip);
       }
       memset(sdes_packet,0,sizeof(sdes_packet));
       sdes_length = rtcp_make_sdes(sdes_packet,sizeof(sdes_packet),
@@ -1507,13 +1493,13 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
       if (instp->fdr >= 0) {
          close(instp->fdr);
          instp->fdr = -1;
-         ast_log(LOG_NOTICE, "rec stopped\n");
+         if (debug) ast_log(LOG_DEBUG, "rec stopped\n");
       }
       else {
          instp->fdr = open(instp->fdr_file, O_CREAT | O_WRONLY | O_APPEND | O_TRUNC, 
                     S_IRUSR | S_IWUSR);
-         if (instp->fdr >= 0)
-            ast_log(LOG_NOTICE, "rec into %s started\n", instp->fdr_file);
+         if (debug && instp->fdr >= 0)
+            ast_log(LOG_DEBUG, "rec into %s started\n", instp->fdr_file);
       }
       return;
    }
@@ -1556,10 +1542,10 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
               for (i = 0; i < 20; i++)
                  sendto(instp->ctrl_sock, pack, pack_length,
                         0,(struct sockaddr *)&sin,sizeof(sin));
-              ast_log(LOG_NOTICE,"disconnect request sent to %s\n",key.ip);
+              if (debug) ast_log(LOG_DEBUG,"disconnect request sent to %s\n",key.ip);
            }
            else
-              ast_log(LOG_NOTICE, "Did not find ip=%s to request disconnect\n",key.ip);
+              if (debug) ast_log(LOG_DEBUG, "Did not find ip=%s to request disconnect\n",key.ip);
       }
       else {
          for (i = 0; i < n; i++)
@@ -1567,7 +1553,7 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
             sendto(instp->ctrl_sock, pack, pack_length,
                    0,(struct sockaddr *)&sin,sizeof(sin));
 	 }
-         ast_log(LOG_NOTICE,"connect request sent to %s\n", arg1);
+         if (debug) ast_log(LOG_DEBUG,"connect request sent to %s\n", arg1);
       }
       return;
    }
@@ -1689,7 +1675,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 #ifndef	OLD_ASTERISK
 						if (f1->frametype == AST_FRAME_DTMF_END)
 #endif
-							ast_log(LOG_NOTICE,"Echolink %s Got DTMF char %c from IP %s\n",p->stream,f1->subclass,p->ip);
+							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Echolink %s Got DTMF char %c from IP %s\n",p->stream,f1->subclass,p->ip);
 						ast_queue_frame(ast,f1);
 						x = 1;
 					}
@@ -1790,7 +1776,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
                  sendto(instp->ctrl_sock, bye, bye_length,
                         0,(struct sockaddr *)&sin,sizeof(sin));
 	      ast_mutex_unlock(&instp->lock);
-              ast_log(LOG_NOTICE,"call=%s RTCP timeout, removing\n",instp->el_node_test.call);
+              if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "call=%s RTCP timeout, removing\n",instp->el_node_test.call);
            }
            instp->el_node_test.ip[0] = '\0';
         } 
@@ -1870,7 +1856,7 @@ static struct ast_channel *el_request(const char *type, int format, void *data, 
 	oldformat = format;
 	format &= (AST_FORMAT_GSM);
 	if (!format) {
-		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", oldformat);
+		ast_log(LOG_ERROR, "Asked to get a channel of unsupported format '%d'\n", oldformat);
 		return NULL;
 	}
 	str = ast_strdup((char *)data);
@@ -2119,7 +2105,7 @@ static int sendcmd(char *server, struct el_instance *instp)
      strncpy(ip,ast_inet_ntoa(ia),EL_IP_SIZE);
 #endif
   } else {
-     ast_log(LOG_NOTICE, "Failed to resolve Echolink server %s\n", server);
+     ast_log(LOG_ERROR, "Failed to resolve Echolink server %s\n", server);
      return -1;
   }
 
@@ -2176,7 +2162,7 @@ static int sendcmd(char *server, struct el_instance *instp)
      rc = read(sd,buf,LOGINSIZE);
      if (rc > 0) {
         buf[rc] = '\0';
-        ast_log(LOG_NOTICE,"Received %s from Echolink server %s\n", buf, server);
+        if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Received %s from Echolink server %s\n", buf, server);
      }
      else
        break;
@@ -2481,8 +2467,8 @@ int	sock;
 	inflateEnd(&z);
 	pp = (dir_partial) ? "partial" : "full";
 	cc = (dir_compressed) ? "compressed" : "un-compressed";
-	ast_log(LOG_NOTICE,"Directory pgm done downloading(%s,%s), %d records\n",pp,cc,n);
-	if (debug && dir_compressed) ast_log(LOG_NOTICE,"Got snapshot_id: %s\n",snapshot_id);
+	if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Directory pgm done downloading(%s,%s), %d records\n",pp,cc,n);
+	if (debug && dir_compressed) ast_log(LOG_DEBUG,"Got snapshot_id: %s\n",snapshot_id);
 	return(dir_compressed);
 }
 
@@ -2519,7 +2505,7 @@ static void *el_directory(void *data)
 		if (rc == 1) el_sleeptime = 240;
 		else if (rc == 0) el_sleeptime = 1800;
 	}
-	ast_log(LOG_NOTICE, "Echolink directory thread exited.\n");
+	ast_log(LOG_WARNING, "Echolink directory thread exited.\n");
 	mythread_exit(NULL);
 	return NULL;
 }
@@ -2566,7 +2552,7 @@ static void *el_register(void *data)
       Send a de-register message, but what is the point,
       Echolink deactivates this node within 6 minutes
    */
-   ast_log(LOG_NOTICE, "Echolink registration thread exited.\n");
+   ast_log(LOG_WARNING, "Echolink registration thread exited.\n");
    mythread_exit(NULL);
    return NULL;
 }
@@ -2600,7 +2586,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		el_node_key->instp = instp;
 		if (tsearch(el_node_key, &el_node_list, compare_ip))
 		{
-			ast_log(LOG_NOTICE, "new CALL=%s,ip=%s,name=%s\n",
+			if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "new CALL=%s,ip=%s,name=%s\n",
 				el_node_key->call,el_node_key->ip,
 					el_node_key->name);
 			if (instp->confmode)
@@ -2614,7 +2600,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 					p = el_alloc((void *)instp->name);
 					if (!p)
 					{
-						ast_log(LOG_NOTICE,"Cannot alloc el channel\n");
+						ast_log(LOG_ERROR,"Cannot alloc el channel\n");
 						return -1;
 					}	
 					el_node_key->p = p;
@@ -2694,7 +2680,7 @@ static void *el_reader(void *data)
 
 	time(&instp->starttime);
 	instp->aprstime = instp->starttime + EL_APRS_START_DELAY;
-	ast_log(LOG_NOTICE, "Echolink reader thread started on %s.\n",instp->name);
+	if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Echolink reader thread started on %s.\n",instp->name);
 	ast_mutex_lock(&instp->lock);
 	while(run_forever)
 	{
@@ -2854,13 +2840,13 @@ static void *el_reader(void *data)
 						/* different callsigns behind a NAT router, running -L, -R, ... */
 						if (strncmp((*found_key)->call,call,EL_CALL_SIZE) != 0)
 						{
-							ast_log(LOG_NOTICE,"Call changed from %s to %s\n",
+							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Call changed from %s to %s\n",
 								(*found_key)->call,call);
 							strncpy((*found_key)->call,call,EL_CALL_SIZE);
 						}
 						if (strncmp((*found_key)->name, name, EL_NAME_SIZE) != 0) 
 						{
-							ast_log(LOG_NOTICE,"Name changed from %s to %s\n",
+							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Name changed from %s to %s\n",
 								(*found_key)->name,name);
 							strncpy((*found_key)->name,name,EL_NAME_SIZE);
 						}
@@ -2975,7 +2961,7 @@ static void *el_reader(void *data)
 				if (is_rtcp_bye((unsigned char *)buf,recvlen))
 				{
 					if (find_delete(&instp->el_node_test))
-						ast_log(LOG_NOTICE,"disconnect from ip=%s\n",instp->el_node_test.ip);
+						if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "disconnect from ip=%s\n",instp->el_node_test.ip);
 				} 
 			    }
 			}
@@ -3019,7 +3005,7 @@ static void *el_reader(void *data)
 							fr.delivery.tv_sec = 0;
 							fr.delivery.tv_usec = 0;
 							ast_queue_frame((*found_key)->chan,&fr);
-							ast_log(LOG_NOTICE,"Channel %s answering\n",
+							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Channel %s answering\n",
 								(*found_key)->chan->name);
 						}
 						(*found_key)->countdown = instp->rtcptimeout;
@@ -3034,7 +3020,7 @@ static void *el_reader(void *data)
 									qpast = ast_malloc(sizeof(struct el_rxqast));
 									if (!qpast)
 									{
-										ast_log(LOG_NOTICE,"Cannot malloc for qpast\n");
+										ast_log(LOG_ERROR,"Cannot malloc for qpast\n");
 										ast_mutex_unlock(&instp->lock);
 										mythread_exit(NULL);
 									}
@@ -3049,7 +3035,7 @@ static void *el_reader(void *data)
 							qpel = ast_malloc(sizeof(struct el_rxqel));
 							if (!qpel)
 							{
-								ast_log(LOG_NOTICE,"Cannot malloc for qpel\n");
+								ast_log(LOG_ERROR,"Cannot malloc for qpel\n");
 							}
 							else
 							{
@@ -3066,7 +3052,7 @@ static void *el_reader(void *data)
 		}
 	}
 	ast_mutex_unlock(&instp->lock);
-	ast_log(LOG_NOTICE, "Echolink read thread exited.\n");
+	if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Echolink read thread exited.\n");
 	mythread_exit(NULL);
 	return NULL;
 }
@@ -3317,15 +3303,19 @@ pthread_attr_t attr;
         ast_pthread_create(&instp->el_reader_thread,&attr,el_reader,(void *)instp);
 	instances[ninstances++] = instp;
 
-        ast_log(LOG_NOTICE, "Echolink/%s listening on %s port %s\n", instp->name, instp->ipaddr,instp->port);
-        ast_log(LOG_NOTICE, "Echolink/%s node capacity set to %d node(s)\n", instp->name, instp->maxstns);
-        ast_log(LOG_NOTICE, "Echolink/%s heartbeat timeout set to %d heartbeats\n", instp->name,instp->rtcptimeout);
-        ast_log(LOG_NOTICE, "Echolink/%s node set to %u\n", instp->name,instp->mynode);
-        ast_log(LOG_NOTICE, "Echolink/%s call set to %s\n",instp->name,instp->mycall);
-        ast_log(LOG_NOTICE, "Echolink/%s name set to %s\n",instp->name,instp->myname);
-        ast_log(LOG_NOTICE, "Echolink/%s file for recording set to %s\n",instp->name, instp->fdr_file);
-        ast_log(LOG_NOTICE, "Echolink/%s  qth set to %s\n",instp->name, instp->myqth);
-        ast_log(LOG_NOTICE, "Echolink/%s emailID set to %s\n", instp->name,instp->myemail);
+
+	if (option_verbose > 3)
+	{
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s listening on %s port %s\n", instp->name, instp->ipaddr,instp->port);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s node capacity set to %d node(s)\n", instp->name, instp->maxstns);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s heartbeat timeout set to %d heartbeats\n", instp->name,instp->rtcptimeout);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s node set to %u\n", instp->name,instp->mynode);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s call set to %s\n",instp->name,instp->mycall);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s name set to %s\n",instp->name,instp->myname);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s file for recording set to %s\n",instp->name, instp->fdr_file);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s  qth set to %s\n",instp->name, instp->myqth);
+	        ast_verbose(VERBOSE_PREFIX_3  "Echolink/%s emailID set to %s\n", instp->name,instp->myemail);
+	}
 	return 0;
 }
 #ifndef	OLD_ASTERISK
@@ -3346,7 +3336,7 @@ int load_module(void)
 #else
         if (!(cfg = ast_config_load(config))) {
 #endif
-                ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+                ast_log(LOG_ERROR, "Unable to load config %s\n", config);
                 return AST_MODULE_LOAD_DECLINE;
         }
 
@@ -3357,7 +3347,7 @@ int load_module(void)
 	}
         ast_config_destroy(cfg);
         cfg = NULL; 
-	ast_log(LOG_NOTICE,"Total of %d Echolink instances found\n",ninstances);
+	if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Total of %d Echolink instances found\n",ninstances);
 	if (ninstances < 1)
 	{
 		ast_log(LOG_ERROR,"Cannot run echolink with no instances\n");
