@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.297 10/24/2011
+ *  version 0.298 11/06/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -579,7 +579,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.297 10/24/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.298 11/06/2011";
 
 static char *app = "Rpt";
 
@@ -16894,7 +16894,7 @@ char	str[300];
 char	*offsets[] = {"SIMPLEX","MINUS","PLUS"};
 char	*powerlevels[] = {"LOW","MEDIUM","HIGH"};
 char	*modes[] = {"FM","USB","LSB","AM"};
-int	res = -1;
+int	i,res = -1;
 
 #if	0
 printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
@@ -16916,13 +16916,15 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 	{
 		if (myrpt->remmode == REM_MODE_FM)
 		{
-			char *myfreq = strdupa(myrpt->freq),*cp,*cp1 = NULL;
+			char myfreq[MAXREMSTR],*cp;
+			strcpy(myfreq,myrpt->freq);
 			cp = strchr(myfreq,'.');
-			if (cp && (*(cp + 1)))
+			for(i = strlen(myfreq) - 1; i; i--)
 			{
-				cp1 = strchr(cp + 2,'0');
-				if (cp1) *cp1 = 0;
+				if (myfreq[i] != '0') break;
+				myfreq[i] = 0;
 			}
+			if (myfreq[0] && (myfreq[strlen(myfreq) - 1] == '.')) strcat(myfreq,"0");
 			sprintf(str,"J Remote Frequency\n%s FM\n%s Offset\n",
 				(cp) ? myfreq : myrpt->freq,offsets[(int)myrpt->offset]);
 			sprintf(str + strlen(str),"%s Power\nTX PL %s\nRX PL %s\n",
