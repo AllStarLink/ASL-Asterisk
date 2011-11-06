@@ -267,7 +267,7 @@ struct el_instance
 	uint16_t ctrl_port;
 	int fdr;
 	unsigned long seqno;
-	int confmode;
+	int useless_flag_1;
 	struct el_pvt *confp;
 	struct gsmVoice_t audio_all_but_one;
 	struct gsmVoice_t audio_all;
@@ -1027,7 +1027,7 @@ static struct el_pvt *el_alloc(void *data)
 		p->keepalive = KEEPALIVE_TIME;
 		p->instp = instances[n];
 		p->instp->confp = p;  /* save for conference mode */
-		if (!p->instp->confmode)
+		if (!p->instp->useless_flag_1)
 		{
 			p->dsp = ast_dsp_new();
 			if (!p->dsp)
@@ -1062,7 +1062,7 @@ static int el_hangup(struct ast_channel *ast)
 	struct sockaddr_in sin;
 	time_t now;
 
-	if (!instp->confmode)
+	if (!instp->useless_flag_1)
 	{
 		if (debug) ast_log(LOG_DEBUG,"Sent bye to IP address %s\n",p->ip);
 		ast_mutex_lock(&instp->lock);
@@ -1163,7 +1163,7 @@ static int el_text(struct ast_channel *ast, const char *text)
 	ptr = strchr(buf, (int)'\n');    
 	if (ptr) *ptr = '\0';
 
-	if (p->instp && (!p->instp->confmode) && (text[0] == 'L'))
+	if (p->instp && (!p->instp->useless_flag_1) && (text[0] == 'L'))
 	{
 		if (strlen(text) < 3)
 		{
@@ -1450,7 +1450,7 @@ static int find_delete(struct el_node *key)
    if (found_key) {
        if (debug) ast_log(LOG_DEBUG,"...removing %s(%s)\n", (*found_key)->call, (*found_key)->ip); 
        found = 1;
-       if (!(*found_key)->instp->confmode) 
+       if (!(*found_key)->instp->useless_flag_1) 
 		ast_softhangup((*found_key)->chan,AST_SOFTHANGUP_DEV);
        tdelete(key, &el_node_list, compare_ip);
    }
@@ -1658,7 +1658,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			fr.delivery.tv_usec = 0;
 
 			x = 0;
-			if (p->dsp && (!instp->confmode))
+			if (p->dsp && (!instp->useless_flag_1))
 			{
 				f2 = ast_translate(p->xpath,&fr,0);
 				f1 = ast_dsp_process(NULL,p->dsp,f2);
@@ -1700,7 +1700,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 	} 
 	if (p->rxkey) p->rxkey--;
 
-        if (instp->confmode && (p->rxqel.qe_forw != &p->rxqel))
+        if (instp->useless_flag_1 && (p->rxqel.qe_forw != &p->rxqel))
         {
            for(m = 0,qpel = p->rxqel.qe_forw; qpel != &p->rxqel; qpel = qpel->qe_forw) 
               m++;
@@ -1744,7 +1744,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
            }      
            if (p->txindex >= BLOCKING_FACTOR) {
 		ast_mutex_lock(&instp->lock);
-                if (instp->confmode)
+                if (instp->useless_flag_1)
 		{
 			twalk(el_node_list, send_audio_all);
 		}
@@ -2589,7 +2589,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 			if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "new CALL=%s,ip=%s,name=%s\n",
 				el_node_key->call,el_node_key->ip,
 					el_node_key->name);
-			if (instp->confmode)
+			if (instp->useless_flag_1)
 			{
 				el_node_key->p = instp->confp;
 			}
@@ -3030,7 +3030,7 @@ static void *el_reader(void *data)
 										p->rxqast.qe_back);
 								}
 							}
-							if (!instp->confmode) continue;
+							if (!instp->useless_flag_1) continue;
 							/* need complete packet and IP address for Echolink */
 							qpel = ast_malloc(sizeof(struct el_rxqel));
 							if (!qpel)
@@ -3181,8 +3181,7 @@ pthread_attr_t attr;
         else
            strncpy(instp->myemail,val,EL_EMAIL_SIZE);
 
-        val = (char *) ast_variable_retrieve(cfg,ctg,"confmode");
-	if (val) instp->confmode = ast_true(val); else instp->confmode = 0;
+	instp->useless_flag_1 = 0;
 
         val = (char *) ast_variable_retrieve(cfg,ctg,"server1");
         if (!val)
