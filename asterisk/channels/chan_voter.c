@@ -1848,6 +1848,8 @@ static void *voter_reader(void *data)
 								index *= FRAME_SIZE;
 								index += BUFDELAY(client);
 								index -= (FRAME_SIZE * 2);
+								if (debug >= 3) ast_verbose("mix client %s index: %d their seq: %d our seq: %d\n",
+									client->name,index,ntohl(vph->curtime.vtime_nsec),client->rxseqno);
 							}
 							else
 							{
@@ -1927,7 +1929,13 @@ static void *voter_reader(void *data)
 									memset(client->rssi,buf[sizeof(VOTER_PACKET_HEADER)],-i);
 								}
 								if (f1) ast_frfree(f1);
-							}
+                                                        } 
+							else if (client->mix)
+							{
+								client->rxseqno = 0;
+								client->rxseqadpcm = 0;
+								if (debug >= 3) ast_verbose("mix client %s outa bounds, resetting!!\n",client->name);
+                                                        }
 							if (client->ismaster)
 							{
 
