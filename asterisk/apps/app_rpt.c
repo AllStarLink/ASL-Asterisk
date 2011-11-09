@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.298 11/06/2011
+ *  version 0.299 11/08/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -143,6 +143,7 @@
  *  7 - Last Node to Key Up
  *  8 - Connect specified link -- local monitor only
  *  9 - Send Text Message (9,<destnodeno or 0 (for all)>,Message Text, etc.
+ *  10 - Disconnect all RANGER links (except permalinks)
  *  11 - Disconnect a previously permanently connected link
  *  12 - Permanently connect specified link -- monitor only
  *  13 - Permanently connect specified link -- tranceive
@@ -229,6 +230,23 @@
  * if type is 'N' (for "no change"), var-spec is a single (already-defined) variable name, and the result will be 1
  *    if the varible has not changed.
  *
+ * "RANGER" mode configuration:
+ * in the node stanza in rpt.conf ONLY the following need be specified for a RANGER node:
+ *
+ * 
+ *
+ * [90101]
+ *
+ * rxchannel=Radio/usb90101
+ * functions=rangerfunctions
+ * litzcmd=*32008
+ *
+ * This example given would be for node "90101" (note ALL RANGER nodes MUST begin with '9'.
+ * litzcmd specifes the function that LiTZ inititiates to cause a connection
+ * "rangerfunctions" in this example, is a function stanza that AT LEAST has the *3 command
+ * to connect to another node
+ *
+ *
 */
 
 /*** MODULEINFO
@@ -312,6 +330,8 @@
 #define	MAX_EXTNODEFILES 50
 #define	MAX_LOCALLINKNODES 50
 #define	MAX_LSTUFF 20
+
+#define ISRANGER(name) (name[0] == '9')
 
 #define	NODES "nodes"
 #define	EXTNODES "extnodes"
@@ -579,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.298 11/06/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.299 11/08/2011";
 
 static char *app = "Rpt";
 
@@ -927,7 +947,7 @@ struct morse_bits
 struct telem_defaults
 {
 	char name[20];
-	char value[80];
+	char value[200];
 } ;
 
 
@@ -1942,6 +1962,7 @@ static struct telem_defaults tele_defs[] = {
 	{"ct6","|t(880,0,150,3072)"},
 	{"ct7","|t(660,440,150,3072)"},
 	{"ct8","|t(700,1100,150,3072)"},
+	{"ranger","|t(1800,0,60,3072)(0,0,50,0)(1800,0,60,3072)(0,0,50,0)(1800,0,60,3072)(0,0,50,0)(1800,0,60,3072)(0,0,50,0)(1800,0,60,3072)(0,0,50,0)(1800,0,60,3072)(0,0,150,0)"},
 	{"remotemon","|t(1600,0,75,2048)"},
 	{"remotetx","|t(2000,0,75,2048)(0,0,75,0)(1600,0,75,2048)"},
 	{"cmdmode","|t(900,904,200,2048)"},
@@ -5872,15 +5893,15 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	if (val) rpt_vars[n].p.ident = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"hangtime");
 	if (val) rpt_vars[n].p.hangtime = atoi(val);
-		else rpt_vars[n].p.hangtime = HANGTIME;
+		else rpt_vars[n].p.hangtime = (ISRANGER(rpt_vars[n].name) ? 1 : HANGTIME);
 	if (rpt_vars[n].p.hangtime < 1) rpt_vars[n].p.hangtime = 1;
 	val = (char *) ast_variable_retrieve(cfg,this,"althangtime");
 	if (val) rpt_vars[n].p.althangtime = atoi(val);
-		else rpt_vars[n].p.althangtime = HANGTIME;
+		else rpt_vars[n].p.althangtime = (ISRANGER(rpt_vars[n].name) ? 1 : HANGTIME);
 	if (rpt_vars[n].p.althangtime < 1) rpt_vars[n].p.althangtime = 1;
 	val = (char *) ast_variable_retrieve(cfg,this,"totime");
 	if (val) rpt_vars[n].p.totime = atoi(val);
-		else rpt_vars[n].p.totime = TOTIME;
+		else rpt_vars[n].p.totime = (ISRANGER(rpt_vars[n].name) ? 9999999 : TOTIME);
 	val = (char *) ast_variable_retrieve(cfg,this,"voxtimeout");
 	if (val) rpt_vars[n].p.voxtimeout_ms = atoi(val);
 		else rpt_vars[n].p.voxtimeout_ms = VOX_TIMEOUT_MS;
@@ -5900,7 +5921,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		(char *) ast_variable_retrieve(cfg,this,"statpost_url");
 	rpt_vars[n].p.tailmessagetime = retrieve_astcfgint(&rpt_vars[n],this, "tailmessagetime", 0, 2400000, 0);		
 	rpt_vars[n].p.tailsquashedtime = retrieve_astcfgint(&rpt_vars[n],this, "tailsquashedtime", 0, 2400000, 0);		
-	rpt_vars[n].p.duplex = retrieve_astcfgint(&rpt_vars[n],this,"duplex",0,4,2);
+	rpt_vars[n].p.duplex = retrieve_astcfgint(&rpt_vars[n],this,"duplex",0,4,(ISRANGER(rpt_vars[n].name) ? 0 : 2));
 	rpt_vars[n].p.idtime = retrieve_astcfgint(&rpt_vars[n],this, "idtime", -60000, 2400000, IDTIME);	/* Enforce a min max including zero */
 	rpt_vars[n].p.politeid = retrieve_astcfgint(&rpt_vars[n],this, "politeid", 30000, 300000, POLITEID); /* Enforce a min max */
 	j  = retrieve_astcfgint(&rpt_vars[n],this, "elke", 0, 40000000, 0);
@@ -5953,8 +5974,10 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		rpt_vars[n].p.link_functions = rpt_vars[n].p.functions;
 	val = (char *) ast_variable_retrieve(cfg,this,"phone_functions");
 	if (val) rpt_vars[n].p.phone_functions = val;
+	else if (ISRANGER(rpt_vars[n].name)) rpt_vars[n].p.phone_functions = rpt_vars[n].p.functions;
 	val = (char *) ast_variable_retrieve(cfg,this,"dphone_functions");
 	if (val) rpt_vars[n].p.dphone_functions = val;
+	else if (ISRANGER(rpt_vars[n].name)) rpt_vars[n].p.dphone_functions = rpt_vars[n].p.functions;
 	val = (char *) ast_variable_retrieve(cfg,this,"alt_functions");
 	if (val) rpt_vars[n].p.alt_functions = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"funcchar");
@@ -9052,6 +9075,29 @@ struct	mdcparams *mdcp;
 		rpt_mutex_unlock(&myrpt->lock);
 	
 treataslocal:
+
+		rpt_mutex_lock(&myrpt->lock);
+		/* get all the nodes */
+		__mklinklist(myrpt,NULL,lbuf,0);
+		rpt_mutex_unlock(&myrpt->lock);
+		/* parse em */
+		ns = finddelim(lbuf,strs,MAXLINKLIST);
+		haslink = 0;
+		for(i = 0; i < ns; i++)
+		{
+			char *cpr = strs[i] + 1;
+			if (!strcmp(cpr,myrpt->name)) continue;
+			if (ISRANGER(cpr)) haslink = 1;
+		}
+
+		/* if has a RANGER node connected to it, use special telemetry for RANGER mode */
+		if (haslink)
+		{
+			res = telem_lookup(myrpt,mychannel, myrpt->name, "ranger");
+			if(res)
+				ast_log(LOG_WARNING, "telem_lookup:ranger failed on %s\n", mychannel->name);
+		}
+
 		if ((mytele->mode == LOCUNKEY) &&
 		    ((ct = (char *) ast_variable_retrieve(myrpt->cfg, nodename, "localct")))) { /* Local override ct */
 			ct_copy = ast_strdup(ct);
@@ -11598,6 +11644,60 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
                         rpt_telemetry(myrpt, COMPLETE, NULL);
 			return DC_COMPLETE;
 
+
+		case 10: /* All RANGER Links Off */
+                       rpt_mutex_lock(&myrpt->lock);
+			myrpt->savednodes[0] = 0;
+                        l = myrpt->links.next;
+                        /* loop through all links */
+                        while(l != &myrpt->links){
+				struct	ast_frame wf;
+				char c1;
+                                if ((l->name[0] <= '0') || (l->name[0] > '9'))  /* Skip any IAXRPT monitoring */
+                                {
+                                        l = l->next;
+                                        continue;
+                                }
+				/* if RANGER and not permalink */
+				if ((l->max_retries <= MAX_RETRIES) && ISRANGER(l->name))
+				{
+					if (l->mode == 1) c1 = 'X';
+					else if (l->mode > 1) c1 = 'L';
+					else c1 = 'M';
+					/* Make a string of disconnected nodes for possible restoration */
+					sprintf(tmp,"%c%c%s",c1,(l->perma) ? 'P':'T',l->name);
+					if(strlen(tmp) + strlen(myrpt->savednodes) + 1 < MAXNODESTR){ 
+						if(myrpt->savednodes[0])
+							strcat(myrpt->savednodes, ",");
+						strcat(myrpt->savednodes, tmp);
+					}
+	                           	l->retries = l->max_retries + 1;
+	                                l->disced = 2; /* Silently disconnect */
+	                                rpt_mutex_unlock(&myrpt->lock);
+					/* ast_log(LOG_NOTICE,"dumping link %s\n",l->name); */
+                                
+					memset(&wf,0,sizeof(wf));
+	                                wf.frametype = AST_FRAME_TEXT;
+	                                wf.datalen = strlen(discstr) + 1;
+	                                AST_FRAME_DATA(wf) = discstr;
+					wf.src = "function_ilink:6";
+	                                if (l->chan)
+	                                {
+	                                        if (l->thisconnected) ast_write(l->chan,&wf);
+	                                        rpt_safe_sleep(myrpt,l->chan,250); /* It's dead already, why check the return value? */
+	                                        ast_softhangup(l->chan,AST_SOFTHANGUP_DEV);
+	                                }
+					rpt_mutex_lock(&myrpt->lock);
+				}
+                                l = l->next;
+                        }
+			rpt_mutex_unlock(&myrpt->lock);
+			if(debug > 3)
+				ast_log(LOG_NOTICE,"Nodes disconnected: %s\n",myrpt->savednodes);
+			rpt_telem_select(myrpt,command_source,mylink);
+                        rpt_telemetry(myrpt, COMPLETE, NULL);
+			return DC_COMPLETE;
+
 		case 7: /* Identify last node which keyed us up */
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, LASTNODEKEY, NULL);
@@ -12832,6 +12932,10 @@ struct	ast_frame wf;
 		}
 		/* if is from me, ignore */
 		if (!strcmp(src,myrpt->name)) return;
+
+		/* if is a RANGER node, only allow CONNECTED message that directly involve our node */
+		if (ISRANGER(myrpt->name) && (strncasecmp(dest,"CONNECTED,",10) ||
+			(!strstr(dest,myrpt->name)))) return;
 
 		/* set 'got T message' flag */
 		mylink->gott = 1;
