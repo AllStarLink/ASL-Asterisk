@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.299 11/08/2011
+ *  version 0.300 11/11/2011
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.299 11/08/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.300 11/11/2011";
 
 static char *app = "Rpt";
 
@@ -1186,6 +1186,8 @@ static struct rpt
 	char linkactivityflag;
 	char rptinactwaskeyedflag;
 	char lastitx;
+	char remsetting;
+	char tunetx;
 	int  parrottimer;
 	unsigned int parrotcnt;
 	int telemmode;
@@ -9529,6 +9531,7 @@ treataslocal:
 	    case SETREMOTE:
 		ast_mutex_lock(&myrpt->remlock);
 		res = 0;
+		myrpt->remsetting = 1;
 		if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		{
 			res = set_ft897(myrpt);
@@ -9572,6 +9575,7 @@ treataslocal:
 			setxpmr(myrpt,0);
 			if (ast_safe_sleep(mychannel,200) == -1)
 			{
+				myrpt->remsetting = 0;
 				ast_mutex_unlock(&myrpt->remlock);
 				res = -1;
 				break;
@@ -9581,6 +9585,7 @@ treataslocal:
 				i = DAHDI_FLUSH_EVENT;
 				if (ioctl(myrpt->zaptxchannel->fds[0],DAHDI_FLUSH,&i) == -1)
 				{
+					myrpt->remsetting = 0;
 					ast_mutex_unlock(&myrpt->remlock);
 					ast_log(LOG_ERROR,"Cant flush events");
 					res = -1;
@@ -9588,6 +9593,7 @@ treataslocal:
 				}
 				if (ioctl(myrpt->zaprxchannel->fds[0],DAHDI_GET_PARAMS,&par) == -1)
 				{
+					myrpt->remsetting = 0;
 					ast_mutex_unlock(&myrpt->remlock);
 					ast_log(LOG_ERROR,"Cant get params");
 					res = -1;
@@ -9603,6 +9609,7 @@ treataslocal:
 			setxpmr(myrpt,0);
 		}
 
+		myrpt->remsetting = 0;
 		ast_mutex_unlock(&myrpt->remlock);
 		if (!res)
 		{
@@ -9763,6 +9770,20 @@ treataslocal:
 			imdone = 1;
 			break;
 		}
+		ast_safe_sleep(mychannel,500);
+		set_mode_ft897(myrpt, REM_MODE_AM);
+		ast_safe_sleep(mychannel,500);
+		myrpt->tunetx = 1;
+		if (play_tone(mychannel, 800, 6000, 8192) == -1) break;
+		myrpt->tunetx = 0;
+		ast_safe_sleep(mychannel,500);
+		set_mode_ft897(myrpt, myrpt->remmode);
+		ast_playtones_stop(mychannel);
+		myrpt->tunerequest = 0;
+		ast_mutex_unlock(&myrpt->remlock);
+		imdone = 1;
+		break;
+#if 0
 		set_mode_ft897(myrpt, REM_MODE_AM);
 		simple_command_ft897(myrpt, 8);
 		if(play_tone(mychannel, 800, 6000, 8192) == -1) break;
@@ -9773,6 +9794,7 @@ treataslocal:
 		ast_mutex_unlock(&myrpt->remlock);
 		imdone = 1;
 		break;
+#endif
 	    case REMSHORTSTATUS:
 	    case REMLONGSTATUS:	
 		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
@@ -17925,6 +17947,7 @@ invalid_freq:
 					ast_indicate(myrpt->txchannel,
 						AST_CONTROL_RADIO_UNKEY);
 				}	
+				myrpt->tunetx = 0;
 				myrpt->tunerequest = 1;
 				rpt_telemetry(myrpt,TUNE,NULL);
 				return DC_COMPLETEQUIET;
@@ -23029,6 +23052,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	myrpt->newkey = 0;
 	myrpt->iaxkey = 0;
 	myrpt->lastitx = !myrpt->lastitx;
+	myrpt->tunerequest = 0;
+	myrpt->tunetx = 0;
 	rpt_mutex_unlock(&myrpt->lock);
 	ast_set_write_format(chan, AST_FORMAT_SLINEAR);
 	ast_set_read_format(chan, AST_FORMAT_SLINEAR);
@@ -23278,7 +23303,10 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		rem_rx = (remkeyed && (!setting)) || (myrpt->tele.next != &myrpt->tele);
 		if(!strcmp(myrpt->remoterig, remote_rig_ic706))
 			rem_totx |= myrpt->tunerequest;
+		if(!strcmp(myrpt->remoterig, remote_rig_ft897))
+			rem_totx |= (myrpt->tunetx && myrpt->tunerequest);
 		if (myrpt->remstopgen < 0) rem_totx = 1;
+		if (myrpt->remsetting) rem_totx = 0;
 		//
 	    if((debug > 6) && rem_totx) {
 	    	ast_log(LOG_NOTICE,"Set rem_totx=%i.  dtmf_local_timer=%i phone_mode=%i keyed=%i tunerequest=%i\n",rem_totx,myrpt->dtmf_local_timer,phone_mode,keyed,myrpt->tunerequest);

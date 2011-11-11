@@ -1654,7 +1654,7 @@ static void *hidthread(void *arg)
 			ast_mutex_lock(&o->txqlock);
 			txreq = !(AST_LIST_EMPTY(&o->txq));
 			ast_mutex_unlock(&o->txqlock);
-			txreq = txreq || o->txtestkey || o->txclikey || o->echoing;
+			txreq = txreq || o->txkeyed || o->txtestkey || o->txclikey || o->echoing;
 			if (txreq && (!o->lasttx))
 			{
 				buf[o->hid_gpio_loc] = o->hid_io_ptt;
