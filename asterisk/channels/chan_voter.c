@@ -172,6 +172,7 @@ struct ast_flags zeroflag = { 0 };
 #define	GPS_DATA_FILE "/tmp/gps%s.dat"
 
 #define	NTAPS_PL 6
+#define	NTAPS_4K 6
 
 static const char vdesc[] = "radio Voter channel driver";
 static char type[] = "voter";
@@ -243,6 +244,7 @@ typedef struct {
 #define VOTER_PAYLOAD_ULAW	1
 #define	VOTER_PAYLOAD_GPS	2
 #define VOTER_PAYLOAD_ADPCM	3
+#define VOTER_PAYLOAD_NULAW	4
 
 struct voter_client {
 	uint32_t nodenum;
@@ -258,6 +260,7 @@ struct voter_client {
 	char totransmit;
 	char ismaster;
 	char doadpcm;
+	char donulaw;
 	char mix;
 	char nodeemp;
 	char noplfilter;
@@ -292,6 +295,10 @@ struct voter_pvt {
 	int nstreams;
 	float	hpx[NTAPS_PL + 1];
 	float	hpy[NTAPS_PL + 1];
+	float	rlpx[NTAPS_4K + 1];
+	float	rlpy[NTAPS_4K + 1];
+	float	tlpx[NTAPS_4K + 1];
+	float	tlpy[NTAPS_4K + 1];
 	char plfilter;
 	int linger;
 	uint8_t rssi_thresh[MAXTHRESHOLDS];
@@ -304,6 +311,8 @@ struct voter_pvt {
 	struct ast_dsp *dsp;
 	struct ast_trans_pvt *adpcmin;
 	struct ast_trans_pvt *adpcmout;
+	struct ast_trans_pvt *nuin;
+	struct ast_trans_pvt *nuout;
 	struct ast_trans_pvt *toast;
 	struct ast_trans_pvt *toast1;
 	struct ast_trans_pvt *fromast;
@@ -313,6 +322,7 @@ struct voter_pvt {
 	int	txtoctype;
 	char 	duplex;
 	struct	ast_frame *adpcmf1;
+	struct	ast_frame *nulawf1;
 	ast_mutex_t xmit_lock;
 	ast_cond_t xmit_cond;
 	pthread_t xmit_thread;
@@ -533,6 +543,23 @@ static int16_t hpass6(int16_t input,float *xv,float *yv)
         return((int)yv[6]);
 }
 
+/* IIR 6 pole Low pass filter, 1900 Hz corner with 0.5 db ripple */
+
+#define GAIN2   1.080715413e+02
+
+static int16_t lpass4(int16_t input,float *xv,float *yv)
+{
+        xv[0] = xv[1]; xv[1] = xv[2]; xv[2] = xv[3]; xv[3] = xv[4]; xv[4] = xv[5]; xv[5] = xv[6]; 
+        xv[6] = ((float)input) / GAIN2;
+        yv[0] = yv[1]; yv[1] = yv[2]; yv[2] = yv[3]; yv[3] = yv[4]; yv[4] = yv[5]; yv[5] = yv[6]; 
+        yv[6] =   (xv[0] + xv[6]) + 6 * (xv[1] + xv[5]) + 15 * (xv[2] + xv[4])
+                     + 20 * xv[3]
+                     + ( -0.1802140297 * yv[0]) + (  0.7084527003 * yv[1])
+                     + ( -1.5847014566 * yv[2]) + (  2.3188475168 * yv[3])
+                     + ( -2.5392334760 * yv[4]) + (  1.6846484378 * yv[5]);
+        return((int)yv[6]);
+}
+
 
 /*
 * Break up a delimited string into a table of substrings
@@ -625,6 +652,8 @@ static int voter_hangup(struct ast_channel *ast)
 	if (p->toast) ast_translator_free_path(p->toast);
 	if (p->toast) ast_translator_free_path(p->toast1);
 	if (p->fromast) ast_translator_free_path(p->fromast);
+	if (p->nuin) ast_translator_free_path(p->nuin);
+	if (p->nuout) ast_translator_free_path(p->nuout);
 	ast_mutex_lock(&voter_lock);
 	for(q = pvts; q; q = q->next)
 	{
@@ -1108,6 +1137,7 @@ struct voter_client *client;
 				if (!client->respdigest) continue;
 				if (!client->heardfrom) continue;
 				if (client->doadpcm) continue;
+				if (client->donulaw) continue;
 				audiopacket.vp.digest = htonl(client->respdigest);
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 				if (client->totransmit)
@@ -1154,6 +1184,64 @@ struct voter_client *client;
 					{
 						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
 						sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+					}
+#endif
+				}
+				ast_frfree(f2);
+			}
+		}
+		if (x || p->nulawf1)
+		{
+			short *sap,s;
+			unsigned char nubuf[FRAME_SIZE];
+
+			if (p->nulawf1 == NULL) p->nulawf1 = ast_frdup(f1);
+			else
+			{
+				memset(xmtbuf,0xff,sizeof(xmtbuf));
+				memset(&fr,0,sizeof(struct ast_frame));
+			        fr.frametype = AST_FRAME_VOICE;
+			        fr.subclass = AST_FORMAT_ULAW;
+			        fr.datalen = FRAME_SIZE;
+			        fr.samples = FRAME_SIZE;
+			        AST_FRAME_DATA(fr) = xmtbuf;
+			        fr.src = type;
+			        fr.offset = 0;
+			        fr.mallocd = 0;
+			        fr.delivery.tv_sec = 0;
+			        fr.delivery.tv_usec = 0;
+				if (x) f3 = ast_frcat(p->nulawf1,f1); else f3 = ast_frcat(p->nulawf1,&fr);
+				ast_frfree(p->nulawf1);
+				p->nulawf1 = NULL;
+				f2 = ast_translate(p->nuout,f3,1);
+				sap = (short *)AST_FRAME_DATAP(f2);
+				for(i = 0; i < f2->samples / 2; i++)
+				{
+					s = *sap++;
+					if (s > 14000) s = 14000;
+					if (s < -14000) s = -14000;
+					lpass4(s,p->tlpx,p->tlpy);
+					s = *sap++;
+					if (s > 14000) s = 14000;
+					if (s < -14000) s = -14000;
+					nubuf[i] = AST_LIN2MU(lpass4(s,p->tlpx,p->tlpy));
+				}
+				memcpy(audiopacket.audio,nubuf,sizeof(nubuf));
+				audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+				audiopacket.vp.payload_type = htons(4);
+				for(client = clients; client; client = client->next)
+				{
+					if (client->nodenum != p->nodenum) continue;
+					if (!client->respdigest) continue;
+					if (!client->heardfrom) continue;
+					if (!client->donulaw) continue;
+					audiopacket.vp.digest = htonl(client->respdigest);
+					audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
+#ifndef	NULAW_LOOPBACK
+					if (client->totransmit)
+					{
+						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+						sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 					}
 #endif
 				}
@@ -1241,6 +1329,22 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	if (!p->fromast)
 	{
 		ast_log(LOG_ERROR,"Cannot get translator from slinear to ulaw!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->nuin = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_SLINEAR);
+	if (!p->nuin)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from slinear to ulaw!!\n");
+		ast_dsp_free(p->dsp);
+		ast_free(p);
+		return NULL;
+	}
+	p->nuout = ast_translator_build_path(AST_FORMAT_SLINEAR,AST_FORMAT_ULAW);
+	if (!p->nuout)
+	{
+		ast_log(LOG_ERROR,"Cannot get translator from ulaw to slinear!!\n");
 		ast_dsp_free(p->dsp);
 		ast_free(p);
 		return NULL;
@@ -1632,7 +1736,7 @@ struct voter_pvt *p;
 		client->txseqno++;
 		if (client->rxseqno)
 		{
-			if (!client->doadpcm) client->rxseqno++;
+			if ((!client->doadpcm) && (!client->donulaw)) client->rxseqno++;
 			else
 			{
 				if (client->rxseqadpcm) client->rxseqno += 2;
@@ -1813,7 +1917,9 @@ static void *voter_reader(void *data)
 					    (((ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1))) ||
 					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM) && 
-						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 4)))))
+						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 4))) ||
+					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_NULAW) && 
+						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1)))))
 					{
 						for(p = pvts; p; p = p->next)
 						{
@@ -1909,6 +2015,43 @@ static void *voter_reader(void *data)
 								        fr.delivery.tv_sec = 0;
 								        fr.delivery.tv_usec = 0;
 									f1 = ast_translate(p->adpcmin,&fr,0);
+								}
+								/* if otherwise (RSSI > 0), if NULAW, translate it */
+								else if (ntohs(vph->payload_type) == VOTER_PAYLOAD_NULAW)
+								{
+
+									short s,xbuf[FRAME_SIZE * 2];
+#ifdef	NULAW_LOOPBACK
+									memset(&audiopacket,0,sizeof(audiopacket));
+									strcpy((char *)audiopacket.vp.challenge,challenge);
+									audiopacket.vp.payload_type = htons(4);
+									audiopacket.rssi = 0;
+									memcpy(audiopacket.audio, buf + sizeof(VOTER_PACKET_HEADER) + 1,FRAME_SIZE);
+									audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+									audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
+									audiopacket.vp.digest = htonl(client->respdigest);
+									sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+#endif
+
+									for(i = 0; i < FRAME_SIZE * 2; i += 2)
+									{
+ 										s = (AST_MULAW((int)(unsigned char)
+											buf[sizeof(VOTER_PACKET_HEADER) + 1 + (i >> 1)])) / 2;
+										xbuf[i] = lpass4(s,p->rlpx,p->rlpy);
+										xbuf[i + 1] = lpass4(s,p->rlpx,p->rlpy);
+									}
+									memset(&fr,0,sizeof(struct ast_frame));
+								        fr.frametype = AST_FRAME_VOICE;
+								        fr.subclass = AST_FORMAT_SLINEAR;
+								        fr.datalen = FRAME_SIZE * 4;
+								        fr.samples = FRAME_SIZE * 2;
+								        AST_FRAME_DATA(fr) = xbuf;
+								        fr.src = type;
+								        fr.offset = 0;
+								        fr.mallocd = 0;
+								        fr.delivery.tv_sec = 0;
+								        fr.delivery.tv_usec = 0;
+									f1 = ast_translate(p->nuin,&fr,0);
 								}
 								index = (index + client->drainindex) % client->buflen;
 								flen = (f1) ? f1->datalen : FRAME_SIZE;
@@ -2569,6 +2712,7 @@ static int reload(void)
 			if (!strncasecmp(v->name,"transmit",8)) continue;
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
+			if (!strncasecmp(v->name,"nulaw",5)) continue;
 			if (!strncasecmp(v->name,"gpsid",5)) continue;
 			if (!strncasecmp(v->name,"buflen",6)) continue;
 			if (!strncasecmp(v->name,"nodeemp",7)) continue;
@@ -2631,6 +2775,8 @@ static int reload(void)
 				}
 				else if (!strcasecmp(strs[i],"adpcm"))
                                         client->doadpcm = 1;
+				else if (!strcasecmp(strs[i],"nulaw"))
+                                        client->donulaw = 1;
 				else if (!strcasecmp(strs[i],"nodeemp"))
                                         client->nodeemp = 1;
 				else if (!strcasecmp(strs[i],"noplfilter"))
