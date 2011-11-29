@@ -734,6 +734,14 @@ static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 
 	if (!p->txkey) return 0;
 
+	if (hasmaster && (!master_time.vtime_sec))
+	{
+		ast_mutex_lock(&p->txqlock);
+		while((f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list)) != NULL) ast_frfree(f1);
+		ast_mutex_unlock(&p->txqlock);
+		return 0;
+	}
+
 	if (fp != NULL) fwrite(AST_FRAME_DATAP(frame),1,frame->datalen,fp);
 	f1 = ast_frdup(frame);
 	memset(&f1->frame_list,0,sizeof(f1->frame_list));
