@@ -203,7 +203,7 @@ static pthread_t voter_timer_thread = 0;
 #define	FRAME_SIZE 160
 #define	ADPCM_FRAME_SIZE 163
 
-#define	DEFAULT_BUFLEN 500 /* 500ms default buffer len */
+#define	DEFAULT_BUFLEN 480 /* 480ms default buffer len */
 
 #define BUFDELAY(p) (p->buflen - (FRAME_SIZE * 2))
 
@@ -255,6 +255,7 @@ struct voter_client {
 	uint32_t respdigest;
 	struct sockaddr_in sin;
 	int drainindex;
+	int drainindex_40ms;
 	int buflen;
 	char heardfrom;
 	char totransmit;
@@ -270,7 +271,9 @@ struct voter_client {
 	int txseqno;
 	int txseqno_rxkeyed;
 	int rxseqno;
-	char rxseqadpcm;
+	int rxseqno_40ms;
+	char rxseq40ms;
+	char drain40ms;
 	time_t warntime;
 	char *gpsid;
 	int reload;
@@ -617,8 +620,14 @@ struct voter_client *client;
 	for(client = clients; client; client = client->next)
 	{
 		if (client->nodenum != p->nodenum) continue;
+		if (!client->drain40ms) 
+		{
+			client->drainindex_40ms = client->drainindex;
+			client->rxseqno_40ms = client->rxseqno;
+		}
 		client->drainindex += FRAME_SIZE;
 		if (client->drainindex >= client->buflen) client->drainindex -= client->buflen;
+		client->drain40ms = !client->drain40ms;
 	}
 }
 
@@ -1747,8 +1756,8 @@ struct voter_pvt *p;
 			if ((!client->doadpcm) && (!client->donulaw)) client->rxseqno++;
 			else
 			{
-				if (client->rxseqadpcm) client->rxseqno += 2;
-				client->rxseqadpcm = !client->rxseqadpcm;
+				if (client->rxseq40ms) client->rxseqno += 2;
+				client->rxseq40ms = !client->rxseq40ms;
 			}
 		}
 	}
@@ -1951,19 +1960,38 @@ static void *voter_reader(void *data)
 							}
 							if (client->mix)
 							{
-								if (client->txseqno > (client->txseqno_rxkeyed + 2))
+								if (ntohl(vph->curtime.vtime_nsec) > client->rxseqno)
 								{
 									client->rxseqno = 0;
-									client->rxseqadpcm = 0;
+									client->rxseqno_40ms = 0;
+									client->rxseq40ms = 0;
+									client->drain40ms = 0;
+								}
+								if (client->txseqno > (client->txseqno_rxkeyed + 4))
+								{
+									client->rxseqno = 0;
+									client->rxseqno_40ms = 0;
+									client->rxseq40ms = 0;
+									client->drain40ms = 0;
 								}
 								client->txseqno_rxkeyed = client->txseqno;
-								if  (!client->rxseqno) client->rxseqno = ntohl(vph->curtime.vtime_nsec);
-								index = ntohl(vph->curtime.vtime_nsec) - client->rxseqno;
+								if  (!client->rxseqno) 	client->rxseqno_40ms = client->rxseqno = ntohl(vph->curtime.vtime_nsec);
+								if ((!client->doadpcm) && (!client->donulaw))
+									index = ntohl(vph->curtime.vtime_nsec) - client->rxseqno;
+								else
+									index = ntohl(vph->curtime.vtime_nsec) - client->rxseqno_40ms;
 								index *= FRAME_SIZE;
 								index += BUFDELAY(client);
-								index -= (FRAME_SIZE * 2);
-								if (debug >= 3) ast_verbose("mix client %s index: %d their seq: %d our seq: %d\n",
-									client->name,index,ntohl(vph->curtime.vtime_nsec),client->rxseqno);
+								index -= (FRAME_SIZE * 4);
+								if (debug >= 3) 
+								{
+									if ((!client->doadpcm) && (!client->donulaw))
+										ast_verbose("mix client (Mulaw) %s index: %d their seq: %d our seq: %d\n",
+											client->name,index,ntohl(vph->curtime.vtime_nsec),client->rxseqno);
+									else
+										ast_verbose("mix client (ADPCM/Nulaw) %s index: %d their seq: %d our seq: %d\n",
+											client->name,index,ntohl(vph->curtime.vtime_nsec),client->rxseqno_40ms);
+								}
 							}
 							else
 							{
@@ -2061,7 +2089,10 @@ static void *voter_reader(void *data)
 								        fr.delivery.tv_usec = 0;
 									f1 = ast_translate(p->nuin,&fr,0);
 								}
-								index = (index + client->drainindex) % client->buflen;
+								if ((!client->doadpcm) && (!client->donulaw))
+									index = (index + client->drainindex) % client->buflen;
+								else
+									index = (index + client->drainindex_40ms) % client->buflen;
 								flen = (f1) ? f1->datalen : FRAME_SIZE;
 								i = (int)client->buflen - (index + flen);
 								if (i >= 0)
@@ -2084,7 +2115,9 @@ static void *voter_reader(void *data)
 							else if (client->mix)
 							{
 								client->rxseqno = 0;
-								client->rxseqadpcm = 0;
+								client->rxseqno_40ms = 0;
+								client->rxseq40ms = 0;
+								client->drain40ms = 0;
 								if (debug >= 3) ast_verbose("mix client %s outa bounds, resetting!!\n",client->name);
                                                         }
 							if (client->ismaster)
@@ -2506,7 +2539,9 @@ static void *voter_reader(void *data)
 					client->txseqno = 0;
 					client->txseqno_rxkeyed = 0;
 					client->rxseqno = 0;
-					client->rxseqadpcm = 0;
+					client->rxseqno_40ms = 0;
+					client->rxseq40ms = 0;
+					client->drain40ms = 0;
 				}
 				strcpy((char *)authpacket.vp.challenge,challenge);
 				gettimeofday(&tv,NULL);
@@ -2812,6 +2847,7 @@ static int reload(void)
 					}
 				}
 			}
+			client->buflen -= client->buflen % (FRAME_SIZE * 2);
 			client->digest = crc32_bufs(challenge,strs[0]);
 			ast_free(cp);
 			if (client->old_buflen && (client->buflen != client->old_buflen))
