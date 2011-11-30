@@ -155,6 +155,8 @@ struct ast_flags zeroflag = { 0 };
 #define	VOTER_NAME_LEN 50
 
 #define	RX_TIMEOUT_MS 200
+#define	CLIENT_TIMEOUT_MS 3000
+#define	TX_KEEPALIVE_MS 1000
 
 #define	DEFAULT_LINGER 6
 
@@ -278,6 +280,8 @@ struct voter_client {
 	char *gpsid;
 	int reload;
 	int old_buflen;
+	struct timeval lastheardtime;
+	struct timeval lastsenttime;
 } ;
 
 struct voter_pvt {
@@ -1061,6 +1065,7 @@ i16 dummybuf1[FRAME_SIZE * 12],xmtbuf1[FRAME_SIZE * 12];
 i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE];
 struct ast_frame fr,*f1,*f2,*f3;
 struct voter_client *client;
+struct timeval tv;
 
 #pragma pack(push)
 #pragma pack(1)
@@ -1161,6 +1166,7 @@ struct voter_client *client;
 				{
 					if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
 					sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+					gettimeofday(&client->lastsenttime,NULL);
 				}
 			}
 		}
@@ -1201,6 +1207,7 @@ struct voter_client *client;
 					{
 						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
 						sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+						gettimeofday(&client->lastsenttime,NULL);
 					}
 #endif
 				}
@@ -1259,6 +1266,7 @@ struct voter_client *client;
 					{
 						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
 						sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+						gettimeofday(&client->lastsenttime,NULL);
 					}
 #endif
 				}
@@ -1266,6 +1274,26 @@ struct voter_client *client;
 			}
 		}
 		if (f1) ast_frfree(f1);
+		gettimeofday(&tv,NULL);
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (!client->respdigest) continue;
+			if (!client->heardfrom) continue;
+			if (ast_tvzero(client->lastsenttime) || (ast_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
+			{
+				
+				memset(&audiopacket,0,sizeof(audiopacket));
+				strcpy((char *)audiopacket.vp.challenge,challenge);
+				audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+				audiopacket.vp.payload_type = htons(2);
+				audiopacket.vp.digest = htonl(client->respdigest);
+				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
+				if (debug > 1) ast_verbose("sending KEEPALIVE (GPS) packet to client %s digest %08x\n",client->name,client->respdigest);
+				sendto(udp_socket, &audiopacket, sizeof(VOTER_PACKET_HEADER),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+				gettimeofday(&client->lastsenttime,NULL);
+			}
+		}
 	}
 	pthread_exit(NULL);
 }
@@ -1779,6 +1807,8 @@ static void *voter_timer(void *data)
 	int	i;
 	time_t	t;
 	struct voter_pvt *p;
+	struct voter_client *client,*client1;
+	struct timeval tv;
 
 	while(run_forever && (!ast_shutting_down()))
 	{
@@ -1800,6 +1830,36 @@ static void *voter_timer(void *data)
 				voter_mix_and_send(p,NULL,0);
 			}
 			voter_xmit_master();
+			gettimeofday(&tv,NULL);
+			for(client = clients; client; client = client->next)
+			{
+				if (!ast_tvzero(client->lastheardtime) && (ast_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+				{
+					if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
+					client->heardfrom = 0;
+					client->respdigest = 0;
+					client->lastheardtime.tv_sec = client->lastheardtime.tv_usec = 0;
+				}
+			}
+			if (check_client_sanity)
+			{
+				for(client = clients; client; client = client->next)
+				{
+					if (!client->respdigest) continue;
+					for(client1 = client->next; client1; client1 = client1->next)
+					{
+						if ((client1->sin.sin_addr.s_addr == client->sin.sin_addr.s_addr) &&
+							(client1->sin.sin_port == client->sin.sin_port))
+						{
+							if (!client1->respdigest) continue;
+							client->respdigest = 0;
+							client->heardfrom = 0;
+							client1->respdigest = 0;
+							client1->heardfrom = 0;
+						}
+					}
+				}
+			}
 		}
 		ast_mutex_unlock(&voter_lock);
 	}
@@ -1947,6 +2007,7 @@ static void *voter_reader(void *data)
 							long long btime,ptime,difftime;
 							int index,flen;
 
+							gettimeofday(&client->lastheardtime,NULL);
 							if (client->ismaster)
 							{
 								last_master_count = voter_timing_count;
@@ -2122,7 +2183,17 @@ static void *voter_reader(void *data)
                                                         }
 							if (client->ismaster)
 							{
-
+								gettimeofday(&tv,NULL);
+								for(client = clients; client; client = client->next)
+								{
+									if (!ast_tvzero(client->lastheardtime) && (ast_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+									{
+										if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
+										client->heardfrom = 0;
+										client->respdigest = 0;
+									}
+									if (!client->heardfrom) client->lastheardtime.tv_sec = client->lastheardtime.tv_usec = 0;
+								}
 								if (check_client_sanity)
 								{
 									for(client = clients; client; client = client->next)
@@ -2481,6 +2552,7 @@ static void *voter_reader(void *data)
 						(recvlen == ((sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_GPS)) - 1))))
 
 					{
+						gettimeofday(&client->lastheardtime,NULL);
 						if (debug >= 3) 
 						{
 							gettimeofday(&timetv,NULL);
