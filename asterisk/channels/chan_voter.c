@@ -313,6 +313,7 @@ struct voter_pvt {
 	uint16_t linger_thresh[MAXTHRESHOLDS];
 	int nthresholds;
 	int threshold;
+	struct voter_client *winner;
 	uint16_t threshcount;
 	uint16_t lingercount;
 	struct ast_dsp *dsp;
@@ -449,6 +450,13 @@ static char reload_usage[] =
 "Usage: voter reload\n"
 "       Reload chan_voter parameters\n";
 
+/* Display */
+static int voter_do_display(int fd, int argc, char *argv[]);
+
+static char display_usage[] =
+"Usage: voter display [instance]\n"
+"       Display voter instance clients\n";
+
 
 
 #ifndef	NEW_ASTERISK
@@ -468,6 +476,9 @@ static struct ast_cli_entry  cli_tone =
 static struct ast_cli_entry  cli_reload =
         { { "voter", "reload" }, voter_do_reload, 
 		"Reloads chan_voter parameters", reload_usage };
+static struct ast_cli_entry  cli_display =
+        { { "voter", "display" }, voter_do_display, 
+		"Display voter (instance) clients", display_usage };
 
 #endif
 
@@ -967,6 +978,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 			p->threshold = 0;
 			p->threshcount = 0;
 			p->lingercount = 0;
+			p->winner = 0;
 			incr_drainindex(p);
 			ast_queue_frame(p->owner,&fr);
 			return(0);
@@ -985,10 +997,12 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	        fr.mallocd=0;
 	        fr.delivery.tv_sec = 0;
 	        fr.delivery.tv_usec = 0;
+		p->winner = 0;
 		incr_drainindex(p);
 		ast_queue_frame(p->owner,&fr);
 		return(0);
 	}
+	p->winner = maxclient;
 	incr_drainindex(p);
 	gettimeofday(&p->lastrxtime,NULL);
 	if (!p->rxkey)
@@ -1645,6 +1659,103 @@ static int voter_do_reload(int fd, int argc, char *argv[])
 	reload();
         return RESULT_SUCCESS;
 }
+
+static int rad_rxwait(int fd,int ms)
+{
+fd_set fds;
+struct timeval tv;
+
+	FD_ZERO(&fds);
+	FD_SET(fd,&fds);
+	tv.tv_usec = ms * 1000;
+	tv.tv_sec = 0;
+	return(select(fd + 1,&fds,NULL,NULL,&tv));
+}
+
+static void voter_display(int fd, struct voter_pvt *p)
+{
+	int j,rssi,thresh,ncols = 56,wasverbose,vt100compat;
+	char str[256],*term;
+	struct voter_client *client;
+
+
+	term = getenv("TERM");
+	vt100compat = 0;
+
+	if (term)
+	{
+                if (!strcmp(term, "linux")) {
+                        vt100compat = 1;
+                } else if (!strcmp(term, "xterm")) {
+                        vt100compat = 1;
+                } else if (!strcmp(term, "xterm-color")) {
+                        vt100compat = 1;
+                } else if (!strncmp(term, "Eterm", 5)) {
+                        /* Both entries which start with Eterm support color */
+                        vt100compat = 1;
+                } else if (!strcmp(term, "vt100")) {
+                        vt100compat = 1;
+                } else if (!strncmp(term, "crt", 3)) {
+                        /* Both crt terminals support color */
+                        vt100compat = 1;
+                }
+	}
+
+
+	for(j = 0; j < ncols; j++) str[j] = ' ';
+	str[j] = 0;
+	ast_cli(fd," %s \r",str);
+
+	wasverbose = option_verbose;
+	option_verbose = 0;
+
+	for(;;)
+	{
+		if (rad_rxwait(fd,100)) break;
+		if (vt100compat) ast_cli(fd,"\033[2J\033[H");
+		ast_cli(fd,"VOTER INSTANCE %d DISPLAY:\n\n",p->nodenum);
+		if (hasmaster && (!master_time.vtime_sec))
+			ast_cli(fd,"*** WARNING -- LOSS OF MASTER TIMING SOURCE ***\n\n");
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (!client->respdigest) continue;
+			if (!client->heardfrom) continue;
+			rssi = client->lastrssi;
+			thresh = (rssi * ncols) / 256;
+			for(j = 0; j < ncols; j++)
+			{
+				if (j < thresh) str[j] = '=';
+				else if (j == thresh) str[j] = '>';
+				else str[j] = ' ';
+			}
+			str[j] = 0;
+			ast_cli(fd,"%c%10.10s |%s| [%3d]\n",(p->winner == client) ? '*' : ' ',
+				client->name,str,rssi);
+		}
+		ast_cli(fd,"\n\n");
+	}
+	option_verbose = wasverbose;
+}
+
+static int voter_do_display(int fd, int argc, char *argv[])
+{
+struct voter_pvt *p;
+
+        if (argc != 3)
+                return RESULT_SHOWUSAGE;
+	for(p = pvts; p; p = p->next)
+	{
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	voter_display(fd,p);
+        return RESULT_SUCCESS;
+}
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -1731,12 +1842,27 @@ static char *handle_cli_reload(struct ast_cli_entry *e,
 	return res2cli(voter_do_reload(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_display(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter display";
+                e->usage = display_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_display(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
 	AST_CLI_DEFINE(handle_cli_record,"Enable/Specify (or disable) voter recording file"),
 	AST_CLI_DEFINE(handle_cli_tone,"Sets/Queries Tx CTCSS level for specified chan_voter instance"),
 	AST_CLI_DEFINE(handle_cli_reload,"Reloads chan_voter parameters"),
+	AST_CLI_DEFINE(handle_cli_display,"Displays voter (instance) clients"),
 } ;
 
 #endif
@@ -1760,6 +1886,7 @@ int unload_module(void)
 	ast_cli_unregister(&cli_record);
 	ast_cli_unregister(&cli_tone);
 	ast_cli_unregister(&cli_reload);
+	ast_cli_unregister(&cli_display);
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -2383,6 +2510,7 @@ static void *voter_reader(void *data)
 										        fr.mallocd=0;
 										        fr.delivery.tv_sec = 0;
 										        fr.delivery.tv_usec = 0;
+											p->winner = 0;
 											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
 											continue;
@@ -2452,6 +2580,7 @@ static void *voter_reader(void *data)
 										        fr.mallocd=0;
 										        fr.delivery.tv_sec = 0;
 										        fr.delivery.tv_usec = 0;
+											p->winner = 0;
 											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
 											continue;
@@ -2530,6 +2659,7 @@ static void *voter_reader(void *data)
 									        fr.mallocd=0;
 									        fr.delivery.tv_sec = 0;
 									        fr.delivery.tv_usec = 0;
+										p->winner = 0;
 										incr_drainindex(p);
 										ast_queue_frame(p->owner,&fr);
 										continue;
@@ -3118,6 +3248,7 @@ int load_module(void)
 	ast_cli_register(&cli_record);
 	ast_cli_register(&cli_tone);
 	ast_cli_register(&cli_reload);
+	ast_cli_register(&cli_display);
 #endif
 
         pthread_attr_init(&attr);
