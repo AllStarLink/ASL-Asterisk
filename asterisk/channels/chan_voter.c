@@ -282,6 +282,8 @@ struct voter_client {
 	int old_buflen;
 	struct timeval lastheardtime;
 	struct timeval lastsenttime;
+	VTIME lastgpstime;
+	VTIME lastmastergpstime;
 } ;
 
 struct voter_pvt {
@@ -359,6 +361,17 @@ int voter_test = 0;
 FILE *recfp = NULL;
 int hasmaster = 0;
 
+/* This is just a horrendous KLUDGE!! Some Garmin LVC-18 GPS "pucks"
+ *sometimes* get EXACTLY 1 second off!! Some dont do it at all.
+ Some do it constantly. Some just do it once in a while. In an attempt
+ to be at least somewhat tolerant of such swine poo-poo, the "puckit"
+ configuration flag may be set, which makes an attempt to deal with
+ this problem by keeping a "time differential" for each client (compared
+ with the "master") and applying it to time information within the protocol.
+ Obviously, this SHOULD NEVER HAVE TO BE DONE. */
+
+int puckit = 0;
+
 static char *config = "voter.conf";
 
 struct voter_pvt *pvts = NULL;
@@ -368,7 +381,7 @@ struct voter_client *clients = NULL;
 FILE *fp;
 
 VTIME master_time = {0,0};
-
+VTIME mastergps_time = {0,0};
 
 #ifdef OLD_ASTERISK
 #define ast_free free
@@ -626,6 +639,29 @@ int     i,l,inquo;
 
 }
 
+/* return offsetted time */
+static long long puckoffset(struct voter_client *client)
+{
+long long btime,ptime,difftime;
+
+	if (!puckit) return 0;
+	btime = ((long long)client->lastmastergpstime.vtime_sec * 1000000000LL) + client->lastmastergpstime.vtime_nsec;
+	ptime = ((long long)client->lastgpstime.vtime_sec * 1000000000LL) + client->lastgpstime.vtime_nsec;
+	difftime = ptime - btime;
+	return difftime;
+}
+
+static void mkpucked(struct voter_client *client,VTIME *dst)
+{
+long long btime;
+
+	btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
+	btime += puckoffset(client);
+	dst->vtime_nsec = htonl((long)(btime % 1000000000LL));
+	dst->vtime_sec = htonl((long)(btime / 1000000000LL));
+	return;
+}
+		
 /* must be called with voter_lock locked */
  static void incr_drainindex(struct voter_pvt *p)
 {
@@ -1174,6 +1210,7 @@ struct timeval tv;
 				if (!client->heardfrom) continue;
 				if (client->doadpcm) continue;
 				if (client->donulaw) continue;
+				mkpucked(client,&audiopacket.vp.curtime);
 				audiopacket.vp.digest = htonl(client->respdigest);
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 				if (client->totransmit)
@@ -1214,6 +1251,7 @@ struct timeval tv;
 					if (!client->respdigest) continue;
 					if (!client->heardfrom) continue;
 					if (!client->doadpcm) continue;
+					mkpucked(client,&audiopacket.vp.curtime);
 					audiopacket.vp.digest = htonl(client->respdigest);
 					audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 #ifndef	ADPCM_LOOPBACK
@@ -1273,6 +1311,7 @@ struct timeval tv;
 					if (!client->respdigest) continue;
 					if (!client->heardfrom) continue;
 					if (!client->donulaw) continue;
+					mkpucked(client,&audiopacket.vp.curtime);
 					audiopacket.vp.digest = htonl(client->respdigest);
 					audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 #ifndef	NULAW_LOOPBACK
@@ -2184,10 +2223,10 @@ static void *voter_reader(void *data)
 							else
 							{
 								btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
-
 								btime += 40000000;
 								ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
 								difftime = (ptime - btime) + (BUFDELAY(client) * 125000LL);
+								difftime -= puckoffset(client);
 								index = (int)((long long)difftime / 125000LL);
 								if ((debug >= 3) && (!client->ismaster))
 								{
@@ -2683,12 +2722,23 @@ static void *voter_reader(void *data)
 
 					{
 						gettimeofday(&client->lastheardtime,NULL);
+						client->lastgpstime.vtime_sec = ntohl(vph->curtime.vtime_sec);
+						client->lastgpstime.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
+						if (client->ismaster)
+						{
+							mastergps_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
+							mastergps_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
+						}
+						client->lastmastergpstime.vtime_sec = mastergps_time.vtime_sec;
+						client->lastmastergpstime.vtime_nsec = mastergps_time.vtime_nsec;
+puckoffset(client);
 						if (debug >= 3) 
 						{
 							gettimeofday(&timetv,NULL);
 							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
 	
+
 							ast_verbose("GPSTime (%s):   %s.%09d\n",client->name,timestr,ntohl(vph->curtime.vtime_nsec));
 							timetv.tv_usec = ((timetv.tv_usec + 10000) / 20000) * 20000;
 							if (timetv.tv_usec >= 1000000)
@@ -2832,15 +2882,20 @@ static int reload(void)
 
         val = (char *) ast_variable_retrieve(cfg,"general","password"); 
 	if (val) ast_copy_string(password,val,sizeof(password) - 1);
+	else password[0] = 0;
 
         val = (char *) ast_variable_retrieve(cfg,"general","context"); 
 	if (val) ast_copy_string(context,val,sizeof(context) - 1);
+	else context[0] = 0;
 
         val = (char *) ast_variable_retrieve(cfg,"general","buflen"); 
 	if (val) buflen = strtoul(val,NULL,0) * 8; else buflen = DEFAULT_BUFLEN * 8;
 
         val = (char *) ast_variable_retrieve(cfg,"general","sanity"); 
-	if (val) check_client_sanity = ast_true(val);
+	if (val) check_client_sanity = ast_true(val); else check_client_sanity = 0;
+
+        val = (char *) ast_variable_retrieve(cfg,"general","puckit"); 
+	if (val) puckit = ast_true(val); else puckit = 0;
 
 	if (buflen < (FRAME_SIZE * 2)) buflen = FRAME_SIZE * 2;
 
