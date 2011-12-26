@@ -2148,9 +2148,36 @@ static void *voter_reader(void *data)
 							if (last_master_count && (voter_timing_count > (last_master_count + MAX_MASTER_COUNT)))
 							{
 								ast_log(LOG_NOTICE,"Voter lost master timing source!!\n");
-									last_master_count = 0;
-									master_time.vtime_sec = 0;
-									continue;
+								last_master_count = 0;
+								master_time.vtime_sec = 0;
+								for(client1 = client->next; client1; client1 = client1->next)
+								{
+									memset(client1->audio,0xff,client1->buflen);
+									memset(client1->rssi,0,client1->buflen);
+								}
+								for(p = pvts; p; p = p->next)
+								{
+									if (p->rxkey)
+									{
+										memset(&fr,0,sizeof(fr));
+										fr.datalen = 0;
+										fr.samples = 0;
+										fr.frametype = AST_FRAME_CONTROL;
+										fr.subclass = AST_CONTROL_RADIO_UNKEY;
+										AST_FRAME_DATA(fr) =  0;
+										fr.src = type;
+										fr.offset = 0;
+										fr.mallocd=0;
+										fr.delivery.tv_sec = 0;
+										fr.delivery.tv_usec = 0;
+										ast_queue_frame(p->owner,&fr);
+									}
+									p->rxkey = 0;
+									ast_mutex_lock(&p->txqlock);
+									while((f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list)) != NULL) ast_frfree(f1);
+									ast_mutex_unlock(&p->txqlock);
+								}
+								continue;
 							}
 							if (!master_time.vtime_sec) continue;
 						}
@@ -2176,6 +2203,16 @@ static void *voter_reader(void *data)
 							gettimeofday(&client->lastheardtime,NULL);
 							if (client->ismaster)
 							{
+
+								if (!master_time.vtime_sec)
+								{
+									for(p = pvts; p; p = p->next)
+									{
+										ast_mutex_lock(&p->txqlock);
+										while((f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list)) != NULL) ast_frfree(f1);
+										ast_mutex_unlock(&p->txqlock);
+									}
+								}
 								last_master_count = voter_timing_count;
 								master_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 								master_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
@@ -2731,7 +2768,6 @@ static void *voter_reader(void *data)
 						}
 						client->lastmastergpstime.vtime_sec = mastergps_time.vtime_sec;
 						client->lastmastergpstime.vtime_nsec = mastergps_time.vtime_nsec;
-puckoffset(client);
 						if (debug >= 3) 
 						{
 							gettimeofday(&timetv,NULL);
@@ -2892,7 +2928,7 @@ static int reload(void)
 	if (val) buflen = strtoul(val,NULL,0) * 8; else buflen = DEFAULT_BUFLEN * 8;
 
         val = (char *) ast_variable_retrieve(cfg,"general","sanity"); 
-	if (val) check_client_sanity = ast_true(val); else check_client_sanity = 0;
+	if (val) check_client_sanity = ast_true(val); else check_client_sanity = 1;
 
         val = (char *) ast_variable_retrieve(cfg,"general","puckit"); 
 	if (val) puckit = ast_true(val); else puckit = 0;
