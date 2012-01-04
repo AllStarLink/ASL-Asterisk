@@ -282,6 +282,8 @@ struct voter_client {
 	int old_buflen;
 	struct timeval lastheardtime;
 	struct timeval lastsenttime;
+	int prio;
+	int prio_override;
 	VTIME lastgpstime;
 	VTIME lastmastergpstime;
 } ;
@@ -336,6 +338,7 @@ struct voter_pvt {
 	ast_mutex_t xmit_lock;
 	ast_cond_t xmit_cond;
 	pthread_t xmit_thread;
+	int voter_test;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -357,7 +360,6 @@ AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
 
 int debug = 0;
-int voter_test = 0;
 FILE *recfp = NULL;
 int hasmaster = 0;
 
@@ -438,8 +440,16 @@ static char debug_usage[] =
 static int voter_do_test(int fd, int argc, char *argv[]);
 
 static char test_usage[] =
-"Usage: voter test {test value}\n"
-"       Specifies test mode for voter chan_voter\n";
+"Usage: voter test instance_id [test value]\n"
+"       Specifies/Queries test mode for voter instance\n";
+
+
+/* Prio */
+static int voter_do_prio(int fd, int argc, char *argv[]);
+
+static char prio_usage[] =
+"Usage: voter prio instance_id [client_id] [priority value]\n"
+"       Specifies/Queries priority value for voter client\n";
 
 
 /* Record */
@@ -479,7 +489,10 @@ static struct ast_cli_entry  cli_debug =
 		"Enable voter debugging", debug_usage };
 static struct ast_cli_entry  cli_test =
         { { "voter", "test" }, voter_do_test, 
-		"Specify voter test value", test_usage };
+		"Specify/Query voter instance test mode", test_usage };
+static struct ast_cli_entry  cli_prio =
+        { { "voter", "prio" }, voter_do_prio, 
+		"Specify/Query voter client priority value", prio_usage };
 static struct ast_cli_entry  cli_record =
         { { "voter", "record" }, voter_do_record, 
 		"Enables/Specifies (or disables) voter recording file", record_usage };
@@ -1614,24 +1627,150 @@ static int voter_do_debug(int fd, int argc, char *argv[])
 static int voter_do_test(int fd, int argc, char *argv[])
 {
 	int newlevel;
+	struct voter_pvt *p;
 
-	if (argc == 2)
+        if (argc < 3)
+                return RESULT_SHOWUSAGE;
+	ast_mutex_lock(&voter_lock);
+	for(p = pvts; p; p = p->next)
 	{
-		if (voter_test)
-			ast_cli(fd,"voter Test: currently set to %d\n",voter_test);
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+	if (argc == 3)
+	{
+		if (p->voter_test)
+			ast_cli(fd,"voter instance %d Test: currently set to %d\n",p->nodenum,p->voter_test);
 		else
-			ast_cli(fd,"voter Test: currently disabled\n");
+			ast_cli(fd,"voter instance %d Test: currently disabled\n",p->nodenum);
+		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}		
-        if (argc != 3)
+        if (argc != 4)
+	{
+		ast_mutex_unlock(&voter_lock);
                 return RESULT_SHOWUSAGE;
-        newlevel = atoi(argv[2]);
+	}
+        newlevel = atoi(argv[3]);
+	if (newlevel < 0)
+	{
+		ast_cli(fd,"Error: Invalid test mode value specification!!\n");
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
         if(newlevel)
-                ast_cli(fd, "voter Test: previous level: %d, new level: %d\n", voter_test, newlevel);
+                ast_cli(fd, "voter instance %d Test: previous level: %d, new level: %d\n", p->nodenum, p->voter_test, newlevel);
         else
-                ast_cli(fd, "voter Test disabled\n");
+                ast_cli(fd, "voter instance %d Test disabled\n",p->nodenum);
 
-        voter_test = newlevel;                                                                                                                          
+        p->voter_test = newlevel;                                                                                                                          
+	ast_mutex_unlock(&voter_lock);
+        return RESULT_SUCCESS;
+}
+
+static int voter_do_prio(int fd, int argc, char *argv[])
+{
+	int newlevel;
+	struct voter_pvt *p;
+	struct voter_client *client;
+
+        if (argc < 3)
+                return RESULT_SHOWUSAGE;
+	ast_mutex_lock(&voter_lock);
+	for(p = pvts; p; p = p->next)
+	{
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+	if (argc == 3)
+	{
+		ast_cli(fd,"Voter instance %d priority values:\n\n",p->nodenum);
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (client->prio_override > -2)
+				ast_cli(fd,"client %s: eff_prio: %d, prio: %d, override_prio: %d\n",
+					client->name,client->prio_override, client->prio,client->prio_override);
+			else
+				ast_cli(fd,"client %s: prio: %d (not overridden)\n",client->name,client->prio);
+		}
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+	if (argc == 4)
+	{
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (strcasecmp(argv[3],client->name)) continue;
+			if (client->prio_override > -2)
+				ast_cli(fd,"Voter instance %d, client %s: eff_prio: %d, prio: %d, override_prio: %d\n",
+					p->nodenum,client->name,client->prio_override, client->prio,client->prio_override);
+			else
+				ast_cli(fd,"Voter instance %d, client %s: prio: %d (not overridden)\n",
+					p->nodenum,client->name,client->prio);
+			break;
+		}
+		if (!client) ast_cli(fd,"voter client %s not found\n",argv[3]);
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+        if (argc != 5)
+	{
+		ast_mutex_unlock(&voter_lock);
+                return RESULT_SHOWUSAGE;
+	}
+	for(client = clients; client; client = client->next)
+	{
+		if (client->nodenum != p->nodenum) continue;
+		if (!strcasecmp(argv[3],client->name)) break;
+	}
+	if (!client)
+	{
+		ast_cli(fd,"voter client %s not found\n",argv[3]);
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+	if ((!strcasecmp(argv[4],"off")) || (!strncasecmp(argv[4],"dis",3))) newlevel = -2;
+	else 
+	{
+		if (sscanf(argv[4],"%d",&newlevel) < 1)
+		{
+			ast_cli(fd,"Error: Invalid priority value specification!!\n");
+			ast_mutex_unlock(&voter_lock);
+			return RESULT_SUCCESS;
+		}
+	}
+	if (newlevel < -2)
+	{
+		ast_cli(fd,"Error: Invalid priority value specification!!\n");
+		ast_mutex_unlock(&voter_lock);
+		return RESULT_SUCCESS;
+	}
+        if (newlevel > -2)
+	{
+		if (client->prio_override > -2)
+	                ast_cli(fd, "voter instance %d prio (override): previous level: %d, new level: %d\n", 
+				p->nodenum, client->prio_override, newlevel);
+		else
+	                ast_cli(fd, "voter instance %d prio (override): previous level: <disabled>, new level: %d\n", 
+				p->nodenum, newlevel);
+	}
+        else
+                ast_cli(fd, "voter instance %d prio (override) disabled\n",p->nodenum);
+
+        client->prio_override = newlevel;                                                                                                                          
+	ast_mutex_unlock(&voter_lock);
         return RESULT_SUCCESS;
 }
 
@@ -1663,6 +1802,7 @@ static int voter_do_tone(int fd, int argc, char *argv[])
 
         if (argc < 3)
                 return RESULT_SHOWUSAGE;
+	ast_mutex_lock(&voter_lock);
 	for(p = pvts; p; p = p->next)
 	{
 		if (p->nodenum == atoi(argv[2])) break;
@@ -1670,24 +1810,31 @@ static int voter_do_tone(int fd, int argc, char *argv[])
 	if (!p)
 	{
 		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
 	if (!p->pmrChan)
 	{
 		ast_cli(fd,"voter instance %s does not have CTCSS enabled\n",argv[2]);
+		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
 	if (argc == 3)
 	{
 		ast_cli(fd,"voter instance %d CTCSS tone level is %d\n",p->nodenum,p->txctcsslevel);
+		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
         newlevel = atoi(argv[3]);
         if((newlevel < 0) || (newlevel > 250))
+	{
+		ast_mutex_unlock(&voter_lock);
                 return RESULT_SHOWUSAGE;
+	}
         ast_cli(fd, "voter instance %d CTCSS tone level set to %d\n",p->nodenum,newlevel);
 	p->txctcsslevel = newlevel;
 	*p->pmrChan->ptxCtcssAdjust = newlevel;
+	ast_mutex_unlock(&voter_lock);
         return RESULT_SUCCESS;
 }
 
@@ -1714,7 +1861,7 @@ struct timeval tv;
 static void voter_display(int fd, struct voter_pvt *p)
 {
 	int j,rssi,thresh,ncols = 56,wasverbose,vt100compat;
-	char str[256],*term;
+	char str[256],*term,c;
 	struct voter_client *client;
 
 
@@ -1764,13 +1911,15 @@ static void voter_display(int fd, struct voter_pvt *p)
 			thresh = (rssi * ncols) / 256;
 			for(j = 0; j < ncols; j++)
 			{
-				if (j < thresh) str[j] = '=';
+				if (client->prio_override == -1) str[j] = 'X';
+				else if (j < thresh) str[j] = '=';
 				else if (j == thresh) str[j] = '>';
 				else str[j] = ' ';
 			}
 			str[j] = 0;
-			ast_cli(fd,"%c%10.10s |%s| [%3d]\n",(p->winner == client) ? '*' : ' ',
-				client->name,str,rssi);
+			c = ' ';
+			if (p->winner == client) c = '*';
+			ast_cli(fd,"%c%10.10s |%s| [%3d]\n",c,client->name,str,rssi);
 		}
 		ast_cli(fd,"\n\n");
 	}
@@ -1839,6 +1988,20 @@ static char *handle_cli_test(struct ast_cli_entry *e,
 	return res2cli(voter_do_test(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_prio(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter prio";
+                e->usage = prio_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_prio(a->fd,a->argc,a->argv));
+}
+
 static char *handle_cli_record(struct ast_cli_entry *e,
 	int cmd, struct ast_cli_args *a)
 {
@@ -1897,7 +2060,8 @@ static char *handle_cli_display(struct ast_cli_entry *e,
 
 static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
-	AST_CLI_DEFINE(handle_cli_test,"Specify voter test value"),
+	AST_CLI_DEFINE(handle_cli_test,"Specify/Query voter instance test mode"),
+	AST_CLI_DEFINE(handle_cli_prio,"Specify/Query voter client priority value"),
 	AST_CLI_DEFINE(handle_cli_record,"Enable/Specify (or disable) voter recording file"),
 	AST_CLI_DEFINE(handle_cli_tone,"Sets/Queries Tx CTCSS level for specified chan_voter instance"),
 	AST_CLI_DEFINE(handle_cli_reload,"Reloads chan_voter parameters"),
@@ -1922,6 +2086,7 @@ int unload_module(void)
 	/* Unregister cli extensions */
 	ast_cli_unregister(&cli_debug);
 	ast_cli_unregister(&cli_test);
+	ast_cli_unregister(&cli_prio);
 	ast_cli_unregister(&cli_record);
 	ast_cli_unregister(&cli_tone);
 	ast_cli_unregister(&cli_reload);
@@ -2172,6 +2337,7 @@ static void *voter_reader(void *data)
 										fr.delivery.tv_usec = 0;
 										ast_queue_frame(p->owner,&fr);
 									}
+									p->lastwon = NULL;
 									p->rxkey = 0;
 									ast_mutex_lock(&p->txqlock);
 									while((f1 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list)) != NULL) ast_frfree(f1);
@@ -2420,12 +2586,17 @@ static void *voter_reader(void *data)
 								voter_xmit_master();
 								for(p = pvts; p; p = p->next)
 								{
+									char startagain;
+
+									startagain = 0;
 									maxrssi = 0;
 									maxclient = NULL;
-									for(client = clients; client; client = client->next)
+									for(client = clients; client; client = (startagain) ? clients : client->next)
 									{
+										startagain = 0;
 										if (client->nodenum != p->nodenum) continue;
 										if (client->mix) continue;
+										if (client->prio_override == -1) continue;
 										k = 0;
 										i = (int)client->buflen - ((int)client->drainindex + FRAME_SIZE);
 										if (i >= 0)
@@ -2433,7 +2604,6 @@ static void *voter_reader(void *data)
 											for(j = client->drainindex; j < client->drainindex + FRAME_SIZE; j++)
 											{
 												k += client->rssi[j];
-												client->rssi[j] = 0;
 											}
 										}
 										else
@@ -2441,27 +2611,82 @@ static void *voter_reader(void *data)
 											for(j = client->drainindex; j < client->drainindex + (FRAME_SIZE + i); j++)
 											{
 												k += client->rssi[j];
-												client->rssi[j] = 0;
 											}
 											for(j = 0; j < -i; j++)
 											{
 												k += client->rssi[j];
-												client->rssi[j] = 0;
 											}
 										}			
 										client->lastrssi = k / FRAME_SIZE; 
 										if (client->lastrssi > maxrssi)
 										{
-											maxrssi =  client->lastrssi;
-											maxclient = client;
+											int maxprio,thisprio;
+
+											maxprio = thisprio = 0;
+											if (maxclient)
+											{
+												if (maxclient->prio_override > -2) 
+													maxprio = maxclient->prio_override;
+												else
+													maxprio = maxclient->prio;
+											}
+											if (client->prio_override > -2)
+												thisprio = client->prio_override;
+											else
+												thisprio = client->prio;
+											if (thisprio >= maxprio)
+											{
+												maxrssi =  client->lastrssi;
+												maxclient = client;
+												if (thisprio > maxprio) startagain = 1;
+											}
 										}
+									}
+									for(client = clients; client; client =  client->next)
+									{
+										if (client->nodenum != p->nodenum) continue;
+										if (client->mix) continue;
+										if (client->prio_override == -1) continue;
+										i = (int)client->buflen - ((int)client->drainindex + FRAME_SIZE);
+										if (i >= 0)
+										{
+											for(j = client->drainindex; j < client->drainindex + FRAME_SIZE; j++)
+											{
+												client->rssi[j] = 0;
+											}
+										}
+										else
+										{
+											for(j = client->drainindex; j < client->drainindex + (FRAME_SIZE + i); j++)
+											{
+												client->rssi[j] = 0;
+											}
+											for(j = 0; j < -i; j++)
+											{
+												client->rssi[j] = 0;
+											}
+										}			
 									}
 									if (!maxclient) maxrssi = 0;
 									memset(p->buf + AST_FRIENDLY_OFFSET,0xff,FRAME_SIZE);
 									if (maxclient)
 									{
-										/* if not on same client, and we have thresholds */
-										if (p->lastwon /* && (p->lastwon != maxclient) */ && p->nthresholds /* && (!p->lingercount) */)
+										int maxprio,lastprio;
+
+										if (maxclient->prio_override > -2) 
+											maxprio = maxclient->prio_override;
+										else
+											maxprio = maxclient->prio;
+										lastprio = 0;
+										if (p->lastwon)
+										{
+											if (p->lastwon->prio_override > -2)
+												lastprio = p->lastwon->prio_override;
+											else
+												lastprio = p->lastwon->prio;
+										}
+										/* if not on same client, and we have thresholds, and priority appropriate */
+										if (p->lastwon && p->nthresholds && (maxprio <= lastprio))
 										{
 											/* go thru all the thresholds */
 											for(i = 0; i < p->nthresholds; i++)
@@ -2507,29 +2732,7 @@ static void *voter_reader(void *data)
 											maxclient = p->lastwon;
 											maxrssi = maxclient->lastrssi;
 										}
-										/* if we are in test mode, we need to artifically affect the vote outcome */
-										if (voter_test < 0) /* force explicit selection */
-										{
-											p->testcycle = 0;
-											p->testindex = 0;
-											for(i = 0,client = clients; client; client = client->next)
-											{
-												if (client->nodenum != p->nodenum) continue;
-												if (client->mix) continue;
-												maxclient = 0;
-												i++;
-												if (i == -voter_test)
-												{
-													if (client->lastrssi)
-													{
-														maxclient = client;
-														maxrssi = client->lastrssi;
-													}												
-													break;
-												}
-											}
-										}
-										else if (voter_test > 0) /* perform cyclic selection */
+										if (p->voter_test > 0) /* perform cyclic selection */
 										{
 											/* see how many are eligible */
 											for(i = 0,client = clients; client; client = client->next)
@@ -2538,14 +2741,14 @@ static void *voter_reader(void *data)
 												if (client->mix) continue;
 												if (client->lastrssi == maxrssi) i++;
 											}
-											if (voter_test == 1)
+											if (p->voter_test == 1)
 											{
 												p->testindex = random() % i;
 											}
 											else
 											{
 												p->testcycle++;
-												if (p->testcycle >= (voter_test - 1))
+												if (p->testcycle >= (p->voter_test - 1))
 												{
 													p->testcycle = 0;
 													p->testindex++;
@@ -2642,6 +2845,7 @@ static void *voter_reader(void *data)
 										if ((!p->duplex) && p->txkey)
 										{
 											p->rxkey = 0;
+											p->lastwon = NULL;
 											p->threshold = 0;
 											p->threshcount = 0;
 											p->lingercount = 0;
@@ -2721,6 +2925,7 @@ static void *voter_reader(void *data)
 									if ((!p->duplex) && p->txkey)
 									{
 										p->rxkey = 0;
+										p->lastwon = NULL;
 										p->threshold = 0;
 										p->threshcount = 0;
 										p->lingercount = 0;
@@ -3053,6 +3258,7 @@ static int reload(void)
 			if (!strncasecmp(v->name,"buflen",6)) continue;
 			if (!strncasecmp(v->name,"nodeemp",7)) continue;
 			if (!strncasecmp(v->name,"noplfilter",10)) continue;
+			if (!strncasecmp(v->name,"prio",4)) continue;
 			cp = ast_strdup(v->value);
 			if (!cp)
 			{
@@ -3094,6 +3300,7 @@ static int reload(void)
 					return -1;
 				}
 				memset(client,0,sizeof(struct voter_client));
+				client->prio_override = -2;
 				ast_copy_string(client->name,v->name,VOTER_NAME_LEN - 1);
 				newclient = 1;
 			}
@@ -3130,13 +3337,13 @@ static int reload(void)
 						*client->gpsid = '_';
 					}
 				}
-				else if (!strncasecmp(strs[i],"buflen",6))
+				else if (!strncasecmp(strs[i],"prio",4))
 				{
 					cp1 = strchr(strs[i],'=');
 					if (cp1)
 					{
-						client->buflen = strtoul(cp1 + 1,NULL,0) * 8;
-						if (client->buflen < (FRAME_SIZE * 2)) client->buflen = FRAME_SIZE * 2;
+						client->prio = strtoul(cp1 + 1,NULL,0);
+						if (client->prio < -1) client->prio = 0;
 					}
 				}
 			}
@@ -3336,6 +3543,7 @@ int load_module(void)
 	/* Register cli extensions */
 	ast_cli_register(&cli_debug);
 	ast_cli_register(&cli_test);
+	ast_cli_register(&cli_prio);
 	ast_cli_register(&cli_record);
 	ast_cli_register(&cli_tone);
 	ast_cli_register(&cli_reload);
