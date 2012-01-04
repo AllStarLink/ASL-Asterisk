@@ -869,7 +869,7 @@ int len;
 static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclient, int maxrssi)
 {
 
-	int i,j,k,x;
+	int i,j,k,x,maxprio;
 	struct ast_frame fr,*f1,*f2;
 	struct voter_client *client;
 	short  silbuf[FRAME_SIZE];
@@ -892,12 +892,33 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		ast_log(LOG_ERROR,"Can not translate frame to send to Asterisk\n");
 		return(0);
 	}
+	maxprio = 0;
+	for(client = clients; client; client = client->next)
+	{
+		if (client->nodenum != p->nodenum) continue;
+		if (!client->mix) continue;
+		if (client->prio_override == -1) continue;
+		if (client->prio_override > -2)
+			i = client->prio_override;
+		else
+			i = client->prio;
+		if (i > maxprio) maxprio = i;
+	}
 	/* f1 now contains the voted-upon audio in slinear */
 	for(client = clients; client; client = client->next)
 	{
 		short *sp1,*sp2;
 		if (client->nodenum != p->nodenum) continue;
 		if (!client->mix) continue;
+		if (client->prio_override == -1) continue;
+		if (maxprio)
+		{
+			if (client->prio_override > -2)
+				i = client->prio_override;
+			else
+				i = client->prio;
+			if (i < maxprio) continue;
+		}
 		i = (int)client->buflen - ((int)client->drainindex + FRAME_SIZE);
 		if (i >= 0)
 		{
@@ -966,7 +987,10 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		sp2 = AST_FRAME_DATAP(f2);
 		for(i = 0; i < FRAME_SIZE; i++)
 		{
-			j = sp1[i] + sp2[i];
+			if (maxprio && client->lastrssi)
+				j = sp2[i];
+			else
+				j = sp1[i] + sp2[i];
 			if (j > 32767) j = 32767;
 			if (j < -32767) j = -32767;
 			sp1[i] = j;
