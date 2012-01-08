@@ -2617,6 +2617,8 @@ static void *voter_reader(void *data)
 									maxclient = NULL;
 									for(client = clients; client; client = (startagain) ? clients : client->next)
 									{
+										int maxprio,thisprio;
+
 										startagain = 0;
 										if (client->nodenum != p->nodenum) continue;
 										if (client->mix) continue;
@@ -2642,28 +2644,24 @@ static void *voter_reader(void *data)
 											}
 										}			
 										client->lastrssi = k / FRAME_SIZE; 
-										if (client->lastrssi > maxrssi)
+										maxprio = thisprio = 0;
+										if (maxclient)
 										{
-											int maxprio,thisprio;
-
-											maxprio = thisprio = 0;
-											if (maxclient)
-											{
-												if (maxclient->prio_override > -2) 
-													maxprio = maxclient->prio_override;
-												else
-													maxprio = maxclient->prio;
-											}
-											if (client->prio_override > -2)
-												thisprio = client->prio_override;
+											if (maxclient->prio_override > -2) 
+												maxprio = maxclient->prio_override;
 											else
-												thisprio = client->prio;
-											if (thisprio >= maxprio)
-											{
-												maxrssi =  client->lastrssi;
-												maxclient = client;
-												if (thisprio > maxprio) startagain = 1;
-											}
+												maxprio = maxclient->prio;
+										}
+										if (client->prio_override > -2)
+											thisprio = client->prio_override;
+										else
+											thisprio = client->prio;
+										if (((client->lastrssi > maxrssi) && (thisprio == maxprio))
+											 || (client->lastrssi && (thisprio > maxprio)))
+										{
+											maxrssi =  client->lastrssi;
+											maxclient = client;
+											if (thisprio > maxprio) startagain = 1;
 										}
 									}
 									for(client = clients; client; client =  client->next)
