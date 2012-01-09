@@ -82,12 +82,6 @@ Voter Channel test modes:
     frames. In other words, if you set it to 2, it will
     change every single time. If you set it to 11, it will
     change every 10 times. This is serious torture test.
-< 1 - Explicitly select the client to use. Specify the
-    negative value of the client in the list in voter.conf
-    (reversed). In other words, if you want the last client
-    you specified in the list for the particular node, set
-    the value to -1. If you want the 3rd from the last, set
-    it to -4.
 
 Note on ADPCM functionality:
 The original intent was to change this driver to use signed linear internally,
@@ -97,6 +91,11 @@ degradation in dynamic range when using ADPCM resulting in doing so).  This was
 done becuase existing external entities (such as the recording files and the streaming
 stuff) use mulaw as their transport, and changing all of that to signed linear would
 be cumbersome, inefficient and undesirable.
+
+Note on "Dynamic" client functionality:
+DONT USE IT!!. It is intentionally *NOT* documented to encourage non-use of this
+feature. It is for demo purposes *ONLY*. The chan_voter driver will *NOT* properly
+perform reliably in a production environment if this option is used.
 */
 
 
@@ -160,6 +159,8 @@ struct ast_flags zeroflag = { 0 };
 
 #define	DEFAULT_LINGER 6
 
+#define	DEFAULT_DYNTIME 30000
+
 #define MAX_MASTER_COUNT 3
 
 #define CLIENT_WARN_SECS 60
@@ -190,6 +191,7 @@ int udp_socket = -1;
 int voter_timing_fd = -1;
 int voter_timing_count = 0;
 int last_master_count = 0;
+int dyntime = DEFAULT_DYNTIME;
 
 int check_client_sanity = 1;
 
@@ -267,6 +269,7 @@ struct voter_client {
 	char mix;
 	char nodeemp;
 	char noplfilter;
+	char dynamic;
 	struct voter_client *next;
 	long long dtime;
 	uint8_t lastrssi;
@@ -281,6 +284,7 @@ struct voter_client {
 	int reload;
 	int old_buflen;
 	struct timeval lastheardtime;
+	struct timeval lastdyntime;
 	struct timeval lastsenttime;
 	int prio;
 	int prio_override;
@@ -379,6 +383,8 @@ static char *config = "voter.conf";
 struct voter_pvt *pvts = NULL;
 
 struct voter_client *clients = NULL;
+
+struct voter_client *dyn_clients = NULL;
 
 FILE *fp;
 
@@ -1885,7 +1891,7 @@ struct timeval tv;
 static void voter_display(int fd, struct voter_pvt *p)
 {
 	int j,rssi,thresh,ncols = 56,wasverbose,vt100compat;
-	char str[256],*term,c;
+	char str[256],*term,c,hasdyn;
 	struct voter_client *client;
 
 
@@ -1926,9 +1932,11 @@ static void voter_display(int fd, struct voter_pvt *p)
 		ast_cli(fd,"VOTER INSTANCE %d DISPLAY:\n\n",p->nodenum);
 		if (hasmaster && (!master_time.vtime_sec))
 			ast_cli(fd,"*** WARNING -- LOSS OF MASTER TIMING SOURCE ***\n\n");
+		hasdyn = 0;
 		for(client = clients; client; client = client->next)
 		{
 			if (client->nodenum != p->nodenum) continue;
+			if (client->dynamic) hasdyn = 1;
 			if (!client->respdigest) continue;
 			if (!client->heardfrom) continue;
 			rssi = client->lastrssi;
@@ -1946,6 +1954,17 @@ static void voter_display(int fd, struct voter_pvt *p)
 			ast_cli(fd,"%c%10.10s |%s| [%3d]\n",c,client->name,str,rssi);
 		}
 		ast_cli(fd,"\n\n");
+		if (hasdyn)
+		{
+			ast_cli(fd,"ACTIVE DYNAMIC CLIENTS:\n\n");
+			for(client = clients; client; client = client->next)
+			{
+				if (!client->dynamic) continue;
+				if (ast_tvzero(client->lastdyntime)) continue;
+				ast_cli(fd,"%10.10s -- %s:%d\n",client->name,ast_inet_ntoa(client->sin.sin_addr),ntohs(client->sin.sin_port));
+			}
+			ast_cli(fd,"\n\n");
+		}
 	}
 	option_verbose = wasverbose;
 }
@@ -2127,6 +2146,7 @@ static void voter_xmit_master(void)
 {
 struct voter_client *client;
 struct voter_pvt *p;
+struct timeval tv;
 
 	for(client = clients; client; client = client->next)
 	{
@@ -2149,6 +2169,19 @@ struct voter_pvt *p;
 		ast_mutex_lock(&p->xmit_lock);
 		ast_cond_signal(&p->xmit_cond);
 		ast_mutex_unlock(&p->xmit_lock);
+	}
+	gettimeofday(&tv,NULL);
+	for(client = clients; client; client = client->next)
+	{
+		if (!client->dynamic) continue;
+		if (ast_tvzero(client->lastdyntime)) continue;
+		if (ast_tvdiff_ms(tv,client->lastdyntime) > dyntime)
+		{
+			if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 
+				"DYN client %s past lease time\n",client->name);
+			memset(&client->lastdyntime,0,sizeof(client->lastheardtime));
+			memset(&client->sin,0,sizeof(client->sin));
+		}
 	}
 	return;
 }
@@ -2311,12 +2344,52 @@ static void *voter_reader(void *data)
 				if ((!check_client_sanity) && master_port) sin.sin_port = htons(master_port);
 				if (vph->digest)
 				{
-					
+					gettimeofday(&tv,NULL);
+					/* first see if client is not a dynamic one */
 					for(client = clients; client; client = client->next)
 					{
+						if (client->dynamic) continue;
 						if (client->digest == htonl(vph->digest)) break;
 					}
-
+					/* if not found as non-dynamic, try it as existing dynamic */					
+					if (!client)
+					{
+						for(client = clients; client; client = client->next)
+						{
+							if (!client->dynamic) continue;
+							if (ast_tvzero(client->lastdyntime)) continue;
+							if (ast_tvdiff_ms(tv,client->lastdyntime) > dyntime)
+							{
+								if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 
+									"DYN client %s past lease time\n",client->name);
+								memset(&client->lastdyntime,0,sizeof(client->lastheardtime));
+								memset(&client->sin,0,sizeof(client->sin));
+								continue;
+							}
+							if (client->digest != htonl(vph->digest)) continue;
+							if (client->sin.sin_addr.s_addr != sin.sin_addr.s_addr) continue;
+							if (client->sin.sin_port != sin.sin_port) continue;
+							if (option_verbose > 4) ast_verbose(VERBOSE_PREFIX_3 
+								"Using existing Dynamic client %s for %s:%d\n",client->name,ast_inet_ntoa(sin.sin_addr),ntohs(sin.sin_port));
+							break;
+						}
+					}
+					/* if still now found, try as new dynamic */
+					if (!client)
+					{
+						for(client = clients; client; client = client->next)
+						{
+							if (!client->dynamic) continue;
+							if (!ast_tvzero(client->lastdyntime)) continue;
+							if (client->digest != htonl(vph->digest)) continue;
+							/* okay, we found an empty dynamic slot with proper digest */
+							gettimeofday(&client->lastdyntime,NULL);
+							client->sin = sin;
+							if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 
+								"Bound new Dynamic client %s to %s:%d\n",client->name,ast_inet_ntoa(sin.sin_addr),ntohs(sin.sin_port));
+							break;
+						}
+					}
 					if ((debug >= 3) && client && (!client->ismaster) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
 					{
 						timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
@@ -2330,6 +2403,7 @@ static void *voter_reader(void *data)
 							if ((client->sin.sin_addr.s_addr && (client->sin.sin_addr.s_addr != sin.sin_addr.s_addr)) ||
 								(client->sin.sin_port && (client->sin.sin_port != sin.sin_port))) client->heardfrom = 0;
 						} 
+						gettimeofday(&client->lastdyntime,NULL);
 						client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
 						if ((!client->ismaster) && hasmaster)
@@ -3160,6 +3234,9 @@ static int reload(void)
         val = (char *) ast_variable_retrieve(cfg,"general","puckit"); 
 	if (val) puckit = ast_true(val); else puckit = 0;
 
+        val = (char *) ast_variable_retrieve(cfg,"general","dyntime"); 
+	if (val) dyntime = strtoul(val,NULL,0); else dyntime = DEFAULT_DYNTIME;
+
 	if (buflen < (FRAME_SIZE * 2)) buflen = FRAME_SIZE * 2;
 
 	for(p = pvts; p; p = p->next)
@@ -3276,6 +3353,7 @@ static int reload(void)
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
 			if (!strncasecmp(v->name,"nulaw",5)) continue;
+			if (!strncasecmp(v->name,"dynamic",7)) continue;
 			if (!strncasecmp(v->name,"gpsid",5)) continue;
 			if (!strncasecmp(v->name,"buflen",6)) continue;
 			if (!strncasecmp(v->name,"nodeemp",7)) continue;
@@ -3295,6 +3373,7 @@ static int reload(void)
 			/* see if we "know" this client already */
 			for(client = clients; client; client = client->next)
 			{
+				if (client->dynamic) continue;
 				/* if this is the one whose digest matches one currently being looked at */
 				if (client->digest == crc32_bufs(challenge,strs[0]))
 				{
@@ -3346,6 +3425,8 @@ static int reload(void)
                                         client->nodeemp = 1;
 				else if (!strcasecmp(strs[i],"noplfilter"))
                                         client->noplfilter = 1;
+				else if (!strcasecmp(strs[i],"dynamic"))
+                                        client->dynamic = 1;
 				else if (!strncasecmp(strs[i],"gpsid",5))
 				{
 					cp1 = strchr(strs[i],'=');
@@ -3442,15 +3523,16 @@ static int reload(void)
 	for(client = clients; client; client = client->next)
 	{
 		if (!client->reload) continue;
+		if (client->digest == 0)
+		{
+			ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER client %s has invalid authentication digest (can not be 0)!!!\n",client->name);
+			ast_mutex_unlock(&voter_lock);
+			return -1;
+		}
+		if (client->dynamic) continue;
 		for(client1 = clients; client1; client1 = client1->next)
 		{
 			if (!client1->reload) continue;
-			if (client->digest == 0)
-			{
-				ast_log(LOG_ERROR,"Can Not Load chan_voter -- VOTER client %s has invalid authentication digest (can not be 0)!!!\n",client->name);
-				ast_mutex_unlock(&voter_lock);
-				return -1;
-			}
 			if (client == client1) continue;
 			if (client->digest == client1->digest)
 			{
