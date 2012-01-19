@@ -1,7 +1,7 @@
 /*
  * Asterisk -- An open source telephony toolkit.
  *
- * Copyright (C) 2002-2009, Jim Dixon, WB6NIL
+ * Copyright (C) 2002-2012, Jim Dixon, WB6NIL
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.300 11/11/2011
+ *  version 0.301 01/18/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.300 11/11/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.301 01/18/2011";
 
 static char *app = "Rpt";
 
@@ -19484,7 +19484,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		/* If full duplex, add local dtmf stuff active */
 		if (myrpt->p.duplex > 1) 
 		{
-			totx = totx || (myrpt->dtmfidx > -1) ||
+			totx = totx || /* (myrpt->dtmfidx > -1) || */
 				(myrpt->cmdnode[0] && strcmp(myrpt->cmdnode,"aprstt"));
 		}
 		/* add in parrot stuff */
