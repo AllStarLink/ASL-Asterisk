@@ -4,7 +4,7 @@
  *
  * Copyright (C) 1999 - 2006, Digium, Inc.
  *
- * Copyright (C) 2010, Jim Dixon/WB6NIL
+ * Copyright (C) 2012, Jim Dixon/WB6NIL
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
  * See http://www.asterisk.org for more information about
@@ -29,6 +29,60 @@
 
 /*** MODULEINFO
  ***/
+
+/* This application is intended to provide a generic "bridging"
+   functionality for radio-oriented Asterisk channels.
+
+   The idea here is that certain radio applications lend themselves
+   to needing a "generic" (passes audio and tx/rx keying completely
+   transparently) to and from two or more endpoints.
+
+   An example of such an appication might be replacing (or providing
+   equivlent new functionaliy of) one or more full-duplex UHF control
+   links with an IP-based one(s).
+
+   app_radbridge allows multiple instances of radio-oriented channels
+   transparently "bridged" together.
+
+   The config file (radbridge.conf) allows specification of each
+   "bridging" instance and what radio-oriented Asterisk channels
+   are to be associated with it. There is no need for any other
+   specificaiton of configuration.
+
+   The file format for radbridge.conf departs somewhat from the standard
+   usage (at least for radio stuff) of the Asterisk config file architecture.
+
+   In most other radio-oriented cases, an instance of whatever it is
+   gets defined as a "Stanza" in the config file. In this case, because
+   of limitations in the way that Asterisk parses config files, that 
+   was not possible. Instead, all config information goes into the
+   [general] stanza, and each line of config info defines a different
+   instance of radio bridging.  For example:
+
+[general]
+
+instance1 = Voter/1234,Radio/5678
+instance2 = Voter/1235,Radio/5679
+
+    This example would define two radio bridging instances "instance1"
+    and "instance2", each with 2 channels associated with them.
+
+    The supported channel types are "Voter" (chan_voter), "Radio"
+    (chan_usbradio), "SimpleUsb" (chan_simpleusb), and "Zap" ("Dahdi")
+    (chan_dahdi, for the couple of devices that use this channel
+    driver, such as the PCIRadio card, and separate analog channels
+    using an ARIB board or such).
+
+    Rather then "adding" (which would actually be a lot of *removing*
+    optionally) this functionality in app_rpt, it made more sense to
+    create a separate application specifically for this purpose. In
+    addition, this allows for a system that is merely provided for
+    doing this bridging application and nothing else radio-oriented,
+    to not have to run app_rpt at all. 
+    
+
+*/
+
 
 #include "asterisk.h"
 
