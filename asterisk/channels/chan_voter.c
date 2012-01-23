@@ -343,6 +343,7 @@ struct voter_pvt {
 	ast_cond_t xmit_cond;
 	pthread_t xmit_thread;
 	int voter_test;
+	char usedtmf;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -410,6 +411,7 @@ static int voter_digit_begin(struct ast_channel *c, char digit);
 static int voter_digit_end(struct ast_channel *c, char digit, unsigned int duratiion);
 #endif
 static int voter_text(struct ast_channel *c, const char *text);
+static int voter_setoption(struct ast_channel *chan, int option, void *data, int datalen);
 
 static const struct ast_channel_tech voter_tech = {
 	.type = type,
@@ -427,6 +429,8 @@ static const struct ast_channel_tech voter_tech = {
 #else
 	.send_digit_begin = voter_digit_begin,
 	.send_digit_end = voter_digit_end,
+	.setoption = voter_setoption,
+
 #endif
 };
 
@@ -789,6 +793,44 @@ static int voter_digit_end(struct ast_channel *ast, char digit, unsigned int dur
 	return(0);
 }
 
+static int voter_setoption(struct ast_channel *chan, int option, void *data, int datalen)
+{
+	char *cp;
+	struct voter_pvt *o = chan->tech_pvt;
+
+	/* all supported options require data */
+	if (!data || (datalen < 1)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	switch (option) {
+	case AST_OPTION_TONE_VERIFY:
+		cp = (char *) data;
+		switch (*cp) {
+		case 1:
+			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: OFF(0) on %s\n",chan->name);
+			o->usedtmf = 1;
+			break;
+		case 2:
+			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: MUTECONF/MAX(2) on %s\n",chan->name);
+			o->usedtmf = 1;
+			break;
+		case 3:
+			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: DISABLE DETECT(3) on %s\n",chan->name);
+			o->usedtmf = 0;
+			break;
+		default:
+			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: OFF(0) on %s\n",chan->name);
+			o->usedtmf = 1;
+			break;
+		}
+		break;
+	}
+	errno = 0;
+	return 0;
+}
+
 static int voter_text(struct ast_channel *ast, const char *text)
 {
 	return 0;
@@ -1005,7 +1047,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	}
 	if (!maxclient) /* if nothing there */
 	{
-		if (p->rxkey && p->dsp)
+		if (p->rxkey && p->dsp && p->usedtmf)
 		{
 			memset(silbuf,0,sizeof(silbuf));
 			memset(&fr,0,sizeof(struct ast_frame));
@@ -1042,40 +1084,22 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 				ast_queue_frame(p->owner,f2);
 				gettimeofday(&p->lastrxtime,NULL);
 			}
-			memset(silbuf,0,sizeof(silbuf));
-			memset(&fr,0,sizeof(struct ast_frame));
-		        fr.frametype = AST_FRAME_VOICE;
-		        fr.subclass = AST_FORMAT_SLINEAR;
-		        fr.datalen = FRAME_SIZE * 2;
-		        fr.samples = FRAME_SIZE;
-		        AST_FRAME_DATA(fr) =  silbuf;
-		        fr.src = type;
-		        fr.offset = 0;
-		        fr.mallocd = 0;
-		        fr.delivery.tv_sec = 0;
-		        fr.delivery.tv_usec = 0;
-			p->threshold = 0;
-			p->threshcount = 0;
-			p->lingercount = 0;
-			p->winner = 0;
-			incr_drainindex(p);
-			ast_queue_frame(p->owner,&fr);
-			return(0);
 		}
+		memset(silbuf,0,sizeof(silbuf));
+		memset(&fr,0,sizeof(struct ast_frame));
+	        fr.frametype = AST_FRAME_VOICE;
+	        fr.subclass = AST_FORMAT_SLINEAR;
+	        fr.datalen = FRAME_SIZE * 2;
+	        fr.samples = FRAME_SIZE;
+	        AST_FRAME_DATA(fr) =  silbuf;
+	        fr.src = type;
+	        fr.offset = 0;
+	        fr.mallocd = 0;
+	        fr.delivery.tv_sec = 0;
+	        fr.delivery.tv_usec = 0;
 		p->threshold = 0;
 		p->threshcount = 0;
 		p->lingercount = 0;
-		memset(&fr,0,sizeof(struct ast_frame));
-	        fr.frametype = 0;
-	        fr.subclass = 0;
-	        fr.datalen = 0;
-	        fr.samples = 0;
-	        AST_FRAME_DATA(fr) =  NULL;
-	        fr.src = type;
-	        fr.offset = 0;
-	        fr.mallocd=0;
-	        fr.delivery.tv_sec = 0;
-	        fr.delivery.tv_usec = 0;
 		p->winner = 0;
 		incr_drainindex(p);
 		ast_queue_frame(p->owner,&fr);
@@ -1101,7 +1125,7 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	}
 	p->rxkey = 1;
 	x = 0;
-	if (p->dsp)
+	if (p->dsp && p->usedtmf)
 	{
 		f2 = ast_dsp_process(NULL,p->dsp,f1);
 #ifdef	OLD_ASTERISK
@@ -1434,6 +1458,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
         ast_dsp_set_features(p->dsp,DSP_FEATURE_DTMF_DETECT);
         ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
+	p->usedtmf = 1;
 	p->adpcmin = ast_translator_build_path(AST_FORMAT_ULAW,AST_FORMAT_ADPCM);
 	if (!p->adpcmin)
 	{
@@ -2274,6 +2299,7 @@ static void *voter_reader(void *data)
 	VOTER_STREAM stream;
 	time_t timestuff,t;
 	unsigned long my_voter_time;
+	short  silbuf[FRAME_SIZE];
 #ifdef	ADPCM_LOOPBACK
 #pragma pack(push)
 #pragma pack(1)
@@ -2871,20 +2897,21 @@ static void *voter_reader(void *data)
 										}
 										if (!maxclient) /* if nothing there */
 										{
+											memset(silbuf,0,sizeof(silbuf));
+											memset(&fr,0,sizeof(struct ast_frame));
+										        fr.frametype = AST_FRAME_VOICE;
+										        fr.subclass = AST_FORMAT_SLINEAR;
+										        fr.datalen = FRAME_SIZE * 2;
+										        fr.samples = FRAME_SIZE;
+										        AST_FRAME_DATA(fr) =  silbuf;
+										        fr.src = type;
+										        fr.offset = 0;
+										        fr.mallocd = 0;
+										        fr.delivery.tv_sec = 0;
+										        fr.delivery.tv_usec = 0;
 											p->threshold = 0;
 											p->threshcount = 0;
 											p->lingercount = 0;
-											memset(&fr,0,sizeof(struct ast_frame));
-										        fr.frametype = 0;
-										        fr.subclass = 0;
-										        fr.datalen = 0;
-										        fr.samples = 0;
-										        AST_FRAME_DATA(fr) =  NULL;
-										        fr.src = type;
-										        fr.offset = 0;
-										        fr.mallocd=0;
-										        fr.delivery.tv_sec = 0;
-										        fr.delivery.tv_usec = 0;
 											p->winner = 0;
 											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
@@ -2942,20 +2969,21 @@ static void *voter_reader(void *data)
 										{
 											p->rxkey = 0;
 											p->lastwon = NULL;
+											memset(silbuf,0,sizeof(silbuf));
+											memset(&fr,0,sizeof(struct ast_frame));
+										        fr.frametype = AST_FRAME_VOICE;
+										        fr.subclass = AST_FORMAT_SLINEAR;
+										        fr.datalen = FRAME_SIZE * 2;
+										        fr.samples = FRAME_SIZE;
+										        AST_FRAME_DATA(fr) =  silbuf;
+										        fr.src = type;
+										        fr.offset = 0;
+										        fr.mallocd = 0;
+										        fr.delivery.tv_sec = 0;
+										        fr.delivery.tv_usec = 0;
 											p->threshold = 0;
 											p->threshcount = 0;
 											p->lingercount = 0;
-											memset(&fr,0,sizeof(struct ast_frame));
-										        fr.frametype = 0;
-										        fr.subclass = 0;
-										        fr.datalen = 0;
-										        fr.samples = 0;
-										        AST_FRAME_DATA(fr) =  NULL;
-										        fr.src = type;
-										        fr.offset = 0;
-										        fr.mallocd=0;
-										        fr.delivery.tv_sec = 0;
-										        fr.delivery.tv_usec = 0;
 											p->winner = 0;
 											incr_drainindex(p);
 											ast_queue_frame(p->owner,&fr);
@@ -3022,20 +3050,21 @@ static void *voter_reader(void *data)
 									{
 										p->rxkey = 0;
 										p->lastwon = NULL;
+										memset(silbuf,0,sizeof(silbuf));
+										memset(&fr,0,sizeof(struct ast_frame));
+									        fr.frametype = AST_FRAME_VOICE;
+									        fr.subclass = AST_FORMAT_SLINEAR;
+									        fr.datalen = FRAME_SIZE * 2;
+									        fr.samples = FRAME_SIZE;
+									        AST_FRAME_DATA(fr) =  silbuf;
+									        fr.src = type;
+									        fr.offset = 0;
+									        fr.mallocd = 0;
+									        fr.delivery.tv_sec = 0;
+									        fr.delivery.tv_usec = 0;
 										p->threshold = 0;
 										p->threshcount = 0;
 										p->lingercount = 0;
-										memset(&fr,0,sizeof(struct ast_frame));
-									        fr.frametype = 0;
-									        fr.subclass = 0;
-									        fr.datalen = 0;
-									        fr.samples = 0;
-									        AST_FRAME_DATA(fr) =  NULL;
-									        fr.src = type;
-									        fr.offset = 0;
-									        fr.mallocd=0;
-									        fr.delivery.tv_sec = 0;
-									        fr.delivery.tv_usec = 0;
 										p->winner = 0;
 										incr_drainindex(p);
 										ast_queue_frame(p->owner,&fr);

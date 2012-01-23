@@ -692,6 +692,8 @@ static int dahdi_indicate(struct ast_channel *chan, int condition, const void *d
 static int dahdi_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
 static int dahdi_setoption(struct ast_channel *chan, int option, void *data, int datalen);
 static int dahdi_func_read(struct ast_channel *chan, char *function, char *data, char *buf, size_t len); 
+static void enable_dtmf_detect(struct dahdi_pvt *p);
+static void disable_dtmf_detect(struct dahdi_pvt *p);
 
 static const struct ast_channel_tech dahdi_tech = {
 	.type = "DAHDI",
@@ -2964,12 +2966,18 @@ static int dahdi_setoption(struct ast_channel *chan, int option, void *data, int
 		cp = (char *) data;
 		switch (*cp) {
 		case 1:
+			enable_dtmf_detect(p);
 			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: MUTECONF(1) on %s\n",chan->name);
 			ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_MUTECONF | p->dtmfrelax);  /* set mute mode if desired */
 			break;
 		case 2:
+			enable_dtmf_detect(p);
 			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: MUTECONF/MAX(2) on %s\n",chan->name);
 			ast_dsp_digitmode(p->dsp,DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_MUTEMAX | p->dtmfrelax);  /* set mute mode if desired */
+			break;
+		case 3:
+			disable_dtmf_detect(p);
+			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: DISABLE DETECT(3) on %s\n",chan->name);
 			break;
 		default:
 			ast_log(LOG_DEBUG, "Set option TONE VERIFY, mode: OFF(0) on %s\n",chan->name);
