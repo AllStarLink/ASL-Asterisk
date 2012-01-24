@@ -85,6 +85,7 @@ instance2 = Voter/1235,Radio/5679
 
 
 #include "asterisk.h"
+#include "../astver.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -123,18 +124,28 @@ instance2 = Voter/1235,Radio/5679
 
 #define MAXBRIDGES 100
 #define	MAXCHANS 100
+#define	RXDELAY 40
+
+#define	FRAME_SIZE 160
 
 struct radbridge {
 	char *name;
 	char *channames[MAXCHANS];
 	struct ast_channel *chans[MAXCHANS];
 	int nchans;
+	int zapchans[MAXCHANS];
+	char isnativezap[MAXCHANS];
+	int zapconf;
 	pthread_t thread;
 	time_t lastthreadrestarttime;
 	int threadrestarts;
 	int scram;
+	char tx[MAXBRIDGES];
+	char rx[MAXBRIDGES];
+	struct timeval lastrx[MAXBRIDGES];
 } radbridge_vars[MAXBRIDGES];
 
+#define	is_mixminus(p) (p->nchans > 2)
 
 static char *config = "radbridge.conf";
 
@@ -207,15 +218,58 @@ int     i,l,inquo;
 
 }
 
+static void dokey(struct radbridge *mybridge)
+{
+int	i,j,rx;
+struct	ast_frame fr;
+
+	for(i = 0; i < mybridge->nchans; i++)
+	{
+		rx = 0;
+		for(j = 0; j < mybridge->nchans; j++)
+		{
+			if (i == j) continue;
+			rx |= mybridge->rx[j] | (!ast_tvzero(mybridge->lastrx[j]));
+		}
+		if (rx && (!mybridge->tx[i]))
+		{
+			mybridge->tx[i] = 1;
+			memset(&fr,0,sizeof(struct ast_frame));
+		        fr.frametype = AST_FRAME_CONTROL;
+		        fr.subclass = AST_CONTROL_RADIO_KEY;
+			ast_write(mybridge->chans[i],&fr);		
+			if (option_verbose > 4)
+				ast_verbose(VERBOSE_PREFIX_3 "radbridge %s TX KEY\n",mybridge->channames[i]);
+		}
+		else if ((!rx) && mybridge->tx[i])
+		{
+			mybridge->tx[i] = 0;
+			memset(&fr,0,sizeof(struct ast_frame));
+		        fr.frametype = AST_FRAME_CONTROL;
+		        fr.subclass = AST_CONTROL_RADIO_UNKEY;
+			ast_write(mybridge->chans[i],&fr);			
+			if (option_verbose > 4)
+				ast_verbose(VERBOSE_PREFIX_3 "radbridge %s TX UNKEY\n",mybridge->channames[i]);
+		}
+	}
+	return;
+}
+
+
 static void *radbridge(void *data)
 {
 
 struct radbridge *mybridge = (struct radbridge *)data;
 char *tele,tmpstr[300],val;
-int	i,ms;
+int	i,j,ms,bs,fds[MAXCHANS],nfds,winfd;
+short	buf[FRAME_SIZE];
 struct ast_channel *who,*cs[MAXCHANS];
-struct ast_frame *f;
+struct ast_frame *f,fr;
+struct dahdi_confinfo ci;  /* conference info */
+struct dahdi_bufferinfo bi;
+struct timeval now;
 
+	mybridge->zapconf = -1;
 	for(i = 0; i < mybridge->nchans; i++)
 	{
 		strncpy(tmpstr,mybridge->channames[i],sizeof(tmpstr) - 1);
@@ -264,6 +318,69 @@ struct ast_frame *f;
 		}
 		val = 3;
 		ast_channel_setoption(mybridge->chans[i],AST_OPTION_TONE_VERIFY,&val,sizeof(char),0);
+		if (is_mixminus(mybridge))
+		{
+			if ((!strcasecmp(tmpstr,"zap")) || (!strcasecmp(tmpstr,"Dahdi")))
+			{
+				mybridge->zapchans[i] = mybridge->chans[i]->fds[0];
+				mybridge->isnativezap[i] = 1;
+			}
+			else
+			{
+				mybridge->zapchans[i] = open(DAHDI_PSEUDO_DEV_NAME,O_RDWR);
+				if (mybridge->zapchans[i] == -1)
+				{
+					ast_log(LOG_ERROR,"Can not open pseudo channel for radio bridging\n");
+					ast_hangup(mybridge->chans[i]);
+					mybridge->thread = AST_PTHREADT_STOP;
+					pthread_exit(NULL);
+				}
+				bs = FRAME_SIZE;
+				if (ioctl(mybridge->zapchans[i], DAHDI_SET_BLOCKSIZE, &bs) == -1) 
+				{
+					ast_log(LOG_WARNING, "Unable to set blocksize '%d': %s\n", bs,  strerror(errno));
+					close(mybridge->zapchans[i]);
+					ast_hangup(mybridge->chans[i]);
+					mybridge->thread = AST_PTHREADT_STOP;
+					pthread_exit(NULL);
+				}
+				bs = 1;
+				if (ioctl(mybridge->zapchans[i], DAHDI_SETLINEAR, &bs) == -1) 
+				{
+					ast_log(LOG_WARNING, "Unable to linear mode  %s\n", strerror(errno));
+					close(mybridge->zapchans[i]);
+					ast_hangup(mybridge->chans[i]);
+					mybridge->thread = AST_PTHREADT_STOP;
+					pthread_exit(NULL);
+				}
+				/* Setup buffering information */
+				memset(&bi, 0, sizeof(bi));
+				bi.bufsize = FRAME_SIZE;
+				bi.txbufpolicy = DAHDI_POLICY_IMMEDIATE;
+				bi.rxbufpolicy = DAHDI_POLICY_IMMEDIATE;
+				bi.numbufs = 4;
+				if (ioctl(mybridge->zapchans[i], DAHDI_SET_BUFINFO, &bi))
+				{
+					ast_log(LOG_WARNING, "Unable to set buf policy:  %s\n", strerror(errno));
+					close(mybridge->zapchans[i]);
+					ast_hangup(mybridge->chans[i]);
+					mybridge->thread = AST_PTHREADT_STOP;
+					pthread_exit(NULL);
+				}
+				ci.chan = 0;
+				ci.confno = mybridge->zapconf;
+				ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_TALKER | DAHDI_CONF_LISTENER;
+				if (ioctl(mybridge->zapchans[i],DAHDI_SETCONF,&ci) == -1)
+				{
+					ast_log(LOG_WARNING, "Unable to add psuedo to conf\n");
+					close(mybridge->zapchans[i]);
+					ast_hangup(mybridge->chans[i]);
+					mybridge->thread = AST_PTHREADT_STOP;
+					pthread_exit(NULL);
+				}
+				mybridge->zapconf = ci.confno;
+			}
+		}
 	}
 	while(run_forever)
 	{
@@ -273,34 +390,117 @@ struct ast_frame *f;
 			cs[i] = mybridge->chans[s];
 		}
 		mybridge->scram++;
-		ms = 100;
-		who = ast_waitfor_n(cs,mybridge->nchans,&ms);
-		if (who == NULL) continue;
-		f = ast_read(who);
-		if (!f)
-		{
-			ast_log(LOG_ERROR,"radbridge channel %s hung up!!\n",who->name);
-			mybridge->thread = AST_PTHREADT_STOP;
-			pthread_exit(NULL);
-		}
-		if ((f->frametype == AST_FRAME_VOICE) ||
-		    ((f->frametype == AST_FRAME_CONTROL) && 
-			((f->subclass == AST_CONTROL_RADIO_KEY) || (f->subclass == AST_CONTROL_RADIO_UNKEY))))
+		nfds = 0;
+		if (is_mixminus(mybridge))
 		{
 			for(i = 0; i < mybridge->nchans; i++)
 			{
-				if (mybridge->chans[i] == who) continue;
-				ast_write(mybridge->chans[i],f);
+				if (mybridge->isnativezap[i]) continue;
+				fds[nfds++] = mybridge->zapchans[i];
 			}
-	
 		}
-		else if ((f->frametype == AST_FRAME_CONTROL) && (f->subclass == AST_CONTROL_HANGUP))
+		ms = 100;
+		who = ast_waitfor_nandfds(cs,mybridge->nchans,fds,nfds,NULL,&winfd,&ms);
+		gettimeofday(&now,NULL);
+		if (who != NULL)
 		{
-			ast_log(LOG_ERROR,"radbridge channel %s hung up!!\n",who->name);
-			mybridge->thread = AST_PTHREADT_STOP;
-			pthread_exit(NULL);
+			f = ast_read(who);
+			if (!f)
+			{
+				ast_log(LOG_ERROR,"radbridge channel %s hung up!!\n",who->name);
+				mybridge->thread = AST_PTHREADT_STOP;
+				pthread_exit(NULL);
+			}
+			if (!is_mixminus(mybridge))
+			{
+				if ((f->frametype == AST_FRAME_VOICE) ||
+				    ((f->frametype == AST_FRAME_CONTROL) && 
+					((f->subclass == AST_CONTROL_RADIO_KEY) || (f->subclass == AST_CONTROL_RADIO_UNKEY))))
+				{
+					for(j = 0; j < mybridge->nchans; j++)
+					{
+						if (mybridge->chans[j] == who) continue;
+						ast_write(mybridge->chans[j],f);
+					}
+				}
+			}
+			else
+			{
+				for(i = 0; i < mybridge->nchans; i++)
+				{
+					if (mybridge->chans[i] == who) break;
+				}
+				if (i >= mybridge->nchans)
+				{
+					ast_log(LOG_WARNING,"Cannot find match for %s\n",who->name);
+					ast_frfree(f);
+					continue;
+				}
+				if (f->frametype == AST_FRAME_VOICE)
+				{
+					if (!mybridge->isnativezap[i])
+						write(mybridge->zapchans[i],AST_FRAME_DATAP(f),f->datalen);
+					if ((!mybridge->rx[i]) && (!ast_tvzero(mybridge->lastrx[i])) &&
+						(ast_tvdiff_ms(now,mybridge->lastrx[i]) >= RXDELAY))
+					{
+						memset(&mybridge->lastrx[i],0,sizeof(mybridge->lastrx[i]));
+						dokey(mybridge);
+					}
+				}
+				if (f->frametype == AST_FRAME_CONTROL)
+				{
+					if (f->subclass == AST_CONTROL_RADIO_KEY)
+					{
+						mybridge->rx[i] = 1;
+						memset(&mybridge->lastrx[i],0,sizeof(mybridge->lastrx[i]));
+						dokey(mybridge);
+					}
+					if (f->subclass == AST_CONTROL_RADIO_UNKEY)
+					{
+						mybridge->rx[i] = 0;
+						mybridge->lastrx[i] = now;
+					}
+				}
+			}
+			if ((f->frametype == AST_FRAME_CONTROL) && (f->subclass == AST_CONTROL_HANGUP))
+			{
+				ast_log(LOG_ERROR,"radbridge channel %s hung up!!\n",who->name);
+				mybridge->thread = AST_PTHREADT_STOP;
+				pthread_exit(NULL);
+			}
+			ast_frfree(f);
 		}
-		ast_frfree(f);
+		if (winfd >= 0)
+		{
+			for(i = 0; i < mybridge->nchans; i++)
+			{
+				if (winfd == mybridge->zapchans[i]) break;
+			}
+			if (i >= mybridge->nchans)
+			{
+				ast_log(LOG_WARNING,"Cannot find zap chan for fd %d\n",winfd);
+				continue;
+			}
+			j = read(winfd,buf,FRAME_SIZE * 2);
+			if (j != (FRAME_SIZE * 2))
+			{
+				ast_log(LOG_ERROR,"radbridge pseudo channel %s hung up!!\n",mybridge->channames[i]);
+				mybridge->thread = AST_PTHREADT_STOP;
+				pthread_exit(NULL);
+			}
+			memset(&fr,0,sizeof(struct ast_frame));
+		        fr.frametype = AST_FRAME_VOICE;
+		        fr.subclass = AST_FORMAT_SLINEAR;
+		        fr.datalen = FRAME_SIZE * 2;
+		        fr.samples = FRAME_SIZE;
+		        AST_FRAME_DATA(fr) =  buf;
+		        fr.src = app;
+		        fr.offset = 0;
+		        fr.mallocd = 0;
+		        fr.delivery.tv_sec = 0;
+		        fr.delivery.tv_usec = 0;
+			ast_write(mybridge->chans[i],&fr);			
+		}
 	}
 	pthread_exit(NULL);
 }
