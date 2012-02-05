@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.301 01/18/2012
+ *  version 0.302 02/05/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.301 01/18/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.302 02/05/2011";
 
 static char *app = "Rpt";
 
@@ -2296,14 +2296,9 @@ static int serial_open(char *fname, int speed, int stop2)
 
 static int serial_rxready(int fd, int timeoutms)
 {
-	fd_set readyset;
-	struct timeval tv;
+int	myms = timeoutms;
 
-	tv.tv_sec = 0;
-	tv.tv_usec = 1000 * timeoutms;
-        FD_ZERO(&readyset);
-        FD_SET(fd, &readyset);
-        return select(fd + 1, &readyset, NULL, NULL, &tv);
+	return(ast_waitfor_n_fd(&fd, 1, &myms,NULL));
 }
 
 /*

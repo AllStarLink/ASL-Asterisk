@@ -1903,14 +1903,9 @@ static int voter_do_reload(int fd, int argc, char *argv[])
 
 static int rad_rxwait(int fd,int ms)
 {
-fd_set fds;
-struct timeval tv;
+int	myms = ms;
 
-	FD_ZERO(&fds);
-	FD_SET(fd,&fds);
-	tv.tv_usec = ms * 1000;
-	tv.tv_sec = 0;
-	return(select(fd + 1,&fds,NULL,NULL,&tv));
+	return(ast_waitfor_n_fd(&fd, 1, &myms,NULL));
 }
 
 static void voter_display(int fd, struct voter_pvt *p)
@@ -2285,13 +2280,12 @@ static void *voter_reader(void *data)
 	char gps0[300],gps1[300],gps2[300];
 	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
-	int i,j,k,maxrssi,master_port;
+	int i,j,k,ms,maxrssi,master_port;
 	struct ast_frame *f1,fr;
         socklen_t fromlen;
 	ssize_t recvlen;
-	struct timeval tmout,tv,timetv;
+	struct timeval tv,timetv;
 	FILE *gpsfp;
-	fd_set fds;
 	struct voter_client *client,*client1,*maxclient;
 	VOTER_PACKET_HEADER *vph;
 	VOTER_GPS *vgp;
@@ -2322,11 +2316,8 @@ static void *voter_reader(void *data)
 	{
 		my_voter_time = voter_timing_count;
 		ast_mutex_unlock(&voter_lock);
-		FD_ZERO(&fds);
-		FD_SET(udp_socket,&fds);
-		tmout.tv_sec = 0;
-		tmout.tv_usec = 50000;
-		i = select(udp_socket + 1,&fds,NULL,NULL,&tmout);
+		ms = 50000;
+		i = ast_waitfor_n_fd(&udp_socket, 1, &ms,NULL);
 		ast_mutex_lock(&voter_lock);
 		if (i < 0)
 		{
@@ -2357,7 +2348,7 @@ static void *voter_reader(void *data)
 			}
 		}
 		if (i == 0) continue;
-		if (FD_ISSET(udp_socket,&fds)) /* if we get a packet */
+		if (i == udp_socket) /* if we get a packet */
 		{
 			fromlen = sizeof(struct sockaddr_in);
 			recvlen = recvfrom(udp_socket,buf,sizeof(buf) - 1,0,
