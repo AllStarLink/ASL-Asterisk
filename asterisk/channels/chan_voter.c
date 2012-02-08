@@ -1903,9 +1903,12 @@ static int voter_do_reload(int fd, int argc, char *argv[])
 
 static int rad_rxwait(int fd,int ms)
 {
-int	myms = ms;
+int	myms = ms,x;
 
-	return(ast_waitfor_n_fd(&fd, 1, &myms,NULL));
+	x = ast_waitfor_n_fd(&fd, 1, &myms,NULL);
+	if (x == -1) return -1;
+	if (x == fd) return 1;
+	return 0;
 }
 
 static void voter_display(int fd, struct voter_pvt *p)
