@@ -2319,10 +2319,10 @@ static void *voter_reader(void *data)
 	{
 		my_voter_time = voter_timing_count;
 		ast_mutex_unlock(&voter_lock);
-		ms = 50000;
+		ms = 50;
 		i = ast_waitfor_n_fd(&udp_socket, 1, &ms,NULL);
 		ast_mutex_lock(&voter_lock);
-		if (i < 0)
+		if (i == -1)
 		{
 			ast_mutex_unlock(&voter_lock);
 			ast_log(LOG_ERROR,"Error in select()\n");
@@ -2350,7 +2350,7 @@ static void *voter_reader(void *data)
 				p->lastwon = NULL;
 			}
 		}
-		if (i == 0) continue;
+		if (i < 0) continue;
 		if (i == udp_socket) /* if we get a packet */
 		{
 			fromlen = sizeof(struct sockaddr_in);
