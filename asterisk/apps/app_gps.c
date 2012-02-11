@@ -748,7 +748,7 @@ char *val,*deflat,*deflon,*defelev,latc,lonc;
 char fname[200],lat[300],lon[300];
 FILE *fp;
 unsigned int u;
-int interval,my_update_secs;
+int interval,my_update_secs,ehlert;
 float	mylat,lata,latb,latd;
 float	mylon,lona,lonb,lond;
 struct stat mystat;
@@ -772,6 +772,8 @@ time_t	now,was,lastupdate;
 	if (val) defelev = ast_strdup(val); else defelev = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"interval");	
 	if (val) interval = atoi(val); else interval = GPS_UPDATE_SECS;
+	val = (char *) ast_variable_retrieve(cfg,ctg,"ehlert");	
+	if (val) ehlert = ast_true(val); else ehlert = 0;
         ast_config_destroy(cfg);
         cfg = NULL; 
 	time(&lastupdate);
@@ -803,7 +805,7 @@ time_t	now,was,lastupdate;
 				}
 			}
 		}
-		if ((!gotfiledata) && deflat && deflon)
+		if ((!gotfiledata) && (!ehlert) && deflat && deflon)
 		{
 			if (now >= (lastupdate + my_update_secs))
 			{
