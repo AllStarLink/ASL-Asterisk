@@ -96,80 +96,6 @@ Note on "Dynamic" client functionality:
 DONT USE IT!!. It is intentionally *NOT* documented to encourage non-use of this
 feature. It is for demo purposes *ONLY*. The chan_voter driver will *NOT* properly
 perform reliably in a production environment if this option is used.
-
-
-Redundant "Proxy" Mode:
-
-A "Redundant" (backup) server may be set up, so that if the "primary" server fails,
-clients can detect this failure, and connect to the designated "backup" (or "secondary")
-server.
-
-Needless to say, since Internet connectivity is not by any means guaranteed to be consistent,
-it is possible for some clients to have working connectivity to the "primary" server and not
-others, even though the "primary" server is functional.
-
-If this was to occur, actual voting and/or simulcast clients would have a "broken" system
-(being that all the clients need to be on the same server for any sort of functional operation).
-
-To eliminate this possibility, functionality has been added so that a "secondary" server
-will "proxy" (forward) all of its VOTER packets to the "primary" (if the "primary" is
-on line), and the "primary" will generate all of the outbound VOTER packets, which (for clients
-"connected" to the "secondary" server) get sent to the "secondary" server to distribution to
-its clients.
-
-This allows for a "unity" of all of the clients on a network, even though they may be connected
-to different servers.
-
-In addition, it is assumed that "permanent linking" (at least of some sort) will be provided between
-the channel side of the chan_voter instances (presumably through a "perma-link" provided by app_rpt).
-When the "secondary" is "proxying" (to the "primary") it does not provide direct connectivity to/from
-its locally-connected clients, thus allowing them to "connect" via the "primary" server instead. In
-"normal" mode, it works "normally".
-
-The operation is performed by more-or-less "encapsulating" the VOTER packets received by the "secondary"
-server, and forwarding them on to the "primary" server, where they are "un-encapsulated" and appear to
-that serer to be coming from clients connected directly to it (and keeps track of which ones are connected
-in this manner, etc). When it needs to send VOTER packets to a client connected through the "secondary",
-it "encapsulates" them, and sends them to the "secondary", where they get "un-enacpsulated" and sent
-to their associated connected clients, based upon information in the "encapsulation".
-
-If the "secondary" server loses (or does not make) connection to the "primary", it operates as normal, until
-such time as it can make the connection.
-
-The server redundancy feature is local to each chan_voter instance.
-
-For each chan_voter instance served by both the "primary" and "secondary" servers, the client
-list (parameters, etc) *MUST* be identical.
-
-In addition, the following things must be added uniquely on each server:
-
-In the "primary" server, there needs to be a "primary connectivity" client specified for each
-"secondary" server for which it is "primary". Basicaly, this is a client that does NOTHING other
-then providing a means by which the "secondary" can determine whether the "primary" is on line.
-It is a stanard chan_voter client, with nothing else specified other then its password. Again,
-although it is a "legitmate" client (technically), its only purpose *MUST* be to allow the secondary
-server to connect to it.
-
-
-The "primary" server also needs to have the following in all of its instances that require redundancy:
-
-isprimary = y
-
-The "secondary" server needs to have the following in all of its instances that require redundancy:
-
-primary = 12.34.56.78:667,mypswd
-
-(where 12.34.56.78:667 is the IPADDDR:PORT of the "primary" server, and mypswd is the password of the
-"primary connectivity" client)
-
-Note: Master timing sources *MUST* be local to their associated server, and therefore, can not be operated
-in a redundant configuration. If a radio needs server redundancy, it CAN NOT be connected to a master timing
-source. Also, the master timing source MUST be associated with a chan_voter instance that DOES NOT have
-redundancy configured for it, even if a separate instance needs to be created just for this purpose.
-
-Also, if Non-GPS-based operation is all that is needed, just the use of redundancy within the clients is
-sufficient, and does not require any use of the server redundancy features.
-
 */
 
 
@@ -225,7 +151,6 @@ struct ast_flags zeroflag = { 0 };
 #endif
 
 #define	VOTER_CHALLENGE_LEN 10
-#define	VOTER_PASSWORD_LEN 30
 #define	VOTER_NAME_LEN 50
 
 #define	RX_TIMEOUT_MS 200
@@ -252,9 +177,6 @@ struct ast_flags zeroflag = { 0 };
 #define	NTAPS_PL 6
 #define	NTAPS_4K 6
 
-#define	IS_CLIENT_PROXY(x) (x->proxy_sin.sin_family == AF_INET)
-#define	SEND_PRIMARY(x) (x->primary.sin_family == AF_INET)
-
 static const char vdesc[] = "radio Voter channel driver";
 static char type[] = "voter";
 
@@ -274,7 +196,7 @@ int dyntime = DEFAULT_DYNTIME;
 int check_client_sanity = 1;
 
 char challenge[VOTER_CHALLENGE_LEN];
-char password[VOTER_PASSWORD_LEN];
+char password[100];
 char context[100];
 
 double dnsec;
@@ -320,15 +242,6 @@ typedef struct {
 	uint8_t audio[FRAME_SIZE];
 	char str[152];
 } VOTER_STREAM;
-
-typedef struct {
-	uint32_t ipaddr;
-	uint16_t port;
-	uint16_t payload_type;
-	uint8_t flags;
-	char challenge[VOTER_CHALLENGE_LEN];
-} VOTER_PROXY_HEADER;
-	
 #pragma pack(pop)
 
 #define VOTER_PAYLOAD_NONE	0
@@ -336,13 +249,11 @@ typedef struct {
 #define	VOTER_PAYLOAD_GPS	2
 #define VOTER_PAYLOAD_ADPCM	3
 #define VOTER_PAYLOAD_NULAW	4
-#define	VOTER_PAYLOAD_PROXY	0xf000
 
 struct voter_client {
 	uint32_t nodenum;
 	uint32_t digest;
 	char name[VOTER_NAME_LEN];
-	char pswd[VOTER_NAME_LEN];
 	uint8_t *audio;
 	uint8_t *rssi;
 	uint32_t respdigest;
@@ -379,8 +290,6 @@ struct voter_client {
 	int prio_override;
 	VTIME lastgpstime;
 	VTIME lastmastergpstime;
-	struct sockaddr_in proxy_sin;
-	char saved_challenge[VOTER_CHALLENGE_LEN];
 } ;
 
 struct voter_pvt {
@@ -435,11 +344,6 @@ struct voter_pvt {
 	pthread_t xmit_thread;
 	int voter_test;
 	char usedtmf;
-	char isprimary;
-	char priconn;
-	struct sockaddr_in primary;
-	char primary_pswd[VOTER_NAME_LEN];
-	char primary_challenge[VOTER_CHALLENGE_LEN];
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1141,7 +1045,6 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		}
 		ast_frfree(f2);
 	}
-	if (p->priconn) maxclient = NULL;
 	if (!maxclient) /* if nothing there */
 	{
 		if (p->rxkey && p->dsp && p->usedtmf)
@@ -1268,139 +1171,6 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 	return(1);
 }
 
-/* voter primary client thread */
-static void *voter_primary_client(void *data)
-{
-struct voter_pvt *p = (struct voter_pvt *)data;
-int i,pri_socket,ms;
-char buf[4096];
-struct sockaddr_in sin;
-socklen_t fromlen;
-ssize_t recvlen;
-struct voter_client *client;
-struct timeval tv,lasttx,lastrx;
-VOTER_PACKET_HEADER *vph;
-uint32_t resp_digest,digest,mydigest;
-#pragma pack(push)
-#pragma pack(1)
-struct {
-	VOTER_PACKET_HEADER vp;
-	char flags;
-} authpacket;
-#pragma pack(pop)
-
-
-
-	if (debug >= 3) ast_verbose("pri thread started on instance %d\n",p->nodenum);
-	if ((pri_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-	{
-		ast_log(LOG_ERROR,"Unable to create new socket for voter primary connection for instance %d\n",p->nodenum);
-		pthread_exit(NULL);
-		return (NULL);
-	}
-	resp_digest = 0;
-	digest = 0;
-	memset(&lasttx,0,sizeof(lasttx));
-	memset(&lastrx,0,sizeof(lasttx));
-	ast_mutex_lock(&voter_lock);
-	p->primary_challenge[0] = 0;
-	while(run_forever && (!ast_shutting_down()))
-	{
-		ast_mutex_unlock(&voter_lock);
-		ms = 100;
-		i = ast_waitfor_n_fd(&pri_socket, 1, &ms,NULL);
-		ast_mutex_lock(&voter_lock);
-		if (i == -1)
-		{
-			ast_mutex_unlock(&voter_lock);
-			ast_log(LOG_ERROR,"Error in select()\n");
-			pthread_exit(NULL);
-		}
-		gettimeofday(&tv,NULL);
-		memset(&authpacket,0,sizeof(authpacket));
-		if ((!p->priconn) && (ast_tvzero(lasttx) || (ast_tvdiff_ms(tv,lasttx) >= 500)))
-		{
-			authpacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
-			authpacket.vp.curtime.vtime_nsec = htonl(voter_timing_count);
-			strcpy((char *)authpacket.vp.challenge,challenge);
-			authpacket.vp.digest = htonl(resp_digest);
-			authpacket.flags = 32;
-			if (debug >= 3) ast_verbose("Sent pri auth to %s:%d\n",ast_inet_ntoa(p->primary.sin_addr),ntohs(p->primary.sin_port));
-			sendto(pri_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&p->primary,sizeof(p->primary));
-			lasttx = tv;
-		}
-		if (p->priconn && (ast_tvzero(lasttx) || (ast_tvdiff_ms(tv,lasttx) >= 1000)))
-		{
-			authpacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
-			authpacket.vp.curtime.vtime_nsec = htonl(voter_timing_count);
-			strcpy((char *)authpacket.vp.challenge,challenge);
-			authpacket.vp.digest = htonl(resp_digest);
-			authpacket.vp.payload_type = htons(VOTER_PAYLOAD_GPS);
-			if (debug >= 3) ast_verbose("Sent pri GPS Keepalive to %s:%d\n",ast_inet_ntoa(p->primary.sin_addr),ntohs(p->primary.sin_port));
-			sendto(pri_socket, &authpacket, sizeof(authpacket) - 1,0,(struct sockaddr *)&p->primary,sizeof(p->primary));
-			lasttx = tv;
-		}
-		if (p->priconn && (ast_tvzero(lastrx) || (ast_tvdiff_ms(tv,lastrx) >= 2000)))
-		{
-			p->priconn = 0;
-			digest = 0;
-			p->primary_challenge[0] = 0;
-			if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Primary client for %d  Lost connection!!!\n",p->nodenum);
-			for(client = clients; client; client = client->next)
-			{
-				if (client->nodenum != p->nodenum) continue;
-				if (!IS_CLIENT_PROXY(client)) continue;
-				client->respdigest = 0;
-				client->heardfrom = 0;
-			}
-		}
-		if (i < 0) continue;
-		if (i == pri_socket)
-		{
-			fromlen = sizeof(struct sockaddr_in);
-			recvlen = recvfrom(pri_socket,buf,sizeof(buf) - 1,0,
-				(struct sockaddr *)&sin,&fromlen);
-
-			if (recvlen >= sizeof(VOTER_PACKET_HEADER)) /* if set got something worthwile */
-			{
-				vph = (VOTER_PACKET_HEADER *)buf;
-				if (debug > 3) ast_verbose("Got pri rx packet, len %d payload %d challenge %s digest %08x\n",(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
-				/* if this is a new session */
-				if (strcmp((char *)vph->challenge,p->primary_challenge))
-				{
-					resp_digest = crc32_bufs((char *)vph->challenge,p->primary_pswd);
-					strcpy(p->primary_challenge,(char *)vph->challenge);
-					p->priconn = 0;
-				}
-				else
-				{
-					if ((!digest) || (!vph->digest) || (digest != ntohl(vph->digest)) ||
-						(ntohs(vph->payload_type) == 0) || (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS))
-					{
-						mydigest = crc32_bufs(challenge,password);
-						if (mydigest == ntohl(vph->digest))
-						{
-							digest = mydigest;
-							if ((!p->priconn) && (option_verbose >= 3))
-								 ast_verbose(VERBOSE_PREFIX_3 "Primary client for %d connected (with challenge=%s)\n",
-									p->nodenum,p->primary_challenge);
-							p->priconn = 1;
-							lastrx = tv;
-						}
-						else
-						{
-							p->priconn = 0;
-							digest = 0;
-						}
-					}
-				}
-			}
-		}
-	}
-	pthread_exit(NULL);
-	return (NULL);
-}
-
 
 /* voter xmit thread */
 static void *voter_xmit(void *data)
@@ -1421,12 +1191,6 @@ struct timeval tv;
 		char rssi;
 		char audio[FRAME_SIZE + 3];
 	} audiopacket;
-	struct {
-		VOTER_PACKET_HEADER vp;
-		VOTER_PROXY_HEADER vprox;
-		char rssi;
-		char audio[FRAME_SIZE + 3];
-	} proxy_audiopacket;
 #pragma pack(pop)
 
 	while(run_forever && (!ast_shutting_down()))
@@ -1496,7 +1260,6 @@ struct timeval tv;
 				continue;
 			}
 		}
-		if (p->priconn) x = 0;
 		// x will now be set if we are to generate TX output
 		if (x)
 		{
@@ -1510,7 +1273,7 @@ struct timeval tv;
 			for(client = clients; client; client = client->next)
 			{
 				if (client->nodenum != p->nodenum) continue;
-				if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
+				if (!client->respdigest) continue;
 				if (!client->heardfrom) continue;
 				if (client->doadpcm) continue;
 				if (client->donulaw) continue;
@@ -1519,26 +1282,8 @@ struct timeval tv;
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 				if (client->totransmit)
 				{
-					if (IS_CLIENT_PROXY(client))
-					{
-						memset(&proxy_audiopacket,0,sizeof(proxy_audiopacket));
-						proxy_audiopacket.vp = audiopacket.vp;
-						proxy_audiopacket.rssi = audiopacket.rssi;
-						memcpy(proxy_audiopacket.audio,audiopacket.audio,sizeof(audiopacket.audio));
-						proxy_audiopacket.vprox.ipaddr = client->proxy_sin.sin_addr.s_addr;
-						proxy_audiopacket.vprox.port = client->proxy_sin.sin_port;
-						proxy_audiopacket.vprox.payload_type = proxy_audiopacket.vp.payload_type;
-						proxy_audiopacket.vp.payload_type = htons(VOTER_PAYLOAD_PROXY);
-						proxy_audiopacket.vp.digest = htonl(crc32_bufs(client->saved_challenge,client->pswd));
-						proxy_audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-						if (debug > 1) ast_verbose("sending (proxied) audio packet to client %s digest %08x\n",client->name,proxy_audiopacket.vp.digest);
-						sendto(udp_socket, &proxy_audiopacket, sizeof(proxy_audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-					}
-					else
-					{
-						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-						sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-					}
+					if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+					sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 					gettimeofday(&client->lastsenttime,NULL);
 				}
 			}
@@ -1570,7 +1315,7 @@ struct timeval tv;
 				for(client = clients; client; client = client->next)
 				{
 					if (client->nodenum != p->nodenum) continue;
-					if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
+					if (!client->respdigest) continue;
 					if (!client->heardfrom) continue;
 					if (!client->doadpcm) continue;
 					mkpucked(client,&audiopacket.vp.curtime);
@@ -1579,28 +1324,9 @@ struct timeval tv;
 #ifndef	ADPCM_LOOPBACK
 					if (client->totransmit)
 					{
-						if (IS_CLIENT_PROXY(client))
-						{
-							memset(&proxy_audiopacket,0,sizeof(proxy_audiopacket));
-							proxy_audiopacket.vp = audiopacket.vp;
-							proxy_audiopacket.rssi = audiopacket.rssi;
-							memcpy(proxy_audiopacket.audio,audiopacket.audio,sizeof(audiopacket.audio));
-							proxy_audiopacket.vprox.ipaddr = client->proxy_sin.sin_addr.s_addr;
-							proxy_audiopacket.vprox.port = client->proxy_sin.sin_port;
-							proxy_audiopacket.vprox.payload_type = proxy_audiopacket.vp.payload_type;
-							proxy_audiopacket.vp.payload_type = htons(VOTER_PAYLOAD_PROXY);
-							proxy_audiopacket.vp.digest = htonl(crc32_bufs(client->saved_challenge,client->pswd));
-							proxy_audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-							if (debug > 1) ast_verbose("sending (proxied) audio packet to client %s digest %08x\n",client->name,proxy_audiopacket.vp.digest);
-							sendto(udp_socket, &proxy_audiopacket, sizeof(proxy_audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-						}
-						else
-						{
-							if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-							sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-						}
+						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+						sendto(udp_socket, &audiopacket, sizeof(audiopacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 						gettimeofday(&client->lastsenttime,NULL);
-
 					}
 #endif
 				}
@@ -1649,7 +1375,7 @@ struct timeval tv;
 				for(client = clients; client; client = client->next)
 				{
 					if (client->nodenum != p->nodenum) continue;
-					if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
+					if (!client->respdigest) continue;
 					if (!client->heardfrom) continue;
 					if (!client->donulaw) continue;
 					mkpucked(client,&audiopacket.vp.curtime);
@@ -1658,27 +1384,8 @@ struct timeval tv;
 #ifndef	NULAW_LOOPBACK
 					if (client->totransmit)
 					{
-						if (IS_CLIENT_PROXY(client))
-						{
-							memset(&proxy_audiopacket,0,sizeof(proxy_audiopacket));
-							proxy_audiopacket.vp = audiopacket.vp;
-							proxy_audiopacket.rssi = audiopacket.rssi;
-							memcpy(proxy_audiopacket.audio,audiopacket.audio,sizeof(audiopacket.audio));
-							proxy_audiopacket.vprox.ipaddr = client->proxy_sin.sin_addr.s_addr;
-							proxy_audiopacket.vprox.port = client->proxy_sin.sin_port;
-							proxy_audiopacket.vprox.payload_type = proxy_audiopacket.vp.payload_type;
-							proxy_audiopacket.vp.payload_type = htons(VOTER_PAYLOAD_PROXY);
-							proxy_audiopacket.vp.digest = htonl(crc32_bufs(client->saved_challenge,client->pswd));
-							proxy_audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-							if (debug > 1) ast_verbose("sending (proxied) audio packet to client %s digest %08x\n",client->name,proxy_audiopacket.vp.digest);
-							sendto(udp_socket, &proxy_audiopacket, sizeof(proxy_audiopacket) - 3,0,
-								(struct sockaddr *)&client->sin,sizeof(client->sin));
-						}
-						else
-						{
-							if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
-							sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-						}
+						if (debug > 1) ast_verbose("sending audio packet to client %s digest %08x\n",client->name,client->respdigest);
+						sendto(udp_socket, &audiopacket, sizeof(audiopacket) - 3,0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 						gettimeofday(&client->lastsenttime,NULL);
 					}
 #endif
@@ -1691,8 +1398,7 @@ struct timeval tv;
 		for(client = clients; client; client = client->next)
 		{
 			if (client->nodenum != p->nodenum) continue;
-			if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
-			if (p->priconn && (!IS_CLIENT_PROXY(client))) continue;
+			if (!client->respdigest) continue;
 			if (!client->heardfrom) continue;
 			if (ast_tvzero(client->lastsenttime) || (ast_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
 			{
@@ -1703,27 +1409,8 @@ struct timeval tv;
 				audiopacket.vp.payload_type = htons(2);
 				audiopacket.vp.digest = htonl(client->respdigest);
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-				if (IS_CLIENT_PROXY(client))
-				{
-					memset(&proxy_audiopacket,0,sizeof(proxy_audiopacket));
-					proxy_audiopacket.vp = audiopacket.vp;
-					proxy_audiopacket.rssi = audiopacket.rssi;
-					memcpy(proxy_audiopacket.audio,audiopacket.audio,sizeof(audiopacket.audio));
-					proxy_audiopacket.vprox.ipaddr = client->proxy_sin.sin_addr.s_addr;
-					proxy_audiopacket.vprox.port = client->proxy_sin.sin_port;
-					proxy_audiopacket.vprox.payload_type = proxy_audiopacket.vp.payload_type;
-					proxy_audiopacket.vp.payload_type = htons(VOTER_PAYLOAD_PROXY);
-					proxy_audiopacket.vp.digest = htonl(crc32_bufs(client->saved_challenge,client->pswd));
-					proxy_audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-					if (debug > 1) ast_verbose("sending (proxied) GPS/Keepalive packet to client %s digest %08x\n",client->name,proxy_audiopacket.vp.digest);
-					sendto(udp_socket, &proxy_audiopacket, sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
-						0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-				}
-				else
-				{
-					if (debug > 1) ast_verbose("sending KEEPALIVE (GPS) packet to client %s digest %08x\n",client->name,client->respdigest);
-					sendto(udp_socket, &audiopacket, sizeof(VOTER_PACKET_HEADER),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
-				}
+				if (debug > 1) ast_verbose("sending KEEPALIVE (GPS) packet to client %s digest %08x\n",client->name,client->respdigest);
+				sendto(udp_socket, &audiopacket, sizeof(VOTER_PACKET_HEADER),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
 				gettimeofday(&client->lastsenttime,NULL);
 			}
 		}
@@ -1733,7 +1420,7 @@ struct timeval tv;
 
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat,i,j;
+	int oldformat,i;
 	struct voter_pvt *p;
 	struct ast_channel *tmp = NULL;
 	char *val,*cp,*cp1,*cp2,*strs[MAXTHRESHOLDS];
@@ -1905,38 +1592,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 			if (!strcasecmp(val,"phase")) p->txtoctype = TOC_PHASE;
 			else if (!strcasecmp(val,"notone")) p->txtoctype = TOC_NOTONE;
 		}
-		memset(&p->primary,0,sizeof(p->primary));
-	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"primary"); 
-		if (val)
-		{
-			cp = ast_strdup(val);
-			if (!cp)
-			{
-				ast_log(LOG_ERROR,"Cant Malloc()\n");
-				return NULL;
-			}
-			j = finddelim(cp,strs,2);
-			if (j < 2)
-			{
-				ast_log(LOG_ERROR,"primary not specified properly!!!\n");
-			}
-			else
-			{
-				cp1 = strchr(strs[0],':');
-				if (cp1)
-				{
-					*cp1 = 0;
-					j = atoi(cp1 + 1);
-				} else j = listen_port;
-				p->primary.sin_family = AF_INET;
-				p->primary.sin_addr.s_addr = inet_addr(strs[0]);
-				p->primary.sin_port = htons(j);
-				ast_copy_string(p->primary_pswd,strs[1],sizeof(p->primary_pswd) - 1);
-			}
-			ast_free(cp);
-		}
-	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"isprimary"); 
-		if (val) p->isprimary = ast_true(val); else p->isprimary = 0;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
 		if (val)
 		{
@@ -1998,8 +1653,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         ast_pthread_create(&p->xmit_thread,&attr,voter_xmit,p);
-	if (SEND_PRIMARY(p))
-	        ast_pthread_create(&p->xmit_thread,&attr,voter_primary_client,p);
 	pthread_attr_destroy(&attr);
 	return tmp;
 }
@@ -2627,8 +2280,8 @@ static void *voter_timer(void *data)
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
-	char gps0[300],gps1[300],gps2[300],isproxy;
-	struct sockaddr_in sin,sin_stream,psin;
+	char gps0[300],gps1[300],gps2[300];
+	struct sockaddr_in sin,sin_stream;
 	struct voter_pvt *p;
 	int i,j,k,ms,maxrssi,master_port;
 	struct ast_frame *f1,fr;
@@ -2638,32 +2291,26 @@ static void *voter_reader(void *data)
 	FILE *gpsfp;
 	struct voter_client *client,*client1,*maxclient;
 	VOTER_PACKET_HEADER *vph;
-	VOTER_PROXY_HEADER proxy;
 	VOTER_GPS *vgp;
 	VOTER_REC rec;
 	VOTER_STREAM stream;
 	time_t timestuff,t;
 	unsigned long my_voter_time;
 	short  silbuf[FRAME_SIZE];
+#ifdef	ADPCM_LOOPBACK
 #pragma pack(push)
 #pragma pack(1)
-#ifdef	ADPCM_LOOPBACK
 	struct {
 		VOTER_PACKET_HEADER vp;
 		char rssi;
 		char audio[FRAME_SIZE + 3];
 	} audiopacket;
+#pragma pack(pop)
 #endif
 	struct {
 		VOTER_PACKET_HEADER vp;
 		char flags;
 	} authpacket;
-	struct {
-		VOTER_PACKET_HEADER vp;
-		VOTER_PROXY_HEADER vprox;
-		char flags;
-	} proxy_authpacket;
-#pragma pack(pop)
 
 	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "voter: reader thread started.\n");
 	ast_mutex_lock(&voter_lock);
@@ -2715,7 +2362,6 @@ static void *voter_reader(void *data)
 				if (debug > 3) ast_verbose("Got rx packet, len %d payload %d challenge %s digest %08x\n",(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
 				client = NULL;
 				if ((!check_client_sanity) && master_port) sin.sin_port = htons(master_port);
-				isproxy = 0;
 				if (vph->digest)
 				{
 					gettimeofday(&tv,NULL);
@@ -2772,25 +2418,14 @@ static void *voter_reader(void *data)
 					}
 					if (client)
 					{
-						for(p = pvts; p; p = p->next)
-						{
-							if (p->nodenum == client->nodenum) break;
-						}
-						if (check_client_sanity && p && (!p->priconn))
+						if (check_client_sanity)
 						{
 							if ((client->sin.sin_addr.s_addr && (client->sin.sin_addr.s_addr != sin.sin_addr.s_addr)) ||
 								(client->sin.sin_port && (client->sin.sin_port != sin.sin_port))) client->heardfrom = 0;
-							if (IS_CLIENT_PROXY(client))
-							{
-								client->heardfrom = 0;
-								client->respdigest = 0;
-							}
 						} 
 						gettimeofday(&client->lastdyntime,NULL);
-						if ((!client) || (client && (ntohs(vph->payload_type) != VOTER_PAYLOAD_PROXY)))
-							client->respdigest = crc32_bufs((char*)vph->challenge,password);
+						client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
-						memset(&client->proxy_sin,0,sizeof(client->proxy_sin));
 						if ((!client->ismaster) && hasmaster)
 						{
 							if (last_master_count && (voter_timing_count > (last_master_count + MAX_MASTER_COUNT)))
@@ -2831,14 +2466,12 @@ static void *voter_reader(void *data)
 							if (!master_time.vtime_sec) continue;
 						}
 					}
-					if (client && ntohs(vph->payload_type)) client->heardfrom = 1;
 					/* if we know the dude, find the connection his audio belongs to and send it there */
 					if (client && client->heardfrom  && 
 					    (((ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1))) ||
 					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_ADPCM) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 4))) ||
-					    (ntohs(vph->payload_type) == VOTER_PAYLOAD_PROXY) ||
 					    ((ntohs(vph->payload_type) == VOTER_PAYLOAD_NULAW) && 
 						(recvlen == (sizeof(VOTER_PACKET_HEADER) + FRAME_SIZE + 1)))))
 					{
@@ -2854,6 +2487,7 @@ static void *voter_reader(void *data)
 							gettimeofday(&client->lastheardtime,NULL);
 							if (client->ismaster)
 							{
+
 								if (!master_time.vtime_sec)
 								{
 									for(p = pvts; p; p = p->next)
@@ -2871,59 +2505,6 @@ static void *voter_reader(void *data)
 							else
 							{
 								if (!master_time.vtime_sec) continue;
-								if (ntohs(vph->payload_type) == VOTER_PAYLOAD_PROXY)
-								{
-									memcpy(&proxy,buf + sizeof(VOTER_PACKET_HEADER),sizeof(proxy));
-									memmove(buf + sizeof(VOTER_PACKET_HEADER),
-									    buf + sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
-										recvlen - (sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER)));
-									vph->payload_type = proxy.payload_type;
-									psin.sin_family = AF_INET;
-									psin.sin_addr.s_addr = proxy.ipaddr;
-									psin.sin_port = proxy.port;
-									isproxy = 1;
-									if (!p->isprimary)
-									{
-										vph->digest = htonl(client->respdigest);
-										strcpy((char *)vph->challenge,challenge);
-										sendto(udp_socket, buf, recvlen - sizeof(proxy),0,
-											(struct sockaddr *)&psin,sizeof(psin));
-										continue;
-									}
-									ast_copy_string(client->saved_challenge,proxy.challenge,sizeof(client->saved_challenge));
-									client->proxy_sin = psin;
-									if (proxy.flags & 32) client->mix = 1;
-									else client->mix = 0;
-									recvlen -= sizeof(proxy);
-									if (debug > 3) ast_verbose("Now (proxy) Got rx packet, len %d payload %d challenge %s digest %08x\n",
-										(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
-									if (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) goto process_gps;
-								}
-								else if (p->priconn)
-								{
-									memcpy(&proxy,buf + sizeof(VOTER_PACKET_HEADER),sizeof(proxy));
-									proxy.ipaddr = sin.sin_addr.s_addr;
-									proxy.port = sin.sin_port;
-									proxy.payload_type = vph->payload_type;
-									ast_copy_string(proxy.challenge,challenge,sizeof(challenge));
-									vph->payload_type = htons(VOTER_PAYLOAD_PROXY);
-									proxy.flags = 0;
-									if (client->ismaster) proxy.flags |= 2 | 8;
-									if (client->doadpcm) proxy.flags |= 16;
-									if (client->mix) proxy.flags |= 32;
-									if (client->nodeemp) proxy.flags |= 1;
-									if (client->noplfilter) proxy.flags |= 4;
-									vph->digest = htonl(crc32_bufs(p->primary_challenge,client->pswd));
-									memmove(buf + sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
-									    buf + sizeof(VOTER_PACKET_HEADER),recvlen - sizeof(VOTER_PACKET_HEADER));
-									memcpy(buf + sizeof(VOTER_PACKET_HEADER),&proxy,sizeof(proxy));
-									if (debug >= 3) ast_verbose("Sent outproxy to %s:%d for %s payload %d digest %08x\n",
-									    ast_inet_ntoa(p->primary.sin_addr),ntohs(p->primary.sin_port),
-										client->name,ntohs(proxy.payload_type),ntohl(vph->digest));
-									sendto(udp_socket, buf, recvlen + sizeof(proxy),0,
-										(struct sockaddr *)&p->primary,sizeof(p->primary));
-									continue;
-								}
 							}
 							if (client->mix)
 							{
@@ -3104,15 +2685,9 @@ static void *voter_reader(void *data)
 								{
 									for(client = clients; client; client = client->next)
 									{
-										for(p = pvts; p; p = p->next)
-										{
-											if (p->nodenum == client->nodenum) break;
-										}
-										if ((!p) || p->priconn) continue;
 										if (!client->respdigest) continue;
 										for(client1 = client->next; client1; client1 = client1->next)
 										{
-											if (client1 == client) continue;
 											if ((client1->sin.sin_addr.s_addr == client->sin.sin_addr.s_addr) &&
 												(client1->sin.sin_port == client->sin.sin_port))
 											{
@@ -3510,41 +3085,11 @@ static void *voter_reader(void *data)
 						gettimeofday(&client->lastheardtime,NULL);
 						client->lastgpstime.vtime_sec = ntohl(vph->curtime.vtime_sec);
 						client->lastgpstime.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
-						for(p = pvts; p; p = p->next)
-						{
-							if (p->nodenum == client->nodenum) break;
-						}
 						if (client->ismaster)
 						{
 							mastergps_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 							mastergps_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
 						}
-						else if (p && p->priconn)
-						{
-							memcpy(&proxy,buf + sizeof(VOTER_PACKET_HEADER),sizeof(proxy));
-							proxy.ipaddr = sin.sin_addr.s_addr;
-							proxy.port = sin.sin_port;
-							proxy.payload_type = vph->payload_type;
-							ast_copy_string(proxy.challenge,challenge,sizeof(challenge));
-							vph->payload_type = htons(VOTER_PAYLOAD_PROXY);
-							proxy.flags = 0;
-							if (client->ismaster) proxy.flags |= 2 | 8;
-							if (client->doadpcm) proxy.flags |= 16;
-							if (client->mix) proxy.flags |= 32;
-							if (client->nodeemp) proxy.flags |= 1;
-							if (client->noplfilter) proxy.flags |= 4;
-							vph->digest = htonl(crc32_bufs(p->primary_challenge,client->pswd));
-							memmove(buf + sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
-							    buf + sizeof(VOTER_PACKET_HEADER),recvlen - sizeof(VOTER_PACKET_HEADER));
-							memcpy(buf + sizeof(VOTER_PACKET_HEADER),&proxy,sizeof(proxy));
-							if (debug >= 3) ast_verbose("Sent outproxy to %s:%d for %s payload %d digest %08x\n",
-							    ast_inet_ntoa(p->primary.sin_addr),ntohs(p->primary.sin_port),
-								client->name,ntohs(proxy.payload_type),ntohl(vph->digest));
-							sendto(udp_socket, buf, recvlen + sizeof(proxy),0,
-								(struct sockaddr *)&p->primary,sizeof(p->primary));
-							continue;
-						}
-process_gps:
 						client->lastmastergpstime.vtime_sec = mastergps_time.vtime_sec;
 						client->lastmastergpstime.vtime_nsec = mastergps_time.vtime_nsec;
 						if (debug >= 3) 
@@ -3601,7 +3146,6 @@ process_gps:
 				}
 				/* otherwise, we just need to send an empty packet to the dude */
 				memset(&authpacket,0,sizeof(authpacket));
-				memset(&proxy_authpacket,0,sizeof(proxy_authpacket));
 				if (client)
 				{
 					client->txseqno = 0;
@@ -3618,11 +3162,6 @@ process_gps:
 				/* make our digest based on their challenge */
 				authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				authpacket.flags = 0;
-				proxy_authpacket.vp.curtime.vtime_sec = htonl(tv.tv_sec);
-				proxy_authpacket.vp.curtime.vtime_nsec = htonl(tv.tv_usec * 1000);
-				/* make our digest based on their challenge */
-				proxy_authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
-				proxy_authpacket.flags = 0;
 				if (client)
 				{
 					client->mix = 0;
@@ -3653,21 +3192,9 @@ process_gps:
 						if (client->noplfilter) authpacket.flags |= 4;
 					}
 				}
+				if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
 				/* send em the empty packet to get things started */
-				if (isproxy)
-				{
-					if (debug > 1) ast_verbose("sending (proxied) packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
-					proxy_authpacket.flags = authpacket.flags;
-					proxy_authpacket.vprox.ipaddr = sin.sin_addr.s_addr;
-					proxy_authpacket.vprox.port = sin.sin_port;
-					proxy_authpacket.vp.payload_type = htons(VOTER_PAYLOAD_PROXY);
-					sendto(udp_socket, &proxy_authpacket, sizeof(proxy_authpacket),0,(struct sockaddr *)&psin,sizeof(psin));
-				}
-				else
-				{
-					if (debug > 1) ast_verbose("sending packet challenge %s digest %08x password %s\n",authpacket.vp.challenge,ntohl(authpacket.vp.digest),password);
-					sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
-				}
+				sendto(udp_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&sin,sizeof(sin));
 				continue;
 			}
 		}
@@ -3845,8 +3372,6 @@ static int reload(void)
 			if (!strcmp(v->name,"plfilter")) continue;
 			if (!strcmp(v->name,"duplex")) continue;
 			if (!strcmp(v->name,"linger")) continue;
-			if (!strcmp(v->name,"primary")) continue;
-			if (!strcmp(v->name,"isprimary")) continue;
 			if (!strncasecmp(v->name,"transmit",8)) continue;
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
@@ -3950,7 +3475,6 @@ static int reload(void)
 			}
 			client->buflen -= client->buflen % (FRAME_SIZE * 2);
 			client->digest = crc32_bufs(challenge,strs[0]);
-			ast_copy_string(client->pswd,strs[0],sizeof(client->pswd) - 1);
 			ast_free(cp);
 			if (client->old_buflen && (client->buflen != client->old_buflen))
 				client->drainindex = 0;
