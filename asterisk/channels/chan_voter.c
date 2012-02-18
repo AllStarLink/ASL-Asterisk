@@ -1509,7 +1509,7 @@ struct timeval tv;
 			for(client = clients; client; client = client->next)
 			{
 				if (client->nodenum != p->nodenum) continue;
-				if (p->priconn && (!client->dynamic)) continue;
+				if (p->priconn && (!client->dynamic) && (!client->mix)) continue;
 				if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 				if (!client->heardfrom) continue;
 				if (client->doadpcm) continue;
@@ -1570,7 +1570,7 @@ struct timeval tv;
 				for(client = clients; client; client = client->next)
 				{
 					if (client->nodenum != p->nodenum) continue;
-					if (p->priconn && (!client->dynamic)) continue;
+					if (p->priconn && (!client->dynamic) && (!client->mix)) continue;
 					if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 					if (!client->heardfrom) continue;
 					if (!client->doadpcm) continue;
@@ -1650,7 +1650,7 @@ struct timeval tv;
 				for(client = clients; client; client = client->next)
 				{
 					if (client->nodenum != p->nodenum) continue;
-					if (p->priconn && (!client->dynamic)) continue;
+					if (p->priconn && (!client->dynamic) && (!client->mix)) continue;
 					if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 					if (!client->heardfrom) continue;
 					if (!client->donulaw) continue;
@@ -1694,7 +1694,7 @@ struct timeval tv;
 		{
 			if (client->nodenum != p->nodenum) continue;
 			if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
-			if (p->priconn && (!client->dynamic) && (!IS_CLIENT_PROXY(client))) continue;
+			if (p->priconn && (!client->dynamic) && (!client->mix) && (!IS_CLIENT_PROXY(client))) continue;
 			if (!client->heardfrom) continue;
 			if (ast_tvzero(client->lastsenttime) || (ast_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
 			{
@@ -2309,7 +2309,7 @@ static void voter_display(int fd, struct voter_pvt *p)
 		{
 			if (client->nodenum != p->nodenum) continue;
 			if (client->dynamic) hasdyn = 1;
-			if (p->priconn && (!client->dynamic)) continue;
+			if (p->priconn && (!client->dynamic) && (!client->mix)) continue;
 			if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 			if (!client->heardfrom) continue;
 			rssi = client->lastrssi;
@@ -2902,7 +2902,7 @@ static void *voter_reader(void *data)
 										(int)recvlen,ntohs(vph->payload_type),vph->challenge,ntohl(vph->digest));
 									if (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) goto process_gps;
 								}
-								else if (p->priconn && (!client->dynamic))
+								else if (p->priconn && (!client->dynamic) && (!client->mix))
 								{
 									memcpy(&proxy,buf + sizeof(VOTER_PACKET_HEADER),sizeof(proxy));
 									proxy.ipaddr = sin.sin_addr.s_addr;
@@ -3522,7 +3522,7 @@ static void *voter_reader(void *data)
 							mastergps_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 							mastergps_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
 						}
-						else if (p && p->priconn && (!client->dynamic))
+						else if (p && p->priconn && (!client->dynamic) && (!client->mix))
 						{
 							memcpy(&proxy,buf + sizeof(VOTER_PACKET_HEADER),sizeof(proxy));
 							proxy.ipaddr = sin.sin_addr.s_addr;
