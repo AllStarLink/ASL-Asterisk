@@ -2981,6 +2981,7 @@ static void *voter_reader(void *data)
 							{
 								btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
 								btime += 40000000;
+								if (client->ismaster) btime -= 20000000;
 								ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
 								difftime = (ptime - btime) + (BUFDELAY(client) * 125000LL);
 								difftime -= puckoffset(client);
