@@ -440,6 +440,7 @@ struct voter_pvt {
 	struct sockaddr_in primary;
 	char primary_pswd[VOTER_NAME_LEN];
 	char primary_challenge[VOTER_CHALLENGE_LEN];
+	FILE *recfp;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -461,7 +462,6 @@ AST_MUTEX_DEFINE_STATIC(usecnt_lock);
 #endif
 
 int debug = 0;
-FILE *recfp = NULL;
 int hasmaster = 0;
 
 /* This is just a horrendous KLUDGE!! Some Garmin LVC-18 GPS "pucks"
@@ -562,7 +562,7 @@ static char prio_usage[] =
 static int voter_do_record(int fd, int argc, char *argv[]);
 
 static char record_usage[] =
-"Usage: voter record [record filename]\n"
+"Usage: voter record instance_id [record filename]\n"
 "       Enables/Specifies (or disables) recording file for chan_voter\n";
 
 /* Tone */
@@ -2180,22 +2180,36 @@ static int voter_do_prio(int fd, int argc, char *argv[])
 
 static int voter_do_record(int fd, int argc, char *argv[])
 {
-	if (argc == 2)
-	{
-		if (recfp) fclose(recfp);
-		recfp = NULL;
-		ast_cli(fd,"voter recording disabled\n");
-		return RESULT_SUCCESS;
-	}		
-        if (argc != 3)
+	struct voter_pvt *p;
+
+        if (argc < 3)
                 return RESULT_SHOWUSAGE;
-	recfp = fopen(argv[2],"w");
-	if (!recfp)
+	for(p = pvts; p; p = p->next)
 	{
-		ast_cli(fd,"voter Record: Could not open file %s\n",argv[2]);
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
-        ast_cli(fd, "voter Record: Recording enabled info file %s\n",argv[2]);
+	if (argc == 3)
+	{
+		if (p->recfp) fclose(p->recfp);
+		p->recfp = NULL;
+		ast_cli(fd,"voter instance %s recording disabled\n",argv[2]);
+		return RESULT_SUCCESS;
+	}		
+        if (argc != 4)
+                return RESULT_SHOWUSAGE;
+	p->recfp = fopen(argv[3],"w");
+	if (!p->recfp)
+	{
+		ast_cli(fd,"voter instance %s Record: Could not open file %s\n",argv[2],argv[3]);
+		return RESULT_SUCCESS;
+	}
+        ast_cli(fd, "voter instance %s Record: Recording enabled info file %s\n",argv[2],argv[3]);
         return RESULT_SUCCESS;
 }
 
@@ -3353,14 +3367,14 @@ static void *voter_reader(void *data)
 										{
 											if (client->nodenum != p->nodenum) continue;
 											if (client->mix) continue;
-											if (recfp)
+											if (p->recfp)
 											{
 												if (!hasmastered)
 												{
 													hasmastered = 1;
 													memset(&rec,0,sizeof(rec));
 													memcpy(rec.audio,&master_time,sizeof(master_time));
-													fwrite(&rec,1,sizeof(rec),recfp);
+													fwrite(&rec,1,sizeof(rec),p->recfp);
 												}
 												ast_copy_string(rec.name,client->name,sizeof(rec.name) - 1);
 												rec.rssi = client->lastrssi;
@@ -3375,7 +3389,7 @@ static void *voter_reader(void *data)
 													memcpy(rec.audio + FRAME_SIZE + i,client->audio,-i);
 													memset(client->audio + client->drainindex,0xff,FRAME_SIZE + i);
 												}
-												fwrite(&rec,1,sizeof(rec),recfp);
+												fwrite(&rec,1,sizeof(rec),p->recfp);
 											}
 											if (i >= 0)
 											{
