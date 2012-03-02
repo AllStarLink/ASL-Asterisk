@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.302 02/05/2012
+ *  version 0.303 03/02/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.302 02/05/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.303 03/02/2011";
 
 static char *app = "Rpt";
 
@@ -1156,6 +1156,7 @@ static struct rpt
 		int nlconn;
 		char *ldisc[MAX_LSTUFF];
 		int nldisc;
+		char *timezone;
 	} p;
 	struct rpt_link links;
 	int unkeytocttimer;
@@ -5782,27 +5783,46 @@ struct	rptfilter *f;
 */
 
 #ifdef	NEW_ASTERISK
-static void rpt_localtime( time_t *t, struct ast_tm *lt)
+static void rpt_localtime( time_t *t, struct ast_tm *lt, char *tz)
 {
 struct timeval tv;
 
 	tv.tv_sec = *t;
 	tv.tv_usec = 0;
-	ast_localtime(&tv, lt, NULL);
+	ast_localtime(&tv, lt, tz);
 
 }
 
+static time_t rpt_mktime(struct ast_tm *tm,char *zone)
+{
+struct timeval now;
+
+	now = ast_mktime(tm,zone);
+	return now.tv_sec;
+}
+
+
 #else
-static void rpt_localtime( time_t *t, struct tm *lt)
+
+static void rpt_localtime( time_t *t, struct tm *lt, char *tz)
 {
 #ifdef OLD_ASTERISK
 	localtime_r(t, lt);
 #else
-	ast_localtime(t, lt, NULL);
+	ast_localtime(t, lt, tz);
 #endif
 }
-#endif
 
+static time_t rpt_mktime(struct tm *tm,char *zone)
+{
+#ifdef OLD_ASTERISK
+	return(mktime(tm));
+#else
+	return(ast_mktime(tm,zone));
+#endif
+}
+
+#endif
 
 /* Retrieve an int from a config file */
                                                                                 
@@ -6130,6 +6150,8 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg,this,"events");
 	if (!val) val = "events";
 	rpt_vars[n].p.events = val;
+	val = (char *) ast_variable_retrieve(cfg,this,"timezone");
+	rpt_vars[n].p.timezone = val;
 
 #ifdef	__RPT_NOTCH
 	val = (char *) ast_variable_retrieve(cfg,this,"rxnotch");
@@ -8524,7 +8546,8 @@ struct	tm localtm;
 		if (sscanf(strs[1],"%u",&t1) != 1) return;
 		t = t1;
 	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
-		rpt_localtime(&t, &localtm);
+		rpt_localtime(&t, &localtm, myrpt->p.timezone);
+		t1 = rpt_mktime(&localtm,NULL);
 		/* Say the phase of the day is before the time */
 		if((localtm.tm_hour >= 0) && (localtm.tm_hour < 12))
 			p = "rpt/goodmorning";
@@ -8536,7 +8559,7 @@ struct	tm localtm;
 		/* Say the time is ... */		
 		if (sayfile(mychannel,"rpt/thetimeis") == -1) return;
 		/* Say the time */				
-	    	res = ast_say_time(mychannel, t, "", mychannel->language);
+	    	res = ast_say_time(mychannel, t1, "", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);		
@@ -8729,7 +8752,7 @@ struct	rpt_link *l,*l1,linkbase;
 struct	ast_channel *mychannel;
 int id_malloc, vmajor, vminor, m;
 char *p,*ct,*ct_copy,*ident, *nodename,*cp;
-time_t t,was;
+time_t t,t1,was;
 #ifdef	NEW_ASTERISK
 struct ast_tm localtm;
 #else
@@ -10175,7 +10198,8 @@ treataslocal:
             case STATS_TIME_LOCAL:
 	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		t = time(NULL);
-		rpt_localtime(&t, &localtm);
+		rpt_localtime(&t, &localtm, myrpt->p.timezone);
+		t1 = rpt_mktime(&localtm,NULL);
 		/* Say the phase of the day is before the time */
 		if((localtm.tm_hour >= 0) && (localtm.tm_hour < 12))
 			p = "rpt/goodmorning";
@@ -10195,7 +10219,7 @@ treataslocal:
 			break;
 		}
 		/* Say the time */				
-	    	res = ast_say_time(mychannel, t, "", mychannel->language);
+	    	res = ast_say_time(mychannel, t1, "", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);		
@@ -18620,7 +18644,7 @@ static void do_scheduler(struct rpt *myrpt)
 		}
 	}
 			
-	rpt_localtime(&myrpt->curtv.tv_sec, &tmnow);
+	rpt_localtime(&myrpt->curtv.tv_sec, &tmnow, NULL);
 
 	/* If midnight, then reset all daily statistics */
 	
