@@ -211,6 +211,7 @@ sufficient, and does not require any use of the server redundancy features.
 #include "asterisk/cli.h"
 #include "asterisk/ulaw.h"
 #include "asterisk/dsp.h"
+#include "asterisk/manager.h"
 
 
 #ifdef	NEW_ASTERISK
@@ -2500,6 +2501,71 @@ static struct ast_cli_entry voter_cli[] = {
 
 #endif
 
+#ifndef OLD_ASTERISK
+/*
+ * Append Success and ActionID to manager response message
+ */
+
+static void rpt_manager_success(struct mansession *s, const struct message *m)
+{
+	const char *id = astman_get_header(m, "ActionID");
+	if (!ast_strlen_zero(id))
+		astman_append(s, "ActionID: %s\r\n", id);
+	astman_append(s, "Response: Success\r\n");
+}
+
+static int manager_voter_status(struct mansession *ses, const struct message *m)
+{
+int success = 0;
+struct voter_pvt *p;
+struct voter_client *client;
+const char *node = astman_get_header(m, "Node");
+
+
+	ast_mutex_lock(&voter_lock);
+	for(p = pvts; p; p = p->next)
+	{
+		if (node && *node && (p->nodenum != atoi(node))) continue;
+		if (!success) rpt_manager_success(ses,m);
+		success = 1;
+		astman_append(ses,"Node: %d\r\n",p->nodenum);
+		if (p->lastwon) 
+			astman_append(ses,"Voted: %s\r\n",p->lastwon->name);
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
+			if (!client->heardfrom) continue;
+			if (IS_CLIENT_PROXY(client))
+			{
+				astman_append(ses,"Client: %s",client->name);
+				if (client->dynamic) astman_append(ses," Dynamic");
+				if (client->mix) astman_append(ses," Mix");
+				if (client->ismaster) astman_append(ses," Master");
+				astman_append(ses,"\r\n");
+				astman_append(ses,"IP: %s:%d (Proxied)\r\n",
+					ast_inet_ntoa(client->proxy_sin.sin_addr),ntohs(client->proxy_sin.sin_port));
+			}
+			else
+			{
+				if (!client->respdigest) continue;
+				astman_append(ses,"Client: %s",client->name);
+				if (client->dynamic) astman_append(ses," Dynamic");
+				if (client->mix) astman_append(ses," Mix");
+				if (client->ismaster) astman_append(ses," Master");
+				astman_append(ses,"\r\n");
+				astman_append(ses,"IP: %s:%d\r\n",
+					ast_inet_ntoa(client->sin.sin_addr),ntohs(client->sin.sin_port));
+			}
+			astman_append(ses,"RSSI: %d\r\n",client->lastrssi);
+		}
+	}
+	ast_mutex_unlock(&voter_lock);
+	astman_append(ses, "\r\n");	/* Properly terminate Manager output */
+	return RESULT_SUCCESS;
+}
+
+#endif
+
 #include "xpmr/xpmr.c"
 
 #ifndef	OLD_ASTERISK
@@ -2521,6 +2587,9 @@ int unload_module(void)
 	ast_cli_unregister(&cli_tone);
 	ast_cli_unregister(&cli_reload);
 	ast_cli_unregister(&cli_display);
+#endif
+#ifndef OLD_ASTERISK
+	ast_manager_unregister("VoterStatus");
 #endif
 	/* First, take us out of the channel loop */
 	ast_channel_unregister(&voter_tech);
@@ -4171,6 +4240,9 @@ int load_module(void)
 	ast_cli_register(&cli_display);
 #endif
 
+#ifndef OLD_ASTERISK
+	ast_manager_register("VoterStatus", 0, manager_voter_status, "Return Voter instance(s) status");
+#endif
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         ast_pthread_create(&voter_reader_thread,&attr,voter_reader,NULL);
