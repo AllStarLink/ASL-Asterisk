@@ -361,7 +361,6 @@ struct voter_client {
 	char noplfilter;
 	char dynamic;
 	struct voter_client *next;
-	long long dtime;
 	uint8_t lastrssi;
 	int txseqno;
 	int txseqno_rxkeyed;
@@ -382,6 +381,7 @@ struct voter_client {
 	VTIME lastmastergpstime;
 	struct sockaddr_in proxy_sin;
 	char saved_challenge[VOTER_CHALLENGE_LEN];
+	short lastaudio[FRAME_SIZE];
 } ;
 
 struct voter_pvt {
@@ -442,6 +442,8 @@ struct voter_pvt {
 	char primary_pswd[VOTER_NAME_LEN];
 	char primary_challenge[VOTER_CHALLENGE_LEN];
 	FILE *recfp;
+	short lastaudio[FRAME_SIZE];
+	char mixminus;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1014,12 +1016,13 @@ int len;
 static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclient, int maxrssi)
 {
 
-	int i,j,k,x,maxprio;
+	int i,j,k,x,maxprio,haslastaudio;
 	struct ast_frame fr,*f1,*f2;
 	struct voter_client *client;
 	short  silbuf[FRAME_SIZE];
 
 
+	haslastaudio = 0;
 	memset(&fr,0,sizeof(struct ast_frame));
         fr.frametype = AST_FRAME_VOICE;
         fr.subclass = AST_FORMAT_ULAW;
@@ -1130,6 +1133,12 @@ static int voter_mix_and_send(struct voter_pvt *p, struct voter_client *maxclien
 		}
 		sp1 = AST_FRAME_DATAP(f1);
 		sp2 = AST_FRAME_DATAP(f2);
+		if (!haslastaudio)
+		{
+			memcpy(p->lastaudio,sp1,FRAME_SIZE * 2);
+			haslastaudio = 1;
+		}
+		memcpy(client->lastaudio,sp2,FRAME_SIZE * 2);
 		for(i = 0; i < FRAME_SIZE; i++)
 		{
 			if (maxprio && client->lastrssi)
@@ -1408,11 +1417,12 @@ static void *voter_xmit(void *data)
 {
 
 struct voter_pvt *p = (struct voter_pvt *)data;
-int	i,n,x;
+int	i,n,x,mx;
 i16 dummybuf1[FRAME_SIZE * 12],xmtbuf1[FRAME_SIZE * 12];
-i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE];
+i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE],xmtbuf2[FRAME_SIZE];
+i32	l;
 struct ast_frame fr,*f1,*f2,*f3;
-struct voter_client *client;
+struct voter_client *client,*client1;
 struct timeval tv;
 
 #pragma pack(push)
@@ -1462,6 +1472,7 @@ struct timeval tv;
 		if ((!x) && (p->pmrChan)) p->pmrChan->txPttIn = 0;
 		if (x && (!p->pmrChan))
 		{
+			memcpy(xmtbuf,AST_FRAME_DATAP(f2),sizeof(xmtbuf));
 			f1 = ast_translate(p->fromast,f2,1);
 			if (!f1)
 			{
@@ -1482,7 +1493,7 @@ struct timeval tv;
 			memset(&fr,0,sizeof(struct ast_frame));
 		        fr.frametype = AST_FRAME_VOICE;
 		        fr.subclass = AST_FORMAT_SLINEAR;
-		        fr.datalen = ADPCM_FRAME_SIZE;
+		        fr.datalen = FRAME_SIZE;
 		        fr.samples = FRAME_SIZE;
 		        AST_FRAME_DATA(fr) = xmtbuf;
 		        fr.src = type;
@@ -1497,14 +1508,29 @@ struct timeval tv;
 				continue;
 			}
 		}
-		// x will now be set if we are to generate TX output
-		if (x)
+		mx = 0;
+		if (p->mixminus)
 		{
-			memset(&audiopacket,0,sizeof(audiopacket));
+			for(client = clients; client; client = client->next)
+			{
+				if (client->nodenum != p->nodenum) continue;
+				if (!client->heardfrom) continue;
+				if (!client->respdigest) continue;
+				if (!client->mix) continue;
+				if (client->doadpcm) continue;
+				if (client->donulaw) continue;
+				if (client->lastrssi) mx = 1;
+			}
+		}
+		// x will now be set if we are to generate TX output
+		if (x || mx)
+		{
+			memset(&audiopacket,0,sizeof(audiopacket) - sizeof(audiopacket.audio));
+			memset(&audiopacket.audio,0xff,sizeof(audiopacket.audio));
 			strcpy((char *)audiopacket.vp.challenge,challenge);
 			audiopacket.vp.payload_type = htons(1);
 			audiopacket.rssi = 0;
-			memcpy(audiopacket.audio,AST_FRAME_DATAP(f1),FRAME_SIZE);
+			if (f1) memcpy(audiopacket.audio,AST_FRAME_DATAP(f1),FRAME_SIZE);
 			audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 			audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
 			for(client = clients; client; client = client->next)
@@ -1515,6 +1541,49 @@ struct timeval tv;
 				if (!client->heardfrom) continue;
 				if (client->doadpcm) continue;
 				if (client->donulaw) continue;
+				if (p->mixminus)
+				{
+					memcpy(xmtbuf2,xmtbuf,sizeof(xmtbuf2));
+					i = 0;
+					for(client1 = clients; client1; client1 = client1->next)
+					{
+						if (client1 == client) continue;
+						if (client1->nodenum != p->nodenum) continue;
+						if (!client1->heardfrom) continue;
+						if (!client1->respdigest) continue;
+						if (!client1->mix) continue;						
+						if (client1->doadpcm) continue;
+						if (client1->donulaw) continue;
+						if (!client1->lastrssi) continue;
+						for(i = 0; i < FRAME_SIZE; i++)
+						{
+							l = xmtbuf2[i] + client1->lastaudio[i];
+							if (l > 32767) l = 32767;
+							if (l < -32767) l = -32767;
+							xmtbuf2[i] = l;
+						}
+					}
+					if ((!x) && (!i)) continue;
+					memset(&fr,0,sizeof(struct ast_frame));
+				        fr.frametype = AST_FRAME_VOICE;
+				        fr.subclass = AST_FORMAT_SLINEAR;
+				        fr.datalen = FRAME_SIZE;
+				        fr.samples = FRAME_SIZE;
+				        AST_FRAME_DATA(fr) = xmtbuf2;
+				        fr.src = type;
+				        fr.offset = 0;
+				        fr.mallocd = 0;
+				        fr.delivery.tv_sec = 0;
+				        fr.delivery.tv_usec = 0;
+					if (f1) ast_frfree(f1);
+					f1 = ast_translate(p->fromast,&fr,0);
+					if (!f1)
+					{
+						ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
+						continue;
+					}
+					memcpy(audiopacket.audio,AST_FRAME_DATAP(f1),FRAME_SIZE);
+				}
 				mkpucked(client,&audiopacket.vp.curtime);
 				audiopacket.vp.digest = htonl(client->respdigest);
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
@@ -1891,6 +1960,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		if (val) p->plfilter = ast_true(val);
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
 		if (val) p->duplex = ast_true(val); else p->duplex = 1;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"mixminus"); 
+		if (val) p->mixminus = ast_true(val); else p->mixminus = 0;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
 		if (val)
 		{
@@ -3834,6 +3905,8 @@ static int reload(void)
 		if (val) p->plfilter = ast_true(val); else p->plfilter = 0;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
 		if (val) p->duplex = ast_true(val); else p->duplex = 1;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"mixminus"); 
+		if (val) p->mixminus = ast_true(val); else p->mixminus = 0;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"streams"); 
 		if (p->nstreams && p->streams[0]) ast_free(p->streams[0]);
 		p->nstreams = 0;
@@ -3931,6 +4004,7 @@ static int reload(void)
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
 			if (!strcmp(v->name,"duplex")) continue;
+			if (!strcmp(v->name,"mixminus")) continue;
 			if (!strcmp(v->name,"linger")) continue;
 			if (!strcmp(v->name,"primary")) continue;
 			if (!strcmp(v->name,"isprimary")) continue;

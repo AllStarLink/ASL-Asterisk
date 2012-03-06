@@ -116,6 +116,7 @@ instance2 = Voter/1235,Radio/5679
 #include "asterisk/app.h"
 #include "asterisk/translate.h"
 #include "asterisk/cli.h"
+#include "asterisk/channel.h"
 
 #ifdef OLD_ASTERISK
 #define ast_free free
@@ -382,7 +383,7 @@ struct timeval now;
 			}
 		}
 	}
-	while(run_forever)
+	while(run_forever && (!ast_shutting_down()))
 	{
 		for(i = 0; i < mybridge->nchans; i++)
 		{
@@ -554,7 +555,7 @@ pthread_attr_t attr;
 		ast_pthread_create(&radbridge_vars[i].thread,&attr,radbridge,(void *) &radbridge_vars[i]);
 	}
 	usleep(500000);
-	for(;;)
+	while(!ast_shutting_down())
 	{
 		/* Now monitor each thread, and restart it if necessary */
 		for(i = 0; i < nbridges; i++)
