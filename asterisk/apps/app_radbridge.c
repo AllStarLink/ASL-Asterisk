@@ -387,9 +387,15 @@ struct timeval now;
 	{
 		for(i = 0; i < mybridge->nchans; i++)
 		{
+			if (ast_check_hangup(mybridge->chans[i]))
+			{
+				run_forever = 0;
+				break;
+			}
 			int s = -(-i - mybridge->scram - 1) % mybridge->nchans;
 			cs[i] = mybridge->chans[s];
 		}
+		if (!run_forever) break;
 		mybridge->scram++;
 		nfds = 0;
 		if (is_mixminus(mybridge))
@@ -402,6 +408,15 @@ struct timeval now;
 		}
 		ms = 100;
 		who = ast_waitfor_nandfds(cs,mybridge->nchans,fds,nfds,NULL,&winfd,&ms);
+		for(i = 0; i < mybridge->nchans; i++)
+		{
+			if (ast_check_hangup(mybridge->chans[i]))
+			{
+				run_forever = 0;
+				break;
+			}
+		}
+		if (!run_forever) break;
 		gettimeofday(&now,NULL);
 		if (who != NULL)
 		{
@@ -502,6 +517,10 @@ struct timeval now;
 		        fr.delivery.tv_usec = 0;
 			ast_write(mybridge->chans[i],&fr);			
 		}
+	}
+	for(i = 0; i < mybridge->nchans; i++)
+	{
+		ast_hangup(mybridge->chans[i]);
 	}
 	pthread_exit(NULL);
 }
