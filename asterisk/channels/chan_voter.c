@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1999 - 2011, Digium, Inc.
  *
- * Copyright (C) 2011
+ * Copyright (C) 2011-2012
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
  * See http://www.asterisk.org for more information about
@@ -2587,16 +2587,28 @@ static void rpt_manager_success(struct mansession *s, const struct message *m)
 
 static int manager_voter_status(struct mansession *ses, const struct message *m)
 {
-int success = 0;
+int success = 0,i,n;
 struct voter_pvt *p;
 struct voter_client *client;
 const char *node = astman_get_header(m, "Node");
-
+char *str,*strs[100];
 
 	ast_mutex_lock(&voter_lock);
+	str = NULL;
+	if (node) str = ast_strdup(node);
+	n = 0;
+	if (str) n = finddelim(str,strs,100);
 	for(p = pvts; p; p = p->next)
 	{
-		if (node && *node && (p->nodenum != atoi(node))) continue;
+		if (node && *node && str && n)
+		{
+			for(i = 0; i < n; i++)
+			{
+				if (!*strs[i]) continue;
+				if (atoi(strs[i]) == p->nodenum) break;
+			}
+			if (i >= n) continue;
+		}
 		if (!success) rpt_manager_success(ses,m);
 		success = 1;
 		astman_append(ses,"Node: %d\r\n",p->nodenum);
@@ -2632,6 +2644,7 @@ const char *node = astman_get_header(m, "Node");
 	}
 	ast_mutex_unlock(&voter_lock);
 	astman_append(ses, "\r\n");	/* Properly terminate Manager output */
+	if (str) ast_free(str);
 	return RESULT_SUCCESS;
 }
 
