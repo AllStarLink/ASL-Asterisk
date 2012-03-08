@@ -283,6 +283,8 @@ double dnsec;
 static pthread_t voter_reader_thread = 0;
 static pthread_t voter_timer_thread = 0;
 
+int maxpvtorder = 0;
+
 #define	FRAME_SIZE 160
 #define	ADPCM_FRAME_SIZE 163
 
@@ -444,6 +446,7 @@ struct voter_pvt {
 	FILE *recfp;
 	short lastaudio[FRAME_SIZE];
 	char mixminus;
+	int order;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1806,9 +1809,9 @@ struct timeval tv;
 static struct ast_channel *voter_request(const char *type, int format, void *data, int *cause)
 {
 	int oldformat,i,j;
-	struct voter_pvt *p;
+	struct voter_pvt *p,*p1;
 	struct ast_channel *tmp = NULL;
-	char *val,*cp,*cp1,*cp2,*strs[MAXTHRESHOLDS];
+	char *val,*cp,*cp1,*cp2,*strs[MAXTHRESHOLDS],*ctg;
 	struct ast_config *cfg = NULL;
 	pthread_attr_t attr;
 	
@@ -2067,6 +2070,24 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		p->pmrChan->pTxCodeSrc = p->txctcssfreq;
 //		p->pmrChan->txfreq = p->txctcssfreq;
 			
+	}
+	i = 0;
+	ctg = NULL;
+        while ( (ctg = ast_category_browse(cfg, ctg)) != NULL)
+	{
+		if (!ctg[0]) continue;
+		if (!isdigit(ctg[0])) continue;
+		ast_mutex_lock(&voter_lock);
+		for(p1 = pvts; p1; p1 = p1->next)
+		{
+			if (p1->nodenum == atoi(ctg)) break;
+		}
+		if (p1)
+		{
+			p1->order = ++i;
+			if (i > maxpvtorder) maxpvtorder = i;
+		}
+		ast_mutex_unlock(&voter_lock);
 	}
 	ast_config_destroy(cfg);
         pthread_attr_init(&attr);
@@ -2587,7 +2608,7 @@ static void rpt_manager_success(struct mansession *s, const struct message *m)
 
 static int manager_voter_status(struct mansession *ses, const struct message *m)
 {
-int success = 0,i,n;
+int success = 0,i,j,n;
 struct voter_pvt *p;
 struct voter_client *client;
 const char *node = astman_get_header(m, "Node");
@@ -2598,8 +2619,13 @@ char *str,*strs[100];
 	if (node) str = ast_strdup(node);
 	n = 0;
 	if (str) n = finddelim(str,strs,100);
-	for(p = pvts; p; p = p->next)
+	for(j = 1; j <= maxpvtorder; j++)
 	{
+		for(p = pvts; p; p = p->next)
+		{
+			if (p->order == j) break;
+		}
+		if (!p) continue;
 		if (node && *node && str && n)
 		{
 			for(i = 0; i < n; i++)
