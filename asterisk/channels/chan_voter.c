@@ -3820,11 +3820,11 @@ process_gps:
 				/* make our digest based on their challenge */
 				proxy_authpacket.vp.digest = htonl(crc32_bufs((char*)vph->challenge,password));
 				proxy_authpacket.flags = 0;
-				if (client)
+				if (client && (!vph->payload_type))
 				{
 					client->mix = 0;
 					/* if client is sending options */
-  					if ((recvlen > sizeof(VOTER_PACKET_HEADER)) && (!vph->payload_type))
+  					if (recvlen > sizeof(VOTER_PACKET_HEADER))
 					{
 						if (buf[sizeof(VOTER_PACKET_HEADER)] & 32) client->mix = 1;
 					}
