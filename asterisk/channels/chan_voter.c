@@ -840,12 +840,12 @@ static int voter_hangup(struct ast_channel *ast)
 	if (p->nuin) ast_translator_free_path(p->nuin);
 	if (p->nuout) ast_translator_free_path(p->nuout);
 	ast_mutex_lock(&voter_lock);
-	for(q = pvts; q; q = q->next)
+	for(q = pvts; q->next; q = q->next)
 	{
 		if (q->next == p) break;
 	}
-	if (q) q->next = p->next;
-	else pvts = NULL;
+	if (q->next) q->next = p->next;
+	if (pvts == p) pvts = p->next;
 	ast_mutex_unlock(&voter_lock);
 	ast_free(p);
 	ast->tech_pvt = NULL;
@@ -2052,6 +2052,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		tChan.txMod = 2;
 		tChan.txMixA = TX_OUT_COMPOSITE;
 		tChan.b.txboost = 1;
+		if (p->pmrChan) destroyPmrChannel(p->pmrChan);
 		p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
 		p->pmrChan->radioDuplex = 1;//o->radioduplex;
 		p->pmrChan->b.loopback=0; 
@@ -2068,7 +2069,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		*p->pmrChan->ptxCtcssAdjust = p->txctcsslevel;
 		p->pmrChan->pTxCodeDefault = p->txctcssfreq;
 		p->pmrChan->pTxCodeSrc = p->txctcssfreq;
-//		p->pmrChan->txfreq = p->txctcssfreq;
 			
 	}
 	i = 0;
@@ -3885,7 +3885,7 @@ static int reload(void)
         struct ast_flags zeroflag = {0};
 #endif
 	unsigned int mynode;
-	int i,n,instance_buflen,buflen;
+	int i,n,instance_buflen,buflen,oldtoctype,oldlevel;
 	char *val,*ctg,*cp,*cp1,*cp2,*strs[40],newclient,data[100],oldctcss[100];
 	struct voter_pvt *p;
 	struct voter_client *client,*client1;
@@ -3956,8 +3956,10 @@ static int reload(void)
 		}		
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcss"); 
 		if (val) ast_copy_string(p->txctcssfreq,val,sizeof(p->txctcssfreq)); else p->txctcssfreq[0] = 0;
+		oldlevel = p->txctcsslevel;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcsslevel"); 
 		if (val) p->txctcsslevel = atoi(val); else p->txctcsslevel = 62;
+		oldtoctype = p->txtoctype;
 		p->txtoctype = TOC_NONE;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txtoctype"); 
 		if (val)
@@ -3991,36 +3993,41 @@ static int reload(void)
 			ast_free(cp);
 		}		
 		/* if new CTCSS freq */
-		if (p->txctcssfreq[0] && strcmp(oldctcss,p->txctcssfreq))
+		if (strcmp(oldctcss,p->txctcssfreq) || (oldtoctype != p->txtoctype) || (oldlevel != p->txctcsslevel))
 		{
+
 			t_pmr_chan tChan;
 
-			memset(&tChan,0,sizeof(t_pmr_chan));
-
-			tChan.pTxCodeDefault = p->txctcssfreq;
-			tChan.pTxCodeSrc     = p->txctcssfreq;
-			tChan.pRxCodeSrc     = p->txctcssfreq;
-			tChan.txMod = 2;
-			tChan.txMixA = TX_OUT_COMPOSITE;
-			tChan.b.txboost = 1;
 			if (p->pmrChan) destroyPmrChannel(p->pmrChan);
-			p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
-			p->pmrChan->radioDuplex = 1;//o->radioduplex;
-			p->pmrChan->b.loopback=0; 
-			p->pmrChan->b.radioactive= 1;
-			p->pmrChan->txrxblankingtime = 0;
-			p->pmrChan->rxCpuSaver = 0;
-			p->pmrChan->txCpuSaver = 0;
-			*(p->pmrChan->prxSquelchAdjust) = 0;
-			*(p->pmrChan->prxVoiceAdjust) = 0;
-			*(p->pmrChan->prxCtcssAdjust) = 0;
-			p->pmrChan->rxCtcss->relax = 0;
-			p->pmrChan->txTocType = p->txtoctype;
-			p->pmrChan->spsTxOutA->outputGain = 250;
-			*p->pmrChan->ptxCtcssAdjust = p->txctcsslevel;
-			p->pmrChan->pTxCodeDefault = p->txctcssfreq;
-			p->pmrChan->pTxCodeSrc = p->txctcssfreq;
-	//		p->pmrChan->txfreq = p->txctcssfreq;
+			p->pmrChan = 0;
+			if (p->txctcssfreq[0])
+			{
+
+				memset(&tChan,0,sizeof(t_pmr_chan));
+
+				tChan.pTxCodeDefault = p->txctcssfreq;
+				tChan.pTxCodeSrc     = p->txctcssfreq;
+				tChan.pRxCodeSrc     = p->txctcssfreq;
+				tChan.txMod = 2;
+				tChan.txMixA = TX_OUT_COMPOSITE;
+				tChan.b.txboost = 1;
+				p->pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
+				p->pmrChan->radioDuplex = 1;//o->radioduplex;
+				p->pmrChan->b.loopback=0; 
+				p->pmrChan->b.radioactive= 1;
+				p->pmrChan->txrxblankingtime = 0;
+				p->pmrChan->rxCpuSaver = 0;
+				p->pmrChan->txCpuSaver = 0;
+				*(p->pmrChan->prxSquelchAdjust) = 0;
+				*(p->pmrChan->prxVoiceAdjust) = 0;
+				*(p->pmrChan->prxCtcssAdjust) = 0;
+				p->pmrChan->rxCtcss->relax = 0;
+				p->pmrChan->txTocType = p->txtoctype;
+				p->pmrChan->spsTxOutA->outputGain = 250;
+				*p->pmrChan->ptxCtcssAdjust = p->txctcsslevel;
+				p->pmrChan->pTxCodeDefault = p->txctcssfreq;
+				p->pmrChan->pTxCodeSrc = p->txctcssfreq;
+			}
 		}
 	}
 	hasmaster = 0;
@@ -4106,6 +4113,9 @@ static int reload(void)
 			client->reload = 1;
 			client->buflen = instance_buflen;
 			client->nodenum = strtoul(ctg,NULL,0);
+			client->totransmit = client->doadpcm = client->donulaw = 0;
+			client->nodeemp = client->noplfilter = 	client->dynamic = client->prio = 0;
+			client->gpsid = 0;
 			for(i = 1; i < n; i++)
 			{
 				if (!strcasecmp(strs[i],"transmit"))

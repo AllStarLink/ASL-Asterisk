@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.303 03/02/2012
+ *  version 0.304 05/09/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.303 03/02/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.304 05/09/2011";
 
 static char *app = "Rpt";
 
@@ -834,6 +834,8 @@ struct rpt_link
 	int linkmode;
 	int newkeytimer;
 	char gott;
+	time_t	lastkeytime;
+	time_t	lastunkeytime;
 #ifdef OLD_ASTERISK
         AST_LIST_HEAD(, ast_frame) rxq;
 #else
@@ -6088,13 +6090,14 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	if (rpt_vars[n].p.tannmode < 1) rpt_vars[n].p.tannmode = 1;
 	if (rpt_vars[n].p.tannmode > 3) rpt_vars[n].p.tannmode = 3;
 	val = (char *) ast_variable_retrieve(cfg,this,"discpgm");
-	rpt_vars[n].p.discpgm = val;
+	rpt_vars[n].p.discpgm = val; 
 	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
 	rpt_vars[n].p.connpgm = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"mdclog");
 	rpt_vars[n].p.mdclog = val;
 	val = (char *) ast_variable_retrieve(cfg,this,"lnkactenable");
 	if (val) rpt_vars[n].p.lnkactenable = ast_true(val);
+	else rpt_vars[n].p.lnkactenable = 0;
 	rpt_vars[n].p.lnkacttime = retrieve_astcfgint(&rpt_vars[n],this, "lnkacttime", -120, 90000, 0);	/* Enforce a min max including zero */
 	val = (char *) ast_variable_retrieve(cfg, this, "lnkactmacro");
 	rpt_vars[n].p.lnkactmacro = val;
@@ -6110,7 +6113,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	val = (char *) ast_variable_retrieve(cfg, this, "holdofftelem");
 	rpt_vars[n].p.holdofftelem = ast_true(val);
 	val = (char *) ast_variable_retrieve(cfg, this, "beaconing");
-	rpt_vars[n].p.beaconing = ast_true(val);
+	rpt_vars[n].p.beaconing = ast_true(val); 
 	val = (char *) ast_variable_retrieve(cfg,this,"rxburstfreq");
 	if (val) rpt_vars[n].p.rxburstfreq = atoi(val);
 	else rpt_vars[n].p.rxburstfreq = 0;
@@ -8213,21 +8216,19 @@ static int telem_any(struct rpt *myrpt,struct ast_channel *chan, char *entry)
 	int res;
 	char c;
 	
-	static int morsespeed;
-	static int morsefreq;
-	static int morseampl;
-	static int morseidfreq = 0;
-	static int morseidampl;
+	int morsespeed;
+	int morsefreq;
+	int morseampl;
+	int morseidfreq;
+	int morseidampl;
 	
 	res = 0;
 	
-	if(!morseidfreq){ /* Get the morse parameters if not already loaded */
-		morsespeed = retrieve_astcfgint(myrpt, myrpt->p.morse, "speed", 5, 20, 20);
-        	morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
-        	morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
-		morseidampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "idamplitude", 200, 8192, 2048);
-		morseidfreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "idfrequency", 300, 3000, 330);	
-	}
+	morsespeed = retrieve_astcfgint(myrpt, myrpt->p.morse, "speed", 5, 20, 20);
+       	morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
+       	morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
+	morseidampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "idamplitude", 200, 8192, 2048);
+	morseidfreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "idfrequency", 300, 3000, 330);	
 	
 	/* Is it a file, or a tone sequence? */
 			
@@ -19902,6 +19903,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					}
 					l->lastrx1 = 0;
 					rpt_update_links(myrpt);
+					time(&l->lastunkeytime);
 					if(myrpt->p.duplex) 
 						rpt_telemetry(myrpt,LINKUNKEY,l);
 				}
@@ -21111,6 +21113,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							}
 							l->lastrx1 = 1;
 							rpt_update_links(myrpt);
+							time(&l->lastkeytime);
 						}
 					}
 					if (((l->phonemode) && (l->phonevox)) || 
@@ -21288,6 +21291,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							}
 							l->lastrx1 = 1;
 							rpt_update_links(myrpt);
+							time(&l->lastkeytime);
 						}
 					}
 					/* if RX un-key */
@@ -21307,6 +21311,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 								donodelog(myrpt,str);
 							}
 							l->lastrx1 = 0;
+							time(&l->lastunkeytime);
 							rpt_update_links(myrpt);
 							if(myrpt->p.duplex)
 								rpt_telemetry(myrpt,LINKUNKEY,l);
@@ -23886,6 +23891,43 @@ static void rpt_manager_success(struct mansession *s, const struct message *m)
 }
 
 
+static int rpt_manager_do_sawstat(struct mansession *ses, const struct message *m, char *str)
+{
+	int i;
+	struct rpt_link *l;
+	const char *node = astman_get_header(m, "Node");
+	time_t now;
+
+	time(&now);
+	for(i = 0; i < nrpts; i++)
+	{
+		if ((node)&&(!strcmp(node,rpt_vars[i].name))){
+			rpt_manager_success(ses,m);
+			astman_append(ses,"Node: %s\r\n",node);
+
+			rpt_mutex_lock(&rpt_vars[i].lock); /* LOCK */
+
+			l = rpt_vars[i].links.next;
+			while(l && (l != &rpt_vars[i].links)){
+				if (l->name[0] == '0'){ // Skip '0' nodes 
+					l = l->next;
+					continue;
+				}
+				astman_append(ses, "Conn: %s %d %d %d\r\n",l->name,l->lastrx1,
+					(l->lastkeytime) ? (int)(now - l->lastkeytime) : 0,
+					(l->lastunkeytime) ? (int)(now - l->lastunkeytime) : 0);
+				l = l->next;
+			}
+			rpt_mutex_unlock(&rpt_vars[i].lock); // UNLOCK 
+			astman_append(ses, "\r\n");
+			return(0);
+		}
+	}
+	astman_send_error(ses, m, "RptStatus unknown or missing node");
+	return 0;
+}
+
+
 static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m, char *str)
 {
 	int i,j;
@@ -24481,7 +24523,7 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 	time_t now;
 	const char *cmd = astman_get_header(m, "Command");
 	char *str;
-	enum {MGRCMD_RPTSTAT,MGRCMD_NODESTAT,MGRCMD_XSTAT};
+	enum {MGRCMD_RPTSTAT,MGRCMD_NODESTAT,MGRCMD_XSTAT,MGRCMD_SAWSTAT};
 	struct mgrcmdtbl{
 		const char *cmd;
 		int index;
@@ -24490,6 +24532,7 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 		{"RptStat",MGRCMD_RPTSTAT},
 		{"NodeStat",MGRCMD_NODESTAT},
 		{"XStat",MGRCMD_XSTAT},
+		{"SawStat",MGRCMD_SAWSTAT},
 		{NULL,0} /* NULL marks end of command table */
 	};
 
@@ -24571,6 +24614,11 @@ static int manager_rpt_status(struct mansession *s, const struct message *m)
 
 		case	MGRCMD_XSTAT:
 			res = rpt_manager_do_xstat(s,m,str);
+			ast_free(str);
+			return res;
+
+		case	MGRCMD_SAWSTAT:
+			res = rpt_manager_do_sawstat(s,m,str);
 			ast_free(str);
 			return res;
 
