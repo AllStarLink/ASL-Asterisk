@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.304 05/09/2012
+ *  version 0.305 06/05/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.304 05/09/2011";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.305 06/05/2012";
 
 static char *app = "Rpt";
 
@@ -23914,8 +23914,8 @@ static int rpt_manager_do_sawstat(struct mansession *ses, const struct message *
 					continue;
 				}
 				astman_append(ses, "Conn: %s %d %d %d\r\n",l->name,l->lastrx1,
-					(l->lastkeytime) ? (int)(now - l->lastkeytime) : 0,
-					(l->lastunkeytime) ? (int)(now - l->lastunkeytime) : 0);
+					(l->lastkeytime) ? (int)(now - l->lastkeytime) : -1,
+					(l->lastunkeytime) ? (int)(now - l->lastunkeytime) : -1);
 				l = l->next;
 			}
 			rpt_mutex_unlock(&rpt_vars[i].lock); // UNLOCK 
