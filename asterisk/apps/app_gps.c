@@ -516,7 +516,7 @@ static int report_aprstt(char *ctg,char *lat,char *lon,char *theircall,char over
 
 struct ast_config *cfg = NULL;
 char *call,*comment;
-char *val,basecall[300],buf[300],*cp;
+char *val,basecall[300],buf[300],buf1[100],*cp;
 time_t t;
 struct tm *tm;
 
@@ -566,8 +566,9 @@ struct tm *tm;
 	}
 	time(&t);
 	tm = gmtime(&t);
-	sprintf(buf,"%s>APSTAR:;%s-12*%02d%02d%02dz%s%c%sA%s\n",
-		call,theircall,tm->tm_hour,tm->tm_min,tm->tm_sec,lat,overlay,lon,comment);
+	sprintf(buf1,"%s-12",theircall);
+	sprintf(buf,"%s>APSTAR:;%-9s*%02d%02d%02dz%s%c%sA%s\n",
+		call,buf1,tm->tm_hour,tm->tm_min,tm->tm_sec,lat,overlay,lon,comment);
 	if (send(sockfd,buf,strlen(buf),0) < 0)
 	{
 		ast_log(LOG_WARNING, "Can not send APRS (APSTAR) data\n");
