@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.305 06/05/2012
+ *  version 0.306 06/10/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.305 06/05/2012";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.306 06/10/2012";
 
 static char *app = "Rpt";
 
@@ -1683,7 +1683,7 @@ static int dovox(struct vox *v,short *buf,int bs)
 
 }
 
-static int rpt_safe_sleep(struct rpt *rpt,struct ast_channel *chan, int ms)
+static void rpt_safe_sleep(struct rpt *rpt,struct ast_channel *chan, int ms)
 {
 	struct ast_frame *f;
 	struct ast_channel *cs[2],*w;
@@ -1694,10 +1694,10 @@ static int rpt_safe_sleep(struct rpt *rpt,struct ast_channel *chan, int ms)
 		w = ast_waitfor_n(cs,2,&ms);
 		if (!w) break;
 		f = ast_read(w);
-		if (!f) return -1;
+		if (!f) break;
 		ast_frfree(f);
 	}
-	return 0;
+	return;
 }
 
 static void rpt_forward(struct ast_channel *chan, char *dialstr, char *nodefrom)
@@ -11528,7 +11528,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				if (l->chan)
 				{
 					if (l->thisconnected) ast_write(l->chan,&wf);
-					if (rpt_safe_sleep(myrpt,l->chan,250) == -1) return DC_ERROR;
+					rpt_safe_sleep(myrpt,l->chan,250);
 					ast_softhangup(l->chan,AST_SOFTHANGUP_DEV);
 				}
 				myrpt->linkactivityflag = 1;
