@@ -362,6 +362,7 @@ struct voter_client {
 	char nodeemp;
 	char noplfilter;
 	char dynamic;
+	char txlockout;
 	struct voter_client *next;
 	uint8_t lastrssi;
 	int txseqno;
@@ -592,6 +593,13 @@ static char display_usage[] =
 "Usage: voter display [instance]\n"
 "       Display voter instance clients\n";
 
+/* Txlockout */
+static int voter_do_txlockout(int fd, int argc, char *argv[]);
+
+static char txlockout_usage[] =
+"Usage: voter txlockout [instance] <client_list>\n"
+"       Set Tx Lockout for voter instance clients\n";
+
 
 
 #ifndef	NEW_ASTERISK
@@ -617,6 +625,9 @@ static struct ast_cli_entry  cli_reload =
 static struct ast_cli_entry  cli_display =
         { { "voter", "display" }, voter_do_display, 
 		"Display voter (instance) clients", display_usage };
+static struct ast_cli_entry  cli_txlockout =
+        { { "voter", "txlockout" }, voter_do_txlockout, 
+		"Set Tx Lockout status for voter (instance) clients", txlockout_usage };
 
 #endif
 
@@ -1590,7 +1601,7 @@ struct timeval tv;
 				mkpucked(client,&audiopacket.vp.curtime);
 				audiopacket.vp.digest = htonl(client->respdigest);
 				audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
-				if (client->totransmit)
+				if (client->totransmit && (!client->txlockout))
 				{
 					if (IS_CLIENT_PROXY(client))
 					{
@@ -1651,7 +1662,7 @@ struct timeval tv;
 					audiopacket.vp.digest = htonl(client->respdigest);
 					audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 #ifndef	ADPCM_LOOPBACK
-					if (client->totransmit)
+					if (client->totransmit && (!client->txlockout))
 					{
 						if (IS_CLIENT_PROXY(client))
 						{
@@ -1731,7 +1742,7 @@ struct timeval tv;
 					audiopacket.vp.digest = htonl(client->respdigest);
 					audiopacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
 #ifndef	NULAW_LOOPBACK
-					if (client->totransmit)
+					if (client->totransmit && (!client->txlockout))
 					{
 						if (IS_CLIENT_PROXY(client))
 						{
@@ -2467,6 +2478,106 @@ struct voter_pvt *p;
 	voter_display(fd,p);
         return RESULT_SUCCESS;
 }
+
+static int voter_do_txlockout(int fd, int argc, char *argv[])
+{
+int i,n,newval;
+char str[300],*strs[100];
+struct voter_pvt *p;
+struct voter_client *client;
+
+        if (argc < 3)
+                return RESULT_SHOWUSAGE;
+	for(p = pvts; p; p = p->next)
+	{
+		if (p->nodenum == atoi(argv[2])) break;
+	}
+	if (!p)
+	{
+		ast_cli(fd,"voter instance %s not found\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	if (argc > 3) /* specify list of lockouts */
+	{
+		if (!strcasecmp(argv[3],"all"))
+		{
+			for(client = clients; client; client = client->next)
+			{
+				if (client->nodenum != p->nodenum) continue;
+				if (client->dynamic) continue;
+				client->txlockout = 1;
+			}
+		}
+		else if (!strcasecmp(argv[3],"none"))
+		{
+			for(client = clients; client; client = client->next)
+			{
+				if (client->nodenum != p->nodenum) continue;
+				if (client->dynamic) continue;
+				client->txlockout = 0;
+			}
+		}
+		else /* must be a comma-delimited list */
+		{
+			ast_copy_string(str,argv[3],sizeof(str) - 1);
+			n = finddelim(argv[3],strs,100);
+			for(i = 0; i < n; i++)
+			{
+				if (!*strs[i]) continue;
+				newval = 1;
+				if (*strs[i] == '-')
+				{
+					strs[i]++;
+					newval = 0;
+				}
+				else if (*strs[i] == '+')
+				{
+					strs[i]++;
+				}
+				for(client = clients; client; client = client->next)
+				{
+					if (client->nodenum != p->nodenum) continue;
+					if (strcasecmp(strs[i],client->name)) continue;
+					if (client->dynamic)
+					{
+						ast_cli(fd,"Client %s can not be set since it is dynamic!!\n",strs[i]);
+						continue;
+					}
+					ast_cli(fd,"Client %s tx lockout %s\n",strs[i],(newval) ? "Enabled" : "Disabled");
+					client->txlockout = newval;
+					break;
+				}
+				if (!client) ast_cli(fd,"Client %s not found!!\n",strs[i]);
+			}				
+		}
+	}
+	ast_cli(fd,"\nFull list of Tx Locked-out clients for voter instance %s:\n",argv[2]);
+	for(n = 0,client = clients; client; client = client->next)
+	{
+		if (client->nodenum != p->nodenum) continue;
+		if (client->dynamic) continue;
+		if (client->txlockout)
+		{
+			ast_cli(fd,"Client %s tx is locked-out\n",client->name);
+			n++;
+		}
+	}
+	if (!n) ast_cli(fd,"No clients are currently locked-out\n");
+	ast_cli(fd,"\nFull list of normally transmitting clients for voter instance %s:\n",argv[2]);
+	for(n = 0,client = clients; client; client = client->next)
+	{
+		if (client->nodenum != p->nodenum) continue;
+		if (client->dynamic) continue;
+		if (!client->txlockout)
+		{
+			ast_cli(fd,"Client %s is able to transmit\n",client->name);
+			n++;
+		}
+	}
+	if (!n) ast_cli(fd,"No clients are currently able to transmit\n");
+	ast_cli(fd,"\n");
+        return RESULT_SUCCESS;
+}
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -2581,6 +2692,20 @@ static char *handle_cli_display(struct ast_cli_entry *e,
 	return res2cli(voter_do_display(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_txlockout(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter txlockout";
+                e->usage = txlockout_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_txlockout(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify/Query voter instance test mode"),
@@ -2589,6 +2714,7 @@ static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_tone,"Sets/Queries Tx CTCSS level for specified chan_voter instance"),
 	AST_CLI_DEFINE(handle_cli_reload,"Reloads chan_voter parameters"),
 	AST_CLI_DEFINE(handle_cli_display,"Displays voter (instance) clients"),
+	AST_CLI_DEFINE(handle_cli_txlockout,"Set Tx Lockout for voter (instance) clients"),
 } ;
 
 #endif
@@ -2697,6 +2823,7 @@ int unload_module(void)
 	ast_cli_unregister(&cli_tone);
 	ast_cli_unregister(&cli_reload);
 	ast_cli_unregister(&cli_display);
+	ast_cli_unregister(&cli_txlockout);
 #endif
 #ifndef OLD_ASTERISK
 	ast_manager_unregister("VoterStatus");
@@ -4361,6 +4488,7 @@ int load_module(void)
 	ast_cli_register(&cli_tone);
 	ast_cli_register(&cli_reload);
 	ast_cli_register(&cli_display);
+	ast_cli_register(&cli_txlockout);
 #endif
 
 #ifndef OLD_ASTERISK

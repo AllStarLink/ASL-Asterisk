@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.306 06/10/2012
+ *  version 0.307 10/20/2012
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.306 06/10/2012";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.307 10/20/2012";
 
 static char *app = "Rpt";
 
@@ -3978,19 +3978,26 @@ static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int comm
 	if (myrpt->remote)
 		return DC_ERROR;
 
-		ast_log(LOG_NOTICE, "cmd param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	ast_log(LOG_NOTICE, "cmd param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
 	
 	if (param) {
-		cp = ast_malloc(strlen(param) + 10);
-		if (!cp)
+		if (*param == '#') /* to execute asterisk cli command */
 		{
-			ast_log(LOG_NOTICE,"Unable to alloc");
-			return DC_ERROR;
+			ast_cli_command(nullfd,param + 1);
 		}
-		memset(cp,0,strlen(param) + 10);
-		sprintf(cp,"%s &",param);
-		ast_safe_system(cp);
-		free(cp);
+		else
+		{			
+			cp = ast_malloc(strlen(param) + 10);
+			if (!cp)
+			{
+				ast_log(LOG_NOTICE,"Unable to alloc");
+				return DC_ERROR;
+			}
+			memset(cp,0,strlen(param) + 10);
+			sprintf(cp,"%s &",param);
+			ast_safe_system(cp);
+			free(cp);
+		}
 	}
 	return DC_COMPLETE;
 }
