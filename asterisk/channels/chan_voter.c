@@ -2183,7 +2183,7 @@ static int voter_do_test(int fd, int argc, char *argv[])
 
 static int voter_do_prio(int fd, int argc, char *argv[])
 {
-	int newlevel;
+	int newlevel,foundit;
 	struct voter_pvt *p;
 	struct voter_client *client;
 
@@ -2217,19 +2217,20 @@ static int voter_do_prio(int fd, int argc, char *argv[])
 	}
 	if (argc == 4)
 	{
+		foundit = 0;
 		for(client = clients; client; client = client->next)
 		{
 			if (client->nodenum != p->nodenum) continue;
-			if (strcasecmp(argv[3],client->name)) continue;
+			if (strcasecmp(argv[3],"all") && strcasecmp(argv[3],client->name)) continue;
+			foundit = 1;
 			if (client->prio_override > -2)
 				ast_cli(fd,"Voter instance %d, client %s: eff_prio: %d, prio: %d, override_prio: %d\n",
 					p->nodenum,client->name,client->prio_override, client->prio,client->prio_override);
 			else
 				ast_cli(fd,"Voter instance %d, client %s: prio: %d (not overridden)\n",
 					p->nodenum,client->name,client->prio);
-			break;
 		}
-		if (!client) ast_cli(fd,"voter client %s not found\n",argv[3]);
+		if (!foundit) ast_cli(fd,"voter client %s not found\n",argv[3]);
 		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
@@ -2238,48 +2239,45 @@ static int voter_do_prio(int fd, int argc, char *argv[])
 		ast_mutex_unlock(&voter_lock);
                 return RESULT_SHOWUSAGE;
 	}
+	foundit = 0;
 	for(client = clients; client; client = client->next)
 	{
 		if (client->nodenum != p->nodenum) continue;
-		if (!strcasecmp(argv[3],client->name)) break;
-	}
-	if (!client)
-	{
-		ast_cli(fd,"voter client %s not found\n",argv[3]);
-		ast_mutex_unlock(&voter_lock);
-		return RESULT_SUCCESS;
-	}
-	if ((!strcasecmp(argv[4],"off")) || (!strncasecmp(argv[4],"dis",3))) newlevel = -2;
-	else 
-	{
-		if (sscanf(argv[4],"%d",&newlevel) < 1)
+		if (strcasecmp(argv[3],"all") && strcasecmp(argv[3],client->name)) continue;
+		if ((!strcasecmp(argv[4],"off")) || (!strncasecmp(argv[4],"dis",3))) newlevel = -2;
+		else 
+		{
+			if (sscanf(argv[4],"%d",&newlevel) < 1)
+			{
+				ast_cli(fd,"Error: Invalid priority value specification!!\n");
+				ast_mutex_unlock(&voter_lock);
+				return RESULT_SUCCESS;
+			}
+		}
+		if (newlevel < -2)
 		{
 			ast_cli(fd,"Error: Invalid priority value specification!!\n");
 			ast_mutex_unlock(&voter_lock);
 			return RESULT_SUCCESS;
 		}
+	        if (newlevel > -2)
+		{
+			if (client->prio_override > -2)
+		                ast_cli(fd, "voter instance %d client %s prio (override): previous level: %d, new level: %d\n", 
+					p->nodenum, client->name, client->prio_override, newlevel);
+			else
+		                ast_cli(fd, "voter instance %d client %s prio (override): previous level: <disabled>, new level: %d\n", 
+					p->nodenum, client->name, newlevel);
+		}
+	        else
+	                ast_cli(fd, "voter instance %d client %s prio (override) disabled\n",p->nodenum, client->name);
+	
+	        client->prio_override = newlevel;                                                                                                                          
+		foundit = 1;
 	}
-	if (newlevel < -2)
-	{
-		ast_cli(fd,"Error: Invalid priority value specification!!\n");
-		ast_mutex_unlock(&voter_lock);
-		return RESULT_SUCCESS;
-	}
-        if (newlevel > -2)
-	{
-		if (client->prio_override > -2)
-	                ast_cli(fd, "voter instance %d prio (override): previous level: %d, new level: %d\n", 
-				p->nodenum, client->prio_override, newlevel);
-		else
-	                ast_cli(fd, "voter instance %d prio (override): previous level: <disabled>, new level: %d\n", 
-				p->nodenum, newlevel);
-	}
-        else
-                ast_cli(fd, "voter instance %d prio (override) disabled\n",p->nodenum);
-
-        client->prio_override = newlevel;                                                                                                                          
 	ast_mutex_unlock(&voter_lock);
-        return RESULT_SUCCESS;
+	if (!foundit) ast_cli(fd,"voter client %s not found\n",argv[3]);
+	return RESULT_SUCCESS;
 }
 
 static int voter_do_record(int fd, int argc, char *argv[])
