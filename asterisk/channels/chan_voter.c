@@ -430,6 +430,7 @@ struct voter_pvt {
 	t_pmr_chan	*pmrChan;
 	char	txctcssfreq[32];
 	int	txctcsslevel;
+	int	txctcsslevelset;
 	int	txtoctype;
 	char 	duplex;
 	struct	ast_frame *adpcmf1;
@@ -1986,6 +1987,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		if (val) ast_copy_string(p->txctcssfreq,val,sizeof(p->txctcssfreq));
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcsslevel"); 
 		if (val) p->txctcsslevel = atoi(val); else p->txctcsslevel = 62;
+		p->txctcsslevelset = p->txctcsslevel;
 		p->txtoctype = TOC_NONE;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txtoctype"); 
 		if (val)
@@ -2345,11 +2347,18 @@ static int voter_do_tone(int fd, int argc, char *argv[])
 		ast_mutex_unlock(&voter_lock);
 		return RESULT_SUCCESS;
 	}
-        newlevel = atoi(argv[3]);
-        if((newlevel < 0) || (newlevel > 250))
+	if (!strcasecmp(argv[3],"default"))
 	{
-		ast_mutex_unlock(&voter_lock);
-                return RESULT_SHOWUSAGE;
+		newlevel = p->txctcsslevelset;
+	}
+	else
+	{
+	        newlevel = atoi(argv[3]);
+	        if((newlevel < 0) || (newlevel > 250))
+		{
+			ast_mutex_unlock(&voter_lock);
+	                return RESULT_SHOWUSAGE;
+		}
 	}
         ast_cli(fd, "voter instance %d CTCSS tone level set to %d\n",p->nodenum,newlevel);
 	p->txctcsslevel = newlevel;
@@ -4084,6 +4093,7 @@ static int reload(void)
 		oldlevel = p->txctcsslevel;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txctcsslevel"); 
 		if (val) p->txctcsslevel = atoi(val); else p->txctcsslevel = 62;
+		p->txctcsslevelset = p->txctcsslevel;
 		oldtoctype = p->txtoctype;
 		p->txtoctype = TOC_NONE;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"txtoctype"); 
