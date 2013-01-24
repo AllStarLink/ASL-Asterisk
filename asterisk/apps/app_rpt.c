@@ -1,7 +1,7 @@
 /*
  * Asterisk -- An open source telephony toolkit.
  *
- * Copyright (C) 2002-2012, Jim Dixon, WB6NIL
+ * Copyright (C) 2002-2013, Jim Dixon, WB6NIL
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.307 10/20/2012
+ *  version 0.308 01/23/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -258,7 +258,7 @@
 
 #define	MAXDTMF 32
 #define	MAXMACRO 2048
-#define	MAXLINKLIST 512
+#define	MAXLINKLIST 5120
 #define	LINKLISTTIME 10000
 #define	LINKLISTSHORTTIME 200
 #define	LINKPOSTTIME 30000
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.307 10/20/2012";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.308 01/23/2013";
 
 static char *app = "Rpt";
 
