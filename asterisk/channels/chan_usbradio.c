@@ -55,6 +55,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <search.h>
 #include <linux/ppdev.h>
 #include <linux/parport.h>
+#include <linux/version.h>
 #include <alsa/asoundlib.h>
 
 //#define HAVE_XPMRX				1
@@ -1094,6 +1095,14 @@ static struct usb_device *hid_device_init(char *desired_device)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+				sprintf(str,"/sys/class/sound/card%d/device",i);
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+#else
 				if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
 				else strcpy(str,"/sys/class/sound/dsp/device");
 				memset(desdev,0,sizeof(desdev));
@@ -1108,6 +1117,7 @@ static struct usb_device *hid_device_init(char *desired_device)
 				cp = strrchr(desdev,'/');
 				if (!cp) continue;
 				cp++;
+#endif
 				break;
 			}
 			if (i >= 32) continue;
@@ -1169,6 +1179,14 @@ static int hid_device_mklist(void)
 				if (desdev[strlen(desdev) - 1] == '\n')
 			        	desdev[strlen(desdev) -1 ] = 0;
 				if (strcasecmp(desdev,devstr)) continue;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+				sprintf(str,"/sys/class/sound/card%d/device",i);
+				memset(desdev,0,sizeof(desdev));
+				if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+				cp = strrchr(desdev,'/');
+				if (!cp) continue;
+				cp++;
+#else
 				if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
 				else strcpy(str,"/sys/class/sound/dsp/device");
 				memset(desdev,0,sizeof(desdev));
@@ -1183,6 +1201,7 @@ static int hid_device_mklist(void)
 				cp = strrchr(desdev,'/');
 				if (!cp) continue;
 				cp++;
+#endif
 				break;
 			}
 			if (i >= 32) 
@@ -1222,6 +1241,14 @@ char	str[200],desdev[200],*cp;
 
 	for(i = 0;i < 32; i++)
 	{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,26)
+		sprintf(str,"/sys/class/sound/card%d/device",i);
+		memset(desdev,0,sizeof(desdev));
+		if (readlink(str,desdev,sizeof(desdev) - 1) == -1) continue;
+		cp = strrchr(desdev,'/');
+		if (!cp) continue;
+		cp++;
+#else
 		if (i) sprintf(str,"/sys/class/sound/dsp%d/device",i);
 		else strcpy(str,"/sys/class/sound/dsp/device");
 		memset(desdev,0,sizeof(desdev));
@@ -1236,6 +1263,7 @@ char	str[200],desdev[200],*cp;
 		cp = strrchr(desdev,'/');
 		if (!cp) continue;
 		cp++;
+#endif
 		if (!strcasecmp(cp,devstr)) break;
 	}
 	if (i >= 32) return -1;

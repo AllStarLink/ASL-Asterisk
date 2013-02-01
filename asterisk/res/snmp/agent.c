@@ -721,7 +721,7 @@ static u_char *ast_var_Version(struct variable *vp, oid *name, size_t *length,
 		*var_len = strlen(ASTERISK_VERSION);
 		return (u_char *)ASTERISK_VERSION;
 	case ASTVERTAG:
-		long_ret = ASTERISK_VERSION_NUM;
+		long_ret = 0;
 		return (u_char *)&long_ret;
 	default:
 		break;
