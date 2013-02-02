@@ -76,6 +76,8 @@ start() {
 		exit 1
 	fi
 
+	/sbin/modprobe snd_pcm_oss > /dev/null 2>&1
+
 	# Start daemons.
 	echo -n $"Starting asterisk: "
         if [ -f $SAFE_ASTERISK ] ; then
