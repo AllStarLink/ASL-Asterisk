@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.308 01/23/2013
+ *  version 0.309 02/01/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.308 01/23/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.309 02/01/2013";
 
 static char *app = "Rpt";
 
@@ -7454,7 +7454,7 @@ static int rpt_do_cmd(int fd, int argc, char *argv[])
 	{
 		rpt_vars[thisRpt].cmdAction.state = CMD_STATE_BUSY;
 		rpt_vars[thisRpt].cmdAction.functionNumber = thisAction;
-		strncpy(rpt_vars[thisRpt].cmdAction.param, argv[4], MAXDTMF);
+		snprintf(rpt_vars[thisRpt].cmdAction.param, MAXDTMF, "%s,%s",argv[4], argv[5]);
 		strncpy(rpt_vars[thisRpt].cmdAction.digits, argv[5], MAXDTMF);
 		rpt_vars[thisRpt].cmdAction.command_source = SOURCE_RPT;
 		rpt_vars[thisRpt].cmdAction.state = CMD_STATE_READY;
