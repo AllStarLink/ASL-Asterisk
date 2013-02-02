@@ -3,6 +3,10 @@
 ver=`udevinfo -V | cut -f3 -d" "`
 
 if [ -z "${ver}" ]; then
+	ver=`udevadm info -V`
+fi
+
+if [ -z "${ver}" ]; then
    # nobody has that old version, anyway.
    ver=54
 fi
