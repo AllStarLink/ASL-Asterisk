@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.311 02/02/2013
+ *  version 0.312 02/03/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.311 02/02/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.312 02/03/2013";
 
 static char *app = "Rpt";
 
@@ -11991,6 +11991,7 @@ static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, 
 
 static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
+	struct rpt_tele *telem;
 
 	if (!param)
 		return DC_ERROR;
@@ -12003,6 +12004,21 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 	
 	switch(myatoi(param)){
 		case 1: /* System ID */
+		        if(myrpt->p.idtime)  /* ID time must be non-zero */
+			{
+		                myrpt->mustid = myrpt->tailid = 0;
+		                myrpt->idtimer = myrpt->p.idtime;
+			}
+ 			telem = myrpt->tele.next;
+			while(telem != &myrpt->tele)
+			{
+				if (((telem->mode == ID) || (telem->mode == ID1)) && (!telem->killed))
+				{
+					if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
+				}
+				telem = telem->next;
+			}
 			rpt_telemetry(myrpt, ID1, NULL);
 			return DC_COMPLETE;
 		case 2: /* System Time */
@@ -12022,6 +12038,21 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 			rpt_telemetry(myrpt, LASTUSER, NULL);
 			return DC_COMPLETE;
 		case 11: /* System ID (local only)*/
+		        if(myrpt->p.idtime)  /* ID time must be non-zero */
+			{
+		                myrpt->mustid = myrpt->tailid = 0;
+		                myrpt->idtimer = myrpt->p.idtime;
+			}
+ 			telem = myrpt->tele.next;
+			while(telem != &myrpt->tele)
+			{
+				if (((telem->mode == ID) || (telem->mode == ID1)) && (!telem->killed))
+				{
+					if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
+				}
+				telem = telem->next;
+			}
 			rpt_telemetry(myrpt, ID , NULL);
 			return DC_COMPLETE;
 	        case 12: /* System Time (local only)*/
