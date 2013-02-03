@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.310 02/02/2013
+ *  version 0.311 02/02/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.310 02/02/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.311 02/02/2013";
 
 static char *app = "Rpt";
 
@@ -10189,8 +10189,6 @@ treataslocal:
 		    res = ast_streamfile(mychannel, "rpt/act-timeout-warning", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
-		else
-			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		ast_stopstream(mychannel);
 		if(!res) /* Say number of seconds */
 			ast_say_number(mychannel, myrpt->p.remoteinacttimeout - 
@@ -10199,7 +10197,12 @@ treataslocal:
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		ast_stopstream(mychannel);	
-		res = ast_streamfile(mychannel, "queue-seconds", mychannel->language);
+		if (!res)
+			res = ast_streamfile(mychannel, "queue-seconds", mychannel->language);
+		if (!res) 
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);		
+		imdone = 1;
 		break;
 		
 	    case STATS_TIME:
@@ -23417,6 +23420,16 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 				if((myrpt->remtxfreqok = check_tx_freq(myrpt)))
 				{
 					time(&myrpt->last_activity_time);
+					telem = myrpt->tele.next;
+					while(telem != &myrpt->tele)
+					{
+						if(telem->mode == ACT_TIMEOUT_WARNING && !telem->killed)
+						{
+							if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+							telem->killed = 1;
+						}
+						telem = telem->next;
+					}
 					if ((iskenwood_pci4) && (myrpt->txchannel == myrpt->zaptxchannel))
 					{
 						z.radpar = DAHDI_RADPAR_UIODATA;
