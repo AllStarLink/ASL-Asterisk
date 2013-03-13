@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.312 02/03/2013
+ *  version 0.313 03/12/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.312 02/03/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.313 03/12/2013";
 
 static char *app = "Rpt";
 
@@ -856,7 +856,7 @@ struct rpt_lstat
 	char	name[MAXNODESTR];
 	char	mode;
 	char	outbound;
-	char	reconnects;
+	int	reconnects;
 	char	thisconnected;
 	long long	connecttime;
 	struct	rpt_chan_stat chan_stat[NRPTSTAT];
