@@ -214,6 +214,13 @@ sufficient, and does not require any use of the server redundancy features.
 #include "asterisk/manager.h"
 
 
+FILE *dmwfp = NULL;
+
+
+/* Un-comment this if you wish Digital milliwatt output rather then real audio
+   when transmitting (for debugging only) */
+/* #define	DMWDIAG */
+
 #ifdef	NEW_ASTERISK
 struct ast_flags zeroflag = { 0 };
 #endif
@@ -252,6 +259,11 @@ struct ast_flags zeroflag = { 0 };
 
 #define	NTAPS_PL 6
 #define	NTAPS_4K 6
+
+#ifdef DMWDIAG
+unsigned char ulaw_digital_milliwatt[8] = { 0x1e, 0x0b, 0x0b, 0x1e, 0x9e, 0x8b, 0x8b, 0x9e };
+unsigned char mwp;
+#endif
 
 #define	IS_CLIENT_PROXY(x) (x->proxy_sin.sin_family == AF_INET)
 #define	SEND_PRIMARY(x) (x->primary.sin_family == AF_INET)
@@ -1546,6 +1558,14 @@ struct timeval tv;
 			audiopacket.vp.payload_type = htons(1);
 			audiopacket.rssi = 0;
 			if (f1) memcpy(audiopacket.audio,AST_FRAME_DATAP(f1),FRAME_SIZE);
+			if (dmwfp) fwrite(audiopacket.audio,1,FRAME_SIZE,dmwfp);
+#ifdef	DMWDIAG
+			for(i = 0; i < FRAME_SIZE; i++)
+			{
+				audiopacket.audio[i] = ulaw_digital_milliwatt[mwp++];
+				if (mwp > 7) mwp = 0;
+			}
+#endif
 			audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 			audiopacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
 			for(client = clients; client; client = client->next)
@@ -4421,6 +4441,8 @@ int load_module(void)
         struct ast_flags zeroflag = {0};
 #endif
 
+
+	dmwfp = fopen("/tmp/dmw.pcm","w");
 
 	snprintf(challenge, sizeof(challenge), "%ld", ast_random());
 	hasmaster = 0;

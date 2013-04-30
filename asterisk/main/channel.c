@@ -4308,6 +4308,7 @@ static int tonepair_generator(struct ast_channel *chan, void *data, int len, int
 	ts->f.offset = AST_FRIENDLY_OFFSET;
 	ts->f.data = ts->data;
 	ast_write(chan, &ts->f);
+
 	ts->pos += x;
 	if (ts->duration > 0) {
 		if (ts->pos >= ts->duration * 8)
@@ -4322,6 +4323,86 @@ static struct ast_generator tonepair = {
 	generate: tonepair_generator,
 };
 
+static void dmw_release(struct ast_channel *chan, void *params)
+{
+	struct tonepair_state *ts = params;
+
+	if (chan)
+		ast_set_write_format(chan, ts->origwfmt);
+	free(ts);
+}
+
+static void *dmw_alloc(struct ast_channel *chan, void *params)
+{
+	struct tonepair_state *ts;
+	struct tonepair_def *td = params;
+
+	if (!(ts = ast_calloc(1, sizeof(*ts))))
+		return NULL;
+	ts->origwfmt = chan->writeformat;
+	if (ast_set_write_format(chan, AST_FORMAT_SLINEAR)) {
+		ast_log(LOG_WARNING, "Unable to set '%s' to signed linear format (write)\n", chan->name);
+		tonepair_release(NULL, ts);
+		ts = NULL;
+	} else {
+		ts->fac1 = 2.0 * cos(2.0 * M_PI * (td->freq1 / 8000.0)) * 32768.0;
+		ts->v1_1 = 0;
+		ts->v2_1 = sin(-4.0 * M_PI * (td->freq1 / 8000.0)) * td->vol;
+		ts->v3_1 = sin(-2.0 * M_PI * (td->freq1 / 8000.0)) * td->vol;
+		ts->v2_1 = 0;
+		ts->fac2 = 2.0 * cos(2.0 * M_PI * (td->freq2 / 8000.0)) * 32768.0;
+		ts->v2_2 = sin(-4.0 * M_PI * (td->freq2 / 8000.0)) * td->vol;
+		ts->v3_2 = sin(-2.0 * M_PI * (td->freq2 / 8000.0)) * td->vol;
+		ts->duration = td->duration;
+		ts->modulate = 0;
+	}
+	/* Let interrupts interrupt :) */
+	ast_set_flag(chan, AST_FLAG_WRITE_INT);
+	return ts;
+}
+
+static int dmw_generator(struct ast_channel *chan, void *data, int len, int samples)
+{
+	struct tonepair_state *ts = data;
+	int x;
+	static int dmw_data[] = {0, 5091, 7200, 5091,     0, -5091, -7200, -5091 } ;
+
+
+	/* we need to prepare a frame with 16 * timelen samples as we're
+	 * generating SLIN audio
+	 */
+	len = samples * 2;
+
+	if (len > sizeof(ts->data) / 2 - 1) {
+		ast_log(LOG_WARNING, "Can't generate that much data!\n");
+		return -1;
+	}
+	memset(&ts->f, 0, sizeof(ts->f));
+ 	for (x=0;x<len/2;x++) {
+		ts->data[x] = dmw_data[(x + ts->pos) & 7];
+ 	}
+	ts->f.frametype = AST_FRAME_VOICE;
+	ts->f.subclass = AST_FORMAT_SLINEAR;
+	ts->f.datalen = len;
+	ts->f.samples = samples;
+	ts->f.offset = AST_FRIENDLY_OFFSET;
+	ts->f.data = ts->data;
+	ast_write(chan, &ts->f);
+
+	ts->pos += x;
+	if (ts->duration > 0) {
+		if (ts->pos >= ts->duration * 8)
+			return -1;
+	}
+	return 0;
+}
+
+static struct ast_generator dmw = {
+	alloc: dmw_alloc,
+	release: dmw_release,
+	generate: dmw_generator,
+};
+
 int ast_tonepair_start(struct ast_channel *chan, int freq1, int freq2, int duration, int vol)
 {
 	struct tonepair_def d = { 0, };
@@ -4330,8 +4411,16 @@ int ast_tonepair_start(struct ast_channel *chan, int freq1, int freq2, int durat
 	d.freq2 = freq2;
 	d.duration = duration;
 	d.vol = (vol < 1) ? 8192 : vol; /* force invalid to 8192 */
-	if (ast_activate_generator(chan, &tonepair, &d))
-		return -1;
+	if ((freq1 == 1000.0) && (freq2 == 0.0) && (vol == 7200))
+	{
+		if (ast_activate_generator(chan, &dmw, &d))
+			return -1;
+	}
+	else
+	{
+		if (ast_activate_generator(chan, &tonepair, &d))
+			return -1;
+	}
 	return 0;
 }
 

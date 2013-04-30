@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.313 03/12/2013
+ *  version 0.314 04/30/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.313 03/12/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.314 04/30/2013";
 
 static char *app = "Rpt";
 
@@ -10393,7 +10393,7 @@ treataslocal:
 		imdone = 1;
 		if (myrpt->stopgen) break;
 		myrpt->stopgen = -1;
-	        if ((res = ast_tonepair_start(mychannel, 1004.0, 0, 99999999, 7200.0))) 
+	        if ((res = ast_tonepair_start(mychannel, 1000.0, 0, 99999999, 7200.0))) 
 		{
 			myrpt->stopgen = 0;
 			break;
@@ -12217,7 +12217,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			{
 				if (myrpt->remstopgen) break;
 				myrpt->remstopgen = -1;
-			        if ( ast_tonepair_start(myrpt->txchannel, 1004.0, 0, 99999999, 7200.0))
+			        if ( ast_tonepair_start(myrpt->txchannel, 1000.0, 0, 99999999, 7200.0))
 				{
 					myrpt->remstopgen = 0;
 					break;
