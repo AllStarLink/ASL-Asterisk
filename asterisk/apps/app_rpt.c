@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.314 04/30/2013
+ *  version 0.315 05/18/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -599,7 +599,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.314 04/30/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.315 05/18/2013";
 
 static char *app = "Rpt";
 
@@ -7811,7 +7811,7 @@ static char *handle_cli_frog(struct ast_cli_entry *e,
 {
         switch (cmd) {
         case CLI_INIT:
-                e->command = "rpt frog";
+                e->command = "frog";
                 e->usage = frog_usage;
                 return NULL;
         case CLI_GENERATE:
