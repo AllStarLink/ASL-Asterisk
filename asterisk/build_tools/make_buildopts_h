@@ -27,3 +27,12 @@ case ${OSARCH} in	# actually we should check build_os
 esac
 
 echo "#define AST_BUILDOPT_SUM \"${BUILDSUM}\""
+
+if [ -r /etc/sysinfo ]
+then
+        grep LLVERS /etc/sysinfo > /dev/null 2>&1
+        if [ $? -eq 0 ]
+        then
+                echo "#define AST_BUILDOPT_LIMEY \"Y\""
+        fi
+fi
