@@ -418,7 +418,9 @@ struct voter_pvt {
 	float	rlpy[NTAPS_4K + 1];
 	float	tlpx[NTAPS_4K + 1];
 	float	tlpy[NTAPS_4K + 1];
+	int32_t	hdx;
 	char plfilter;
+	char hostdeemp;
 	int linger;
 	uint8_t rssi_thresh[MAXTHRESHOLDS];
 	uint16_t count_thresh[MAXTHRESHOLDS];
@@ -735,6 +737,19 @@ static int16_t lpass4(int16_t input,float *xv,float *yv)
                      + ( -1.5847014566 * yv[2]) + (  2.3188475168 * yv[3])
                      + ( -2.5392334760 * yv[4]) + (  1.6846484378 * yv[5]);
         return((int)yv[6]);
+}
+
+static int16_t deemp1(int16_t input, int32_t *state0)
+{
+
+int32_t	accum;
+int16_t output;
+
+	accum = input;
+	*state0 = accum + (*state0 * 25889) / M_Q15;
+	accum = (*state0 * 6878) / (M_Q15 / 4);
+	output = accum;
+	return(output);
 }
 
 
@@ -1989,6 +2004,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		if (val) p->linger = atoi(val); else p->linger = DEFAULT_LINGER;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
 		if (val) p->plfilter = ast_true(val);
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"hostdeemp"); 
+		if (val) p->hostdeemp = ast_true(val);
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
 		if (val) p->duplex = ast_true(val); else p->duplex = 1;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"mixminus"); 
@@ -3257,7 +3274,7 @@ static void *voter_reader(void *data)
 									if (client->ismaster) proxy.flags |= 2 | 8;
 									if (client->doadpcm) proxy.flags |= 16;
 									if (client->mix) proxy.flags |= 32;
-									if (client->nodeemp) proxy.flags |= 1;
+									if (client->nodeemp || p->hostdeemp) proxy.flags |= 1;
 									if (client->noplfilter) proxy.flags |= 4;
 									vph->digest = htonl(crc32_bufs(p->primary_challenge,client->pswd));
 									memmove(buf + sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
@@ -3755,13 +3772,16 @@ static void *voter_reader(void *data)
 											ast_queue_frame(p->owner,&fr);
 											continue;
 										}
-										if (p->plfilter) 
+										if (p->plfilter || p->hostdeemp) 
 										{
+											short ix;
 											for(i = 0; i < FRAME_SIZE; i++)
 											{
 												j = p->buf[AST_FRIENDLY_OFFSET + i] & 0xff;
-												p->buf[AST_FRIENDLY_OFFSET + i] = 
-													AST_LIN2MU(hpass6(AST_MULAW(j),p->hpx,p->hpy));
+												ix = AST_MULAW(j);
+												if (p->plfilter) ix = hpass6(ix,p->hpx,p->hpy);
+												if (p->hostdeemp) ix = deemp1(ix,&p->hdx);
+												p->buf[AST_FRIENDLY_OFFSET + i] = AST_LIN2MU(ix);
 											}
 										}
 										stream.curtime = master_time;
@@ -3878,7 +3898,7 @@ static void *voter_reader(void *data)
 							if (client->ismaster) proxy.flags |= 2 | 8;
 							if (client->doadpcm) proxy.flags |= 16;
 							if (client->mix) proxy.flags |= 32;
-							if (client->nodeemp) proxy.flags |= 1;
+							if (client->nodeemp || p->hostdeemp) proxy.flags |= 1;
 							if (client->noplfilter) proxy.flags |= 4;
 							vph->digest = htonl(crc32_bufs(p->primary_challenge,client->pswd));
 							memmove(buf + sizeof(VOTER_PACKET_HEADER) + sizeof(VOTER_PROXY_HEADER),
@@ -3996,7 +4016,7 @@ process_gps:
 						if (client->ismaster) authpacket.flags |= 2 | 8;
 						if (client->doadpcm) authpacket.flags |= 16;
 						if (client->mix) authpacket.flags |= 32;
-						if (client->nodeemp) authpacket.flags |= 1;
+						if (client->nodeemp || p->hostdeemp) authpacket.flags |= 1;
 						if (client->noplfilter) authpacket.flags |= 4;
 					}
 				}
@@ -4092,6 +4112,8 @@ static int reload(void)
 		if (val) p->linger = atoi(val); else p->linger = DEFAULT_LINGER;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"plfilter"); 
 		if (val) p->plfilter = ast_true(val); else p->plfilter = 0;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"hostdeemp"); 
+		if (val) p->hostdeemp = ast_true(val); else p->hostdeemp = 0;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"duplex"); 
 		if (val) p->duplex = ast_true(val); else p->duplex = 1;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"mixminus"); 
@@ -4200,6 +4222,7 @@ static int reload(void)
 			if (!strcmp(v->name,"streams")) continue;
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
+			if (!strcmp(v->name,"hostdeemp")) continue;
 			if (!strcmp(v->name,"duplex")) continue;
 			if (!strcmp(v->name,"mixminus")) continue;
 			if (!strcmp(v->name,"linger")) continue;
@@ -4213,6 +4236,7 @@ static int reload(void)
 			if (!strncasecmp(v->name,"gpsid",5)) continue;
 			if (!strncasecmp(v->name,"buflen",6)) continue;
 			if (!strncasecmp(v->name,"nodeemp",7)) continue;
+			if (!strncasecmp(v->name,"hostdeemp",9)) continue;
 			if (!strncasecmp(v->name,"noplfilter",10)) continue;
 			if (!strncasecmp(v->name,"prio",4)) continue;
 			cp = ast_strdup(v->value);
@@ -4265,7 +4289,7 @@ static int reload(void)
 			client->buflen = instance_buflen;
 			client->nodenum = strtoul(ctg,NULL,0);
 			client->totransmit = client->doadpcm = client->donulaw = 0;
-			client->nodeemp = client->noplfilter = 	client->dynamic = client->prio = 0;
+			client->nodeemp = client->noplfilter = client->dynamic = client->prio = 0;
 			client->gpsid = 0;
 			for(i = 1; i < n; i++)
 			{
