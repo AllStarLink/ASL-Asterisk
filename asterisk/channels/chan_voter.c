@@ -170,6 +170,38 @@ redundancy configured for it, even if a separate instance needs to be created ju
 Also, if Non-GPS-based operation is all that is needed, just the use of redundancy within the clients is
 sufficient, and does not require any use of the server redundancy features.
 
+"hostdeemp" (app_rpt duplex=3) mode:
+
+As of Voter board firmware 1.19 (7/19/2013), there is a set of options in both the firmware ("Offline Menu item
+#12, "DUPLEX3 support"), and the "hostdeemp" option (instance-wide) in the voter.conf file on the host.
+
+Duplex mode 3 in app_rpt allows for "in-cabinet" repeat audio (where the actual radio hardware supplies the repeated
+audio directly itself, and app_rpt simply "adds" all of the other audio as appropriate.
+
+The Voter board (RTCM) now has an option to do the same functionality itself, for a case where local repeat audio
+is desired without the "network audio delay" normally associated with Voter board (RTCM) operation, and for a radio
+that doesnt have the option of providing "in cabinet" repeat audio (along with externally provided audio) itself.
+
+Because of limitations with the Voter board (RTCM) hardware (being that there is only 1 audio path into the processor,
+and it either has de-emphasis in its "hardware path" of not), it is necessary if you:
+
+1) Wish to have the "duplex=3" functionality in app_rpt
+2) Have the "DUPLEX3" support enabled in the Voter (RTCM) board
+3) Have a transmitter that you are "modulating directly" (with flat audio)
+
+If all of the above is true, then you need to use the "hostdeemp" option in chan voter, which basically "forces" the
+RTCM *NOT* to do de-emphasis in hardware (it will send the non-de-emphasized audio to the host), and have the host
+"do" the de-emphasis (in software) instead.
+
+This will allow the Voter (RTCM) board to be able to "pass" the non-de-emphaszed audio back into the "direct modulation
+audio" stream, since that is what will be "presented" to the processor in the Voter (RTCM) board, as the hardware de-emphasis
+is disabled in this mode.
+
+If you have a transmitter that you are "feeding" line-level (mic) audio, then this mode is not necessary, as the Voter (RTCM)
+board is fully capable of providing the functionality all by itself.
+
+Obviously, it is not valid to use *ANY* of the duplex=3 modes in a voted and/or simulcasted system.
+
 */
 
 
@@ -738,6 +770,8 @@ static int16_t lpass4(int16_t input,float *xv,float *yv)
                      + ( -2.5392334760 * yv[4]) + (  1.6846484378 * yv[5]);
         return((int)yv[6]);
 }
+
+/* FIR integrator providing de-emphasis @ 8000 samples/sec */
 
 static int16_t deemp1(int16_t input, int32_t *state0)
 {
