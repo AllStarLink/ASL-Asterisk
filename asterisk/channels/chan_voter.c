@@ -268,6 +268,8 @@ struct ast_flags zeroflag = { 0 };
 #define	RX_TIMEOUT_MS 200
 #define	CLIENT_TIMEOUT_MS 3000
 #define	TX_KEEPALIVE_MS 1000
+#define	PING_TIME_MS 250
+#define	PING_TIMEOUT_MS 3000
 
 #define	DEFAULT_LINGER 6
 
@@ -380,6 +382,7 @@ typedef struct {
 #define	VOTER_PAYLOAD_GPS	2
 #define VOTER_PAYLOAD_ADPCM	3
 #define VOTER_PAYLOAD_NULAW	4
+#define VOTER_PAYLOAD_PING	5
 #define	VOTER_PAYLOAD_PROXY	0xf000
 
 struct voter_client {
@@ -426,6 +429,18 @@ struct voter_client {
 	struct sockaddr_in proxy_sin;
 	char saved_challenge[VOTER_CHALLENGE_LEN];
 	short lastaudio[FRAME_SIZE];
+	struct timeval ping_txtime;
+	struct timeval ping_last_rxtime;
+	unsigned int ping_last_seqno;
+	int pings_requested;
+	int pings_sent;
+	int pings_received;
+	int pings_oos;
+	int pings_worst;
+	int pings_best;
+	unsigned int ping_seqno;
+	int pings_total_ms;
+	char ping_abort;
 } ;
 
 struct voter_pvt {
@@ -644,6 +659,13 @@ static char txlockout_usage[] =
 "Usage: voter txlockout [instance] <client_list>\n"
 "       Set Tx Lockout for voter instance clients\n";
 
+/* Ping client */
+static int voter_do_ping(int fd, int argc, char *argv[]);
+
+static char ping_usage[] =
+"Usage: voter ping [client] <# pings, 0 to abort>\n"
+"       Ping (check connectivity) to client\n";
+
 
 
 #ifndef	NEW_ASTERISK
@@ -672,6 +694,9 @@ static struct ast_cli_entry  cli_display =
 static struct ast_cli_entry  cli_txlockout =
         { { "voter", "txlockout" }, voter_do_txlockout, 
 		"Set Tx Lockout status for voter (instance) clients", txlockout_usage };
+static struct ast_cli_entry  cli_ping =
+        { { "voter", "ping" }, voter_do_ping, 
+		"Ping (check connectivity) to client", ping_usage };
 
 #endif
 
@@ -1484,6 +1509,36 @@ struct {
 	return (NULL);
 }
 
+static void check_ping_done(struct voter_client *client)
+{
+float	p;
+
+	if (!client->pings_requested) return;
+	if (!client->ping_abort)
+	{
+		if (client->pings_sent < client->pings_requested) return;
+		if (ast_tvdiff_ms(ast_tvnow(),client->ping_last_rxtime) > PING_TIMEOUT_MS)
+		{
+			ast_verbose("\nPING (%s): RESPONSE TIMEOUT!!\n",client->name);
+		}
+		else
+		{
+			if (client->pings_received < client->pings_requested) return;
+		}
+	}
+	else
+	{
+		ast_verbose("\nPING (%s): ABORTED!!\n",client->name);
+	}
+	p = 100.0 * (float) (client->pings_received - client->pings_oos) / (float) client->pings_sent;
+	ast_verbose("\nPING (%s): Packets tx: %d, rx: %d, oos: %d, Avg.: %0.3f ms\n",client-> name,client->pings_sent,
+		client->pings_received,client->pings_oos,(float)client->pings_total_ms / (float) client->pings_received);
+	ast_verbose("PING (%s):  Worst: %d ms, Best: %d ms, %0.1f%% Packets successfully received (%0.1f%% loss)\n",client->name,
+		client->pings_worst,client->pings_best,p, 100.0 - p);
+	client->pings_requested = 0;
+}
+
+
 
 /* voter xmit thread */
 static void *voter_xmit(void *data)
@@ -1511,6 +1566,13 @@ struct timeval tv;
 		char rssi;
 		char audio[FRAME_SIZE + 3];
 	} proxy_audiopacket;
+	struct {
+		VOTER_PACKET_HEADER vp;
+		unsigned int seqno;
+		struct timeval txtime;
+		struct timeval starttime;
+		char filler[128];
+	} pingpacket;
 #pragma pack(pop)
 
 	while(run_forever && (!ast_shutting_down()))
@@ -1843,12 +1905,45 @@ struct timeval tv;
 		for(client = clients; client; client = client->next)
 		{
 			if (client->nodenum != p->nodenum) continue;
+			if (!client->respdigest) continue;
+			if (!client->heardfrom) continue;
+			if (IS_CLIENT_PROXY(client)) continue;
+			check_ping_done(client);
+			if (!client->pings_requested) continue;
+			if (client->pings_sent >= client->pings_requested) continue;
+			if (ast_tvdiff_ms(tv,client->ping_txtime) >= (PING_TIME_MS * client->pings_sent))
+			{
+				if (!client->pings_sent) 
+				{
+					client->ping_txtime = ast_tvnow();
+					memset(&client->ping_last_rxtime,0,sizeof(client->ping_last_rxtime));
+				}
+				client->pings_sent++;
+				memset(&pingpacket,0,sizeof(pingpacket));
+				pingpacket.seqno = ++client->ping_seqno;
+				for(i = 0; i < sizeof(pingpacket.filler); i++)
+					pingpacket.filler[i] = (pingpacket.seqno & 0xff) + i;
+				pingpacket.txtime = tv;
+				pingpacket.starttime = client->ping_txtime;
+				strcpy((char *)pingpacket.vp.challenge,challenge);
+				pingpacket.vp.payload_type = htons(VOTER_PAYLOAD_PING);
+				pingpacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
+				pingpacket.vp.curtime.vtime_nsec = htonl(master_time.vtime_nsec);
+				mkpucked(client,&pingpacket.vp.curtime);
+				pingpacket.vp.digest = htonl(client->respdigest);
+				pingpacket.vp.curtime.vtime_nsec = (client->mix) ? htonl(client->txseqno) : htonl(master_time.vtime_nsec);
+				if (debug > 1) ast_verbose("sending ping packet to client %s digest %08x\n",client->name,client->respdigest);
+				sendto(udp_socket, &pingpacket, sizeof(pingpacket),0,(struct sockaddr *)&client->sin,sizeof(client->sin));
+			}
+		}
+		for(client = clients; client; client = client->next)
+		{
+			if (client->nodenum != p->nodenum) continue;
 			if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 			if (p->priconn && (!client->dynamic) && (!client->mix) && (!IS_CLIENT_PROXY(client))) continue;
 			if (!client->heardfrom) continue;
 			if (ast_tvzero(client->lastsenttime) || (ast_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
 			{
-				
 				memset(&audiopacket,0,sizeof(audiopacket));
 				strcpy((char *)audiopacket.vp.challenge,challenge);
 				audiopacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
@@ -2652,6 +2747,55 @@ struct voter_client *client;
 	ast_cli(fd,"\n");
         return RESULT_SUCCESS;
 }
+
+static int voter_do_ping(int fd, int argc, char *argv[])
+{
+struct voter_client *client;
+int	npings = 8;
+
+        if (argc < 3)
+                return RESULT_SHOWUSAGE;
+
+	for(client = clients; client; client = client->next)
+	{
+		if (client->dynamic) continue;
+		if (IS_CLIENT_PROXY(client)) continue;
+		if (!client->heardfrom) continue;
+		if (!client->respdigest) continue;
+		if (!strcasecmp(client->name,argv[2])) break;
+	}
+	if (!client)
+	{
+		ast_cli(fd,"voter client %s not found (or at least not connected)\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	if (argc > 3)
+	{
+		npings = atoi(argv[3]);
+	}
+	if (npings <= 0)
+	{
+		client->ping_abort = 1;
+		return RESULT_SUCCESS;
+	}
+	if ((client->pings_requested) && 
+		(client->pings_sent < client->pings_requested))
+	{
+		ast_cli(fd,"voter client %s already pinging!!\n",argv[2]);
+		return RESULT_SUCCESS;
+	}
+	client->pings_sent = 0;
+	client->pings_received = 0;
+	client->pings_oos = 0;
+	client->pings_total_ms = 0;
+	client->pings_best = 0;
+	client->pings_worst = 0;
+	client->ping_last_seqno = 0;
+	client->ping_seqno = 0;
+	client->pings_requested = npings;
+        return RESULT_SUCCESS;
+}
+
 #ifdef	NEW_ASTERISK
 
 static char *res2cli(int r)
@@ -2780,6 +2924,20 @@ static char *handle_cli_txlockout(struct ast_cli_entry *e,
 	return res2cli(voter_do_txlockout(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_ping(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "voter ping";
+                e->usage = ping_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(voter_do_ping(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable voter debugging"),
 	AST_CLI_DEFINE(handle_cli_test,"Specify/Query voter instance test mode"),
@@ -2789,6 +2947,7 @@ static struct ast_cli_entry voter_cli[] = {
 	AST_CLI_DEFINE(handle_cli_reload,"Reloads chan_voter parameters"),
 	AST_CLI_DEFINE(handle_cli_display,"Displays voter (instance) clients"),
 	AST_CLI_DEFINE(handle_cli_txlockout,"Set Tx Lockout for voter (instance) clients"),
+	AST_CLI_DEFINE(handle_cli_ping,"Do Pingage"),
 } ;
 
 #endif
@@ -2898,6 +3057,7 @@ int unload_module(void)
 	ast_cli_unregister(&cli_reload);
 	ast_cli_unregister(&cli_display);
 	ast_cli_unregister(&cli_txlockout);
+	ast_cli_unregister(&cli_ping);
 #endif
 #ifndef OLD_ASTERISK
 	ast_manager_unregister("VoterStatus");
@@ -3060,6 +3220,13 @@ static void *voter_reader(void *data)
 		VOTER_PROXY_HEADER vprox;
 		char flags;
 	} proxy_authpacket;
+	struct {
+		VOTER_PACKET_HEADER vp;
+		unsigned int seqno;
+		struct timeval txtime;
+		struct timeval starttime;
+		char filler[128];
+	} pingpacket;
 #pragma pack(pop)
 
 	if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "voter: reader thread started.\n");
@@ -3901,6 +4068,45 @@ static void *voter_reader(void *data)
 						}
 						continue;
 					} 
+					/* if we know the dude, and its ping, process it */
+					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_PING) && 
+						(recvlen == sizeof(pingpacket)))
+
+					{
+						int timediff;
+
+						memcpy(&pingpacket,buf,sizeof(pingpacket));
+						gettimeofday(&client->ping_last_rxtime,NULL);
+						/* if ping not for this session */
+						if (ast_tvdiff_ms(client->ping_txtime,pingpacket.starttime)) continue;
+						if (client->ping_last_seqno && (pingpacket.seqno < (client->ping_last_seqno + 1)))
+						{
+							ast_verbose("PING (%s): Packets out of sequence!!\n",client->name);
+							client->pings_oos++;
+						}
+						timediff = ast_tvdiff_ms(client->ping_last_rxtime,pingpacket.txtime);
+						if (timediff < 0)
+						{
+							ast_verbose("PING (%s): Packet has invalid time (diff=%d)!!\n",client->name,timediff);
+							continue;
+						}
+						client->ping_last_seqno = pingpacket.seqno;
+						client->pings_received++;
+						client->pings_total_ms += timediff;
+						if (!client->pings_worst) client->pings_worst = timediff;
+						if (!client->pings_best) client->pings_best = timediff;
+						if (timediff < client->pings_best) client->pings_best = timediff;
+						if (timediff > client->pings_worst) client->pings_worst = timediff;
+						ast_verbose("PING (%s) Response:   seqno: %u  diff: %d ms\n",client->name,pingpacket.seqno,timediff);
+						//if (debug >= 3) 
+						{
+							timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
+							strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
+//							ast_verbose("PING (%s):   seqno: %u  %s.%09d\n",client->name,seqno,timestr,ntohl(vph->curtime.vtime_nsec));
+						}
+						check_ping_done(client);
+						continue;
+					}
 					/* if we know the dude, find the connection his audio belongs to and send it there */
 					if (client && client->heardfrom && (ntohs(vph->payload_type) == VOTER_PAYLOAD_GPS) && 
 					    ((recvlen == sizeof(VOTER_PACKET_HEADER)) ||
@@ -4050,7 +4256,7 @@ process_gps:
 						if (client->ismaster) authpacket.flags |= 2 | 8;
 						if (client->doadpcm) authpacket.flags |= 16;
 						if (client->mix) authpacket.flags |= 32;
-						if (client->nodeemp || p->hostdeemp) authpacket.flags |= 1;
+						if (client->nodeemp || (p && p->hostdeemp)) authpacket.flags |= 1;
 						if (client->noplfilter) authpacket.flags |= 4;
 					}
 				}
@@ -4570,6 +4776,7 @@ int load_module(void)
 	ast_cli_register(&cli_reload);
 	ast_cli_register(&cli_display);
 	ast_cli_register(&cli_txlockout);
+	ast_cli_register(&cli_ping);
 #endif
 
 #ifndef OLD_ASTERISK
