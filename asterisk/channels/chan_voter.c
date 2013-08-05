@@ -666,8 +666,6 @@ static char ping_usage[] =
 "Usage: voter ping [client] <# pings, 0 to abort>\n"
 "       Ping (check connectivity) to client\n";
 
-
-
 #ifndef	NEW_ASTERISK
 
 static struct ast_cli_entry  cli_debug =
@@ -697,7 +695,6 @@ static struct ast_cli_entry  cli_txlockout =
 static struct ast_cli_entry  cli_ping =
         { { "voter", "ping" }, voter_do_ping, 
 		"Ping (check connectivity) to client", ping_usage };
-
 #endif
 
 static uint32_t crc_32_tab[] = { /* CRC polynomial 0xedb88320 */
@@ -1529,6 +1526,7 @@ float	p;
 	else
 	{
 		ast_verbose("\nPING (%s): ABORTED!!\n",client->name);
+		client->ping_abort = 0;
 	}
 	p = 100.0 * (float) (client->pings_received - client->pings_oos) / (float) client->pings_sent;
 	ast_verbose("\nPING (%s): Packets tx: %d, rx: %d, oos: %d, Avg.: %0.3f ms\n",client-> name,client->pings_sent,
@@ -2778,7 +2776,7 @@ int	npings = 8;
 		client->ping_abort = 1;
 		return RESULT_SUCCESS;
 	}
-	if ((client->pings_requested) && 
+	else if ((client->pings_requested) && 
 		(client->pings_sent < client->pings_requested))
 	{
 		ast_cli(fd,"voter client %s already pinging!!\n",argv[2]);
@@ -2792,6 +2790,7 @@ int	npings = 8;
 	client->pings_worst = 0;
 	client->ping_last_seqno = 0;
 	client->ping_seqno = 0;
+	client->ping_abort = 0;
 	client->pings_requested = npings;
         return RESULT_SUCCESS;
 }
