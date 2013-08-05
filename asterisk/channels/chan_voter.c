@@ -2553,7 +2553,7 @@ int	myms = ms,x;
 	return 0;
 }
 
-static void voter_display(int fd, struct voter_pvt *p)
+static void voter_display(int fd, struct voter_pvt *p, int doips)
 {
 	int j,rssi,thresh,ncols = 56,wasverbose,vt100compat;
 	char str[256],*term,c,hasdyn;
@@ -2625,8 +2625,23 @@ static void voter_display(int fd, struct voter_pvt *p)
 			ast_cli(fd,"ACTIVE DYNAMIC CLIENTS:\n\n");
 			for(client = clients; client; client = client->next)
 			{
+				if (client->nodenum != p->nodenum) continue;
 				if (!client->dynamic) continue;
 				if (ast_tvzero(client->lastdyntime)) continue;
+				ast_cli(fd,"%10.10s -- %s:%d\n",client->name,ast_inet_ntoa(client->sin.sin_addr),ntohs(client->sin.sin_port));
+			}
+			ast_cli(fd,"\n\n");
+		}
+		if (doips)
+		{
+			ast_cli(fd,"ACTIVE NON-DYNAMIC CLIENTS:\n\n");
+			for(client = clients; client; client = client->next)
+			{
+				if (client->nodenum != p->nodenum) continue;
+				if (client->dynamic) continue;
+				if (p->priconn && (!client->dynamic) && (!client->mix)) continue;
+				if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
+				if (!client->heardfrom) continue;
 				ast_cli(fd,"%10.10s -- %s:%d\n",client->name,ast_inet_ntoa(client->sin.sin_addr),ntohs(client->sin.sin_port));
 			}
 			ast_cli(fd,"\n\n");
@@ -2639,7 +2654,7 @@ static int voter_do_display(int fd, int argc, char *argv[])
 {
 struct voter_pvt *p;
 
-        if (argc != 3)
+        if (argc < 3)
                 return RESULT_SHOWUSAGE;
 	for(p = pvts; p; p = p->next)
 	{
@@ -2650,7 +2665,7 @@ struct voter_pvt *p;
 		ast_cli(fd,"voter instance %s not found\n",argv[2]);
 		return RESULT_SUCCESS;
 	}
-	voter_display(fd,p);
+	voter_display(fd,p,((argc > 3)));
         return RESULT_SUCCESS;
 }
 
