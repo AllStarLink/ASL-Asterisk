@@ -1508,13 +1508,14 @@ struct {
 
 static void check_ping_done(struct voter_client *client)
 {
-float	p;
+float	p,q;
 
 	if (!client->pings_requested) return;
 	if (!client->ping_abort)
 	{
 		if (client->pings_sent < client->pings_requested) return;
-		if (ast_tvdiff_ms(ast_tvnow(),client->ping_last_rxtime) > PING_TIMEOUT_MS)
+		if (ast_tvdiff_ms(ast_tvnow(),
+			(ast_tvzero(client->ping_last_rxtime)) ? client->ping_txtime : client->ping_last_rxtime) > PING_TIMEOUT_MS)
 		{
 			ast_verbose("\nPING (%s): RESPONSE TIMEOUT!!\n",client->name);
 		}
@@ -1528,9 +1529,16 @@ float	p;
 		ast_verbose("\nPING (%s): ABORTED!!\n",client->name);
 		client->ping_abort = 0;
 	}
-	p = 100.0 * (float) (client->pings_received - client->pings_oos) / (float) client->pings_sent;
+	if (client->pings_sent)
+		p = 100.0 * (float) (client->pings_received - client->pings_oos) / (float) client->pings_sent;
+	else
+		p = 0.0;
+	if (client->pings_received)
+		q = (float)client->pings_total_ms / (float) client->pings_received;
+	else
+		q = 0;
 	ast_verbose("\nPING (%s): Packets tx: %d, rx: %d, oos: %d, Avg.: %0.3f ms\n",client-> name,client->pings_sent,
-		client->pings_received,client->pings_oos,(float)client->pings_total_ms / (float) client->pings_received);
+		client->pings_received,client->pings_oos,q);
 	ast_verbose("PING (%s):  Worst: %d ms, Best: %d ms, %0.1f%% Packets successfully received (%0.1f%% loss)\n",client->name,
 		client->pings_worst,client->pings_best,p, 100.0 - p);
 	client->pings_requested = 0;
@@ -2776,7 +2784,7 @@ int	npings = 8;
 		client->ping_abort = 1;
 		return RESULT_SUCCESS;
 	}
-	else if ((client->pings_requested) && 
+	if ((client->pings_requested) && 
 		(client->pings_sent < client->pings_requested))
 	{
 		ast_cli(fd,"voter client %s already pinging!!\n",argv[2]);
