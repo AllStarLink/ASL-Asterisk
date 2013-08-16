@@ -856,6 +856,16 @@ int     i,l,inquo;
 
 }
 
+static unsigned int voter_tvdiff_ms(struct timeval x, struct timeval y)
+{
+int	i;
+
+	i = ast_tvdiff_ms(x,y);
+	if (i < 0) i = INT32_MAX;
+	return(i);
+}
+
+
 /* return offsetted time */
 static long long puckoffset(struct voter_client *client)
 {
@@ -1423,7 +1433,7 @@ struct {
 		}
 		gettimeofday(&tv,NULL);
 		memset(&authpacket,0,sizeof(authpacket));
-		if ((!p->priconn) && (ast_tvzero(lasttx) || (ast_tvdiff_ms(tv,lasttx) >= 500)))
+		if ((!p->priconn) && (ast_tvzero(lasttx) || (voter_tvdiff_ms(tv,lasttx) >= 500)))
 		{
 			authpacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 			authpacket.vp.curtime.vtime_nsec = htonl(voter_timing_count);
@@ -1434,7 +1444,7 @@ struct {
 			sendto(pri_socket, &authpacket, sizeof(authpacket),0,(struct sockaddr *)&p->primary,sizeof(p->primary));
 			lasttx = tv;
 		}
-		if (p->priconn && (ast_tvzero(lasttx) || (ast_tvdiff_ms(tv,lasttx) >= 1000)))
+		if (p->priconn && (ast_tvzero(lasttx) || (voter_tvdiff_ms(tv,lasttx) >= 1000)))
 		{
 			authpacket.vp.curtime.vtime_sec = htonl(master_time.vtime_sec);
 			authpacket.vp.curtime.vtime_nsec = htonl(voter_timing_count);
@@ -1445,7 +1455,7 @@ struct {
 			sendto(pri_socket, &authpacket, sizeof(authpacket) - 1,0,(struct sockaddr *)&p->primary,sizeof(p->primary));
 			lasttx = tv;
 		}
-		if (p->priconn && (ast_tvzero(lastrx) || (ast_tvdiff_ms(tv,lastrx) >= 2000)))
+		if (p->priconn && (ast_tvzero(lastrx) || (voter_tvdiff_ms(tv,lastrx) >= 2000)))
 		{
 			p->priconn = 0;
 			digest = 0;
@@ -1514,7 +1524,7 @@ float	p,q;
 	if (!client->ping_abort)
 	{
 		if (client->pings_sent < client->pings_requested) return;
-		if (ast_tvdiff_ms(ast_tvnow(),
+		if (voter_tvdiff_ms(ast_tvnow(),
 			(ast_tvzero(client->ping_last_rxtime)) ? client->ping_txtime : client->ping_last_rxtime) > PING_TIMEOUT_MS)
 		{
 			ast_verbose("\nPING (%s): RESPONSE TIMEOUT!!\n",client->name);
@@ -1917,7 +1927,7 @@ struct timeval tv;
 			check_ping_done(client);
 			if (!client->pings_requested) continue;
 			if (client->pings_sent >= client->pings_requested) continue;
-			if (ast_tvdiff_ms(tv,client->ping_txtime) >= (PING_TIME_MS * client->pings_sent))
+			if (voter_tvdiff_ms(tv,client->ping_txtime) >= (PING_TIME_MS * client->pings_sent))
 			{
 				if (!client->pings_sent) 
 				{
@@ -1948,7 +1958,7 @@ struct timeval tv;
 			if ((!client->respdigest) && (!IS_CLIENT_PROXY(client))) continue;
 			if (p->priconn && (!client->dynamic) && (!client->mix) && (!IS_CLIENT_PROXY(client))) continue;
 			if (!client->heardfrom) continue;
-			if (ast_tvzero(client->lastsenttime) || (ast_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
+			if (ast_tvzero(client->lastsenttime) || (voter_tvdiff_ms(tv,client->lastsenttime) >= TX_KEEPALIVE_MS))
 			{
 				memset(&audiopacket,0,sizeof(audiopacket));
 				strcpy((char *)audiopacket.vp.challenge,challenge);
@@ -2799,7 +2809,7 @@ int	npings = 8;
 		client->ping_abort = 1;
 		return RESULT_SUCCESS;
 	}
-	if ((client->pings_requested) && 
+	else if ((client->pings_requested) && 
 		(client->pings_sent < client->pings_requested))
 	{
 		ast_cli(fd,"voter client %s already pinging!!\n",argv[2]);
@@ -3124,7 +3134,7 @@ struct timeval tv;
 	{
 		if (!client->dynamic) continue;
 		if (ast_tvzero(client->lastdyntime)) continue;
-		if (ast_tvdiff_ms(tv,client->lastdyntime) > dyntime)
+		if (voter_tvdiff_ms(tv,client->lastdyntime) > dyntime)
 		{
 			if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 
 				"DYN client %s past lease time\n",client->name);
@@ -3170,7 +3180,7 @@ static void *voter_timer(void *data)
 			gettimeofday(&tv,NULL);
 			for(client = clients; client; client = client->next)
 			{
-				if (!ast_tvzero(client->lastheardtime) && (ast_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+				if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
 				{
 					if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
 					client->heardfrom = 0;
@@ -3271,7 +3281,7 @@ static void *voter_reader(void *data)
 		for(p = pvts; p; p = p->next)
 		{
 			if (!p->rxkey) continue;
-			if (ast_tvdiff_ms(tv,p->lastrxtime) > RX_TIMEOUT_MS)
+			if (voter_tvdiff_ms(tv,p->lastrxtime) > RX_TIMEOUT_MS)
 			{
 				memset(&fr,0,sizeof(fr));
 				fr.datalen = 0;
@@ -3318,7 +3328,7 @@ static void *voter_reader(void *data)
 						{
 							if (!client->dynamic) continue;
 							if (ast_tvzero(client->lastdyntime)) continue;
-							if (ast_tvdiff_ms(tv,client->lastdyntime) > dyntime)
+							if (voter_tvdiff_ms(tv,client->lastdyntime) > dyntime)
 							{
 								if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 
 									"DYN client %s past lease time\n",client->name);
@@ -3679,7 +3689,7 @@ static void *voter_reader(void *data)
 								gettimeofday(&tv,NULL);
 								for(client = clients; client; client = client->next)
 								{
-									if (!ast_tvzero(client->lastheardtime) && (ast_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+									if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
 									{
 										if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
 										client->heardfrom = 0;
@@ -4100,7 +4110,7 @@ static void *voter_reader(void *data)
 						memcpy(&pingpacket,buf,sizeof(pingpacket));
 						gettimeofday(&client->ping_last_rxtime,NULL);
 						/* if ping not for this session */
-						if (ast_tvdiff_ms(client->ping_txtime,pingpacket.starttime)) continue;
+						if (voter_tvdiff_ms(client->ping_txtime,pingpacket.starttime)) continue;
 						if (client->ping_last_seqno && (pingpacket.seqno < (client->ping_last_seqno + 1)))
 						{
 							ast_verbose("PING (%s): Packets out of sequence!!\n",client->name);
