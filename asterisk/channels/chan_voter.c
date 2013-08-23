@@ -4726,7 +4726,7 @@ int load_module(void)
 
 	pthread_attr_t attr;
 	struct sockaddr_in sin;
-	int i,bs;
+	int i,bs,utos;
 	struct ast_config *cfg = NULL;
 	char *val;
 #ifdef  NEW_ASTERISK
@@ -4757,6 +4757,9 @@ int load_module(void)
         val = (char *) ast_variable_retrieve(cfg,"general","port"); 
 	if (val) listen_port = (uint16_t) strtoul(val,NULL,0);
 
+        val = (char *) ast_variable_retrieve(cfg,"general","utos"); 
+	if (val) utos = ast_true(val); else utos = 0;
+
         val = (char *) ast_variable_retrieve(cfg,"general","bindaddr"); 
 	if (!val)
 		sin.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -4772,6 +4775,18 @@ int load_module(void)
 
 	i = fcntl(udp_socket,F_GETFL,0);              // Get socket flags
 	fcntl(udp_socket,F_SETFL,i | O_NONBLOCK);   // Add non-blocking flag
+
+
+	if (utos)
+	{
+		i = 0xc0;
+		if (setsockopt(udp_socket, IPPROTO_IP, IP_TOS,  &i, sizeof(i)))
+		{
+			ast_log(LOG_ERROR,"Can't setsockopt:IP_TOS:%s\n",strerror(errno));
+			close(udp_socket);
+			return AST_MODULE_LOAD_DECLINE;
+		}
+	}
 
 	voter_timing_fd = open(DAHDI_PSEUDO_DEV_NAME,O_RDWR);
 	if (voter_timing_fd == -1)
