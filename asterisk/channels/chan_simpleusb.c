@@ -3727,6 +3727,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_UINT("hdwtype",o->hdwtype)
 			M_UINT("eeprom",o->wanteeprom)
 			M_UINT("duplex",o->radioduplex)
+			M_UINT("rxondelay",o->rxondelay)
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;
