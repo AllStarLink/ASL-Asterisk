@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.315 05/18/2013
+ *  version 0.317 09/20/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -128,9 +128,10 @@
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
  *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
- *  62 - Send Message to USB to control GPIO pins, quietly (cop,61,GPIO1=0[,GPIO4=1].....)
+ *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
  *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
- *
+ *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR]) 
+ *  65 - Send POCSAG page (equipped channel types only)
  *
  * ilink cmds:
  *
@@ -599,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.315 05/18/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.317 09/20/2013";
 
 static char *app = "Rpt";
 
@@ -1328,6 +1329,8 @@ static struct rpt
 	char lastmdc[32];
 #endif
 	struct rpt_cmd_struct cmdAction;
+	struct timeval paging;
+	char deferid;
 } rpt_vars[MAXRPTS];	
 
 struct nodelog {
@@ -1599,6 +1602,16 @@ static int narrow_capable(struct rpt *myrpt)
 		return 1;
 	return 0;
 }	
+
+static char is_paging(struct rpt *myrpt)
+{
+char	rv = 0;
+
+	if ((!ast_tvzero(myrpt->paging)) &&
+		(ast_tvdiff_ms(ast_tvnow(),myrpt->paging) <= 300000)) rv = 1;
+	return(rv);
+}
+
 
 static void voxinit_rpt(struct rpt *myrpt,char enable)
 {
@@ -10475,6 +10488,13 @@ struct rpt_link *l;
 	if(debug >= 6)
 		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
 
+
+	if ((mode == ID) && is_paging(myrpt))
+	{
+		myrpt->deferid = 1;
+		return;
+	}
+
 	switch(mode)
 	{
 	    case CONNECTED:
@@ -12169,6 +12189,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 	FILE *fp;
 	char *argv[101],*cp;
 	int i, j, k, r, src;
+	struct rpt_tele *telem;
 #ifdef	_MDC_ENCODE_H_
 	struct mdcparams *mdcp;
 #endif
@@ -12757,6 +12778,29 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			else fprintf(fp,"%s\n",argv[1]);
 			fclose(fp);
 			if (myatoi(argv[0]) == 63) rpt_telemetry(myrpt, ARB_ALPHA, (void *) argv[1]);
+			return DC_COMPLETE;
+		case 65: /* send POCSAG page */
+			if (argc < 2) break;
+			/* ignore if not a USB channel */
+			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
+			sprintf(string,"PAGE %s %s",argv[1],argv[2]);
+			telem = myrpt->tele.next;
+			k = 0;
+			while(telem != &myrpt->tele)
+			{
+				if (((telem->mode == ID) || (telem->mode == ID1) || 
+					(telem->mode == IDTALKOVER)) && (!telem->killed))
+				{
+					if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
+					myrpt->deferid = 1;
+				}
+				telem = telem->next;
+			}
+			gettimeofday(&myrpt->paging,NULL);
+			ast_sendtext(myrpt->rxchannel,string);
 			return DC_COMPLETE;
 	}	
 	return DC_INDETERMINATE;
@@ -20214,6 +20258,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			rpt_mutex_lock(&myrpt->lock);
 			ast_free(str);
 		}
+		if (myrpt->deferid && (!is_paging(myrpt)))
+		{
+			myrpt->deferid = 0;
+			queue_id(myrpt);
+		}
 		if (myrpt->keyposttimer)
 		{
 			myrpt->keyposttimer -= elap;
@@ -20785,6 +20834,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						sprintf(buf,"RPT_PP%d",i);
 						rpt_update_boolean(myrpt,buf,j);
 					}
+					else if (!strcmp(AST_FRAME_DATAP(f),"ENDPAGE"))
+					{
+						myrpt->paging.tv_sec = 0;
+						myrpt->paging.tv_usec = 0;
+					}
 				}
 				/* if is a BeagleBoard device */
 				if (strncasecmp(myrpt->rxchannel->name,"beagle/", 7) == 0)
@@ -20804,29 +20858,37 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					char	str[200];
 
 
-					sprintf(str,"V %s %s",myrpt->name,(char *)AST_FRAME_DATAP(f));
-					wf.frametype = AST_FRAME_TEXT;
-					wf.subclass = 0;
-					wf.offset = 0;
-					wf.mallocd = 0;
-					wf.datalen = strlen(str) + 1;
-					wf.samples = 0;
-					wf.src = "voter_text_send";
-
-
-					l = myrpt->links.next;
-					/* otherwise, send it to all of em */
-					while(l != &myrpt->links)
+					if (!strcmp(AST_FRAME_DATAP(f),"ENDPAGE"))
 					{
-						/* Dont send to other then IAXRPT client */
-						if ((l->name[0] != '0') || (l->phonemode))
+						myrpt->paging.tv_sec = 0;
+						myrpt->paging.tv_usec = 0;
+					}
+					else
+					{
+						sprintf(str,"V %s %s",myrpt->name,(char *)AST_FRAME_DATAP(f));
+						wf.frametype = AST_FRAME_TEXT;
+						wf.subclass = 0;
+						wf.offset = 0;
+						wf.mallocd = 0;
+						wf.datalen = strlen(str) + 1;
+						wf.samples = 0;
+						wf.src = "voter_text_send";
+
+
+						l = myrpt->links.next;
+						/* otherwise, send it to all of em */
+						while(l != &myrpt->links)
 						{
+							/* Dont send to other then IAXRPT client */
+							if ((l->name[0] != '0') || (l->phonemode))
+							{
+								l = l->next;
+								continue;
+							}
+							AST_FRAME_DATA(wf) = str;
+							if (l->chan) rpt_qwrite(l,&wf); 
 							l = l->next;
-							continue;
 						}
-						AST_FRAME_DATA(wf) = str;
-						if (l->chan) rpt_qwrite(l,&wf); 
-						l = l->next;
 					}
 				}
 			}

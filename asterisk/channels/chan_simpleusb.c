@@ -54,6 +54,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <linux/parport.h>
 #include <linux/version.h>
 
+#include "pocsag.c"
+
 #define DEBUG_CAPTURES	 		1
 
 #define RX_CAP_RAW_FILE			"/tmp/rx_cap_in.pcm"
@@ -160,6 +162,16 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	PP_PORT "/dev/parport0"
 #define	PP_IOPORT 0x378
 
+#define	PAGER_SRC "PAGER"
+#define	ENDPAGE_STR "ENDPAGE"
+#define AMPVAL 12000
+#define	SAMPRATE 8000 // (Sample Rate)
+#define	DIVLCM 192000  // (Least Common Mult of 512,1200,2400,8000)
+#define	PREAMBLE_BITS 576
+#define	MESSAGE_BITS 544 // (17 * 32), 1 longword SYNC plus 16 longwords data
+#define	ONEVAL -AMPVAL
+#define ZEROVAL AMPVAL
+#define	DIVSAMP (DIVLCM / SAMPRATE)
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
 static struct ast_jb_conf default_jbconf =
@@ -184,14 +196,17 @@ START_CONFIG
     ;
     ; debug = 0x0		; misc debug flags, default is 0
 
-	; Set the device to use for I/O
-	; devicenum = 0
 	; Set hardware type here
 	; hdwtype = 0               ; 0=limey, 1=sph
 
 	; rxboost = 0          ; no rx gain boost
+	; txboost = 0	       ; no tx gain boost
 	; carrierfrom = usb    ;no,usb,usbinvert
 	; ctcssfrom = usb      ;no,usb,usbinvert
+
+	; pager = no		;no,a,b (e.g. pager = b means "put the normal repeat audio on channel A, and the pager audio on channel B")
+
+	; baud = 512		;512,1200,2400 (pager data rate)
 
 	; invertptt = 0
 
@@ -356,6 +371,7 @@ static int simpleusb_debug;
 
 enum {CD_IGNORE,CD_HID,CD_HID_INVERT,CD_PP,CD_PP_INVERT};
 enum {SD_IGNORE,SD_HID,SD_HID_INVERT,SD_PP,SD_PP_INVERT};    				 // no,external,externalinvert,software
+enum {PAGER_NONE,PAGER_A,PAGER_B};
 
 /*	DECLARE STRUCTURES */
 
@@ -531,6 +547,10 @@ struct chan_simpleusb_pvt {
 	int	rxondelay;
 	int	rxoncnt;
 
+	int	pager;
+	int	baud;
+	int	waspager;
+
 	int	rxboostset;
 	int	rxmixerset;
 	float	rxvoiceadj;
@@ -609,6 +629,8 @@ static struct chan_simpleusb_pvt simpleusb_default = {
 	.wanteeprom = 1,
 	.usedtmf = 1,
 	.rxondelay = 0,
+	.pager = PAGER_NONE,
+	.baud = 512,
 };
 
 /*	DECLARE FUNCTION PROTOTYPES	*/
@@ -2174,11 +2196,31 @@ static int simpleusb_digit_end(struct ast_channel *c, char digit, unsigned int d
 	return 0;
 }
 
+static void mkpsamples(short *audio,uint32_t x, int *audio_ptr, int *divcnt, int divdiv)
+{
+int	i;
+
+	for(i = 31; i >= 0; i--)
+	{
+		while(*divcnt < divdiv)
+		{
+			audio[(*audio_ptr)++] = (x & (1 << i)) ? ONEVAL : ZEROVAL;
+			*divcnt += DIVSAMP;
+		}
+		if (*divcnt >= divdiv) *divcnt -= divdiv;
+	}
+}
+
+
 static int simpleusb_text(struct ast_channel *c, const char *text)
 {
 	struct chan_simpleusb_pvt *o = c->tech_pvt;
 	char *cmd;
-	int cnt,i,j;
+	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr;
+	struct pocsag_batch *batch,*b;
+	short *audio;
+	char audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
+	struct ast_frame wf,*f1;
 
 	if (haspp == 2) ioperm(pbase,2,1);
 
@@ -2242,6 +2284,108 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 			ppwrite(pp_val);
 		}
 		ast_mutex_unlock(&pp_lock);
+		return 0;
+	}
+
+	if (!strncmp(text,"PAGE",4))
+	{
+		cnt = sscanf(text,"%s %d %n",cmd,&i,&j);
+		if (cnt < 2) return 0;
+		if (strlen(text + j) < 1) return 0;
+		switch(text[j])
+		{
+		    case 'T': /* Tone only */
+			tone = 2;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) TONE ONLY\n",i);
+			batch = make_pocsag_batch(i, (char *)&tone, sizeof(tone), TONE);
+			break;
+		    case 'N': /* Numeric */
+			if (!text[j + 1]) return 0;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) NUMERIC (%s)\n",i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC);
+			break;
+		    case 'A': /* Alpha */
+			if (!text[j + 1]) return 0;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) ALPHA (%s)\n",i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA);
+			break;
+		    case '?': /* Query Page Status */
+			i = 0;
+			ast_mutex_lock(&o->txqlock);
+			AST_LIST_TRAVERSE(&o->txq, f1,frame_list) if (f1->src && (!strcmp(f1->src,PAGER_SRC))) i++;
+			ast_mutex_unlock(&o->txqlock);
+			cmd = (i) ? "PAGES" : "NOPAGES" ;
+			memset(&wf,0,sizeof(wf));
+			wf.frametype = AST_FRAME_TEXT;
+		        wf.datalen = strlen(cmd);
+		        wf.data = cmd;
+			ast_queue_frame(o->owner, &wf);
+			return 0;
+		    default:
+			return 0;
+		}
+		if (!batch)
+		{
+			ast_log(LOG_ERROR,"Error creating POCSAG page!!\n");
+			return 0;
+		}
+		b = batch;
+		for(i = 0; b; b = b->next) i++;
+		/* get number of samples to alloc for audio */
+		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / o->baud;
+		/* pad end with 250ms of silence */
+		audio_samples += SAMPRATE / 4;
+		/* also pad up to FRAME_SIZE */
+		audio_samples += audio_samples % FRAME_SIZE;
+		audio = malloc((audio_samples * sizeof(short)) + 10);
+		if (!audio)
+		{
+			free_batch(batch);
+			ast_log(LOG_ERROR,"Cant malloc() for audio buffer!!\n");
+			return 0;
+		}
+		memset(audio,0,audio_samples * sizeof(short));
+		divdiv = DIVLCM / o->baud;
+		divcnt = 0;
+		audio_ptr = 0;
+		for(i = 0; i < (PREAMBLE_BITS / 32); i++)
+			mkpsamples(audio,0xaaaaaaaa,&audio_ptr,&divcnt,divdiv);
+		b = batch;
+		while (b)
+		{
+			mkpsamples(audio,b->sc,&audio_ptr,&divcnt,divdiv);
+			for(j = 0; j < 8; j++)
+			{
+				for(i = 0; i < 2; i++)
+				{
+					mkpsamples(audio,b->frame[j][i],&audio_ptr,&divcnt,divdiv);
+				}
+			}
+			b = b->next;
+		}
+		free_batch(batch);
+		memset(audio1,0,sizeof(audio1));
+		for(i = 0; i < audio_samples; i += FRAME_SIZE)
+		{
+			memset(&wf,0,sizeof(wf));
+			wf.frametype = AST_FRAME_VOICE;
+		        wf.subclass = AST_FORMAT_SLINEAR;
+		        wf.samples = FRAME_SIZE;
+		        wf.datalen = FRAME_SIZE * 2;
+			wf.offset = AST_FRIENDLY_OFFSET;
+		        wf.data = audio1 + AST_FRIENDLY_OFFSET;
+			wf.src = PAGER_SRC;
+			memcpy(wf.data,(char *)(audio + i),FRAME_SIZE * 2);
+			f1 = ast_frdup(&wf);
+			memset(&f1->frame_list,0,sizeof(f1->frame_list));
+			ast_mutex_lock(&o->txqlock);
+			AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
+			ast_mutex_unlock(&o->txqlock);
+		}
+		free(audio);
 		return 0;
 	}
 	return 0;
@@ -2372,10 +2516,10 @@ static int simpleusb_write(struct ast_channel *c, struct ast_frame *f)
 
 static struct ast_frame *simpleusb_read(struct ast_channel *c)
 {
-	int res,cd,sd,src,i,n;
+	int res,cd,sd,src,i,n,ispager,doleft,doright; // Yes, like Dudley!!! :-)
 	struct chan_simpleusb_pvt *o = c->tech_pvt;
 	struct ast_frame *f = &o->read_f,*f1;
-	struct ast_frame wf = { AST_FRAME_CONTROL };
+	struct ast_frame wf = { AST_FRAME_CONTROL }, wf1;
 	time_t now;
 	short *sp,*sp1,outbuf[FRAME_SIZE * 2 * 6];
 
@@ -2525,32 +2669,50 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 					}
 					sp = (short *) o->simpleusb_write_buf;
 					sp1 = outbuf;
+					doright = 1;
+					doleft = 1;
+					ispager = 0;
+					if (f1->src && (!strcmp(f1->src,PAGER_SRC))) ispager = 1;
+					if (o->pager != PAGER_NONE)
+					{
+						doleft = (o->pager == PAGER_A) ? ispager : !ispager;
+						doright = (o->pager == PAGER_B) ? ispager : !ispager;
+					}
 					for(i = 0; i < FRAME_SIZE; i++)
 					{
 						short v;
 
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 						v = lpass(sp[i],o->flpt);
-						*sp1++ = v;
-						*sp1++ = v;
+						*sp1++ = (doleft) ? v : 0;
+						*sp1++ = (doright) ? v : 0;
 					}				
 		                        soundcard_writeframe(o, outbuf);
 		                        src += l;
 		                        o->simpleusb_write_dst = 0;
+					if (o->waspager && (!ispager))
+					{
+						memset(&wf1,0,sizeof(wf1));
+						wf1.frametype = AST_FRAME_TEXT;
+					        wf1.datalen = strlen(ENDPAGE_STR);
+					        wf1.data = ENDPAGE_STR;
+						ast_queue_frame(o->owner, &wf1);
+					}
+					o->waspager = ispager;
 		                } else {                                /* copy residue */
 		                        l = f1->datalen - src;
 		                        memcpy(o->simpleusb_write_buf + o->simpleusb_write_dst,
@@ -2564,6 +2726,23 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		}
 		break;
 	}
+
+	if (o->waspager)
+	{
+		n = 0;
+		ast_mutex_lock(&o->txqlock);
+		AST_LIST_TRAVERSE(&o->txq, f1,frame_list) n++;
+		ast_mutex_unlock(&o->txqlock);
+		if (n < 1)
+		{
+			memset(&wf1,0,sizeof(wf1));
+			wf1.frametype = AST_FRAME_TEXT;
+		        wf1.datalen = strlen(ENDPAGE_STR);
+		        wf1.data = ENDPAGE_STR;
+			ast_queue_frame(o->owner, &wf1);
+			o->waspager = 0;
+		}
+	}			
 
 	cd = 1; /* assume CD */
 	if ((o->rxcdtype == CD_HID) && (!o->rxhidsq)) cd = 0;
@@ -3607,6 +3786,24 @@ static void store_rxsdtype(struct chan_simpleusb_pvt *o, char *s)
 	//ast_log(LOG_WARNING, "set rxsdtype = %s\n", s);
 }
 
+static void store_pager(struct chan_simpleusb_pvt *o, char *s)
+{
+	if (!strcasecmp(s,"no")){
+		o->pager = PAGER_NONE;
+	}
+	else if (!strcasecmp(s,"a")){
+		o->pager = PAGER_A;
+	}
+	else if (!strcasecmp(s,"b")){
+		o->pager = PAGER_B;
+	}	
+	else {
+		ast_log(LOG_WARNING,"Unrecognized pager parameter: %s\n",s);
+	}
+
+	//ast_log(LOG_WARNING, "set pager = %s\n", s);
+}
+
 static void tune_write(struct chan_simpleusb_pvt *o)
 {
 	FILE *fp;
@@ -3728,6 +3925,8 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_UINT("eeprom",o->wanteeprom)
 			M_UINT("duplex",o->radioduplex)
 			M_UINT("rxondelay",o->rxondelay)
+			M_F("pager",store_pager(o,(char *)v->value))
+			M_UINT("baud",o->baud)
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;
