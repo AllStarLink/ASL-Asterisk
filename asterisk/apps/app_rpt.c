@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.317 09/20/2013
+ *  version 0.318 09/21/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -600,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.317 09/20/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.318 09/21/2013";
 
 static char *app = "Rpt";
 
@@ -19586,6 +19586,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		/* If 3/4 or full duplex, or half-duplex with link to link, add in localmsg ptt */
 		if (myrpt->p.duplex > 0 || myrpt->p.linktolink)
 			totx = totx || localmsgqueued;
+		totx = totx || is_paging(myrpt);
 		/* If full duplex, add local dtmf stuff active */
 		if (myrpt->p.duplex > 1) 
 		{

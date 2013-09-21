@@ -308,8 +308,9 @@ unsigned char mwp;
 #define	DIVLCM 192000  // (Least Common Mult of 512,1200,2400,8000)
 #define	PREAMBLE_BITS 576
 #define	MESSAGE_BITS 544 // (17 * 32), 1 longword SYNC plus 16 longwords data
-#define	ONEVAL -AMPVAL
-#define ZEROVAL AMPVAL
+// Apparently we have to send "inverted".. probably because of inverting AMP in Voter board
+#define	ONEVAL AMPVAL
+#define ZEROVAL -AMPVAL
 #define	DIVSAMP (DIVLCM / SAMPRATE)
 
 static const char vdesc[] = "radio Voter channel driver";
@@ -1113,7 +1114,7 @@ static int voter_text(struct ast_channel *ast, const char *text)
 			memset(&wf,0,sizeof(wf));
 			wf.frametype = AST_FRAME_TEXT;
 		        wf.datalen = strlen(cmd);
-		        wf.data = cmd;
+		        AST_FRAME_DATA(wf) = cmd;
 			ast_queue_frame(o->owner, &wf);
 			return 0;
 		    default:
@@ -1128,8 +1129,8 @@ static int voter_text(struct ast_channel *ast, const char *text)
 		for(i = 0; b; b = b->next) i++;
 		/* get number of samples to alloc for audio */
 		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / o->baud;
-		/* pad end with 250ms of silence */
-		audio_samples += SAMPRATE / 4;
+		/* pad end with 250ms of silence on each side */
+		audio_samples += SAMPRATE / 2;
 		/* also pad up to FRAME_SIZE */
 		audio_samples += audio_samples % FRAME_SIZE;
 		audio = malloc((audio_samples * sizeof(short)) + 10);
@@ -1142,7 +1143,7 @@ static int voter_text(struct ast_channel *ast, const char *text)
 		memset(audio,0,audio_samples * sizeof(short));
 		divdiv = DIVLCM / o->baud;
 		divcnt = 0;
-		audio_ptr = 0;
+		audio_ptr = SAMPRATE / 4;
 		for(i = 0; i < (PREAMBLE_BITS / 32); i++)
 			mkpsamples(audio,0xaaaaaaaa,&audio_ptr,&divcnt,divdiv);
 		b = batch;
@@ -1168,9 +1169,9 @@ static int voter_text(struct ast_channel *ast, const char *text)
 		        wf.samples = FRAME_SIZE;
 		        wf.datalen = FRAME_SIZE * 2;
 			wf.offset = AST_FRIENDLY_OFFSET;
-		        wf.data = audio1 + AST_FRIENDLY_OFFSET;
+		        AST_FRAME_DATA(wf) = audio1 + AST_FRIENDLY_OFFSET;
 			wf.src = PAGER_SRC;
-			memcpy(wf.data,(char *)(audio + i),FRAME_SIZE * 2);
+			memcpy(AST_FRAME_DATA(wf),(char *)(audio + i),FRAME_SIZE * 2);
 			f1 = ast_frdup(&wf);
 			memset(&f1->frame_list,0,sizeof(f1->frame_list));
 			ast_mutex_lock(&o->txqlock);
@@ -1750,7 +1751,7 @@ struct timeval tv;
 		ast_mutex_lock(&p->txqlock);
 		AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
 		ast_mutex_unlock(&p->txqlock);
-		if (n && ((n > 3) || (!p->txkey)))
+		if (n && ((n > 3) || (!p->txkey) || p->waspager))
 		{
 			x = 1;
 			ast_mutex_lock(&p->txqlock);
@@ -1769,7 +1770,7 @@ struct timeval tv;
 				memset(&wf1,0,sizeof(wf1));
 				wf1.frametype = AST_FRAME_TEXT;
 			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
-			        wf1.data = ENDPAGE_STR;
+			        AST_FRAME_DATA(wf1) = ENDPAGE_STR;
 				ast_queue_frame(p->owner, &wf1);
 			}
 			p->waspager = ispager;
@@ -1778,14 +1779,14 @@ struct timeval tv;
 		{
 			n = 0;
 			ast_mutex_lock(&p->txqlock);
-			AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
+			AST_LIST_TRAVERSE(&p->txq, f1,frame_list) if (!strcmp(f1->src,PAGER_SRC)) n++;
 			ast_mutex_unlock(&p->txqlock);
 			if (n < 1)
 			{
 				memset(&wf1,0,sizeof(wf1));
 				wf1.frametype = AST_FRAME_TEXT;
 			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
-			        wf1.data = ENDPAGE_STR;
+			        AST_FRAME_DATA(wf1) = ENDPAGE_STR;
 				ast_queue_frame(p->owner, &wf1);
 				p->waspager = 0;
 			}
