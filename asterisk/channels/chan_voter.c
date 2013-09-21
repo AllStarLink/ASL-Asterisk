@@ -529,7 +529,13 @@ struct voter_pvt {
 #else
 	AST_LIST_HEAD_NOLOCK(, ast_frame) txq;
 #endif
+#ifdef 	OLD_ASTERISK
+	AST_LIST_HEAD(, ast_frame) pagerq;
+#else
+	AST_LIST_HEAD_NOLOCK(, ast_frame) pagerq;
+#endif
 	ast_mutex_t  txqlock;
+	ast_mutex_t  pagerqlock;
 };
 
 #ifdef	OLD_ASTERISK
@@ -1082,6 +1088,11 @@ static int voter_text(struct ast_channel *ast, const char *text)
 
 	if (!strncmp(text,"PAGE",4))
 	{
+		if (!o->pmrChan)
+		{
+			ast_log(LOG_WARNING,"Attempt to page on a non-flat-audio Voter config (%s)\n",ast->name);
+			return 0;
+		}
 		cnt = sscanf(text,"%s %d %n",cmd,&i,&j);
 		if (cnt < 2) return 0;
 		if (strlen(text + j) < 1) return 0;
@@ -1174,9 +1185,9 @@ static int voter_text(struct ast_channel *ast, const char *text)
 			memcpy(AST_FRAME_DATA(wf),(char *)(audio + i),FRAME_SIZE * 2);
 			f1 = ast_frdup(&wf);
 			memset(&f1->frame_list,0,sizeof(f1->frame_list));
-			ast_mutex_lock(&o->txqlock);
-			AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
-			ast_mutex_unlock(&o->txqlock);
+			ast_mutex_lock(&o->pagerqlock);
+			AST_LIST_INSERT_TAIL(&o->pagerq,f1,frame_list);
+			ast_mutex_unlock(&o->pagerqlock);
 		}
 		free(audio);
 		return 0;
@@ -1706,7 +1717,7 @@ static void *voter_xmit(void *data)
 {
 
 struct voter_pvt *p = (struct voter_pvt *)data;
-int	i,n,x,mx,ispager;
+int	i,n,x,mx;
 i16 dummybuf1[FRAME_SIZE * 12],xmtbuf1[FRAME_SIZE * 12];
 i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE],xmtbuf2[FRAME_SIZE];
 i32	l;
@@ -1751,44 +1762,17 @@ struct timeval tv;
 		ast_mutex_lock(&p->txqlock);
 		AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
 		ast_mutex_unlock(&p->txqlock);
-		if (n && ((n > 3) || (!p->txkey) || p->waspager))
+		if (n && ((n > 3) || (!p->txkey)))
 		{
 			x = 1;
 			ast_mutex_lock(&p->txqlock);
 			f2 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
 			ast_mutex_unlock(&p->txqlock);
-			ispager = 0;
-			if (f2 && f2->src && (!strcmp(f2->src,PAGER_SRC))) ispager = 1;
 			if (p->pmrChan)
 			{
 				p->pmrChan->txPttIn = 1;
 				PmrTx(p->pmrChan,(i16*) AST_FRAME_DATAP(f2));
 				ast_frfree(f2);
-			}
-			if (p->waspager && (!ispager))
-			{
-				memset(&wf1,0,sizeof(wf1));
-				wf1.frametype = AST_FRAME_TEXT;
-			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
-			        AST_FRAME_DATA(wf1) = ENDPAGE_STR;
-				ast_queue_frame(p->owner, &wf1);
-			}
-			p->waspager = ispager;
-		}
-		if (p->waspager)
-		{
-			n = 0;
-			ast_mutex_lock(&p->txqlock);
-			AST_LIST_TRAVERSE(&p->txq, f1,frame_list) if (!strcmp(f1->src,PAGER_SRC)) n++;
-			ast_mutex_unlock(&p->txqlock);
-			if (n < 1)
-			{
-				memset(&wf1,0,sizeof(wf1));
-				wf1.frametype = AST_FRAME_TEXT;
-			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
-			        AST_FRAME_DATA(wf1) = ENDPAGE_STR;
-				ast_queue_frame(p->owner, &wf1);
-				p->waspager = 0;
 			}
 		}			
 		f1 = NULL;
@@ -1812,24 +1796,55 @@ struct timeval tv;
 				if (p->pmrChan) PmrTx(p->pmrChan,xmtbuf);
 			}
 			PmrRx(p->pmrChan,dummybuf1,dummybuf2,xmtbuf1);
-			x = p->pmrChan->txPttOut;
-			for(i = 0; i < FRAME_SIZE; i++) xmtbuf[i] = xmtbuf1[i * 2];
-			memset(&fr,0,sizeof(struct ast_frame));
-		        fr.frametype = AST_FRAME_VOICE;
-		        fr.subclass = AST_FORMAT_SLINEAR;
-		        fr.datalen = FRAME_SIZE;
-		        fr.samples = FRAME_SIZE;
-		        AST_FRAME_DATA(fr) = xmtbuf;
-		        fr.src = type;
-		        fr.offset = 0;
-		        fr.mallocd = 0;
-		        fr.delivery.tv_sec = 0;
-		        fr.delivery.tv_usec = 0;
-			f1 = ast_translate(p->fromast,&fr,0);
-			if (!f1)
+			n = 0;
+			ast_mutex_lock(&p->pagerqlock);
+			AST_LIST_TRAVERSE(&p->pagerq, f1,frame_list) n++;
+			ast_mutex_unlock(&p->pagerqlock);
+			if (p->waspager && (n < 1))
 			{
-				ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
-				continue;
+				memset(&wf1,0,sizeof(wf1));
+				wf1.frametype = AST_FRAME_TEXT;
+			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
+			        AST_FRAME_DATA(wf1) = ENDPAGE_STR;
+				ast_queue_frame(p->owner, &wf1);
+				p->waspager = 0;
+			}
+			if (n)
+			{
+				ast_mutex_lock(&p->pagerqlock);
+				f3 = AST_LIST_REMOVE_HEAD(&p->pagerq,frame_list);
+				f1 = ast_translate(p->fromast,f3,0);
+				if (!f1)
+				{
+					ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
+					continue;
+				}
+				ast_frfree(f3);
+				ast_mutex_unlock(&p->pagerqlock);
+				x = 1;
+				p->waspager = 1;
+			}
+			else
+			{
+				x = p->pmrChan->txPttOut;
+				for(i = 0; i < FRAME_SIZE; i++) xmtbuf[i] = xmtbuf1[i * 2];
+				memset(&fr,0,sizeof(struct ast_frame));
+			        fr.frametype = AST_FRAME_VOICE;
+			        fr.subclass = AST_FORMAT_SLINEAR;
+			        fr.datalen = FRAME_SIZE;
+			        fr.samples = FRAME_SIZE;
+			        AST_FRAME_DATA(fr) = xmtbuf;
+			        fr.src = type;
+			        fr.offset = 0;
+			        fr.mallocd = 0;
+			        fr.delivery.tv_sec = 0;
+			        fr.delivery.tv_usec = 0;
+				f1 = ast_translate(p->fromast,&fr,0);
+				if (!f1)
+				{
+					ast_log(LOG_ERROR,"Can not translate frame to recv from Asterisk\n");
+					continue;
+				}
 			}
 		}
 		mx = 0;
@@ -2191,6 +2206,7 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 	memset(p, 0, sizeof(struct voter_pvt));
 	p->nodenum = strtoul((char *)data,NULL,0);
 	ast_mutex_init(&p->txqlock);
+	ast_mutex_init(&p->pagerqlock);
 	ast_mutex_init(&p->xmit_lock);
 	ast_cond_init(&p->xmit_cond,NULL);
 	p->dsp = ast_dsp_new();
