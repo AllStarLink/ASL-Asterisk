@@ -41,9 +41,12 @@ be present on the "normal" output, and that during paging operation, audio
 will only be present on the "paging/direct modulation" output. These outputs
 can be designated in the configuration of the channel driver (simpleusb.conf).
 
-Support of chan_usbradio and chan_voter is planned for the very near future,
-and should be somewhat easier then chan_simpleusb, since these channel drivers
-support direct moduation.
+
+Chan_voter supports direct modulation mode(s), so implementation was straightforward.
+The only "user-noticible addition" is the "baud" parameter in voter.conf.
+
+Support of chan_usbradio is planned for the very near future, and, like chan_voter should
+be somewhat easier then chan_simpleusb, since these channel drivers support direct moduation.
 
 
 HOW TO IMPLEMENT:

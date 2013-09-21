@@ -246,6 +246,8 @@ Obviously, it is not valid to use *ANY* of the duplex=3 modes in a voted and/or 
 #include "asterisk/manager.h"
 
 
+#include "pocsag.c"
+
 /* Un-comment this if you wish Digital milliwatt output rather then real audio
    when transmitting (for debugging only) */
 /* #define	DMWDIAG */
@@ -298,6 +300,17 @@ unsigned char mwp;
 
 #define	IS_CLIENT_PROXY(x) (x->proxy_sin.sin_family == AF_INET)
 #define	SEND_PRIMARY(x) (x->primary.sin_family == AF_INET)
+
+#define	PAGER_SRC "PAGER"
+#define	ENDPAGE_STR "ENDPAGE"
+#define AMPVAL 12000
+#define	SAMPRATE 8000 // (Sample Rate)
+#define	DIVLCM 192000  // (Least Common Mult of 512,1200,2400,8000)
+#define	PREAMBLE_BITS 576
+#define	MESSAGE_BITS 544 // (17 * 32), 1 longword SYNC plus 16 longwords data
+#define	ONEVAL -AMPVAL
+#define ZEROVAL AMPVAL
+#define	DIVSAMP (DIVLCM / SAMPRATE)
 
 static const char vdesc[] = "radio Voter channel driver";
 static char type[] = "voter";
@@ -507,6 +520,8 @@ struct voter_pvt {
 	short lastaudio[FRAME_SIZE];
 	char mixminus;
 	int order;
+	int baud;
+	char waspager;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1035,8 +1050,137 @@ static int voter_setoption(struct ast_channel *chan, int option, void *data, int
 	return 0;
 }
 
+static void mkpsamples(short *audio,uint32_t x, int *audio_ptr, int *divcnt, int divdiv)
+{
+int	i;
+
+	for(i = 31; i >= 0; i--)
+	{
+		while(*divcnt < divdiv)
+		{
+			audio[(*audio_ptr)++] = (x & (1 << i)) ? ONEVAL : ZEROVAL;
+			*divcnt += DIVSAMP;
+		}
+		if (*divcnt >= divdiv) *divcnt -= divdiv;
+	}
+}
+
 static int voter_text(struct ast_channel *ast, const char *text)
 {
+	struct voter_pvt *o = ast->tech_pvt;
+	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr;
+	struct pocsag_batch *batch,*b;
+	short *audio;
+	char *cmd,audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
+	struct ast_frame wf,*f1;
+
+	cmd = alloca(strlen(text) + 10);
+
+	/* print received messages */
+	if (debug > 3) ast_verbose(" << Console Received simpleusb text %s >> \n", text);
+
+	if (!strncmp(text,"PAGE",4))
+	{
+		cnt = sscanf(text,"%s %d %n",cmd,&i,&j);
+		if (cnt < 2) return 0;
+		if (strlen(text + j) < 1) return 0;
+		switch(text[j])
+		{
+		    case 'T': /* Tone only */
+			tone = 2;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) TONE ONLY\n",i);
+			batch = make_pocsag_batch(i, (char *)&tone, sizeof(tone), TONE);
+			break;
+		    case 'N': /* Numeric */
+			if (!text[j + 1]) return 0;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) NUMERIC (%s)\n",i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC);
+			break;
+		    case 'A': /* Alpha */
+			if (!text[j + 1]) return 0;
+			if (option_verbose > 2) 
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) ALPHA (%s)\n",i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA);
+			break;
+		    case '?': /* Query Page Status */
+			i = 0;
+			ast_mutex_lock(&o->txqlock);
+			AST_LIST_TRAVERSE(&o->txq, f1,frame_list) if (f1->src && (!strcmp(f1->src,PAGER_SRC))) i++;
+			ast_mutex_unlock(&o->txqlock);
+			cmd = (i) ? "PAGES" : "NOPAGES" ;
+			memset(&wf,0,sizeof(wf));
+			wf.frametype = AST_FRAME_TEXT;
+		        wf.datalen = strlen(cmd);
+		        wf.data = cmd;
+			ast_queue_frame(o->owner, &wf);
+			return 0;
+		    default:
+			return 0;
+		}
+		if (!batch)
+		{
+			ast_log(LOG_ERROR,"Error creating POCSAG page!!\n");
+			return 0;
+		}
+		b = batch;
+		for(i = 0; b; b = b->next) i++;
+		/* get number of samples to alloc for audio */
+		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / o->baud;
+		/* pad end with 250ms of silence */
+		audio_samples += SAMPRATE / 4;
+		/* also pad up to FRAME_SIZE */
+		audio_samples += audio_samples % FRAME_SIZE;
+		audio = malloc((audio_samples * sizeof(short)) + 10);
+		if (!audio)
+		{
+			free_batch(batch);
+			ast_log(LOG_ERROR,"Cant malloc() for audio buffer!!\n");
+			return 0;
+		}
+		memset(audio,0,audio_samples * sizeof(short));
+		divdiv = DIVLCM / o->baud;
+		divcnt = 0;
+		audio_ptr = 0;
+		for(i = 0; i < (PREAMBLE_BITS / 32); i++)
+			mkpsamples(audio,0xaaaaaaaa,&audio_ptr,&divcnt,divdiv);
+		b = batch;
+		while (b)
+		{
+			mkpsamples(audio,b->sc,&audio_ptr,&divcnt,divdiv);
+			for(j = 0; j < 8; j++)
+			{
+				for(i = 0; i < 2; i++)
+				{
+					mkpsamples(audio,b->frame[j][i],&audio_ptr,&divcnt,divdiv);
+				}
+			}
+			b = b->next;
+		}
+		free_batch(batch);
+		memset(audio1,0,sizeof(audio1));
+		for(i = 0; i < audio_samples; i += FRAME_SIZE)
+		{
+			memset(&wf,0,sizeof(wf));
+			wf.frametype = AST_FRAME_VOICE;
+		        wf.subclass = AST_FORMAT_SLINEAR;
+		        wf.samples = FRAME_SIZE;
+		        wf.datalen = FRAME_SIZE * 2;
+			wf.offset = AST_FRIENDLY_OFFSET;
+		        wf.data = audio1 + AST_FRIENDLY_OFFSET;
+			wf.src = PAGER_SRC;
+			memcpy(wf.data,(char *)(audio + i),FRAME_SIZE * 2);
+			f1 = ast_frdup(&wf);
+			memset(&f1->frame_list,0,sizeof(f1->frame_list));
+			ast_mutex_lock(&o->txqlock);
+			AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
+			ast_mutex_unlock(&o->txqlock);
+		}
+		free(audio);
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -1561,11 +1705,11 @@ static void *voter_xmit(void *data)
 {
 
 struct voter_pvt *p = (struct voter_pvt *)data;
-int	i,n,x,mx;
+int	i,n,x,mx,ispager;
 i16 dummybuf1[FRAME_SIZE * 12],xmtbuf1[FRAME_SIZE * 12];
 i16 xmtbuf[FRAME_SIZE],dummybuf2[FRAME_SIZE],xmtbuf2[FRAME_SIZE];
 i32	l;
-struct ast_frame fr,*f1,*f2,*f3;
+struct ast_frame fr,*f1,*f2,*f3,wf1;
 struct voter_client *client,*client1;
 struct timeval tv;
 
@@ -1602,6 +1746,7 @@ struct timeval tv;
 			continue;
 		}
 		n = x = 0;
+		f2 = 0;
 		ast_mutex_lock(&p->txqlock);
 		AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
 		ast_mutex_unlock(&p->txqlock);
@@ -1611,13 +1756,40 @@ struct timeval tv;
 			ast_mutex_lock(&p->txqlock);
 			f2 = AST_LIST_REMOVE_HEAD(&p->txq,frame_list);
 			ast_mutex_unlock(&p->txqlock);
+			ispager = 0;
+			if (f2 && f2->src && (!strcmp(f2->src,PAGER_SRC))) ispager = 1;
 			if (p->pmrChan)
 			{
 				p->pmrChan->txPttIn = 1;
 				PmrTx(p->pmrChan,(i16*) AST_FRAME_DATAP(f2));
 				ast_frfree(f2);
 			}
+			if (p->waspager && (!ispager))
+			{
+				memset(&wf1,0,sizeof(wf1));
+				wf1.frametype = AST_FRAME_TEXT;
+			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
+			        wf1.data = ENDPAGE_STR;
+				ast_queue_frame(p->owner, &wf1);
+			}
+			p->waspager = ispager;
 		}
+		if (p->waspager)
+		{
+			n = 0;
+			ast_mutex_lock(&p->txqlock);
+			AST_LIST_TRAVERSE(&p->txq, f1,frame_list) n++;
+			ast_mutex_unlock(&p->txqlock);
+			if (n < 1)
+			{
+				memset(&wf1,0,sizeof(wf1));
+				wf1.frametype = AST_FRAME_TEXT;
+			        wf1.datalen = strlen(ENDPAGE_STR) + 1;
+			        wf1.data = ENDPAGE_STR;
+				ast_queue_frame(p->owner, &wf1);
+				p->waspager = 0;
+			}
+		}			
 		f1 = NULL;
 		// x will be set here is there was actual transmit activity
 		if ((!x) && (p->pmrChan)) p->pmrChan->txPttIn = 0;
@@ -2205,6 +2377,8 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		}
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"isprimary"); 
 		if (val) p->isprimary = ast_true(val); else p->isprimary = 0;
+	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"baud"); 
+		if (val) p->baud = atoi(val); else p->baud = 1200;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
 		if (val)
 		{
@@ -4500,6 +4674,7 @@ static int reload(void)
 			if (!strcmp(v->name,"linger")) continue;
 			if (!strcmp(v->name,"primary")) continue;
 			if (!strcmp(v->name,"isprimary")) continue;
+			if (!strcmp(v->name,"baud")) continue;
 			if (!strncasecmp(v->name,"transmit",8)) continue;
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;

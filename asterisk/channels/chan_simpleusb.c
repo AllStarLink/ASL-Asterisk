@@ -2708,7 +2708,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 					{
 						memset(&wf1,0,sizeof(wf1));
 						wf1.frametype = AST_FRAME_TEXT;
-					        wf1.datalen = strlen(ENDPAGE_STR);
+					        wf1.datalen = strlen(ENDPAGE_STR) + 1;
 					        wf1.data = ENDPAGE_STR;
 						ast_queue_frame(o->owner, &wf1);
 					}
@@ -2737,7 +2737,7 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		{
 			memset(&wf1,0,sizeof(wf1));
 			wf1.frametype = AST_FRAME_TEXT;
-		        wf1.datalen = strlen(ENDPAGE_STR);
+		        wf1.datalen = strlen(ENDPAGE_STR) + 1;
 		        wf1.data = ENDPAGE_STR;
 			ast_queue_frame(o->owner, &wf1);
 			o->waspager = 0;
