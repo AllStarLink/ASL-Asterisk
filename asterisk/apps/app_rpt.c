@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.318 09/21/2013
+ *  version 0.319 09/21/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -600,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.318 09/21/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.319 09/21/2013";
 
 static char *app = "Rpt";
 
@@ -1809,6 +1809,7 @@ static int rpt_do_cmd(int fd, int argc, char *argv[]);
 static int rpt_do_setvar(int fd, int argc, char *argv[]);
 static int rpt_do_showvars(int fd, int argc, char *argv[]);
 static int rpt_do_frog(int fd, int argc, char *argv[]);
+static int rpt_do_page(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
 "Usage: rpt debug level {0-7}\n"
@@ -1883,6 +1884,11 @@ static char showvars_usage[] =
 static char frog_usage[] =
 "Usage: frog [warp_factor]\n"
 "       Performs frog-in-a-blender calculations (Jacobsen Corollary)\n";
+
+static char page_usage[] =
+"Usage: rpt page <nodename> <capcode> <[ANT]Text....>\n"
+"       Send an page to a user on a node, specifying capcode and type/text\n";
+
 
 #ifndef	NEW_ASTERISK
 
@@ -1963,6 +1969,10 @@ static struct ast_cli_entry  cli_showvars =
 static struct ast_cli_entry  cli_frog =
         { { "frog" }, rpt_do_frog,
                "Perform frog-in-a-blender calculations", frog_usage };
+
+static struct ast_cli_entry  cli_page =
+        { { "rpt", "page" }, rpt_do_page,
+		"Page a user on a node", page_usage };
 
 #endif
 
@@ -7282,7 +7292,6 @@ static int rpt_do_localplay(int fd, int argc, char *argv[])
         return RESULT_SUCCESS;
 }
 
-
 static int rpt_do_sendtext(int fd, int argc, char *argv[])
 {
         int     i;
@@ -7318,6 +7327,50 @@ static int rpt_do_sendtext(int fd, int argc, char *argv[])
 				l = l->next;
 			}
 			rpt_mutex_unlock(&myrpt->lock);
+		}
+	}
+        return RESULT_SUCCESS;
+}
+
+static int rpt_do_page(int fd, int argc, char *argv[])
+{
+        int     i;
+	char str[MAX_TEXTMSG_SIZE];
+	struct rpt_tele *telem;
+
+        if (argc < 5) return RESULT_SHOWUSAGE;
+
+	string_toupper(argv[2]);
+	string_toupper(argv[3]);
+	snprintf(str,sizeof(str) - 1,"PAGE %s ",argv[3]);
+	for(i = 4; i < argc; i++)
+	{
+		if (i > 3) strncat(str," ",sizeof(str) - 1);
+		strncat(str,argv[i],sizeof(str) - 1);
+	}	
+        for(i = 0; i < nrpts; i++)
+	{
+                if(!strcmp(argv[2], rpt_vars[i].name))
+		{
+                        struct rpt *myrpt = &rpt_vars[i];
+			/* ignore if not a USB channel */
+			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0) &&
+			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) return RESULT_SUCCESS;
+			telem = myrpt->tele.next;
+			while(telem != &myrpt->tele)
+			{
+				if (((telem->mode == ID) || (telem->mode == ID1) || 
+					(telem->mode == IDTALKOVER)) && (!telem->killed))
+				{
+					if (telem->chan) ast_softhangup(telem->chan, AST_SOFTHANGUP_DEV); /* Whoosh! */
+					telem->killed = 1;
+					myrpt->deferid = 1;
+				}
+				telem = telem->next;
+			}
+			gettimeofday(&myrpt->paging,NULL);
+			ast_sendtext(myrpt->rxchannel,str);
 		}
 	}
         return RESULT_SUCCESS;
@@ -7875,6 +7928,20 @@ static char *handle_cli_sendtext(struct ast_cli_entry *e,
 	return res2cli(rpt_do_sendtext(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_page(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+        switch (cmd) {
+        case CLI_INIT:
+                e->command = "rpt page";
+                e->usage = page_usage;
+                return NULL;
+        case CLI_GENERATE:
+                return NULL;
+	}
+	return res2cli(rpt_do_page(a->fd,a->argc,a->argv));
+}
+
 static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_debug,"Enable app_rpt debugging"),
 	AST_CLI_DEFINE(handle_cli_dump,"Dump app_rpt structs for debugging"),
@@ -7894,7 +7961,8 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_localplay,"Playback an audio file (local)"),
 	AST_CLI_DEFINE(handle_cli_sendall,"Send a Text message to all connected nodes"),
 	AST_CLI_DEFINE(handle_cli_sendtext,"Send a Text message to a specified nodes"),
-	AST_CLI_DEFINE(handle_cli_frog,"Perform frog-in-a-blender calculations")
+	AST_CLI_DEFINE(handle_cli_frog,"Perform frog-in-a-blender calculations"),
+	AST_CLI_DEFINE(handle_cli_page,"Send a page to a user on a node")
 };
 
 #endif
@@ -24994,6 +25062,7 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_setvar);
 	ast_cli_unregister(&cli_showvars);
 	ast_cli_unregister(&cli_frog);
+	ast_cli_unregister(&cli_page);
 	res |= ast_cli_unregister(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
@@ -25071,6 +25140,7 @@ static int load_module(void)
 	ast_cli_register(&cli_setvar);
 	ast_cli_register(&cli_showvars);
 	ast_cli_register(&cli_frog);
+	ast_cli_register(&cli_page);
 	res = ast_cli_register(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
