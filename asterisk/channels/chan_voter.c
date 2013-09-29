@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1999 - 2011, Digium, Inc.
  *
- * Copyright (C) 2011-2012
+ * Copyright (C) 2011-2013
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
  * See http://www.asterisk.org for more information about
@@ -269,6 +269,7 @@ struct ast_flags zeroflag = { 0 };
 
 #define	RX_TIMEOUT_MS 200
 #define	CLIENT_TIMEOUT_MS 3000
+#define	MASTER_TIMEOUT_MS 100
 #define	TX_KEEPALIVE_MS 1000
 #define	PING_TIME_MS 250
 #define	PING_TIMEOUT_MS 3000
@@ -414,6 +415,7 @@ struct voter_client {
 	char heardfrom;
 	char totransmit;
 	char ismaster;
+	char curmaster;
 	char doadpcm;
 	char donulaw;
 	char mix;
@@ -3232,6 +3234,7 @@ char *str,*strs[100];
 				if (client->dynamic) astman_append(ses," Dynamic");
 				if (client->mix) astman_append(ses," Mix");
 				if (client->ismaster) astman_append(ses," Master");
+				if (client->curmaster) astman_append(ses," ActiveMaster");
 				astman_append(ses,"\r\n");
 				astman_append(ses,"IP: %s:%d (Proxied)\r\n",
 					ast_inet_ntoa(client->proxy_sin.sin_addr),ntohs(client->proxy_sin.sin_port));
@@ -3243,6 +3246,7 @@ char *str,*strs[100];
 				if (client->dynamic) astman_append(ses," Dynamic");
 				if (client->mix) astman_append(ses," Mix");
 				if (client->ismaster) astman_append(ses," Master");
+				if (client->curmaster) astman_append(ses," ActiveMaster");
 				astman_append(ses,"\r\n");
 				astman_append(ses,"IP: %s:%d\r\n",
 					ast_inet_ntoa(client->sin.sin_addr),ntohs(client->sin.sin_port));
@@ -3371,7 +3375,7 @@ static void *voter_timer(void *data)
 			gettimeofday(&tv,NULL);
 			for(client = clients; client; client = client->next)
 			{
-				if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+				if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > ((client->ismaster) ? MASTER_TIMEOUT_MS : CLIENT_TIMEOUT_MS)))
 				{
 					if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
 					client->heardfrom = 0;
@@ -3416,7 +3420,7 @@ static void *voter_reader(void *data)
 	ssize_t recvlen;
 	struct timeval tv,timetv;
 	FILE *gpsfp;
-	struct voter_client *client,*client1,*maxclient;
+	struct voter_client *client,*client1,*maxclient,*lastmaster;
 	VOTER_PACKET_HEADER *vph;
 	VOTER_PROXY_HEADER proxy;
 	VOTER_GPS *vgp;
@@ -3551,7 +3555,8 @@ static void *voter_reader(void *data)
 							break;
 						}
 					}
-					if ((debug >= 3) && client && (!client->ismaster) && ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
+					if ((debug >= 3) && client && ((unsigned char)*(buf + sizeof(VOTER_PACKET_HEADER)) > 0) &&
+						ntohs(vph->payload_type) == VOTER_PAYLOAD_ULAW)
 					{
 						timestuff = (time_t) ntohl(vph->curtime.vtime_sec);
 						strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -3573,12 +3578,52 @@ static void *voter_reader(void *data)
 								client->respdigest = 0;
 							}
 						} 
+						lastmaster = NULL;
+						/* first, kill all the 'curmaster' flags */
+						for(client1 = clients; client1; client1 = client1->next)
+						{
+							if (client1->curmaster) 
+							{
+								lastmaster = client1;
+								client1->curmaster = 0;
+							}
+						}
+						client->lastheardtime = tv;
+						/* if possible, set it to first 'active' one */
+						for(client1 = clients; client1; client1 = client1->next)
+						{
+							if (!client1->ismaster) continue;
+							if (ast_tvzero(client1->lastheardtime)) continue;
+							if (voter_tvdiff_ms(tv,client1->lastheardtime) > MASTER_TIMEOUT_MS) continue;
+							client1->curmaster = 1;
+							if (client1 != lastmaster)
+								ast_log(LOG_NOTICE,"Voter Master changed from client %s to %s\n",
+									(lastmaster) ? lastmaster->name : "NONE",client1->name);
+							break;
+						}
+						/* if not, just set to to "one of 'em" */
+						if (!client1)
+						{
+							if (client->ismaster) client->curmaster = 1;
+							else
+							{
+								for(client1 = clients; client1; client1 = client1->next)
+								{
+									if (!client1->ismaster) continue;
+									client1->curmaster = 1;
+									if (client1 != lastmaster)
+										ast_log(LOG_NOTICE,"Voter Master changed from client %s to %s (inactive)\n",
+											(lastmaster) ? lastmaster->name : "NONE",client1->name);
+									break;
+								}
+							}
+						}
 						gettimeofday(&client->lastdyntime,NULL);
 						if ((!client) || (client && (ntohs(vph->payload_type) != VOTER_PAYLOAD_PROXY)))
 							client->respdigest = crc32_bufs((char*)vph->challenge,password);
 						client->sin = sin;
 						memset(&client->proxy_sin,0,sizeof(client->proxy_sin));
-						if ((!client->ismaster) && hasmaster)
+						if ((!client->curmaster) && hasmaster)
 						{
 							if (last_master_count && (voter_timing_count > (last_master_count + MAX_MASTER_COUNT)))
 							{
@@ -3639,7 +3684,7 @@ static void *voter_reader(void *data)
 							int index,flen;
 
 							gettimeofday(&client->lastheardtime,NULL);
-							if (client->ismaster)
+							if (client->curmaster) 
 							{
 								if (!master_time.vtime_sec)
 								{
@@ -3751,12 +3796,12 @@ static void *voter_reader(void *data)
 							{
 								btime = ((long long)master_time.vtime_sec * 1000000000LL) + master_time.vtime_nsec;
 								btime += 40000000;
-								if (client->ismaster) btime -= 20000000;
+								if (client->curmaster) btime -= 20000000;
 								ptime = ((long long)ntohl(vph->curtime.vtime_sec) * 1000000000LL) + ntohl(vph->curtime.vtime_nsec);
 								difftime = (ptime - btime) + (BUFDELAY(client) * 125000LL);
 								difftime -= puckoffset(client);
 								index = (int)((long long)difftime / 125000LL);
-								if ((debug >= 3) && (!client->ismaster))
+								if ((debug >= 3) && ((unsigned char)*(buf + sizeof(VOTER_PACKET_HEADER)) > 0))
 								{
 									timestuff = (time_t) master_time.vtime_sec;
 									strftime(timestr,sizeof(timestr) - 1,"%D %T",localtime((time_t *)&timestuff));
@@ -3875,12 +3920,12 @@ static void *voter_reader(void *data)
 								client->drain40ms = 0;
 								if (debug >= 3) ast_verbose("mix client %s outa bounds, resetting!!\n",client->name);
                                                         }
-							if (client->ismaster)
+							if (client->curmaster)
 							{
 								gettimeofday(&tv,NULL);
 								for(client = clients; client; client = client->next)
 								{
-									if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > CLIENT_TIMEOUT_MS))
+									if (!ast_tvzero(client->lastheardtime) && (voter_tvdiff_ms(tv,client->lastheardtime) > ((client->ismaster) ? MASTER_TIMEOUT_MS : CLIENT_TIMEOUT_MS)))
 									{
 										if (option_verbose >= 3) ast_verbose(VERBOSE_PREFIX_3 "Voter client %s disconnect (timeout)\n",client->name);
 										client->heardfrom = 0;
@@ -4344,7 +4389,7 @@ static void *voter_reader(void *data)
 						{
 							if (p->nodenum == client->nodenum) break;
 						}
-						if (client->ismaster)
+						if (client->curmaster)
 						{
 							mastergps_time.vtime_sec = ntohl(vph->curtime.vtime_sec);
 							mastergps_time.vtime_nsec = ntohl(vph->curtime.vtime_nsec);
@@ -4459,6 +4504,15 @@ process_gps:
 					/* if client is sending options */
   					if (recvlen > sizeof(VOTER_PACKET_HEADER))
 					{
+						if (client->ismaster)
+						{
+							ast_log(LOG_WARNING,"Voter client master timing source %s attempting to authenticate as mix client!! (HUH\?\?)\n",
+								client->name);
+							authpacket.vp.digest = 0;
+							client->heardfrom = 0;
+							client->respdigest = 0;
+							continue;
+						}
 						if (buf[sizeof(VOTER_PACKET_HEADER)] & 32) client->mix = 1;
 					}
 					if ((!client->mix) && (!hasmaster))
