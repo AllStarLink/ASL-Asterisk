@@ -304,7 +304,7 @@ unsigned char mwp;
 
 #define	PAGER_SRC "PAGER"
 #define	ENDPAGE_STR "ENDPAGE"
-#define AMPVAL 12000
+#define AMPVAL 30000
 #define	SAMPRATE 8000 // (Sample Rate)
 #define	DIVLCM 192000  // (Least Common Mult of 512,1200,2400,8000)
 #define	PREAMBLE_BITS 576
@@ -1829,7 +1829,12 @@ struct timeval tv;
 			else
 			{
 				x = p->pmrChan->txPttOut;
-				for(i = 0; i < FRAME_SIZE; i++) xmtbuf[i] = xmtbuf1[i * 2];
+				for(i = 0; i < FRAME_SIZE; i++) 
+				{
+					xmtbuf[i] = xmtbuf1[i * 2];
+					if (xmtbuf[i] > 28000) xmtbuf[i] = 28000;
+					else if (xmtbuf[i] < -28000) xmtbuf[i] = -28000;
+				}
 				memset(&fr,0,sizeof(struct ast_frame));
 			        fr.frametype = AST_FRAME_VOICE;
 			        fr.subclass = AST_FORMAT_SLINEAR;
