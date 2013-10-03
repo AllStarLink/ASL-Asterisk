@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.319 09/21/2013
+ *  version 0.320 10/02/2013
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -600,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.319 09/21/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.320 10/02/2013";
 
 static char *app = "Rpt";
 
@@ -1886,7 +1886,7 @@ static char frog_usage[] =
 "       Performs frog-in-a-blender calculations (Jacobsen Corollary)\n";
 
 static char page_usage[] =
-"Usage: rpt page <nodename> <capcode> <[ANT]Text....>\n"
+"Usage: rpt page <nodename> <baud> <capcode> <[ANT]Text....>\n"
 "       Send an page to a user on a node, specifying capcode and type/text\n";
 
 
@@ -7338,14 +7338,15 @@ static int rpt_do_page(int fd, int argc, char *argv[])
 	char str[MAX_TEXTMSG_SIZE];
 	struct rpt_tele *telem;
 
-        if (argc < 5) return RESULT_SHOWUSAGE;
+        if (argc < 6) return RESULT_SHOWUSAGE;
 
 	string_toupper(argv[2]);
 	string_toupper(argv[3]);
-	snprintf(str,sizeof(str) - 1,"PAGE %s ",argv[3]);
-	for(i = 4; i < argc; i++)
+	string_toupper(argv[4]);
+	snprintf(str,sizeof(str) - 1,"PAGE %s %s ",argv[3],argv[4]);
+	for(i = 5; i < argc; i++)
 	{
-		if (i > 3) strncat(str," ",sizeof(str) - 1);
+		if (i > 4) strncat(str," ",sizeof(str) - 1);
 		strncat(str,argv[i],sizeof(str) - 1);
 	}	
         for(i = 0; i < nrpts; i++)
@@ -12848,12 +12849,12 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if (myatoi(argv[0]) == 63) rpt_telemetry(myrpt, ARB_ALPHA, (void *) argv[1]);
 			return DC_COMPLETE;
 		case 65: /* send POCSAG page */
-			if (argc < 2) break;
+			if (argc < 3) break;
 			/* ignore if not a USB channel */
 			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
-			sprintf(string,"PAGE %s %s",argv[1],argv[2]);
+			sprintf(string,"PAGE %s %s %s",argv[1],argv[2],argv[3]);
 			telem = myrpt->tele.next;
 			k = 0;
 			while(telem != &myrpt->tele)

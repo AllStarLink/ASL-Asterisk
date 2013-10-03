@@ -523,7 +523,6 @@ struct voter_pvt {
 	short lastaudio[FRAME_SIZE];
 	char mixminus;
 	int order;
-	int baud;
 	char waspager;
 
 #ifdef 	OLD_ASTERISK
@@ -1077,7 +1076,7 @@ int	i;
 static int voter_text(struct ast_channel *ast, const char *text)
 {
 	struct voter_pvt *o = ast->tech_pvt;
-	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr;
+	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr,baud;
 	struct pocsag_batch *batch,*b;
 	short *audio;
 	char *cmd,audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
@@ -1095,27 +1094,27 @@ static int voter_text(struct ast_channel *ast, const char *text)
 			ast_log(LOG_WARNING,"Attempt to page on a non-flat-audio Voter config (%s)\n",ast->name);
 			return 0;
 		}
-		cnt = sscanf(text,"%s %d %n",cmd,&i,&j);
-		if (cnt < 2) return 0;
+		cnt = sscanf(text,"%s %d %d %n",cmd,&baud,&i,&j);
+		if (cnt < 3) return 0;
 		if (strlen(text + j) < 1) return 0;
 		switch(text[j])
 		{
 		    case 'T': /* Tone only */
 			tone = 2;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) TONE ONLY\n",i);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) TONE ONLY\n",baud,i);
 			batch = make_pocsag_batch(i, (char *)&tone, sizeof(tone), TONE);
 			break;
 		    case 'N': /* Numeric */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) NUMERIC (%s)\n",i,text + j + 1);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) NUMERIC (%s)\n",baud,i,text + j + 1);
 			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC);
 			break;
 		    case 'A': /* Alpha */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) ALPHA (%s)\n",i,text + j + 1);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) ALPHA (%s)\n",baud,i,text + j + 1);
 			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA);
 			break;
 		    case '?': /* Query Page Status */
@@ -1141,7 +1140,7 @@ static int voter_text(struct ast_channel *ast, const char *text)
 		b = batch;
 		for(i = 0; b; b = b->next) i++;
 		/* get number of samples to alloc for audio */
-		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / o->baud;
+		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / baud;
 		/* pad end with 250ms of silence on each side */
 		audio_samples += SAMPRATE / 2;
 		/* also pad up to FRAME_SIZE */
@@ -1154,7 +1153,7 @@ static int voter_text(struct ast_channel *ast, const char *text)
 			return 0;
 		}
 		memset(audio,0,audio_samples * sizeof(short));
-		divdiv = DIVLCM / o->baud;
+		divdiv = DIVLCM / baud;
 		divcnt = 0;
 		audio_ptr = SAMPRATE / 4;
 		for(i = 0; i < (PREAMBLE_BITS / 32); i++)
@@ -2401,8 +2400,6 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 		}
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"isprimary"); 
 		if (val) p->isprimary = ast_true(val); else p->isprimary = 0;
-	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"baud"); 
-		if (val) p->baud = atoi(val); else p->baud = 1200;
 	        val = (char *) ast_variable_retrieve(cfg,(char *)data,"thresholds"); 
 		if (val)
 		{
@@ -4750,7 +4747,6 @@ static int reload(void)
 			if (!strcmp(v->name,"linger")) continue;
 			if (!strcmp(v->name,"primary")) continue;
 			if (!strcmp(v->name,"isprimary")) continue;
-			if (!strcmp(v->name,"baud")) continue;
 			if (!strncasecmp(v->name,"transmit",8)) continue;
 			if (!strncasecmp(v->name,"master",6)) continue;
 			if (!strncasecmp(v->name,"adpcm",5)) continue;
