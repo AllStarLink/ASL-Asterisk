@@ -107,13 +107,13 @@ uint32_t acc;
 		}
 		/* If necessary, pad with more EOT characters until done */
 		i = 4;
-		while((n >= 0) && (n < 19))
+		while(n >= 0)
 		{
 			for(j = 0; j < 7; j++)
 			{
 				if (i & (1 << j))
 					acc |= (1 << n);
-				n--;
+				if (n-- <= 0) break;
 			}
 		}
 		packed[pi++] = acc;
@@ -129,11 +129,12 @@ struct pocsag_batch *make_pocsag_batch(uint32_t ric,char *data,
 	int size_of_data,int type)
 {
 	struct pocsag_batch *cur,*old;
-	int i,j,k,curaddr,mylen;
+	int i,ii,j,k,curaddr,mylen;
 	uint32_t packed[100];
 
 	if ((cur = malloc(sizeof(struct pocsag_batch))) == NULL)
 		return NULL;
+	memset(cur,0,sizeof(struct pocsag_batch));
 	cur->sc = SYNCH;
 	cur->next = NULL;
 
@@ -191,18 +192,19 @@ struct pocsag_batch *make_pocsag_batch(uint32_t ric,char *data,
 				if (i == mylen) break;
 				if (j == 8)
 				{
-					j = k = 0;
 					if ((cur->next = malloc(sizeof(struct pocsag_batch))) == NULL)
 						return NULL;
+					memset(cur->next,0,sizeof(struct pocsag_batch));
 					cur->next->sc   = SYNCH;
 					cur->next->next = NULL;
-					for (i = 0; i < 8; i++)
+					for (ii = 0; ii < 8; ii++)
 					{
 						for (j = 0; j < 2; j++)
 						{
-							cur->next->frame[i][j] = IDLE;
+							cur->next->frame[ii][j] = IDLE;
 						}
 					}
+					j = k = 0;
 					cur = cur->next;
 				}
 				cur->frame[j][k] = packed[i];
