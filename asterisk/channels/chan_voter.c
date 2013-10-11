@@ -1103,19 +1103,19 @@ static int voter_text(struct ast_channel *ast, const char *text)
 			tone = 2;
 			if (option_verbose > 2) 
 				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) TONE ONLY\n",baud,i);
-			batch = make_pocsag_batch(i, (char *)&tone, sizeof(tone), TONE);
+			batch = make_pocsag_batch(i, NULL, 0, TONE, 0);
 			break;
 		    case 'N': /* Numeric */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
 				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) NUMERIC (%s)\n",baud,i,text + j + 1);
-			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC, 0);
 			break;
 		    case 'A': /* Alpha */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
 				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) ALPHA (%s)\n",baud,i,text + j + 1);
-			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA, 0);
 			break;
 		    case '?': /* Query Page Status */
 			i = 0;

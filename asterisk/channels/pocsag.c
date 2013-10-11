@@ -126,7 +126,7 @@ uint32_t acc;
 
 /* make and fill a POCSAG paging batch */
 struct pocsag_batch *make_pocsag_batch(uint32_t ric,char *data, 
-	int size_of_data,int type)
+	int size_of_data,int type,int toneno)
 {
 	struct pocsag_batch *cur,*old;
 	int i,ii,j,k,curaddr,mylen;
@@ -151,29 +151,18 @@ struct pocsag_batch *make_pocsag_batch(uint32_t ric,char *data,
 	cur->frame[curaddr][0] = 0;
 	cur->frame[curaddr][0] = (ric >> 3) << 13;
 
-	switch (type)
+	cur->frame[curaddr][0] &= 0xFFFFE700;
+	switch(toneno)
 	{
-	    case TONE:
-		cur->frame[curaddr][0] &= 0xFFFFE700;
-		switch(data[0])
-		{
-		    case 0:
-			break;
-		    case 1:
-			cur->frame[curaddr][0] |= 0x00000800;
-			break;
-		    case 2:
-			cur->frame[curaddr][0] |= 0x00001000;
-			break;
-		    case 3:
-			cur->frame[curaddr][0] |= 0x00001800;
-			break;
-		    default:
-			return NULL;
-		}
-	    case NUMERIC:
+	    case 0:
 		break;
-	    case ALPHA:
+	    case 1:
+		cur->frame[curaddr][0] |= 0x00000800;
+		break;
+	    case 2:
+		cur->frame[curaddr][0] |= 0x00001000;
+		break;
+	    case 3:
 		cur->frame[curaddr][0] |= 0x00001800;
 		break;
 	    default:

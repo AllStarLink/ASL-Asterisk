@@ -206,8 +206,6 @@ START_CONFIG
 
 	; pager = no		;no,a,b (e.g. pager = b means "put the normal repeat audio on channel A, and the pager audio on channel B")
 
-	; baud = 512		;512,1200,2400 (pager data rate)
-
 	; invertptt = 0
 
         ; duplex = 1		; duplex mode    
@@ -548,7 +546,6 @@ struct chan_simpleusb_pvt {
 	int	rxoncnt;
 
 	int	pager;
-	int	baud;
 	int	waspager;
 
 	int	rxboostset;
@@ -630,7 +627,6 @@ static struct chan_simpleusb_pvt simpleusb_default = {
 	.usedtmf = 1,
 	.rxondelay = 0,
 	.pager = PAGER_NONE,
-	.baud = 512,
 };
 
 /*	DECLARE FUNCTION PROTOTYPES	*/
@@ -2216,7 +2212,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 {
 	struct chan_simpleusb_pvt *o = c->tech_pvt;
 	char *cmd;
-	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr;
+	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr,baud;
 	struct pocsag_batch *batch,*b;
 	short *audio;
 	char audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
@@ -2289,28 +2285,28 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 
 	if (!strncmp(text,"PAGE",4))
 	{
-		cnt = sscanf(text,"%s %d %n",cmd,&i,&j);
-		if (cnt < 2) return 0;
+		cnt = sscanf(text,"%s %d %d %n",cmd,&baud,&i,&j);
+		if (cnt < 3) return 0;
 		if (strlen(text + j) < 1) return 0;
 		switch(text[j])
 		{
 		    case 'T': /* Tone only */
 			tone = 2;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) TONE ONLY\n",i);
-			batch = make_pocsag_batch(i, (char *)&tone, sizeof(tone), TONE);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) TONE ONLY\n",baud,i);
+			batch = make_pocsag_batch(i, NULL, 0, TONE, 0);
 			break;
 		    case 'N': /* Numeric */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) NUMERIC (%s)\n",i,text + j + 1);
-			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) NUMERIC (%s)\n",baud,i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), NUMERIC, 0);
 			break;
 		    case 'A': /* Alpha */
 			if (!text[j + 1]) return 0;
 			if (option_verbose > 2) 
-				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (capcode=%d) ALPHA (%s)\n",i,text + j + 1);
-			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA);
+				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) ALPHA (%s)\n",baud,i,text + j + 1);
+			batch = make_pocsag_batch(i, (char *)text + j + 1, strlen(text + j + 1), ALPHA, 0);
 			break;
 		    case '?': /* Query Page Status */
 			i = 0;
@@ -2335,7 +2331,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 		b = batch;
 		for(i = 0; b; b = b->next) i++;
 		/* get number of samples to alloc for audio */
-		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / o->baud;
+		audio_samples = (SAMPRATE * (PREAMBLE_BITS + (MESSAGE_BITS * i))) / baud;
 		/* pad end with 250ms of silence */
 		audio_samples += SAMPRATE / 4;
 		/* also pad up to FRAME_SIZE */
@@ -2348,7 +2344,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 			return 0;
 		}
 		memset(audio,0,audio_samples * sizeof(short));
-		divdiv = DIVLCM / o->baud;
+		divdiv = DIVLCM / baud;
 		divcnt = 0;
 		audio_ptr = 0;
 		for(i = 0; i < (PREAMBLE_BITS / 32); i++)
@@ -3926,7 +3922,6 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_UINT("duplex",o->radioduplex)
 			M_UINT("rxondelay",o->rxondelay)
 			M_F("pager",store_pager(o,(char *)v->value))
-			M_UINT("baud",o->baud)
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
 			M_END(;

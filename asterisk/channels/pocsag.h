@@ -35,7 +35,7 @@ enum pocsag_msgtype {TONE, NUMERIC, ALPHA} ;
 #define IDLE  0x7A89C197;
 
 struct pocsag_batch *make_pocsag_batch(uint32_t ric,char *data, 
-	int size_of_data,int type);
+	int size_of_data,int type,int toneno);
 void free_batch(struct pocsag_batch *batch);
 
 #endif /* POCSAG_H */
