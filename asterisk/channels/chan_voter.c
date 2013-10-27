@@ -3413,7 +3413,7 @@ static void *voter_timer(void *data)
 static void *voter_reader(void *data)
 {
  	char buf[4096],timestr[100],hasmastered,*cp,*cp1;
-	char gps0[300],gps1[300],gps2[300],isproxy;
+	char gps1[300],gps2[300],isproxy;
 	struct sockaddr_in sin,sin_stream,psin;
 	struct voter_pvt *p;
 	int i,j,k,ms,maxrssi,master_port;
@@ -4466,8 +4466,7 @@ process_gps:
 								time(&t);
 								fprintf(gpsfp,"%u %s %s %sM\n",(unsigned int) t,vgp->lat,vgp->lon,vgp->elev);
 								fclose(gpsfp);
-								snprintf(gps0,sizeof(gps0) - 1,"/bin/mv %s %s > /dev/null 2>&1",gps1,gps2);
-								ast_safe_system(gps0);
+								rename(gps1,gps2);
 							}
 							if (debug > 1) ast_verbose("Got GPS (%s): Lat: %s, Lon: %s, Elev: %s\n",
 								client->name,vgp->lat,vgp->lon,vgp->elev);
