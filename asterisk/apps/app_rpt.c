@@ -1,7 +1,7 @@
 /*
  * Asterisk -- An open source telephony toolkit.
  *
- * Copyright (C) 2002-2013, Jim Dixon, WB6NIL
+ * Copyright (C) 2002-2014, Jim Dixon, WB6NIL
  *
  * Jim Dixon, WB6NIL <jim@lambdatel.com>
  * Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.320 10/02/2013
+ *  version 0.321 03/25/2014
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -600,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.320 10/02/2013";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.321 03/25/2014";
 
 static char *app = "Rpt";
 
@@ -1331,6 +1331,7 @@ static struct rpt
 	struct rpt_cmd_struct cmdAction;
 	struct timeval paging;
 	char deferid;
+	struct timeval lastlinktime;
 } rpt_vars[MAXRPTS];	
 
 struct nodelog {
@@ -8924,6 +8925,7 @@ struct	mdcparams *mdcp;
 	if (mychannel->cdr) 
 		ast_set_flag(mychannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(mychannel);
 	rpt_mutex_lock(&myrpt->lock);
 	mytele->chan = mychannel;
 	while (myrpt->active_telem && 
@@ -10871,6 +10873,7 @@ struct ast_channel *mychannel,*genchannel,*c;
 	if (mychannel->cdr)
 		ast_set_flag(mychannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(mychannel);
 	ci.chan = 0;
 	ci.confno = myrpt->conf; /* use the pseudo conference */
 	ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_TALKER | DAHDI_CONF_LISTENER;
@@ -10894,6 +10897,7 @@ struct ast_channel *mychannel,*genchannel,*c;
 	if (genchannel->cdr)
 		ast_set_flag(genchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(genchannel);
 	ci.chan = 0;
 	ci.confno = myrpt->conf;
 	ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_TALKER | DAHDI_CONF_LISTENER;
@@ -11076,6 +11080,7 @@ struct ast_channel *mychannel,*genchannel,*c;
 			pthread_exit(NULL);
 		}
 		/* get its channel number */
+		res = 0;
 		if (ioctl(mychannel->fds[0],DAHDI_CHANNO,&res) == -1)
 		{
 			ast_log(LOG_WARNING, "Unable to get autopatch channel number\n");
@@ -11527,6 +11532,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	if (l->pchan->cdr)
 		ast_set_flag(l->pchan->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(l->pchan);
 	/* make a conference for the tx */
 	ci.chan = 0;
 	ci.confno = ((l->mode > 1) ? myrpt->txconf : myrpt->conf);
@@ -12854,7 +12860,10 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
-			sprintf(string,"PAGE %s %s %s",argv[1],argv[2],argv[3]);
+			if (argc > 4)
+				sprintf(string,"PAGE %s %s %s %s",argv[1],argv[2],argv[3],argv[4]);
+			else
+				sprintf(string,"PAGE %s %s %s",argv[1],argv[2],argv[3]);
 			telem = myrpt->tele.next;
 			k = 0;
 			while(telem != &myrpt->tele)
@@ -19103,6 +19112,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->pchannel->cdr)
 		ast_set_flag(myrpt->pchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(myrpt->pchannel);
 	if (!myrpt->zaprxchannel) myrpt->zaprxchannel = myrpt->pchannel;
 	if (!myrpt->zaptxchannel)
 	{
@@ -19124,6 +19134,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (myrpt->zaptxchannel->cdr)
 			ast_set_flag(myrpt->zaptxchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+		ast_answer(myrpt->zaptxchannel);
 	}
 	/* allocate a pseudo-channel thru asterisk */
 	myrpt->monchannel = ast_request(DAHDI_CHANNEL_NAME,AST_FORMAT_SLINEAR,"pseudo",NULL);
@@ -19143,6 +19154,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->monchannel->cdr)
 		ast_set_flag(myrpt->monchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(myrpt->monchannel);
 	/* make a conference for the tx */
 	ci.chan = 0;
 	ci.confno = -1; /* make a new conf */
@@ -19239,6 +19251,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->parrotchannel->cdr)
 		ast_set_flag(myrpt->parrotchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(myrpt->parrotchannel);
 	/* allocate a pseudo-channel thru asterisk */
 	myrpt->voxchannel = ast_request(DAHDI_CHANNEL_NAME,AST_FORMAT_SLINEAR,"pseudo",NULL);
 	if (!myrpt->voxchannel)
@@ -19257,6 +19270,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->voxchannel->cdr)
 		ast_set_flag(myrpt->voxchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(myrpt->voxchannel);
 	/* allocate a pseudo-channel thru asterisk */
 	myrpt->txpchannel = ast_request(DAHDI_CHANNEL_NAME,AST_FORMAT_SLINEAR,"pseudo",NULL);
 	if (!myrpt->txpchannel)
@@ -19275,6 +19289,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->txpchannel->cdr)
 		ast_set_flag(myrpt->txpchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
+	ast_answer(myrpt->txpchannel);
 	/* make a conference for the tx */
 	ci.chan = 0;
 	ci.confno = myrpt->txconf;
@@ -22712,6 +22727,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	if (!myrpt->remote)
 	{
 		int reconnects = 0;
+		struct timeval now;
 
 		rpt_mutex_lock(&myrpt->lock);
 		i = myrpt->xlink || (!myrpt->ready);
@@ -22721,6 +22737,18 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_log(LOG_WARNING, "Cannot connect to node %s, system busy\n",myrpt->name);
 			return -1;
 		}
+		rpt_mutex_lock(&myrpt->lock);
+		gettimeofday(&now,NULL);
+		while ((!ast_tvzero(myrpt->lastlinktime)) && (ast_tvdiff_ms(now,myrpt->lastlinktime) < 250))
+		{
+			rpt_mutex_unlock(&myrpt->lock);
+			if (ast_check_hangup(myrpt->rxchannel)) return -1;
+			if (ast_safe_sleep(myrpt->rxchannel,100) == -1) return -1;
+			rpt_mutex_lock(&myrpt->lock);
+			gettimeofday(&now,NULL);
+		}
+		gettimeofday(&myrpt->lastlinktime,NULL);
+		rpt_mutex_unlock(&myrpt->lock);
 		/* look at callerid to see what node this comes from */
 		if (!chan->cid.cid_num) /* if doesn't have caller id */
 		{
@@ -22821,6 +22849,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		else init_linkmode(myrpt,l,LINKMODE_GUI);	
 		ast_set_read_format(l->chan,AST_FORMAT_SLINEAR);
 		ast_set_write_format(l->chan,AST_FORMAT_SLINEAR);
+		gettimeofday(&myrpt->lastlinktime,NULL);
 		/* allocate a pseudo-channel thru asterisk */
 		l->pchan = ast_request(DAHDI_CHANNEL_NAME,AST_FORMAT_SLINEAR,"pseudo",NULL);
 		if (!l->pchan)
@@ -22830,6 +22859,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		}
 		ast_set_read_format(l->pchan,AST_FORMAT_SLINEAR);
 		ast_set_write_format(l->pchan,AST_FORMAT_SLINEAR);
+		ast_answer(l->pchan);
 #ifdef	AST_CDR_FLAG_POST_DISABLED
 		if (l->pchan->cdr)
 			ast_set_flag(l->pchan->cdr,AST_CDR_FLAG_POST_DISABLED);
@@ -22850,6 +22880,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		/* insert at end of queue */
 		insque((struct qelem *)l,(struct qelem *)myrpt->links.next);
 		__kickshort(myrpt);
+		gettimeofday(&myrpt->lastlinktime,NULL);
 		rpt_mutex_unlock(&myrpt->lock);
 		if (chan->_state != AST_STATE_UP)
 		{
@@ -23108,6 +23139,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	}
 	ast_set_read_format(myrpt->pchannel,AST_FORMAT_SLINEAR);
 	ast_set_write_format(myrpt->pchannel,AST_FORMAT_SLINEAR);
+	ast_answer(myrpt->pchannel);
 #ifdef	AST_CDR_FLAG_POST_DISABLED
 	if (myrpt->pchannel->cdr)
 		ast_set_flag(myrpt->pchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
