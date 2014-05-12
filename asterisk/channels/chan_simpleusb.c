@@ -69,6 +69,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	MIXER_PARAM_MIC_BOOST "Auto Gain Control"
 #define	MIXER_PARAM_SPKR_PLAYBACK_SW "Speaker Playback Switch"
 #define	MIXER_PARAM_SPKR_PLAYBACK_VOL "Speaker Playback Volume"
+#define	MIXER_PARAM_SPKR_PLAYBACK_SW_NEW "Headphone Playback Switch"
+#define	MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW "Headphone Playback Volume"
 
 #define	DELIMCHR ','
 #define	QUOTECHR 34
@@ -580,6 +582,8 @@ struct chan_simpleusb_pvt {
 
 	int8_t		last_pp_in;
 	char		had_pp_in;
+
+	char	newname;
 
 	struct {
 	    unsigned rxcapraw:1;
@@ -1394,7 +1398,7 @@ int	i,j,k;
 static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed,ctcssed,txreq;
-	char lastrx, fname[200], *s, isn1kdo, lasttxtmp;
+	char fname[200], *s, isn1kdo, lasttxtmp;
 	int i,j,k,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
@@ -1523,6 +1527,11 @@ static void *hidthread(void *arg)
 		ast_mutex_unlock(&usb_dev_lock);
 		o->micmax = amixer_max(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL);
 		o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL);
+		if (o->spkrmax == -1) 
+		{
+			o->newname = 1;
+			o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW);
+		}
 
 		usb_dev = hid_device_init(o->devstr);
 		if (usb_dev == NULL) {
@@ -1564,7 +1573,6 @@ static void *hidthread(void *arg)
 		else
 			o->devtype = usb_dev->descriptor.idProduct;
 		traceusb1(("hidthread: Starting normally on %s!!\n",o->name));
-		lastrx = 0;
                 if (option_verbose > 1)
                        ast_verbose(VERBOSE_PREFIX_2 "Set device %s to %s\n",o->devstr,o->name);
 		mixer_write(o);
@@ -2212,7 +2220,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 {
 	struct chan_simpleusb_pvt *o = c->tech_pvt;
 	char *cmd;
-	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr,baud;
+	int cnt,i,j,audio_samples,divcnt,divdiv,audio_ptr,baud;
 	struct pocsag_batch *batch,*b;
 	short *audio;
 	char audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
@@ -2291,7 +2299,6 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 		switch(text[j])
 		{
 		    case 'T': /* Tone only */
-			tone = 2;
 			if (option_verbose > 2) 
 				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) TONE ONLY\n",baud,i);
 			batch = make_pocsag_batch(i, NULL, 0, TONE, 0);
@@ -3842,8 +3849,8 @@ static void mixer_write(struct chan_simpleusb_pvt *o)
 
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,0,0);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
-	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
-	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL,
+	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_SW_NEW : MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
+	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW : MIXER_PARAM_SPKR_PLAYBACK_VOL,
 		make_spkr_playback_value(o,o->txmixaset),
 		make_spkr_playback_value(o,o->txmixbset));
 	x =  o->rxmixerset * o->micmax / 1000;
