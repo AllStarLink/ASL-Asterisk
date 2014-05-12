@@ -85,6 +85,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #define	MIXER_PARAM_MIC_BOOST "Auto Gain Control"
 #define	MIXER_PARAM_SPKR_PLAYBACK_SW "Speaker Playback Switch"
 #define	MIXER_PARAM_SPKR_PLAYBACK_VOL "Speaker Playback Volume"
+#define	MIXER_PARAM_SPKR_PLAYBACK_SW_NEW "Headphone Playback Switch"
+#define	MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW "Headphone Playback Volume"
 
 #define	DELIMCHR ','
 #define	QUOTECHR 34
@@ -669,6 +671,8 @@ struct chan_usbradio_pvt {
 
 	int8_t		last_pp_in;
 	char		had_pp_in;
+
+	char	newname;
 
 	struct {
 	    unsigned rxcapraw:1;
@@ -1460,7 +1464,7 @@ int	i,j,k;
 static void *hidthread(void *arg)
 {
 	unsigned char buf[4],bufsave[4],keyed;
-	char lastrx, txtmp, fname[200], *s;
+	char txtmp, fname[200], *s;
 	int i,j,k,res;
 	struct usb_device *usb_dev;
 	struct usb_dev_handle *usb_handle;
@@ -1556,6 +1560,11 @@ static void *hidthread(void *arg)
 
 		o->micmax = amixer_max(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL);
 		o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL);
+		if (o->spkrmax == -1) 
+		{
+			o->newname = 1;
+			o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW);
+		}
 
 		usb_handle = usb_open(usb_dev);
 		if (usb_handle == NULL) {
@@ -1590,7 +1599,6 @@ static void *hidthread(void *arg)
 		else
 			o->devtype = usb_dev->descriptor.idProduct;
 		traceusb1(("hidthread: Starting normally on %s!!\n",o->name));
-		lastrx = 0;
                 if (option_verbose > 1)
 		{
 			ast_mutex_lock(&usb_dev_lock);
@@ -4837,8 +4845,8 @@ static void mixer_write(struct chan_usbradio_pvt *o)
 {
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,0,0);
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
-	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
-	setamixer(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL,
+	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_SW_NEW : MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
+	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW : MIXER_PARAM_SPKR_PLAYBACK_VOL,
 		make_spkr_playback_value(o,o->txmixaset),
 		make_spkr_playback_value(o,o->txmixbset));
 	setamixer(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL,
