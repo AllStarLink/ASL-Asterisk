@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.321 03/25/2014
+ *  version 0.322 05/13/2014
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -600,7 +600,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.321 03/25/2014";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.322 05/13/2014";
 
 static char *app = "Rpt";
 
@@ -4151,6 +4151,7 @@ static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 	if (!myrpt) return(0);
 	if (!mylink) return(0);
 	if (!mylink->chan) return(0);
+	if ((myrpt->p.duplex == 3) && mylink->phonemode && myrpt->keyed) return(0);
 	/* if doesnt qual as a foreign link */
 	if ((mylink->name[0] > '0') && (mylink->name[0] <= '9') &&
 	    (!mylink->phonemode) &&
