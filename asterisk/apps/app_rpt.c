@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.322 05/13/2014
+ *  version 0.323 06/07/2014
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -313,6 +313,7 @@
 #define	DEFAULT_ETXGAIN "3.0"
 #define	DEFAULT_TRXGAIN "-3.0"
 #define	DEFAULT_TTXGAIN "3.0"
+#define	DEFAULT_LINKMONGAIN "0.0"
 
 #define	DEFAULT_EANNMODE 1
 #define	DEFAULT_TANNMODE 1
@@ -600,7 +601,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.322 05/13/2014";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.323 06/07/2014";
 
 static char *app = "Rpt";
 
@@ -799,6 +800,7 @@ struct rpt_link
 	char	lastrx;
 	char	lastrealrx;
 	char	lastrx1;
+	char	wouldtx;
 	char	connected;
 	char	hasconnected;
 	char	perma;
@@ -1123,6 +1125,7 @@ static struct rpt
 		char ctgroup[16];
 		float erxgain;
 		float etxgain;
+		float linkmongain;
 		char eannmode; /* {NONE,NODE,CALL,BOTH} */
 		float trxgain;
 		float ttxgain;
@@ -6121,6 +6124,9 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 	else rpt_vars[n].p.tannmode = DEFAULT_TANNMODE;
 	if (rpt_vars[n].p.tannmode < 1) rpt_vars[n].p.tannmode = 1;
 	if (rpt_vars[n].p.tannmode > 3) rpt_vars[n].p.tannmode = 3;
+	val = (char *) ast_variable_retrieve(cfg,this,"linkmongain");
+	if (!val) val = DEFAULT_LINKMONGAIN;
+	rpt_vars[n].p.linkmongain = pow(10.0,atof(val) / 20.0);
 	val = (char *) ast_variable_retrieve(cfg,this,"discpgm");
 	rpt_vars[n].p.discpgm = val; 
 	val = (char *) ast_variable_retrieve(cfg,this,"connpgm");
@@ -19109,6 +19115,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		myrpt->rpt_thread = AST_PTHREADT_STOP;
 		pthread_exit(NULL);
 	}
+	ast_set_read_format(myrpt->pchannel, AST_FORMAT_SLINEAR);
+	ast_set_write_format(myrpt->pchannel, AST_FORMAT_SLINEAR);
 #ifdef	AST_CDR_FLAG_POST_DISABLED
 	if (myrpt->pchannel->cdr)
 		ast_set_flag(myrpt->pchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
@@ -20992,7 +21000,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			if (f->frametype == AST_FRAME_VOICE)
 			{
 				if (!myrpt->localoverride)
+				{
 					ast_write(myrpt->txpchannel,f);
+				}
 			}
 			if (f->frametype == AST_FRAME_CONTROL)
 			{
@@ -21135,12 +21145,14 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (myrpt->patchvoxalways) 
 					mycalltx = mycalltx && ((!myrpt->voxtostate) && myrpt->wasvox);
 #endif
-				totx = (((l->isremote) ? (remnomute) : 
-					myrpt->localtx || mycalltx) || remrx) && (l->mode == 1);
+				totx = ((l->isremote) ? (remnomute) : 
+					myrpt->localtx || mycalltx) || remrx;
 
 				/* foop */
 				if ((!l->lastrx) && altlink(myrpt,l)) totx = myrpt->txkeyed;
 				if (altlink1(myrpt,l)) totx = 1;
+				l->wouldtx = totx;
+				if (l->mode != 1) totx = 0;
 				if (l->phonemode == 0 && l->chan && (l->lasttx != totx))
 				{
 					if (totx)
@@ -21264,12 +21276,13 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							ioctl(l->pchan->fds[0],DAHDI_SET_BUFINFO,&bi);
 						}
 					}
-
 					fac = 1.0;
 					if (l->chan && (!strncasecmp(l->chan->name,"echolink",8)))
 						fac = myrpt->p.erxgain;
 					if (l->chan && (!strncasecmp(l->chan->name,"tlb",3)))
 						fac = myrpt->p.trxgain;
+					if ((myrpt->p.linkmongain != 1.0) && (l->mode != 1) && (l->wouldtx))
+						fac *= myrpt->p.linkmongain;
 					if (fac != 1.0)
 					{
 						int x1;
