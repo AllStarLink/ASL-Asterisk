@@ -275,6 +275,7 @@ struct ast_flags zeroflag = { 0 };
 #define	PING_TIMEOUT_MS 3000
 
 #define	DEFAULT_LINGER 6
+#define DEFAULT_GTXGAIN "0.0"
 
 #define	DEFAULT_DYNTIME 30000
 
@@ -524,6 +525,7 @@ struct voter_pvt {
 	char mixminus;
 	int order;
 	char waspager;
+	float gtxgain;
 
 #ifdef 	OLD_ASTERISK
 	AST_LIST_HEAD(, ast_frame) txq;
@@ -1226,6 +1228,21 @@ static int voter_write(struct ast_channel *ast, struct ast_frame *frame)
 
 	if (fp != NULL) fwrite(AST_FRAME_DATAP(frame),1,frame->datalen,fp);
 	f1 = ast_frdup(frame);
+	if (p->gtxgain != 1.0)
+	{
+		int x1;
+		short *sp;
+		float fsamp;
+
+		sp = (short *) AST_FRAME_DATAP(f1);
+		for(x1 = 0; x1 < f1->datalen / 2; x1++)
+		{
+			fsamp = (float) sp[x1] * p->gtxgain;
+			if (fsamp > 32765.0) fsamp = 32765.0;
+			if (fsamp < -32765.0) fsamp = -32765.0;
+			sp[x1] = (int) fsamp;
+		}
+	}
 	memset(&f1->frame_list,0,sizeof(f1->frame_list));
 	ast_mutex_lock(&p->txqlock);
 	AST_LIST_INSERT_TAIL(&p->txq,f1,frame_list);
@@ -2424,6 +2441,9 @@ static struct ast_channel *voter_request(const char *type, int format, void *dat
 			}
 			ast_free(cp);
 		}		
+		val = (char *) ast_variable_retrieve(cfg,(char *)data,"gtxgain");
+		if (!val) val = DEFAULT_GTXGAIN;
+		p->gtxgain = pow(10.0,atof(val) / 20.0);
 	}
 
 	if (p->txctcssfreq[0])
@@ -4683,6 +4703,9 @@ static int reload(void)
 			}
 			ast_free(cp);
 		}		
+		val = (char *) ast_variable_retrieve(cfg,(char *)data,"gtxgain");
+		if (!val) val = DEFAULT_GTXGAIN;
+		p->gtxgain = pow(10.0,atof(val) / 20.0);
 		/* if new CTCSS freq */
 		if (strcmp(oldctcss,p->txctcssfreq) || (oldtoctype != p->txtoctype) || (oldlevel != p->txctcsslevel))
 		{
@@ -4740,6 +4763,7 @@ static int reload(void)
 			if (!strcmp(v->name,"streams")) continue;
 			if (!strcmp(v->name,"thresholds")) continue;
 			if (!strcmp(v->name,"plfilter")) continue;
+			if (!strcmp(v->name,"gtxgain")) continue;
 			if (!strcmp(v->name,"hostdeemp")) continue;
 			if (!strcmp(v->name,"duplex")) continue;
 			if (!strcmp(v->name,"mixminus")) continue;
