@@ -6167,7 +6167,7 @@ static int ast_cli_netstats(struct mansession *s, int fd, int limit_fmt)
 			iax_frame_subclass2str(iaxs[x]->first_iax_message & ~MARK_IAX_SUBCLASS_TX, first_message, sizeof(first_message));
 			iax_frame_subclass2str(iaxs[x]->last_iax_message & ~MARK_IAX_SUBCLASS_TX, last_message, sizeof(last_message));
 			if (limit_fmt)
-				fmt = "%-20.25s %4d %4d %4d %5d %3d %5d %4d %6d %4d %4d %5d %3d %5d %4d %6d %s%s %4s%s\n";
+				fmt = "%-25.25s %4d %4d %4d %5d %3d %5d %4d %6d %4d %4d %5d %3d %5d %4d %6d %s%s %4s%s\n";
 			else
 				fmt = "%s %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s%s %s%s\n";
 			if (s)
@@ -6227,8 +6227,8 @@ static int iax2_show_netstats(int fd, int argc, char *argv[])
 	int numchans = 0;
 	if (argc != 3)
 		return RESULT_SHOWUSAGE;
-	ast_cli(fd, "                           -------- LOCAL ---------------------  -------- REMOTE --------------------\n");
-	ast_cli(fd, "Channel               RTT  Jit  Del  Lost   %%  Drop  OOO  Kpkts  Jit  Del  Lost   %%  Drop  OOO  Kpkts FirstMsg    LastMsg\n");
+	ast_cli(fd, "                                ------------- LOCAL ----------------  ------------- REMOTE ---------------\n");
+	ast_cli(fd, "Channel                    RTT  Jit  Del  Lost   %%  Drop  OOO  Kpkts  Jit  Del  Lost   %%  Drop  OOO  Kpkts FirstMsg    LastMsg\n");
 	numchans = ast_cli_netstats(NULL, fd, 1);
 	ast_cli(fd, "%d active IAX channel%s\n", numchans, (numchans != 1) ? "s" : "");
 	return RESULT_SUCCESS;

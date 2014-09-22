@@ -1604,6 +1604,7 @@ static void *hidthread(void *arg)
 		if (o->wanteeprom) o->eepromctl = 1;
 		ast_mutex_unlock(&o->eepromlock);
 		mixer_write(o);
+		setformat(o,O_RDWR);		// KB4FXC 2014-08-24
                 o->hasusb = 1;
 		while((!o->stophid) && o->hasusb)
 		{
