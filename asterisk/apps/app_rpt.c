@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.324 10/01/2014
+ *  version 0.325 10/19/2014
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -601,7 +601,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.324 10/01/2014";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.325 10/19/2014";
 
 static char *app = "Rpt";
 
@@ -7346,15 +7346,16 @@ static int rpt_do_page(int fd, int argc, char *argv[])
 	char str[MAX_TEXTMSG_SIZE];
 	struct rpt_tele *telem;
 
-        if (argc < 6) return RESULT_SHOWUSAGE;
+        if (argc < 7) return RESULT_SHOWUSAGE;
 
 	string_toupper(argv[2]);
 	string_toupper(argv[3]);
 	string_toupper(argv[4]);
-	snprintf(str,sizeof(str) - 1,"PAGE %s %s ",argv[3],argv[4]);
-	for(i = 5; i < argc; i++)
+	string_toupper(argv[5]);
+	snprintf(str,sizeof(str) - 1,"PAGE %s %s %s ",argv[3],argv[4],argv[5]);
+	for(i = 6; i < argc; i++)
 	{
-		if (i > 4) strncat(str," ",sizeof(str) - 1);
+		if (i > 5) strncat(str," ",sizeof(str) - 1);
 		strncat(str,argv[i],sizeof(str) - 1);
 	}	
         for(i = 0; i < nrpts; i++)
@@ -12867,8 +12868,8 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"voter/", 6) == 0) &&
 			    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0)) break;
-			if (argc > 4)
-				sprintf(string,"PAGE %s %s %s %s",argv[1],argv[2],argv[3],argv[4]);
+			if (argc > 5)
+				sprintf(string,"PAGE %s %s %s %s %s",argv[1],argv[2],argv[3],argv[4],argv[5]);
 			else
 				sprintf(string,"PAGE %s %s %s",argv[1],argv[2],argv[3]);
 			telem = myrpt->tele.next;
