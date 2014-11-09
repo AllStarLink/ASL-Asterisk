@@ -535,6 +535,7 @@ struct chan_simpleusb_pvt {
 	float	hpy[NTAPS_PL + 1];
 
 	int32_t	destate;
+	int32_t	prestate;
 
 	char    rxcpusaver;
 	char    txcpusaver;
@@ -606,6 +607,7 @@ struct chan_simpleusb_pvt {
 	int16_t apeak;
 	int plfilter;
 	int deemphasis;
+	int preemphasis;
 	int32_t cur_gpios;
 	char *gpios[32];
 	char *pps[32];
@@ -736,6 +738,24 @@ int32_t accum; /* 32 bit accumulator */
         accum = (*state * coeff00);
         /* adjust gain so that we have unity @ 1KHz */
         return((accum >> 14) + (accum >> 15));
+}
+
+/* Perform standard 6db/octave pre-emphasis */
+static int16_t preemph(int16_t input,int32_t *state)
+{
+
+int16_t coeff00 = 17610;
+int16_t coeff01 = -17610;
+int16_t adjval = 13404;
+int32_t y,temp0,temp1; 
+
+	temp0 =	*state * coeff01;
+	*state = input;
+	temp1 = input * coeff00;
+	y = (temp0 + temp1) / adjval;
+	if (y > 32767) y=32767;
+	else if (y <-32767) y=-32767;
+	return(y);
 }
 
 
@@ -2684,24 +2704,28 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 					}
 					for(i = 0; i < FRAME_SIZE; i++)
 					{
-						short v;
+						short s,v;
 
-						v = lpass(sp[i],o->flpt);
+						if (o->preemphasis)
+							s = preemph(sp[i],&o->prestate);
+						else
+							s = sp[i];
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
-						v = lpass(sp[i],o->flpt);
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
-						v = lpass(sp[i],o->flpt);
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
-						v = lpass(sp[i],o->flpt);
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
-						v = lpass(sp[i],o->flpt);
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
-						v = lpass(sp[i],o->flpt);
+						v = lpass(s,o->flpt);
 						*sp1++ = (doleft) ? v : 0;
 						*sp1++ = (doright) ? v : 0;
 					}				
@@ -3932,6 +3956,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 			M_F("pager",store_pager(o,(char *)v->value))
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
+ 			M_BOOL("preemphasis",o->preemphasis)
 			M_END(;
 			);
 			for(i = 0; i < 32; i++)
