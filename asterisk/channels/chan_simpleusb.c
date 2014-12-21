@@ -212,6 +212,8 @@ START_CONFIG
 
         ; duplex = 1		; duplex mode    
 
+	; duplex3 = 0		; duplex 3 gain setting (0 to disable)
+
 	; rxondelay = 0		  ; number of 20ms intervals to hold off receiver turn-on indication
 
         ; eeprom = no		; no eeprom installed
@@ -468,6 +470,7 @@ struct chan_simpleusb_pvt {
 	char devstr[128];
 	int spkrmax;
 	int micmax;
+	int micplaymax;
 
 #ifndef	NEW_ASTERISK
 	pthread_t sthread;
@@ -608,6 +611,7 @@ struct chan_simpleusb_pvt {
 	int plfilter;
 	int deemphasis;
 	int preemphasis;
+	int duplex3;
 	int32_t cur_gpios;
 	char *gpios[32];
 	char *pps[32];
@@ -1547,6 +1551,7 @@ static void *hidthread(void *arg)
 		ast_mutex_unlock(&usb_dev_lock);
 		o->micmax = amixer_max(o->devicenum,MIXER_PARAM_MIC_CAPTURE_VOL);
 		o->spkrmax = amixer_max(o->devicenum,MIXER_PARAM_SPKR_PLAYBACK_VOL);
+		o->micplaymax = amixer_max(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL);
 		if (o->spkrmax == -1) 
 		{
 			o->newname = 1;
@@ -2798,6 +2803,8 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		// printf("AST_CONTROL_RADIO_UNKEY\n");
 		wf.subclass = AST_CONTROL_RADIO_UNKEY;
 		ast_queue_frame(o->owner, &wf);
+		if (o->duplex3)
+			setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,0,0);
 	}
 	else if ((!o->lastrx) && (o->rxkeyed))
 	{
@@ -2805,6 +2812,8 @@ static struct ast_frame *simpleusb_read(struct ast_channel *c)
 		//printf("AST_CONTROL_RADIO_KEY\n");
 		wf.subclass = AST_CONTROL_RADIO_KEY;
 		ast_queue_frame(o->owner, &wf);
+		if (o->duplex3)
+			setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,1,0);
 	}
 
 	sp = (short *)o->simpleusb_read_buf;
@@ -3872,8 +3881,17 @@ static void mixer_write(struct chan_simpleusb_pvt *o)
 	int x;
 	float f,f1;
 
+	if (o->duplex3)
+	{
+		if (o->duplex3 > o->micplaymax)
+			o->duplex3 = o->micplaymax;
+		setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,o->duplex3,0);
+	}
+	else
+	{
+		setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
+	}
 	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,0,0);
-	setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_VOL,0,0);
 	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_SW_NEW : MIXER_PARAM_SPKR_PLAYBACK_SW,1,0);
 	setamixer(o->devicenum,(o->newname) ? MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW : MIXER_PARAM_SPKR_PLAYBACK_VOL,
 		make_spkr_playback_value(o,o->txmixaset),
@@ -3957,6 +3975,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
  			M_BOOL("preemphasis",o->preemphasis)
+ 			M_UINT("duplex3",o->duplex3)
 			M_END(;
 			);
 			for(i = 0; i < 32; i++)
