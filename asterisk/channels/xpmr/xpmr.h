@@ -916,6 +916,8 @@ typedef struct	t_pmr_chan
 
 	t_sdbg	*sdbg;
 
+	i16 fever;
+
 } t_pmr_chan;
 
 /*

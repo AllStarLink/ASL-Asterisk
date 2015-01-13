@@ -480,7 +480,7 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 
 	i16 samples,nx,iOutput, *input, *output, *noutput;
 	i16 *x, *coef;
-	i16 decimator, decimate, doNoise;
+	i16 decimator, decimate, doNoise, fever, fev1;
     i32 i, naccum, outputGain, calcAdjust;
 	i64 y, npwr;
 
@@ -494,6 +494,7 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	input     = mySps->source;
 	output    = mySps->sink;
 	noutput   = mySps->parentChan->pRxNoise;
+	fever   = mySps->parentChan->fever;
 
 	nx        = mySps->nx;
 	coef      = mySps->coef;
@@ -509,6 +510,11 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	if(mySps->parentChan->rxCdType!=CD_XPMR_VOX)doNoise=1;
 	else doNoise=0;
 
+	if (fever)
+	    fev1 = (nx - 1) * 2;
+	else
+	    fev1 = nx - 1;
+
 	for(i=0;i<samples;i++)
 	{
 		i16 n;
@@ -518,7 +524,7 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	    for(n=nx-1; n>0; n--)
 	       x[n] = x[n-1];
         #else
-		memmove(x+1,x,nx-1);
+		memmove(x+1,x,fev1);
         #endif
 	    x[0] = input[i*2];
 
@@ -1759,6 +1765,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->tracetype=tChan->tracetype;
 		pChan->ukey=tChan->ukey;
 		pChan->name=tChan->name;
+		pChan->fever = tChan->fever;
 	}
 
 	if(pChan->rxCarrierHyst==0)

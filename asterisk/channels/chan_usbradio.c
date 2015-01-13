@@ -674,6 +674,8 @@ struct chan_usbradio_pvt {
 	int8_t		last_pp_in;
 	char		had_pp_in;
 
+	int	fever;
+
 	char	newname;
 
 	struct {
@@ -1653,6 +1655,7 @@ static void *hidthread(void *arg)
 			tChan.ukey=o->ukey;
 			tChan.name=o->name;
 			tChan.b.txboost = o->txboostset;
+			tChan.fever = o->fever;
 
 			o->pmrChan=createPmrChannel(&tChan,FRAME_SIZE);
 										 
@@ -1732,6 +1735,7 @@ static void *hidthread(void *arg)
 				M_F("rxctcssadj",store_rxctcssadj(o,(char *)v->value))
 				M_UINT("txctcssadj",o->txctcssadj);
 				M_UINT("rxsquelchadj", o->rxsquelchadj)
+				M_UINT("fever", o->fever)
 				M_END(;
 				);
 			}
@@ -4068,6 +4072,9 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o, int setsql, int in
 
 	settingmax = o->micmax;
 
+	o->fever = 1;
+	o->pmrChan->fever = 1;
+
 	o->pmrChan->b.tuning=1;
 
 	setting = settingstart;
@@ -4827,6 +4834,7 @@ static void tune_write(struct chan_usbradio_pvt *o)
 	fprintf(fp,"rxctcssadj=%f\n",o->rxctcssadj);
 	fprintf(fp,"txctcssadj=%i\n",o->txctcssadj);
 	fprintf(fp,"rxsquelchadj=%i\n",o->rxsquelchadj);
+	fprintf(fp,"fever=%i\n",o->fever);
 	fclose(fp);
 
 	if(o->wanteeprom)
@@ -5339,6 +5347,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_F("rxctcssadj",store_rxctcssadj(o,(char *)v->value))
 			M_UINT("txctcssadj",o->txctcssadj);
 			M_UINT("rxsquelchadj", o->rxsquelchadj)
+			M_UINT("fever", o->fever)
 			M_STR("devstr", o->devstr)
 			M_END(;
 			);
@@ -5426,6 +5435,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 		tChan.area=o->area;
 		tChan.ukey=o->ukey;
 		tChan.name=o->name;
+		tChan.fever = o->fever;
 
 		o->pmrChan=createPmrChannel(&tChan,FRAME_SIZE);
 									 
