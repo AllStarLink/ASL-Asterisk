@@ -1078,7 +1078,7 @@ int	i;
 static int voter_text(struct ast_channel *ast, const char *text)
 {
 	struct voter_pvt *o = ast->tech_pvt;
-	int cnt,i,j,tone,audio_samples,divcnt,divdiv,audio_ptr,baud;
+	int cnt,i,j,audio_samples,divcnt,divdiv,audio_ptr,baud;
 	struct pocsag_batch *batch,*b;
 	short *audio;
 	char *cmd,audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
@@ -1102,7 +1102,6 @@ static int voter_text(struct ast_channel *ast, const char *text)
 		switch(text[j])
 		{
 		    case 'T': /* Tone only */
-			tone = 2;
 			if (option_verbose > 2) 
 				ast_verbose(VERBOSE_PREFIX_3 "POCSAG page (%d baud, capcode=%d) TONE ONLY\n",baud,i);
 			batch = make_pocsag_batch(i, NULL, 0, TONE, 0);
@@ -3449,7 +3448,6 @@ static void *voter_reader(void *data)
 	VOTER_REC rec;
 	VOTER_STREAM stream;
 	time_t timestuff,t;
-	unsigned long my_voter_time;
 	short  silbuf[FRAME_SIZE];
 #pragma pack(push)
 #pragma pack(1)
@@ -3483,7 +3481,6 @@ static void *voter_reader(void *data)
 	master_port = 0;
 	while(run_forever && (!ast_shutting_down()))
 	{
-		my_voter_time = voter_timing_count;
 		ast_mutex_unlock(&voter_lock);
 		ms = 50;
 		i = ast_waitfor_n_fd(&udp_socket, 1, &ms,NULL);
@@ -4592,7 +4589,6 @@ static int reload(void)
 #ifdef  NEW_ASTERISK
         struct ast_flags zeroflag = {0};
 #endif
-	unsigned int mynode;
 	int i,n,instance_buflen,buflen,oldtoctype,oldlevel;
 	char *val,*ctg,*cp,*cp1,*cp2,*strs[40],newclient,data[100],oldctcss[100];
 	struct voter_pvt *p;
@@ -4750,7 +4746,6 @@ static int reload(void)
 	{
 		if (ctg == NULL) continue;
 		if (!strcmp(ctg,"general")) continue;
-		mynode = strtoul(ctg,NULL,0);
 	        val = (char *) ast_variable_retrieve(cfg,ctg,"buflen"); 
 		if (val) instance_buflen = strtoul(val,NULL,0) * 8;
 		else instance_buflen = buflen;

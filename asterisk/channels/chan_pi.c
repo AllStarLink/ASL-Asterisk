@@ -52,6 +52,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include <sys/mman.h>
 #include <alsa/asoundlib.h>
 #include <linux/i2c-dev.h>		//Needed for I2C port
+#include <math.h>
 
 #define DEBUG_CAPTURES	 		1
 
@@ -81,10 +82,12 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 535 $")
 #include "asterisk/musiconhold.h"
 #include "asterisk/dsp.h"
 
-#define	DESIRED_RATE 8000
+#define	DESIRED_RATE ((usedsp) ? 48000 : 8000)
 
 #define	NTAPS 31
 #define	NTAPS_PL 6
+
+#include "xpmr/xpmr.h"
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
 static struct ast_jb_conf default_jbconf =
@@ -231,6 +234,8 @@ END_CONFIG
 #define LOW  0
 #define HIGH 1
 
+#define	MICMAX 31
+
 #if defined(__FreeBSD__)
 #define	FRAGS	0x8
 #else
@@ -261,10 +266,16 @@ int writedev = -1;
 int w_errors = 0;				/* overfull in the write path */
 int ndevices = 0;
 int readpos;				/* read position above */
-char pi_read_buf[FRAME_SIZE * 4];
-char pi_write_buf[FRAME_SIZE * 4];    
+// Buffers for stereo signed 16bit, 48Ks/s
+char pi_read_buf[FRAME_SIZE * 4 * 6];
+char pi_read_buf1[FRAME_SIZE * 4 * 6];
+char pi_write_buf[FRAME_SIZE * 4 * 6];    
+ast_mutex_t rxbuflock;
+
 int pi_write_dst;
 int total_blocks;			/* total blocks in the output device */
+int usedsp = 1;
+int readpipe[2];
 
 int has_been_open = 0;
 
@@ -296,8 +307,8 @@ static FILE *ftxcapraw = NULL;
 
 static int pi_debug;
 
-enum {CD_IGNORE,CD_HID,CD_HID_INVERT};
-enum {SD_IGNORE,SD_HID,SD_HID_INVERT};    				 // no,external,externalinvert,software
+char *notindsp = "Cannot do this while in DSP mode!!\n";
+char *onlyindsp = "Cannot do this while NOT in DSP mode!!\n";
 
 /*	DECLARE STRUCTURES */
 
@@ -372,9 +383,28 @@ struct chan_pi_pvt {
 
 	int	rxmixerset;
 	float	rxvoiceadj;
+	float	rxctcssadj;
+	int	txctcssadj;
 	int 	txmixerset;
 
 	int measure_enabled;
+
+	t_pmr_chan	*pmrChan;
+	char	txctcssdefault[32];
+	char	txctcssfreqs[32];
+	int	txmix;
+	int	txtoctype;
+	int	txlimonly;
+	int	txprelim;
+	char	rxctcssfreqs[32];
+	char	rxdemod;
+	int	rxsquelchadj;   /* this copy needs to be here for initialization */
+	int	rxsqhyst;
+	int     rxsqvoxadj;
+	int	rxnoisefiltype;
+	int	rxsquelchdelay;
+	int	rxctcssrelax;
+
 
 	int32_t discfactor;
 	int32_t discounterl;
@@ -666,6 +696,37 @@ int	i;
 	return NULL;
 }
 
+static int rad_rxwait(int fd,int ms)
+{
+fd_set fds;
+struct timeval tv;
+
+	FD_ZERO(&fds);
+	FD_SET(fd,&fds);
+	tv.tv_usec = ms * 1000;
+	tv.tv_sec = 0;
+	return(select(fd + 1,&fds,NULL,NULL,&tv));
+}
+
+static int happy_mswait(int fd,int ms, int flag)
+{
+int	i;
+
+	if (!flag)
+	{
+		usleep(ms * 1000);
+		return(0);
+	}
+	i = 0;
+	if (ms >= 100) for(i = 0; i < ms; i += 100)
+	{
+		ast_cli(fd,"\r");
+		if (rad_rxwait(fd,100)) return(1);
+	}
+	if (rad_rxwait(fd,ms - i)) return(1);
+	ast_cli(fd,"\r");
+	return(0);
+}
 
 /* Call with:  devnum: alsa major device number, param: ascii Formal
 Parameter Name, val1, first or only value, val2 second value, or 0 
@@ -739,7 +800,7 @@ static int soundcard_writeframe(short *data)
 	state = snd_pcm_state(alsa.ocard);
 	if (state == SND_PCM_STATE_XRUN)
 		snd_pcm_prepare(alsa.ocard);
-	return(snd_pcm_writei(alsa.ocard, (void *)data, FRAME_SIZE));
+	return(snd_pcm_writei(alsa.ocard, (void *)data, (usedsp) ? FRAME_SIZE * 6 : FRAME_SIZE));
 }
 
 static snd_pcm_t *alsa_card_init(char *dev, snd_pcm_stream_t stream)
@@ -754,7 +815,6 @@ static snd_pcm_t *alsa_card_init(char *dev, snd_pcm_stream_t stream)
 	snd_pcm_uframes_t period_frames = 0;
 	snd_pcm_uframes_t buffer_frames = 0;
 	struct pollfd pfd;
-	/* int period_bytes = 0; */
 	snd_pcm_uframes_t buffer_size = 0;
 
 	unsigned int rate = DESIRED_RATE;
@@ -845,6 +905,7 @@ static snd_pcm_t *alsa_card_init(char *dev, snd_pcm_stream_t stream)
 
 	snd_pcm_hw_params_get_period_size(hwparams, &chunk_size, 0);
 	snd_pcm_hw_params_get_buffer_size(hwparams, &buffer_size);
+
 	if (chunk_size == buffer_size) {
 		ast_log(LOG_ERROR,"Can't use period equal to buffer size (%lu == %lu)\n",
 		      chunk_size, buffer_size);
@@ -1006,22 +1067,57 @@ static int pi_write(struct ast_channel *c, struct ast_frame *f)
 	struct chan_pi_pvt *o = c->tech_pvt;
 	struct ast_frame *f1;
 
-	/*
-	 * we could receive a block which is not a multiple of our
-	 * FRAME_SIZE, so buffer it locally and write to the device
-	 * in FRAME_SIZE chunks.
-	 * Keep the residue stored for future use.
-	 */
+	if (usedsp)
+	{
+		o->pmrChan->txPttIn =  o->txkeyed || o->txtestkey;
+		PmrTx(o->pmrChan,(i16*)AST_FRAME_DATAP(f));
+	}
+	else
+	{
+		if (!o->txkeyed) return 0;
+		f1 = ast_frdup(f);
+		memset(&f1->frame_list,0,sizeof(f1->frame_list));
+		ast_mutex_lock(&o->txqlock);
+		AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
+		ast_mutex_unlock(&o->txqlock);
+	}
+	return 0;
+}
 
-	if (!o->txkeyed) return 0;
+static void dorxproc(struct ast_channel *c)
+{
+	int i;
+	short *sp,*sp1;
+	char xbuf[(FRAME_SIZE * 12) + AST_FRIENDLY_OFFSET];
+	i16 xmtbuf1[FRAME_SIZE * 12];
+	struct ast_frame *f1,f2;
+	struct chan_pi_pvt *o = c->tech_pvt;
 
-	f1 = ast_frdup(f);
+	memset(&f2,0,sizeof(f2));
+        f2.frametype = AST_FRAME_VOICE;
+        f2.subclass = AST_FORMAT_SLINEAR;
+        f2.samples = FRAME_SIZE * 6;
+        f2.datalen = FRAME_SIZE * 12;
+        AST_FRAME_DATA(f2) = xbuf + AST_FRIENDLY_OFFSET;
+	f2.offset = AST_FRIENDLY_OFFSET;
+	sp = (o == &pvts[0]) ? (i16*)pi_read_buf : (i16*)(pi_read_buf1 + 2);
+	PmrRx(o->pmrChan,sp,(i16*)(o->pi_read_frame_buf + AST_FRIENDLY_OFFSET),xmtbuf1);
+	ast_mutex_lock(&rxbuflock);
+	memcpy(pi_read_buf1,pi_read_buf,sizeof(pi_read_buf1));
+	ast_mutex_unlock(&rxbuflock);
+	sp = (short *) AST_FRAME_DATA(f2);
+	sp1 = (short *) xmtbuf1;
+	for(i = 0; i < FRAME_SIZE * 6; i++)
+	{
+		*sp++ = *sp1;
+		sp1 += 2;
+	}
+	f1 = ast_frdup(&f2);
 	memset(&f1->frame_list,0,sizeof(f1->frame_list));
 	ast_mutex_lock(&o->txqlock);
 	AST_LIST_INSERT_TAIL(&o->txq,f1,frame_list);
 	ast_mutex_unlock(&o->txqlock);
-
-	return 0;
+	return;
 }
 
 static struct ast_frame *pi_read(struct ast_channel *c)
@@ -1049,7 +1145,15 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 	f->frametype = AST_FRAME_NULL;
 	f->src = pi_tech.type;
 
-	if (!ismaster) return f;
+	if (!ismaster)
+	{
+		if (usedsp) 
+		{
+			while (read(readpipe[0],&i,1) == 1);
+			dorxproc(c);
+		}
+		return f;
+	}
 
 	state = snd_pcm_state(alsa.icard);
 	if ((state != SND_PCM_STATE_PREPARED) && (state != SND_PCM_STATE_RUNNING)) {
@@ -1058,11 +1162,16 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 
 	gettimeofday(&tv,NULL);
 
-	res = snd_pcm_readi(alsa.icard, pi_read_buf,FRAME_SIZE);
+	ast_mutex_lock(&rxbuflock);
+	res = snd_pcm_readi(alsa.icard, pi_read_buf,(usedsp) ? FRAME_SIZE * 6 :FRAME_SIZE);
 	if (res < 0)				/* audio data not ready, return a NULL frame */
 	{
                 return f;
         }
+	ast_mutex_unlock(&rxbuflock);
+	if (pvts[0].owner && pvts[1].owner)
+		write(readpipe[1],&n0,1);
+
 #if DEBUG_CAPTURES == 1
 	if (frxcapraw) fwrite(pi_read_buf,1,res,frxcapraw);
 #endif
@@ -1096,11 +1205,18 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 				n = f1->datalen;
 			}
 			if (n0 && n1) n = MIN(f0->datalen,f1->datalen);
-			if (n > (FRAME_SIZE * 2)) n = FRAME_SIZE * 2;
+			if (usedsp)
+			{
+				if (n > (FRAME_SIZE * 12)) n = FRAME_SIZE * 12;
+			}
+			else
+			{
+				if (n > (FRAME_SIZE * 2)) n = FRAME_SIZE * 2;
+			}
 			sp = (short *) (pi_write_buf);
 			sp0 = sp1 = NULL;
-			if (f0) sp0 = (short *) f0->data;
-			if (f1) sp1 = (short *) f1->data;
+			if (f0) sp0 = (short *) AST_FRAME_DATAP(f0);
+			if (f1) sp1 = (short *) AST_FRAME_DATAP(f1);
 			for(i = 0; i < (n / 2); i++)
 			{
 				if (f0) *sp++ = *sp0++;
@@ -1115,6 +1231,8 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 		}
 		break;
 	}
+	if (usedsp)
+		dorxproc(c);
 	gv = get_gpios();
 	pvts[0].rxhidsq = 0;
 	if (gv & MASK_GPIOS_COR1) pvts[0].rxhidsq = 1;
@@ -1148,28 +1266,31 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 		set_gpios();
 	}
 	ast_mutex_unlock(&gpio_lock);
-	sp = (short *)pi_read_buf;
-	sp1 = (short *)(pvts[0].pi_read_frame_buf + AST_FRIENDLY_OFFSET);
-	sp2 = (short *)(pvts[1].pi_read_frame_buf + AST_FRIENDLY_OFFSET);
-	for(n = 0; n < FRAME_SIZE; n++)
+	if (!usedsp)
 	{
-		if (pvts[1].plfilter && pvts[1].deemphasis)
-			*sp1++ = hpass6(deemph(*sp++,&pvts[1].destate),pvts[1].hpx,pvts[1].hpy);
-		else if (pvts[1].deemphasis)
-			*sp1++ = deemph(*sp++,&pvts[1].destate);
-		else if (pvts[1].plfilter)
-			*sp1++ = hpass(*sp++,pvts[1].hpx,pvts[1].hpy);
-		else
-			*sp1++ = *sp++;
-		if (pvts[0].plfilter && pvts[0].deemphasis)
-			*sp2++ = hpass6(deemph(*sp++,&pvts[0].destate),pvts[0].hpx,pvts[0].hpy);
-		else if (pvts[0].deemphasis)
-			*sp2++ = deemph(*sp++,&pvts[0].destate);
-		else if (pvts[0].plfilter)
-			*sp2++ = hpass(*sp++,pvts[0].hpx,pvts[0].hpy);
-		else
-			*sp2++ = *sp++;
-	}			
+		sp = (short *)pi_read_buf;
+		sp1 = (short *)(pvts[0].pi_read_frame_buf + AST_FRIENDLY_OFFSET);
+		sp2 = (short *)(pvts[1].pi_read_frame_buf + AST_FRIENDLY_OFFSET);
+		for(n = 0; n < FRAME_SIZE; n++)
+		{
+			if (pvts[1].plfilter && pvts[1].deemphasis)
+				*sp1++ = hpass6(deemph(*sp++,&pvts[1].destate),pvts[1].hpx,pvts[1].hpy);
+			else if (pvts[1].deemphasis)
+				*sp1++ = deemph(*sp++,&pvts[1].destate);
+			else if (pvts[1].plfilter)
+				*sp1++ = hpass(*sp++,pvts[1].hpx,pvts[1].hpy);
+			else
+				*sp1++ = *sp++;
+			if (pvts[0].plfilter && pvts[0].deemphasis)
+				*sp2++ = hpass6(deemph(*sp++,&pvts[0].destate),pvts[0].hpx,pvts[0].hpy);
+			else if (pvts[0].deemphasis)
+				*sp2++ = deemph(*sp++,&pvts[0].destate);
+			else if (pvts[0].plfilter)
+				*sp2++ = hpass(*sp++,pvts[0].hpx,pvts[0].hpy);
+			else
+				*sp2++ = *sp++;
+		}			
+	}
         readpos = 0;		       /* reset read pointer for next frame */
 
 	for(m = 0; m < 2; m++)
@@ -1183,6 +1304,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 			cd = 1; /* assume CD */
 			if ((o->rxcdtype == CD_HID) && (!o->rxhidsq)) cd = 0;
 			else if ((o->rxcdtype == CD_HID_INVERT) && o->rxhidsq) cd = 0;
+			else if ((o->rxcdtype==CD_XPMR_NOISE) && (!o->pmrChan->rxCarrierDetect)) cd = 0;
 			/* apply cd turn-on delay, if one specified */
 			if (o->rxondelay && cd && (o->rxoncnt++ < o->rxondelay)) cd = 0;
 			else if (!cd) o->rxoncnt = 0;
@@ -1190,6 +1312,8 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 			sd = 1; /* assume SD */
 			if ((o->rxsdtype == SD_HID) && (!o->rxhidctcss)) sd = 0;
 			else if ((o->rxsdtype == SD_HID_INVERT) && o->rxhidctcss) sd = 0;
+			else if ((o->rxsdtype == SD_XPMR) &&
+				((!o->pmrChan->b.ctcssRxEnable) || (o->pmrChan->rxCtcss->decode <= CTCSS_NULL))) sd = 0;
 
 			o->rxkeyed = sd && cd && ((!o->lasttx) || o->radioduplex);
 	
@@ -1208,7 +1332,10 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 				if (o->debuglevel) ast_verbose("Channel %s RX KEY\n",o->name);
 			}
 	
-			n = o->txkeyed || o->txtestkey;
+			if (usedsp)
+				n = o->pmrChan->txPttOut;
+			else
+				n = o->txkeyed || o->txtestkey;
 			if (o->lasttx && (!n))
 			{
 				o->lasttx = 0;
@@ -1250,7 +1377,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 					{
 						sprintf(buf1,"GPIO%d %d",i,(gv & (gpios_mask[i])) ? 1 : 0);
 						memset(&fr,0,sizeof(fr));
-						fr.data =  buf1;
+						AST_FRAME_DATA(fr) =  buf1;
 						fr.datalen = strlen(buf1) + 1;
 						fr.samples = 0;
 						fr.frametype = AST_FRAME_TEXT;
@@ -1275,11 +1402,11 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 	        f->subclass = AST_FORMAT_SLINEAR;
 	        f->samples = FRAME_SIZE;
 	        f->datalen = FRAME_SIZE * 2;
-	        f->data = o->pi_read_frame_buf + AST_FRIENDLY_OFFSET;
+	        AST_FRAME_DATAP(f) = o->pi_read_frame_buf + AST_FRIENDLY_OFFSET;
 	        if (o->rxvoiceadj > 1.0) {  /* scale and clip values */
 	                int i, x;
 			float f1;
-	                int16_t *p = (int16_t *) f->data;
+	                int16_t *p = (int16_t *) AST_FRAME_DATAP(f);
 
 	                for (i = 0; i < f->samples; i++) {
 				f1 = (float)p[i] * o->rxvoiceadj;
@@ -1295,7 +1422,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 		{
 			int i;
 			int32_t accum;
-	                int16_t *p = (int16_t *) f->data;
+	                int16_t *p = (int16_t *) AST_FRAME_DATAP(f);
 
 			for(i = 0; i < f->samples; i++)
 			{
@@ -1451,13 +1578,20 @@ static struct ast_channel *pi_new(struct chan_pi_pvt *o, char *ext, char *ctx, i
 
 	if (o == &pvts[0])
 	{
-		if (pvts[1].owner) pvts[1].owner->fds[0] = -1;
+		if (pvts[1].owner) pvts[1].owner->fds[0] = (usedsp) ? readpipe[0] : -1;
 		c->fds[0] = readdev;
 	}
 	else
 	{
 		if (!pvts[0].owner) 
+		{
 			c->fds[0] = readdev;
+		}
+		else
+		{
+			if (usedsp)
+				c->fds[0] = readpipe[0];
+		}
 	}
 
 	c->nativeformats = AST_FORMAT_SLINEAR;
@@ -1545,16 +1679,322 @@ static int pi_unkey(int fd, int argc, char *argv[])
 	return RESULT_SUCCESS;
 }
 
-static int rad_rxwait(int fd,int ms)
+/*
+	Adjust Input Attenuator with maximum signal input
+*/
+static void tune_rxinput(int fd, struct chan_pi_pvt *o, int setsql, int intflag)
 {
-fd_set fds;
-struct timeval tv;
+	const int settingmin=1;
+	const int settingstart=2;
+	const int maxtries=12;
 
-	FD_ZERO(&fds);
-	FD_SET(fd,&fds);
-	tv.tv_usec = ms * 1000;
-	tv.tv_sec = 0;
-	return(select(fd + 1,&fds,NULL,NULL,&tv));
+	int target;
+	int tolerance=2750;
+	int setting=0, tries=0, tmpdiscfactor, meas, measnoise;
+	float settingmax,f;
+
+	if (!usedsp)
+	{
+		ast_cli(fd,onlyindsp);
+		return;
+	}
+	if(o->rxdemod==RX_AUDIO_SPEAKER && o->rxcdtype==CD_XPMR_NOISE)
+	{
+		ast_cli(fd,"ERROR: usbradio.conf rxdemod=speaker vs. carrierfrom=dsp \n");	
+	}
+
+	if( o->rxdemod==RX_AUDIO_FLAT )
+		target=27000;
+	else
+		target=23000;
+
+	settingmax = MICMAX;
+
+	o->pmrChan->b.tuning=1;
+
+	setting = settingstart;
+
+	ast_cli(fd,"tune rxnoise maxtries=%i, target=%i, tolerance=%i\n",maxtries,target,tolerance);
+
+	while(tries<maxtries)
+	{
+		if (o == &pvts[0])
+		{
+			setamixer(0,"IN3L Volume",setting,-1);
+		        setamixer(0,"IN3L Digital Volume",pvts[0].rxboost ? 142 : 102,-1);
+		}
+		else
+		{
+			setamixer(0,"IN3R Volume",setting,-1);
+		        setamixer(0,"IN3R Digital Volume",pvts[1].rxboost ? 142 : 102,-1);
+		}
+		if (happy_mswait(fd,100,intflag)) 
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+		o->pmrChan->spsMeasure->source = o->pmrChan->spsRx->source;
+		o->pmrChan->spsMeasure->discfactor=2000;
+		o->pmrChan->spsMeasure->enabled=1;
+		o->pmrChan->spsMeasure->amax = o->pmrChan->spsMeasure->amin = 0;
+		if (happy_mswait(fd,400,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+		meas=o->pmrChan->spsMeasure->apeak;
+		o->pmrChan->spsMeasure->enabled=0;
+
+		if(!meas)meas++;
+		ast_cli(fd,"tries=%i, setting=%i, meas=%i\n",tries,setting,meas);
+
+		if( (meas<(target-tolerance) || meas>(target+tolerance)) && tries<=2){
+			f=(float)(setting*target)/meas;
+			setting=(int)(f+0.5);
+		}
+		else if( meas<(target-tolerance) && tries>2){
+			setting++;
+		}
+		else if( meas>(target+tolerance) && tries>2){
+			setting--;
+		}
+		else if(tries>5 && meas>(target-tolerance) && meas<(target+tolerance) )
+		{
+			break;
+		}
+
+		if(setting<settingmin)setting=settingmin;
+		else if(setting>settingmax)setting=settingmax;
+
+		tries++;
+	}
+
+
+	/* Measure HF Noise */
+	tmpdiscfactor=o->pmrChan->spsRx->discfactor;
+	o->pmrChan->spsRx->discfactor=(i16)2000;
+	o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
+	o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
+	if (happy_mswait(fd,200,intflag))
+	{
+		o->pmrChan->b.tuning=0;
+		return;
+	}
+	measnoise=o->pmrChan->rxRssi;
+
+	/* Measure RSSI */
+	o->pmrChan->spsRx->discfactor=tmpdiscfactor;
+	o->pmrChan->spsRx->discounteru=o->pmrChan->spsRx->discounterl=0;
+	o->pmrChan->spsRx->amax=o->pmrChan->spsRx->amin=0;
+	if (happy_mswait(fd,200,intflag))
+	{
+		o->pmrChan->b.tuning=0;
+		return;
+	}
+
+	ast_cli(fd,"DONE tries=%i, setting=%i, meas=%i, sqnoise=%i\n",tries,
+		((setting * 1000) + (MICMAX / 2)) / MICMAX,meas,measnoise);
+
+	if( meas<(target-tolerance) || meas>(target+tolerance) ){
+		ast_cli(fd,"ERROR: RX INPUT ADJUST FAILED.\n");
+	}else{
+		ast_cli(fd,"INFO: RX INPUT ADJUST SUCCESS.\n");
+		o->rxmixerset=((setting * 1000) + (MICMAX / 2)) / MICMAX;
+
+		if(o->rxcdtype==CD_XPMR_NOISE)
+		{
+			int normRssi=((32767-o->pmrChan->rxRssi)*1000/32767);
+
+			if((meas/(measnoise/10))>26){
+				ast_cli(fd,"WARNING: Insufficient high frequency noise from receiver.\n");
+				ast_cli(fd,"WARNING: Rx input point may be de-emphasized and not flat.\n");
+				ast_cli(fd,"         usbradio.conf setting of 'carrierfrom=dsp' not recommended.\n");
+			}
+			else
+			{
+				ast_cli(fd,"Rx noise input seems sufficient for squelch.\n");	
+			}
+			if (setsql)
+			{
+				o->rxsquelchadj = normRssi + 150;
+				if (o->rxsquelchadj > 999) o->rxsquelchadj = 999;
+				*(o->pmrChan->prxSquelchAdjust)= ((999 - o->rxsquelchadj) * 32767) / 1000;
+				ast_cli(fd,"Rx Squelch set to %d (RSSI=%d).\n",o->rxsquelchadj,normRssi);
+			}
+			else 
+			{
+				if(o->rxsquelchadj<normRssi)
+				{
+					ast_cli(fd,"WARNING: RSSI=%i SQUELCH=%i and is set too loose.\n",normRssi,o->rxsquelchadj);
+					ast_cli(fd,"         Use 'radio tune rxsquelch' to adjust.\n");
+				}
+			}
+		}
+	}
+	o->pmrChan->b.tuning=0;
+}
+
+static void tune_rxvoice(int fd, struct chan_pi_pvt *o,int intflag)
+{
+	const int target=7200;	 			// peak
+	const int tolerance=360;	   		// peak to peak
+	const float settingmin=0.1;
+	const float settingmax=5;
+	const float settingstart=1;
+	const int maxtries=12;
+
+	float setting;
+
+	int tries=0, meas;
+
+	if (!usedsp)
+	{
+		ast_cli(fd,onlyindsp);
+		return;
+	}
+	ast_cli(fd,"INFO: RX VOICE ADJUST START.\n");
+	ast_cli(fd,"target=%i tolerance=%i \n",target,tolerance);
+
+	o->pmrChan->b.tuning=1;
+	if(!o->pmrChan->spsMeasure)
+		ast_cli(fd,"ERROR: NO MEASURE BLOCK.\n");
+
+	if(!o->pmrChan->spsMeasure->source || !o->pmrChan->prxVoiceAdjust )
+		ast_cli(fd,"ERROR: NO SOURCE OR MEASURE SETTING.\n");
+
+	o->pmrChan->spsMeasure->source=o->pmrChan->spsRxOut->sink;
+	o->pmrChan->spsMeasure->enabled=1;
+	o->pmrChan->spsMeasure->discfactor=1000;
+
+	setting=settingstart;
+
+	// ast_cli(fd,"ERROR: NO MEASURE BLOCK.\n");
+
+	while(tries<maxtries)
+	{
+		*(o->pmrChan->prxVoiceAdjust)=setting*M_Q8;
+		if (happy_mswait(fd,10,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+    	o->pmrChan->spsMeasure->amax = o->pmrChan->spsMeasure->amin = 0;
+		if (happy_mswait(fd,1000,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+		meas = o->pmrChan->spsMeasure->apeak;
+		ast_cli(fd,"tries=%i, setting=%f, meas=%i\n",tries,setting,meas);
+
+		if( meas<(target-tolerance) || meas>(target+tolerance) || tries<3){
+			setting=setting*target/meas;
+		}
+		else if(tries>4 && meas>(target-tolerance) && meas<(target+tolerance) )
+		{
+			break;
+		}
+		if(setting<settingmin)setting=settingmin;
+		else if(setting>settingmax)setting=settingmax;
+
+		tries++;
+	}
+
+	o->pmrChan->spsMeasure->enabled=0;
+
+	ast_cli(fd,"DONE tries=%i, setting=%f, meas=%f\n",tries,setting,(float)meas);
+	if( meas<(target-tolerance) || meas>(target+tolerance) ){
+		ast_cli(fd,"ERROR: RX VOICE GAIN ADJUST FAILED.\n");
+	}else{
+		ast_cli(fd,"INFO: RX VOICE GAIN ADJUST SUCCESS.\n");
+		o->rxvoiceadj=setting;
+	}
+	o->pmrChan->b.tuning=0;
+}
+/*
+*/
+static void tune_rxctcss(int fd, struct chan_pi_pvt *o,int intflag)
+{
+	const int target=2400;		 // was 4096 pre 20080205
+	const int tolerance=100;
+	const float settingmin=0.1;
+	const float settingmax=8;
+	const float settingstart=1;
+	const int maxtries=12;
+
+	float setting;
+	int tries=0,meas;
+
+	if (!usedsp)
+	{
+		ast_cli(fd,onlyindsp);
+		return;
+	}
+	ast_cli(fd,"INFO: RX CTCSS ADJUST START.\n");
+	ast_cli(fd,"target=%i tolerance=%i \n",target,tolerance);
+
+	o->pmrChan->b.tuning=1;
+	o->pmrChan->spsMeasure->source=o->pmrChan->prxCtcssMeasure;
+	o->pmrChan->spsMeasure->discfactor=400;
+	o->pmrChan->spsMeasure->enabled=1;
+
+	setting=settingstart;
+
+	while(tries<maxtries)
+	{
+		*(o->pmrChan->prxCtcssAdjust)=setting*M_Q8;
+		if (happy_mswait(fd,10,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+    	o->pmrChan->spsMeasure->amax = o->pmrChan->spsMeasure->amin = 0;
+		if (happy_mswait(fd,500,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+		meas = o->pmrChan->spsMeasure->apeak;
+		ast_cli(fd,"tries=%i, setting=%f, meas=%i\n",tries,setting,meas);
+
+		if( meas<(target-tolerance) || meas>(target+tolerance) || tries<3){
+			setting=setting*target/meas;
+		}
+		else if(tries>4 && meas>(target-tolerance) && meas<(target+tolerance) )
+		{
+			break;
+		}
+		if(setting<settingmin)setting=settingmin;
+		else if(setting>settingmax)setting=settingmax;
+
+		tries++;
+	}
+	o->pmrChan->spsMeasure->enabled=0;
+	ast_cli(fd,"DONE tries=%i, setting=%f, meas=%.2f\n",tries,setting,(float)meas);
+	if( meas<(target-tolerance) || meas>(target+tolerance) ){
+		ast_cli(fd,"ERROR: RX CTCSS GAIN ADJUST FAILED.\n");
+	}else{
+		ast_cli(fd,"INFO: RX CTCSS GAIN ADJUST SUCCESS.\n");
+		o->rxctcssadj=setting;
+	}
+
+	if(o->rxcdtype==CD_XPMR_NOISE){
+		int normRssi;
+
+		if (happy_mswait(fd,200,intflag))
+		{
+			o->pmrChan->b.tuning=0;
+			return;
+		}
+		normRssi=((32767-o->pmrChan->rxRssi)*1000/32767);
+
+		if(o->rxsquelchadj>normRssi)
+			ast_cli(fd,"WARNING: RSSI=%i SQUELCH=%i and is too tight. Use 'radio tune rxsquelch'.\n",normRssi,o->rxsquelchadj);
+		else
+			ast_cli(fd,"INFO: RX RSSI=%i\n",normRssi);
+
+	}
+	o->pmrChan->b.tuning=0;
 }
 
 static void tune_rxdisplay(int fd, struct chan_pi_pvt *o)
@@ -1605,6 +2045,12 @@ static void tune_rxdisplay(int fd, struct chan_pi_pvt *o)
 	option_verbose = wasverbose;
 }
 
+static void set_txctcss_level(struct chan_pi_pvt *o)
+{							  
+	if(o->pmrChan->ptxCtcssAdjust) /* Ignore if ptr not defined */
+		*o->pmrChan->ptxCtcssAdjust=(o->txctcssadj * M_Q8) / 1000;
+}
+
 static int pi_tune(int fd, int argc, char *argv[])
 {
 	struct chan_pi_pvt *o = find_pvt(pi_active);
@@ -1621,9 +2067,33 @@ static int pi_tune(int fd, int argc, char *argv[])
 		return RESULT_SHOWUSAGE;
 	}
 
+	if (!strcasecmp(argv[2],"rxnoise")) tune_rxinput(fd,o,1,0);
+	else if (!strcasecmp(argv[2],"rxvoice")) tune_rxvoice(fd,o,0);
+	else if (!strcasecmp(argv[2],"rxtone")) tune_rxctcss(fd,o,0);
+	else if (!strcasecmp(argv[2],"rxsquelch"))
+	{
+		if (argc == 3)
+		{
+		    ast_cli(fd,"Current Signal Strength is %d\n",((32767-o->pmrChan->rxRssi)*1000/32767));
+		    ast_cli(fd,"Current Squelch setting is %d\n",o->rxsquelchadj);
+			//ast_cli(fd,"Current Raw RSSI        is %d\n",o->pmrChan->rxRssi);
+		    //ast_cli(fd,"Current (real) Squelch setting is %d\n",*(o->pmrChan->prxSquelchAdjust));
+		} else {
+			i = atoi(argv[3]);
+			if ((i < 0) || (i > 999)) return RESULT_SHOWUSAGE;
+			ast_cli(fd,"Changed Squelch setting to %d\n",i);
+			o->rxsquelchadj = i;
+			*(o->pmrChan->prxSquelchAdjust)= ((999 - i) * 32767) / 1000;
+		}
+	}
 	if (!strcasecmp(argv[2],"rx")) {
 		i = 0;
 
+		if (usedsp)
+		{
+			ast_cli(fd,notindsp);
+			return RESULT_FAILURE;
+		}
 		if (argc == 3)
 		{
 			ast_cli(fd,"Current setting on Rx Channel is %d\n",o->rxmixerset);
@@ -1655,6 +2125,27 @@ static int pi_tune(int fd, int argc, char *argv[])
 			ast_cli(fd,"Changed setting on TX Channel to %d\n",o->txmixerset);
 			mixer_write();
 		}
+	}
+	else if (!strcasecmp(argv[2],"txtone"))
+	{
+		if (!usedsp)
+		{
+			ast_cli(fd,onlyindsp);
+			return RESULT_FAILURE;
+		}
+		if (argc == 3)
+			ast_cli(fd,"Current Tx CTCSS modulation setting = %d\n",o->txctcssadj);
+		else
+		{
+			i = atoi(argv[3]);
+			if ((i < 0) || (i > 999)) return RESULT_SHOWUSAGE;
+			o->txctcssadj = i;
+			set_txctcss_level(o);
+			ast_cli(fd,"Changed Tx CTCSS modulation setting to %i\n",i);
+		}
+		o->txtestkey=1;
+		usleep(5000000);
+		o->txtestkey=0;
 	}
 	else if (!strcasecmp(argv[2],"nocap")) 	
 	{
@@ -1786,6 +2277,9 @@ static void store_rxcdtype(struct chan_pi_pvt *o, char *s)
 	else if (!strcasecmp(s,"hwinvert")){
 		o->rxcdtype = CD_HID_INVERT;
 	}	
+	else if (!strcasecmp(s,"dsp")){
+		o->rxcdtype = CD_XPMR_NOISE;
+	}	
 	else {
 		ast_log(LOG_WARNING,"Unrecognized rxcdtype parameter: %s\n",s);
 	}
@@ -1805,11 +2299,75 @@ static void store_rxsdtype(struct chan_pi_pvt *o, char *s)
 	else if (!strcasecmp(s,"hwinvert") || !strcasecmp(s,"SD_HID_INVERT")){
 		o->rxsdtype = SD_HID_INVERT;
 	}	
+	else if (!strcasecmp(s,"dsp")){
+		o->rxsdtype = SD_XPMR;
+	}	
 	else {
 		ast_log(LOG_WARNING,"Unrecognized rxsdtype parameter: %s\n",s);
 	}
 
 	//ast_log(LOG_WARNING, "set rxsdtype = %s\n", s);
+}
+
+static void store_rxdemod(struct chan_pi_pvt *o, char *s)
+{
+	if (!strcasecmp(s,"no")){
+		o->rxdemod = RX_AUDIO_NONE;
+	}
+	else if (!strcasecmp(s,"speaker")){
+		o->rxdemod = RX_AUDIO_SPEAKER;
+	}
+	else if (!strcasecmp(s,"flat")){
+			o->rxdemod = RX_AUDIO_FLAT;
+	}	
+	else {
+		ast_log(LOG_WARNING,"Unrecognized rxdemod parameter: %s\n",s);
+	}
+
+	//ast_log(LOG_WARNING, "set rxdemod = %s\n", s);
+}
+
+static void store_txtoctype(struct chan_pi_pvt *o, char *s)
+{
+	if (!strcasecmp(s,"no") || !strcasecmp(s,"TOC_NONE")){
+		o->txtoctype = TOC_NONE;
+	}
+	else if (!strcasecmp(s,"phase") || !strcasecmp(s,"TOC_PHASE")){
+		o->txtoctype = TOC_PHASE;
+	}
+	else if (!strcasecmp(s,"notone") || !strcasecmp(s,"TOC_NOTONE")){
+		o->txtoctype = TOC_NOTONE;
+	}	
+	else {
+		ast_log(LOG_WARNING,"Unrecognized txtoctype parameter: %s\n",s);
+	}
+}
+
+static void store_txmix(struct chan_pi_pvt *o, char *s)
+{
+	if (!strcasecmp(s,"voice")){
+		o->txmix = TX_OUT_VOICE;
+	}
+	else if (!strcasecmp(s,"composite")){
+		o->txmix = TX_OUT_COMPOSITE;
+	}	
+	else {
+		ast_log(LOG_WARNING,"Unrecognized txmixa parameter: %s\n",s);
+	}
+}
+
+static void store_rxvoiceadj(struct chan_pi_pvt *o, char *s)
+{
+	float f;
+	sscanf(s,"%f",&f);
+	o->rxvoiceadj = f;
+}
+
+static void store_rxctcssadj(struct chan_pi_pvt *o, char *s)
+{
+	float f;
+	sscanf(s,"%f",&f);
+	o->rxctcssadj = f;
 }
 
 static void tune_write(struct chan_pi_pvt *o)
@@ -1825,8 +2383,11 @@ static void tune_write(struct chan_pi_pvt *o)
 	fprintf(fp,"; name=%s\n",o->name);
 	fprintf(fp,"rxmixerset=%i\n",o->rxmixerset);
 	fprintf(fp,"txmixerset=%i\n",o->txmixerset);
+	fprintf(fp,"rxvoiceadj=%f\n",o->rxvoiceadj);
+	fprintf(fp,"rxctcssadj=%f\n",o->rxctcssadj);
+	fprintf(fp,"txctcssadj=%i\n",o->txctcssadj);
+	fprintf(fp,"rxsquelchadj=%i\n",o->rxsquelchadj);
 	fclose(fp);
-
 }
 
 static int mixer_write(void)
@@ -1835,7 +2396,6 @@ int	v1,v2;
 float f,f1;
 
 
-//	if (setamixer(0,"Master",128,128) == -1) return -1;
         if (setamixer(0,"HPOUT2L Input 1",0,-1) == -1) return -1;
         if (setamixer(0,"HPOUT2R Input 1",0,-1) == -1) return -1;
         if (setamixer(0,"HPOUT2L Input 2",0,-1) == -1) return -1;
@@ -1897,7 +2457,7 @@ static struct chan_pi_pvt *store_config(struct ast_config *cfg, char *ctg)
 			if (ndevices == 2)
 			{
 				ast_log(LOG_ERROR,"You can only define 2 chan_pi devices!!\n");
-				goto error;
+				return NULL;
 			}
 			o = &pvts[ndevices++];
 //			memset(o,0,sizeof(struct chan_pi_pvt));
@@ -1909,6 +2469,9 @@ static struct chan_pi_pvt *store_config(struct ast_config *cfg, char *ctg)
 	}
 	ast_mutex_init(&o->txqlock);
 	strcpy(o->mohinterpret, "default");
+	strcpy(o->txctcssdefault,"100.0");
+	strcpy(o->txctcssfreqs,"100.0");
+	strcpy(o->rxctcssfreqs,"100.0");
 	/* fill other fields from configuration */
 	for (v = ast_variable_browse(cfg, ctg); v; v = v->next) {
 		M_START((char *)v->name, (char *)v->value);
@@ -1926,6 +2489,18 @@ static struct chan_pi_pvt *store_config(struct ast_config *cfg, char *ctg)
 			M_UINT("duplex",o->radioduplex)
  			M_BOOL("plfilter",o->plfilter)
  			M_BOOL("deemphasis",o->deemphasis)
+			M_STR("txctcssdefault",o->txctcssdefault)
+			M_STR("txctcssfreqs",o->txctcssfreqs)
+			M_STR("rxctcssfreqs",o->rxctcssfreqs)
+			M_F("txmix",store_txmix(o,(char *)v->value))
+			M_F("txtoctype",store_txtoctype(o,(char *)v->value))
+			M_BOOL("txlimonly",o->txlimonly)
+			M_BOOL("txprelim",o->txprelim)
+			M_F("rxdemod",store_rxdemod(o,(char *)v->value))
+		        M_UINT("rxsqhyst",o->rxsqhyst)
+		        M_UINT("rxnoisefiltype",o->rxnoisefiltype)
+		        M_UINT("rxsquelchdelay",o->rxsquelchdelay)
+			M_UINT("rxctcssrelax",o->rxctcssrelax)
 			M_END(;
 			);
 			for(i = 1; i <= 10; i++)
@@ -1935,56 +2510,60 @@ static struct chan_pi_pvt *store_config(struct ast_config *cfg, char *ctg)
 			}
 	}
 
-		o->debuglevel = 0;
+	o->debuglevel = 0;
 
-		if (o == &pi_default)		/* we are done with the default */
-			return NULL;
+	if (o == &pi_default)		/* we are done with the default */
+		return NULL;
 
-		snprintf(fname,sizeof(fname) - 1,config1,o->name);
+	snprintf(fname,sizeof(fname) - 1,config1,o->name);
 #ifdef	NEW_ASTERISK
-		cfg1 = ast_config_load(fname,zeroflag);
+	cfg1 = ast_config_load(fname,zeroflag);
 #else
-		cfg1 = ast_config_load(fname);
+	cfg1 = ast_config_load(fname);
 #endif
-		o->rxmixerset = 500;
-		o->txmixerset = 500;
-		if (cfg1) {
-			for (v = ast_variable_browse(cfg1, o->name); v; v = v->next) {
-				M_START((char *)v->name, (char *)v->value);
-				M_UINT("rxmixerset", o->rxmixerset)
-				M_UINT("txmixerset", o->txmixerset)
-				M_END(;
-				);
-			}
-			ast_config_destroy(cfg1);
-		} else ast_log(LOG_WARNING,"File %s not found, using default parameters.\n",fname);
-
+	o->rxmixerset = 500;
+	o->txmixerset = 500;
+	o->rxvoiceadj = 0.5;
+	o->rxctcssadj = 0.5;
+	o->txctcssadj = 200;
+	o->rxsquelchadj = 500;
+	if (cfg1) {
+		for (v = ast_variable_browse(cfg1, o->name); v; v = v->next) {
+			M_START((char *)v->name, (char *)v->value);
+			M_UINT("rxmixerset", o->rxmixerset)
+			M_UINT("txmixerset", o->txmixerset)
+			M_F("rxvoiceadj",store_rxvoiceadj(o,(char *)v->value))
+			M_F("rxctcssadj",store_rxctcssadj(o,(char *)v->value))
+			M_UINT("txctcssadj",o->txctcssadj);
+			M_UINT("rxsquelchadj", o->rxsquelchadj)
+			M_END(;
+			);
+		}
+		ast_config_destroy(cfg1);
+	} else ast_log(LOG_WARNING,"File %s not found, using default parameters.\n",fname);
 		o->dsp = ast_dsp_new();
-		if (o->dsp)
-		{
+	if (o->dsp)
+	{
 #ifdef  NEW_ASTERISK
-	          ast_dsp_set_features(o->dsp,DSP_FEATURE_DIGIT_DETECT);
-	          ast_dsp_set_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+          ast_dsp_set_features(o->dsp,DSP_FEATURE_DIGIT_DETECT);
+          ast_dsp_set_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #else
-	          ast_dsp_set_features(o->dsp,DSP_FEATURE_DTMF_DETECT);
-	          ast_dsp_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+          ast_dsp_set_features(o->dsp,DSP_FEATURE_DTMF_DETECT);
+          ast_dsp_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
 #endif
-		}
-		for(i = 1; i <= 10; i++)
-		{
-			/* skip if this one not specified */
-			if (!o->gpios[i]) continue;
-			/* skip if not out */
-			if (strncasecmp(o->gpios[i],"out",3)) continue;
-			gpio_ctl |= 1 << gpios_mask[i]; /* set this one to output, also */
-			GPIODirection(gpios_mask[i],OUT);
-			/* if default value is 1, set it */
-			if (!strcasecmp(o->gpios[i],"out1")) gpio_val |= gpios_mask[i];
-		}
+	}
+	for(i = 1; i <= 10; i++)
+	{
+		/* skip if this one not specified */
+		if (!o->gpios[i]) continue;
+		/* skip if not out */
+		if (strncasecmp(o->gpios[i],"out",3)) continue;
+		gpio_ctl |= 1 << gpios_mask[i]; /* set this one to output, also */
+		GPIODirection(gpios_mask[i],OUT);
+		/* if default value is 1, set it */
+		if (!strcasecmp(o->gpios[i],"out1")) gpio_val |= gpios_mask[i];
+	}
 	return o;
-  
-  error:
-	return NULL;
 }
 
 #ifdef	NEW_ASTERISK
@@ -2103,6 +2682,7 @@ static struct ast_cli_entry cli_pi[] = {
 */
 static int load_module(void)
 {
+	int i;
 	struct ast_config *cfg = NULL;
 	char *ctg = NULL;
 #ifdef	NEW_ASTERISK
@@ -2170,6 +2750,52 @@ static int load_module(void)
 	set_ptt(0,0);
 	set_ptt(1,0);
 
+	if (usedsp)
+	{
+		t_pmr_chan tChan;
+
+		for(i = 0; i < 2; i++)
+		{		
+			memset(&tChan,0,sizeof(t_pmr_chan));
+
+			tChan.pTxCodeDefault = pvts[i].txctcssdefault;
+			tChan.pTxCodeSrc     = pvts[i].txctcssfreqs;
+			tChan.pRxCodeSrc     = pvts[i].rxctcssfreqs;
+			if (pvts[i].txlimonly) 
+				tChan.txMod = 1;
+			if (pvts[i].txprelim) 
+				tChan.txMod = 2;
+			tChan.txMixA = pvts[i].txmix;
+			tChan.b.txboost = 1;
+			tChan.fever = 1;
+
+			tChan.rxDemod=pvts[i].rxdemod;
+			tChan.rxCdType=pvts[i].rxcdtype;
+			tChan.rxCarrierHyst=pvts[i].rxsqhyst;
+			tChan.rxSqVoxAdj=pvts[i].rxsqvoxadj;
+			tChan.rxSquelchDelay=pvts[i].rxsquelchdelay;
+			tChan.rxNoiseFilType=pvts[i].rxnoisefiltype;
+			if (pvts[i].pmrChan) destroyPmrChannel(pvts[i].pmrChan);
+			pvts[i].pmrChan = createPmrChannel(&tChan,FRAME_SIZE);
+			pvts[i].pmrChan->radioDuplex = pvts[i].radioduplex;
+			pvts[i].pmrChan->b.loopback=0; 
+			pvts[i].pmrChan->b.radioactive= 1;
+			pvts[i].pmrChan->txrxblankingtime = 0;
+			pvts[i].pmrChan->rxCpuSaver = 0;
+			pvts[i].pmrChan->txCpuSaver = 0;
+			*(pvts[i].pmrChan->prxSquelchAdjust) =
+				((999 - pvts[i].rxsquelchadj) * 32767) / 1000;
+			*(pvts[i].pmrChan->prxVoiceAdjust)=pvts[i].rxvoiceadj*M_Q8;
+			*(pvts[i].pmrChan->prxCtcssAdjust)=pvts[i].rxctcssadj*M_Q8;
+			pvts[i].pmrChan->rxCtcss->relax = pvts[i].rxctcssrelax;
+			pvts[i].pmrChan->txTocType = pvts[i].txtoctype;
+			pvts[i].pmrChan->spsTxOutA->outputGain = 250;
+			if (pvts[i].txmix == TX_OUT_COMPOSITE)
+				set_txctcss_level(&pvts[i]);
+			pvts[i].pmrChan->pTxCodeDefault = pvts[i].txctcssdefault;
+			pvts[i].pmrChan->pTxCodeSrc = pvts[i].txctcssfreqs;
+		}
+	}
  	alsa.icard = alsa_card_init("hw:sndrpiwsp", SND_PCM_STREAM_CAPTURE);
 	alsa.ocard = alsa_card_init("hw:sndrpiwsp", SND_PCM_STREAM_PLAYBACK);
 	if (!alsa.icard || !alsa.ocard) {
@@ -2184,10 +2810,27 @@ static int load_module(void)
 		return AST_MODULE_LOAD_FAILURE;
 	}
 
+	if (usedsp)
+	{
+		if (pipe(readpipe) == -1)
+		{
+			ast_log(LOG_ERROR,"Cannot open readpipe!!\n");
+			return AST_MODULE_LOAD_FAILURE;
+		}
+		if (fcntl(readpipe[0], F_SETFL,  O_NONBLOCK) == -1)
+		{
+			ast_log(LOG_ERROR,"Cannot set readpipe NONBLOCK!!\n");
+			return AST_MODULE_LOAD_FAILURE;
+		}
+	}
+
 	ast_cli_register_multiple(cli_pi, sizeof(cli_pi) / sizeof(struct ast_cli_entry));
 
 	return AST_MODULE_LOAD_SUCCESS;
 }
+
+#include "xpmr/xpmr.c"
+
 /*
 */
 static int unload_module(void)

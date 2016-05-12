@@ -4054,7 +4054,6 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o, int setsql, int in
 	const int settingstart=2;
 	const int maxtries=12;
 
-	char success;
 	int target;
 	int tolerance=2750;
 	int setting=0, tries=0, tmpdiscfactor, meas, measnoise;
@@ -4154,10 +4153,8 @@ static void tune_rxinput(int fd, struct chan_usbradio_pvt *o, int setsql, int in
 		((setting * 1000) + (o->micmax / 2)) / o->micmax,meas,measnoise);
 
 	if( meas<(target-tolerance) || meas>(target+tolerance) ){
-		success=0;
 		ast_cli(fd,"ERROR: RX INPUT ADJUST FAILED.\n");
 	}else{
-		success=1;
 		ast_cli(fd,"INFO: RX INPUT ADJUST SUCCESS.\n");
 		o->rxmixerset=((setting * 1000) + (o->micmax / 2)) / o->micmax;
 
@@ -4738,7 +4735,6 @@ static void tune_rxctcss(int fd, struct chan_usbradio_pvt *o,int intflag)
 	const int maxtries=12;
 
 	float setting;
-	char  success;
 	int tries=0,meas;
 
 	ast_cli(fd,"INFO: RX CTCSS ADJUST START.\n");
@@ -4783,10 +4779,8 @@ static void tune_rxctcss(int fd, struct chan_usbradio_pvt *o,int intflag)
 	o->pmrChan->spsMeasure->enabled=0;
 	ast_cli(fd,"DONE tries=%i, setting=%f, meas=%.2f\n",tries,setting,(float)meas);
 	if( meas<(target-tolerance) || meas>(target+tolerance) ){
-		success=0;
 		ast_cli(fd,"ERROR: RX CTCSS GAIN ADJUST FAILED.\n");
 	}else{
-	    success=1;
 		ast_cli(fd,"INFO: RX CTCSS GAIN ADJUST SUCCESS.\n");
 		o->rxctcssadj=setting;
 	}
