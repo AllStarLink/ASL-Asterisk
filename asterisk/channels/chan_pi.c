@@ -274,7 +274,7 @@ ast_mutex_t rxbuflock;
 
 int pi_write_dst;
 int total_blocks;			/* total blocks in the output device */
-int usedsp = 1;
+int usedsp = 1;		// Default to using DSP
 int readpipe[2];
 
 int has_been_open = 0;
@@ -1169,7 +1169,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
                 return f;
         }
 	ast_mutex_unlock(&rxbuflock);
-	if (pvts[0].owner && pvts[1].owner)
+	if (usedsp && pvts[0].owner && pvts[1].owner)
 		write(readpipe[1],&n0,1);
 
 #if DEBUG_CAPTURES == 1
@@ -1304,7 +1304,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 			cd = 1; /* assume CD */
 			if ((o->rxcdtype == CD_HID) && (!o->rxhidsq)) cd = 0;
 			else if ((o->rxcdtype == CD_HID_INVERT) && o->rxhidsq) cd = 0;
-			else if ((o->rxcdtype==CD_XPMR_NOISE) && (!o->pmrChan->rxCarrierDetect)) cd = 0;
+			else if (usedsp && (o->rxcdtype==CD_XPMR_NOISE) && (!o->pmrChan->rxCarrierDetect)) cd = 0;
 			/* apply cd turn-on delay, if one specified */
 			if (o->rxondelay && cd && (o->rxoncnt++ < o->rxondelay)) cd = 0;
 			else if (!cd) o->rxoncnt = 0;
@@ -1312,7 +1312,7 @@ static struct ast_frame *pi_read(struct ast_channel *c)
 			sd = 1; /* assume SD */
 			if ((o->rxsdtype == SD_HID) && (!o->rxhidctcss)) sd = 0;
 			else if ((o->rxsdtype == SD_HID_INVERT) && o->rxhidctcss) sd = 0;
-			else if ((o->rxsdtype == SD_XPMR) &&
+			else if (usedsp && (o->rxsdtype == SD_XPMR) &&
 				((!o->pmrChan->b.ctcssRxEnable) || (o->pmrChan->rxCtcss->decode <= CTCSS_NULL))) sd = 0;
 
 			o->rxkeyed = sd && cd && ((!o->lasttx) || o->radioduplex);
@@ -2482,6 +2482,7 @@ static struct chan_pi_pvt *store_config(struct ast_config *cfg, char *ctg)
 
 			M_UINT("debug", pi_debug)
 			M_UINT("i2caddr", i2c_addr)
+			M_BOOL("dsp", usedsp)
 			M_BOOL("invertptt",o->invertptt)
 			M_BOOL("rxboost",o->rxboost)
 			M_F("carrierfrom",store_rxcdtype(o,(char *)v->value))
