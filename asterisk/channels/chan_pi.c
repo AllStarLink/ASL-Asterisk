@@ -107,7 +107,7 @@ START_CONFIG
     ; General config options which propigate to all devices, with
     ; default values shown. You may have as many devices as the
     ; system will allow. You must use one section per device, with
-    ; [usb] generally (although its up to you) being the first device.
+    ; [1] generally (although its up to you) being the first device.
     ;
     ;
     ; debug = 0x0		; misc debug flags, default is 0
@@ -147,11 +147,11 @@ START_CONFIG
     ; jblog = no                  ; Enables jitterbuffer frame logging. Defaults to "no".
     ;-----------------------------------------------------------------------------------
 
-[usb]
+[1]
 
 ; First channel unique config
 
-[usb1]
+[2]
 
 ; Second channel config
 
@@ -1640,13 +1640,13 @@ static struct ast_channel *pi_request(const char *type, int format, void *data, 
 		return NULL;
 	}
 	if (o->owner) {
-		ast_log(LOG_NOTICE, "Already have a call (chan %p) on the usb channel\n", o->owner);
+		ast_log(LOG_NOTICE, "Already have a call (chan %p) on the pi channel\n", o->owner);
 		*cause = AST_CAUSE_BUSY;
 		return NULL;
 	}
 	c = pi_new(o, NULL, NULL, AST_STATE_DOWN);
 	if (c == NULL) {
-		ast_log(LOG_WARNING, "Unable to create new usb channel\n");
+		ast_log(LOG_WARNING, "Unable to create new pi channel\n");
 		return NULL;
 	}
 	if (!has_been_open)
@@ -1700,7 +1700,7 @@ static void tune_rxinput(int fd, struct chan_pi_pvt *o, int setsql, int intflag)
 	}
 	if(o->rxdemod==RX_AUDIO_SPEAKER && o->rxcdtype==CD_XPMR_NOISE)
 	{
-		ast_cli(fd,"ERROR: usbradio.conf rxdemod=speaker vs. carrierfrom=dsp \n");	
+		ast_cli(fd,"ERROR: pi.conf rxdemod=speaker vs. carrierfrom=dsp \n");	
 	}
 
 	if( o->rxdemod==RX_AUDIO_FLAT )
@@ -1808,7 +1808,7 @@ static void tune_rxinput(int fd, struct chan_pi_pvt *o, int setsql, int intflag)
 			if((meas/(measnoise/10))>26){
 				ast_cli(fd,"WARNING: Insufficient high frequency noise from receiver.\n");
 				ast_cli(fd,"WARNING: Rx input point may be de-emphasized and not flat.\n");
-				ast_cli(fd,"         usbradio.conf setting of 'carrierfrom=dsp' not recommended.\n");
+				ast_cli(fd,"         pi.conf setting of 'carrierfrom=dsp' not recommended.\n");
 			}
 			else
 			{
@@ -2051,6 +2051,336 @@ static void set_txctcss_level(struct chan_pi_pvt *o)
 		*o->pmrChan->ptxCtcssAdjust=(o->txctcssadj * M_Q8) / 1000;
 }
 
+static void tune_txoutput(struct chan_pi_pvt *o, int value, int fd, int intflag)
+{
+	o->txtestkey=1;
+	o->pmrChan->txPttIn=1;
+	TxTestTone(o->pmrChan, 1);	  // generate 1KHz tone at 7200 peak
+	if (fd > 0)
+	{
+		ast_cli(fd,"Tone output starting on channel %s...\n",o->name);
+		if (happy_mswait(fd,5000,intflag))
+		{
+			o->pmrChan->txPttIn=0;
+			o->txtestkey=0;
+		}
+	} else usleep(5000000);
+	TxTestTone(o->pmrChan, 0);
+	if (fd > 0) ast_cli(fd,"Tone output ending on channel %s...\n",o->name);
+	o->pmrChan->txPttIn=0;
+	o->txtestkey=0;
+}
+
+static void do_rxdisplay(int fd, struct chan_pi_pvt *o)
+{
+	int j,waskeyed,meas,ncols = 75;
+	char str[256];
+
+	ast_cli(fd,"RX VOICE DISPLAY:\n");
+	ast_cli(fd,"                                 v -- 3KHz        v -- 5KHz\n");
+
+	if(!o->pmrChan->spsMeasure) 
+	{
+		ast_cli(fd,"ERROR: NO MEASURE BLOCK.\n");
+		return;
+	}
+
+	if(!o->pmrChan->spsMeasure->source || !o->pmrChan->prxVoiceAdjust )
+	{
+		ast_cli(fd,"ERROR: NO SOURCE OR MEASURE SETTING.\n");
+		return;
+	}
+
+	o->pmrChan->spsMeasure->source=o->pmrChan->spsRxOut->sink;
+
+	o->pmrChan->spsMeasure->enabled=1;
+	o->pmrChan->spsMeasure->discfactor=1000;
+
+	waskeyed = !o->rxkeyed;
+	for(;;)
+	{
+	    	o->pmrChan->spsMeasure->amax = 
+			o->pmrChan->spsMeasure->amin = 0;
+		if (rad_rxwait(fd,100)) break;
+		if (o->rxkeyed != waskeyed)
+		{
+			for(j = 0; j < ncols; j++) str[j] = ' ';
+			str[j] = 0;
+			ast_cli(fd," %s \r",str);
+		}
+		waskeyed = o->rxkeyed;
+		if (!o->rxkeyed) {
+			ast_cli(fd,"\r");
+			continue;
+		}
+		meas = o->pmrChan->spsMeasure->apeak;
+		for(j = 0; j < ncols; j++)
+		{
+			int thresh = (meas * ncols) / 16384;
+			if (j < thresh) str[j] = '=';
+			else if (j == thresh) str[j] = '>';
+			else str[j] = ' ';
+		}
+		str[j] = 0;
+		ast_cli(fd,"|%s|\r",str);
+	}
+	o->pmrChan->spsMeasure->enabled=0;
+}
+
+/*
+	Adjust Input Attenuator with maximum signal input
+*/
+
+static void _menu_rxvoice(int fd, struct chan_pi_pvt *o, char *str)
+{
+	int i,x;
+
+	if (!str[0])
+	{
+		if (o->rxdemod == RX_AUDIO_FLAT)
+			ast_cli(fd,"Current Rx voice setting: %d\n",(int)((o->rxvoiceadj * 200.0) + .5));
+		else
+			ast_cli(fd,"Current Rx voice setting: %d\n",o->rxmixerset);
+		return;
+	}
+	for(x = 0; str[x]; x++)
+	{
+		if (!isdigit(str[x])) break;
+	}
+	if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+	{
+		ast_cli(fd,"Entry Error, Rx voice setting not changed\n");
+		return;
+	}
+	if (o->rxdemod == RX_AUDIO_FLAT)
+	{
+	 	o->rxvoiceadj=(float)i / 200.0;
+	}
+	else
+	{
+		o->rxmixerset = i;
+		mixer_write();
+	}
+	*(o->pmrChan->prxVoiceAdjust)=o->rxvoiceadj * M_Q8;
+	ast_cli(fd,"Changed rx voice setting to %d\n",i);
+	return;
+}
+
+static void _menu_print(int fd, struct chan_pi_pvt *o)
+{
+	ast_cli(fd,"Active Pi radio interface is [%s]\n",pi_active);
+	ast_cli(fd,"Output is currently set to ");
+	if(o->txmix==TX_OUT_COMPOSITE)ast_cli(fd,"composite.\n");
+	else if (o->txmix==TX_OUT_VOICE)ast_cli(fd,"voice.\n");
+	else if (o->txmix==TX_OUT_LSD)ast_cli(fd,"tone.\n");
+	else ast_cli(fd,"off.\n");
+
+	ast_cli(fd,"Tx Voice Level currently set to %d\n",o->txmixerset);
+	ast_cli(fd,"Tx Tone Level currently set to %d\n",o->txctcssadj);
+	ast_cli(fd,"Rx Squelch currently set to %d\n",o->rxsquelchadj);
+	return;
+}
+
+static void _menu_rxsquelch(int fd, struct chan_pi_pvt *o, char *str)
+{
+int	i,x;
+
+	if (!str[0])
+	{
+		ast_cli(fd,"Current Signal Strength is %d\n",((32767-o->pmrChan->rxRssi)*1000/32767));
+		ast_cli(fd,"Current Squelch setting is %d\n",o->rxsquelchadj);
+		return;
+	}
+	for(x = 0; str[x]; x++)
+	{
+		if (!isdigit(str[x])) break;
+	}
+	if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+	{
+		ast_cli(fd,"Entry Error, Rx Squelch Level setting not changed\n");
+		return;
+	}
+	ast_cli(fd,"Changed Rx Squelch Level setting to %d\n",i);
+	o->rxsquelchadj = i;
+	*(o->pmrChan->prxSquelchAdjust)= ((999 - i) * 32767) / 1000;
+	return;
+}
+
+static void _menu_txvoice(int fd, struct chan_pi_pvt *o,char *cstr)
+{
+char	*str = cstr;
+int	i,j,x,dokey,withctcss;
+
+	if( (o->txmix != TX_OUT_VOICE) && 
+		(o->txmix != TX_OUT_COMPOSITE))
+	{
+		ast_cli(fd,"Error, No txvoice output configured.\n");
+		return;
+	}
+	if (!str[0])
+	{
+		if((o->txmix==TX_OUT_VOICE)||(o->txmix==TX_OUT_COMPOSITE))
+		{
+			ast_cli(fd,"Current Tx Voice Level setting on Channel A is %d\n",o->txmixerset);
+		}
+		return;
+	}
+	j = o->txmixerset;
+	dokey = 0;
+	if (str[0] == 'K')
+	{
+		dokey = 1;
+		str++;
+	}
+	withctcss = 0;
+	if (str[0] == 'C')
+	{
+		withctcss = 1;
+		str++;
+	}
+	if (!str[0])
+	{
+		ast_cli(fd,"Keying Transmitter and sending 1000 Hz tone for 5 seconds...\n");
+		if (withctcss) o->pmrChan->b.txCtcssInhibit=1;
+		tune_txoutput(o,j,fd,1);
+		o->pmrChan->b.txCtcssInhibit=0;
+		ast_cli(fd,"DONE.\n");
+		return;
+	}
+	for(x = 0; str[x]; x++)
+	{
+		if (!isdigit(str[x])) break;
+	}
+	if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+	{
+		ast_cli(fd,"Entry Error, Tx Voice Level setting not changed\n");
+		return;
+	}
+	if((o->txmix==TX_OUT_VOICE)||(o->txmix==TX_OUT_COMPOSITE))
+	{
+	 	o->txmixerset=i;
+		ast_cli(fd,"Changed Tx Voice Level setting on Channel A to %d\n",o->txmixerset);
+	}
+	mixer_write();
+	if (dokey)
+	{
+		ast_cli(fd,"Keying Transmitter and sending 1000 Hz tone for 5 seconds...\n");
+		if (!withctcss) o->pmrChan->b.txCtcssInhibit=1;
+		tune_txoutput(o,i,fd,1);
+		o->pmrChan->b.txCtcssInhibit=0;
+		ast_cli(fd,"DONE.\n");
+	}
+	return;
+}
+
+
+static void _menu_txtone(int fd, struct chan_pi_pvt *o, char *cstr)
+{
+char	*str = cstr;
+int	i,x,dokey;
+
+	if (!str[0])
+	{
+		ast_cli(fd,"Current Tx CTCSS Modulation Level setting = %d\n",o->txctcssadj);
+		return;
+	}
+	dokey = 0;
+	if (str[0] == 'K')
+	{
+		dokey = 1;
+		str++;
+	}
+	if (str[0])
+	{
+		for(x = 0; str[x]; x++)
+		{
+			if (!isdigit(str[x])) break;
+		}
+		if (str[x] || (sscanf(str,"%d",&i) < 1) || (i < 0) || (i > 999))
+		{
+			ast_cli(fd,"Entry Error, Tx CTCSS Modulation Level setting not changed\n");
+			return;
+		}
+		o->txctcssadj = i;
+		set_txctcss_level(o);
+		ast_cli(fd,"Changed Tx CTCSS Modulation Level setting to %i\n",i);
+	}
+	if (dokey)
+	{
+		ast_cli(fd,"Keying Radio and sending CTCSS tone for 5 seconds...\n");
+		o->txtestkey=1;
+		happy_mswait(fd,5000,1);
+		o->txtestkey=0;
+		ast_cli(fd,"DONE.\n");
+	}
+	return;
+}
+
+static void tune_menusupport(int fd, struct chan_pi_pvt *o, char *cmd)
+{
+int	x,oldverbose,flatrx,txhasctcss;
+
+	oldverbose = option_verbose;
+	option_verbose = 0;
+	flatrx = 0;
+	if (o->rxdemod == RX_AUDIO_FLAT) flatrx = 1;
+	txhasctcss = 0;
+	if ((o->txmix == TX_OUT_LSD) || (o->txmix == TX_OUT_COMPOSITE)) 
+		txhasctcss = 1;
+	switch(cmd[0])
+	{
+	    case '0': /* return audio processing configuration */
+		ast_cli(fd,"%d,%d,%d\n",flatrx,txhasctcss,0);
+		break;
+	    case '1': /* return pi device name list */
+		for(x = 0; x < 2; x++)
+		{
+			if (x) ast_cli(fd,",");
+			ast_cli(fd,"%s",pvts[x].name);
+		}
+		ast_cli(fd,"\n");
+		break;
+	    case '2': /* print parameters */
+		_menu_print(fd,o);
+		break;
+	    case 'a':
+		tune_rxinput(fd,o,1,1);
+		break;
+	    case 'b':
+		do_rxdisplay(fd,o);
+		break;
+	    case 'c':
+		_menu_rxvoice(fd, o, cmd + 1);
+		break;
+	    case 'd':
+		tune_rxctcss(fd,o,1);
+		break;
+	    case 'e':
+		_menu_rxsquelch(fd,o,cmd + 1);
+		break;
+	    case 'f':
+		_menu_txvoice(fd,o,cmd + 1);
+		break;
+	    case 'h':
+		_menu_txtone(fd,o,cmd + 1);
+		break;
+	    case 'i':
+		tune_rxvoice(fd,o,1);
+		break;
+	    case 'j':
+		tune_write(o);
+		ast_cli(fd,"Saved radio tuning settings to pi_tune_%s.conf\n",o->name);
+		break;
+	    default:
+		ast_cli(fd,"Invalid Command\n");
+		break;
+	}
+	o->pmrChan->b.tuning=0;
+	option_verbose = oldverbose;
+	return;
+}
+
+
 static int pi_tune(int fd, int argc, char *argv[])
 {
 	struct chan_pi_pvt *o = find_pvt(pi_active);
@@ -2067,7 +2397,13 @@ static int pi_tune(int fd, int argc, char *argv[])
 		return RESULT_SHOWUSAGE;
 	}
 
-	if (!strcasecmp(argv[2],"rxnoise")) tune_rxinput(fd,o,1,0);
+	if (!strcasecmp(argv[2],"menu-support"))
+	{
+		if (argc > 3) tune_menusupport(fd,o,argv[3]);
+		return RESULT_SUCCESS;
+	}
+
+	else if (!strcasecmp(argv[2],"rxnoise")) tune_rxinput(fd,o,1,0);
 	else if (!strcasecmp(argv[2],"rxvoice")) tune_rxvoice(fd,o,0);
 	else if (!strcasecmp(argv[2],"rxtone")) tune_rxctcss(fd,o,0);
 	else if (!strcasecmp(argv[2],"rxsquelch"))
@@ -2109,6 +2445,35 @@ static int pi_tune(int fd, int argc, char *argv[])
 	}
 	else if (!strncasecmp(argv[2],"rxd",3)) {
 		tune_rxdisplay(fd,o);
+	}
+	else if (!strcasecmp(argv[2],"txvoice")) {
+		i = 0;
+
+		if( (o->txmix!=TX_OUT_VOICE) && (o->txmix!=TX_OUT_COMPOSITE))
+		{
+			ast_log(LOG_ERROR,"No txvoice output configured.\n");
+		}
+		else if (argc == 3)
+		{
+			if((o->txmix==TX_OUT_VOICE)||(o->txmix==TX_OUT_COMPOSITE))
+				ast_cli(fd,"Current txvoice setting on Channel A is %d\n",o->txmixerset);
+		}
+		else
+		{
+			i = atoi(argv[3]);
+			if ((i < 0) || (i > 999)) return RESULT_SHOWUSAGE;
+
+			if((o->txmix==TX_OUT_VOICE)||(o->txmix==TX_OUT_COMPOSITE))
+			{
+			 	o->txmixerset=i;
+				ast_cli(fd,"Changed txvoice setting on Channel A to %d\n",o->txmixerset);
+			}
+			mixer_write();
+			ast_cli(fd,"Changed Tx Voice Output setting to %d\n",i);
+		}
+		o->pmrChan->b.txCtcssInhibit=1;
+		tune_txoutput(o,i,fd,0);
+		o->pmrChan->b.txCtcssInhibit=0;
 	}
 	else if (!strcasecmp(argv[2],"tx")) {
 		i = 0;
@@ -2229,11 +2594,21 @@ static char active_usage[] =
 
 static char pi_tune_usage[] =
 	"Usage: pi tune <function>\n"
-	"       rx [newsetting]\n"
+	"  With DSP NOT enabled:\n"
 	"       rxdisplay\n"
+	"       rx [newsetting]\n"
 	"       tx [newsetting]\n"
 	"       save (settings to tuning file)\n"
-	"       load (tuning settings from EEPROM)\n"
+	"  With DSP Enabled:\n"
+	"       rxdisplay\n"
+	"       rxnoise\n"
+	"       rxvoice\n"
+	"       rxtone\n"
+	"       rxsquelch [newsetting]\n"
+	"       txvoice [newsetting]\n"
+	"       txtone [newsetting]\n"
+	"       tx [newsetting]\n"
+	"       save (settings to tuning file)\n"
 	"\n       All [newsetting]'s are values 0-999\n\n";
 					  
 #ifndef	NEW_ASTERISK
@@ -2244,7 +2619,7 @@ static struct ast_cli_entry cli_pi[] = {
 	key_usage, NULL, NULL},
 
 	{ { "pi", "unkey", NULL },
-	pi_unkey, "Simulate Rx Signal Lusb",
+	pi_unkey, "Simulate Rx Signal Loss",
 	unkey_usage, NULL, NULL },
 
 	{ { "pi", "tune", NULL },
@@ -2352,7 +2727,7 @@ static void store_txmix(struct chan_pi_pvt *o, char *s)
 		o->txmix = TX_OUT_COMPOSITE;
 	}	
 	else {
-		ast_log(LOG_WARNING,"Unrecognized txmixa parameter: %s\n",s);
+		ast_log(LOG_WARNING,"Unrecognized txmix parameter: %s\n",s);
 	}
 }
 

@@ -16,7 +16,7 @@
 .PHONY: clean all uninstall
 
 # to get check_expr, add it to the ALL_UTILS list
-ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted radio-tune-menu simpleusb-tune-menu
+ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted radio-tune-menu simpleusb-tune-menu pi-tune-menu
 UTILS:=$(ALL_UTILS)
 
 include $(ASTTOPDIR)/Makefile.rules
