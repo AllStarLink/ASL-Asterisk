@@ -1074,7 +1074,7 @@ static int pi_write(struct ast_channel *c, struct ast_frame *f)
 	}
 	else
 	{
-		if (!o->txkeyed) return 0;
+		if ((!o->txkeyed) && (!o->txtestkey)) return 0;
 		f1 = ast_frdup(f);
 		memset(&f1->frame_list,0,sizeof(f1->frame_list));
 		ast_mutex_lock(&o->txqlock);
@@ -2051,8 +2051,44 @@ static void set_txctcss_level(struct chan_pi_pvt *o)
 		*o->pmrChan->ptxCtcssAdjust=(o->txctcssadj * M_Q8) / 1000;
 }
 
+static int _send_tx_test_tone(int fd, struct chan_pi_pvt *o,int ms, int intflag)
+{
+int	i,ret;
+
+	ast_tonepair_stop(o->owner);
+        if (ast_tonepair_start(o->owner, 1004.0, 0, 99999999, 7200.0))
+	{
+		if (fd >= 0) ast_cli(fd,"Error starting test tone on %s!!\n",pi_active);
+		return -1;
+	}
+	ast_clear_flag(o->owner, AST_FLAG_WRITE_INT);
+	o->txtestkey = 1;	
+	i = 0;
+	ret = 0;
+	ast_cli(fd,"Tone output starting on channel %s...\n",o->name);
+        while(o->owner->generatordata && (i < ms)) 
+	{
+		if (happy_mswait(fd,50,intflag)) 
+		{
+			ret = 1;
+			break;
+		}
+		i += 50;
+	}
+	if (fd > 0) ast_cli(fd,"Tone output ending on channel %s...\n",o->name);
+	ast_tonepair_stop(o->owner);
+ 	ast_set_flag(o->owner, AST_FLAG_WRITE_INT);
+	o->txtestkey = 0;	
+	return ret;
+}
+
 static void tune_txoutput(struct chan_pi_pvt *o, int value, int fd, int intflag)
 {
+	if (!o->pmrChan)
+	{
+		_send_tx_test_tone(fd,o,5000,1);
+		return;
+	}
 	o->txtestkey=1;
 	o->pmrChan->txPttIn=1;
 	TxTestTone(o->pmrChan, 1);	  // generate 1KHz tone at 7200 peak
