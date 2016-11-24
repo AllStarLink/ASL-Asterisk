@@ -19,7 +19,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.326 8/12/2016
+ *  version 0.327 11/24/2016
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -601,7 +601,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.326 8/12/2016";
+static  char *tdesc = "Radio Repeater / Remote Base  version 0.327 11/24/2016";
 
 static char *app = "Rpt";
 
@@ -8374,23 +8374,11 @@ static int telem_lookup(struct rpt *myrpt,struct ast_channel *chan, char *node, 
 	int res;
 	int i;
 	char *entry;
-	char *telemetry;
-	char *telemetry_save;
 
 	res = 0;
-	telemetry_save = NULL;
 	entry = NULL;
-	
-	/* Retrieve the section name for telemetry from the node section */
-	telemetry = (char *) ast_variable_retrieve(myrpt->cfg, node, myrpt->p.telemetry);
-	if(telemetry ){
-		telemetry_save = ast_strdup(telemetry);
-		if(!telemetry_save){
-			ast_log(LOG_WARNING,"ast_strdup() failed in telem_lookup()\n");
-			return res;
-		}
-		entry = (char *) ast_variable_retrieve(myrpt->cfg, telemetry_save, name);
-	}
+
+	entry = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->p.telemetry, name);
 	
 	/* Try to look up the telemetry name */	
 
@@ -8408,8 +8396,6 @@ static int telem_lookup(struct rpt *myrpt,struct ast_channel *chan, char *node, 
 	else{
 		res = -1;
 	}
-	if(telemetry_save)
-		ast_free(telemetry_save);
 	return res;
 }
 
