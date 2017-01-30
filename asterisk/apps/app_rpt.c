@@ -1712,7 +1712,7 @@ static void rpt_safe_sleep(struct rpt *rpt,struct ast_channel *chan, int ms)
 		if (!w) break;
 		f = ast_read(w);
 		if (!f) break;
-		if ((w == cs[0]) && (f->frametype != AST_FRAME_VOICE))
+		if ((w == cs[0]) && (f->frametype != AST_FRAME_VOICE) && (f->frametype != AST_FRAME_NULL))
 		{
 			ast_queue_frame(rpt->rxchannel,f);
 			ast_frfree(f);
