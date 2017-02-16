@@ -23,7 +23,13 @@
  *
  * A license has been granted to Digium (via disclaimer) for the use of
  * this code.
+
+ * A license has been granted to Digium (via disclaimer) for the use of
+ * this code.
  *
+ * 20160829	inad	added rxlpf rxhpf txlpf txhpf
+ * 20161024	inad	fixed set the number of coefficients
+ * 20161027	WN3A    allow filters of different tap counts
  * 20090725 2039 sph@xelatec.com improved rxfrontend and squelch
   */
 
@@ -538,10 +544,10 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 #if	XPMR_TRACE_FRONTEND == 1
 	    y=0;
 	    for(n=0; n<nx; n++)
-	        y += coef_fir_lpf_3K_1[n] * x[n];
+	        y +=  fir_rxlpf[mySps->parentChan->rxlpf].coefs[n] * x[n];
 
 	    y=((y/calcAdjust)*outputGain)/M_Q8;
-		input[i*2]=y;	 // debug output LowPass at 48KS/s 
+		input[i*2]=y;	 // debug output LowPass at 48KS/s
 #endif
 
 		if(doNoise)
@@ -550,8 +556,8 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 			naccum=0;
 			if(mySps->parentChan->rxNoiseFilType==0)
 			{
-			    for(n=0; n<nx; n++)
-			        naccum += coef_fir_bpf_noise_1[n] * x[n];	
+			    for(n=0; n<taps_fir_bpf_noise_1; n++)
+			        naccum += coef_fir_bpf_noise_1[n] * x[n];
 			    naccum /= DCgainBpfNoise;
 			}
 			else
@@ -575,7 +581,7 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 
 		    y=0;
 		    for(n=0; n<nx; n++)
-		        y += coef_fir_lpf_3K_1[n] * x[n];
+		        y += fir_rxlpf[mySps->parentChan->rxlpf].coefs[n] * x[n];
 
 		    y=((y/calcAdjust)*outputGain)/M_Q8;
 
@@ -1745,7 +1751,32 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->ukey=tChan->ukey;
 		pChan->name=tChan->name;
 		pChan->fever = tChan->fever;
-	}
+
+        if(tChan->rxlpf<MAX_RXLPF&&tChan->rxlpf>=0)
+            pChan->rxlpf=tChan->rxlpf;
+        else
+            pChan->rxlpf=0;
+        
+        if(tChan->rxhpf<MAX_RXHPF&&tChan->rxhpf>=0)
+            pChan->rxhpf=tChan->rxhpf;
+        else
+            pChan->rxhpf=0;
+        
+        if(tChan->txlpf<MAX_TXLPF&&tChan->txlpf>=0)
+            pChan->txlpf=tChan->txlpf;
+        else
+            pChan->txlpf=0;
+        
+        if(tChan->txhpf<MAX_TXHPF&&tChan->txhpf>=0)
+            pChan->txhpf=tChan->txhpf;
+        else
+            pChan->txhpf=0;
+        ast_log(LOG_NOTICE,"xpmr rxlpf: %d\n",pChan->rxlpf);
+        ast_log(LOG_NOTICE,"xpmr rxhpf: %d\n",pChan->rxhpf);
+        ast_log(LOG_NOTICE,"xpmr txlpf: %d\n",pChan->txlpf);
+        ast_log(LOG_NOTICE,"xpmr txhpf: %d\n",pChan->txhpf);
+
+    }
 
 	if(pChan->rxCarrierHyst==0)
 		pChan->rxCarrierHyst = 3000;
@@ -2064,13 +2095,13 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pSps->decimator=pSps->decimate=6;
 	pSps->interpolate=pSps->interpolate=1;
 	pSps->nSamples=pChan->nSamplesRx;
-	pSps->ncoef=taps_fir_bpf_noise_1;
+	pSps->ncoef=fir_rxlpf[pChan->rxlpf].taps;
 	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_lpf_3K_1;
-	pSps->nx=taps_fir_bpf_noise_1;
+	pSps->coef=(void*)fir_rxlpf[pChan->rxlpf].coefs;
+	pSps->nx=fir_rxlpf[pChan->rxlpf].taps;
 	pSps->size_x=2;
 	pSps->x=(void*)(calloc(pSps->nx,pSps->size_coef));
-	pSps->calcAdjust=(gain_fir_lpf_3K_1*256)/0x0100;
+	pSps->calcAdjust=(fir_rxlpf[pChan->rxlpf].gain*256)/0x0100;
 	pSps->outputGain=(1.0*M_Q8);
 	pSps->discfactor=2;
 	pSps->hyst=pChan->rxCarrierHyst;
@@ -2137,14 +2168,14 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pSps->nSamples=pChan->nSamplesRx;
 	pSps->decimator=pSps->decimate=1;
 	pSps->interpolate=1;
-	pSps->ncoef=taps_fir_hpf_300_9_66;
+	pSps->ncoef=fir_rxhpf[pChan->rxhpf].taps;
 	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_hpf_300_9_66;
-	pSps->nx=taps_fir_hpf_300_9_66;
+	pSps->coef=(void*)fir_rxhpf[pChan->rxhpf].coefs;
+	pSps->nx=fir_rxhpf[pChan->rxhpf].taps;
 	pSps->size_x=2;
 	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
 	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-	pSps->calcAdjust=gain_fir_hpf_300_9_66;
+	pSps->calcAdjust=fir_rxhpf[pChan->rxhpf].gain;
 	pSps->inputGain=(1*M_Q8);
 	pSps->outputGain=(1*M_Q8);
 	pChan->prxVoiceAdjust=&(pSps->outputGain);
@@ -2257,14 +2288,14 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps->nSamples=pChan->nSamplesTx;
 		pSps->decimator=pSps->decimate=1;
 		pSps->interpolate=1;
-		pSps->ncoef=taps_fir_hpf_300_9_66;
+		pSps->ncoef=fir_txhpf[pChan->txhpf].taps;
 		pSps->size_coef=2;
-		pSps->coef=(void*)coef_fir_hpf_300_9_66;
-		pSps->nx=taps_fir_hpf_300_9_66;
+		pSps->coef=(void*)fir_txhpf[pChan->txhpf].coefs;
+		pSps->nx=fir_txhpf[pChan->txhpf].taps;
 		pSps->size_x=2;
 		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
 		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		pSps->calcAdjust=gain_fir_hpf_300_9_66;
+		pSps->calcAdjust=fir_txhpf[pChan->txhpf].gain;
 		pSps->inputGain=(1*M_Q8);
 		pSps->outputGain=(1*M_Q8);
 		inputTmp=pChan->pTxHpf;
@@ -2400,11 +2431,11 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pSps->calcAdjust=gain_fir_lpf_3K_2;
 #else
 	pSps->interpolate=6;
-	pSps->ncoef=taps_fir_lpf_3K_1;
+	pSps->ncoef=fir_txlpf[pChan->txlpf].taps;
 	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_lpf_3K_1;
-	pSps->nx=taps_fir_lpf_3K_1;
-	pSps->calcAdjust=gain_fir_lpf_3K_1;
+	pSps->coef=(void*)fir_txlpf[pChan->txlpf].coefs;
+	pSps->nx=fir_txlpf[pChan->txlpf].taps;
+	pSps->calcAdjust=fir_txlpf[pChan->txlpf].gain;
 #endif
 	pSps->size_x=2;
 	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
@@ -2460,11 +2491,11 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps->calcAdjust=(gain_fir_lpf_3K_2);
 #else
 		pSps->interpolate=6;
-		pSps->ncoef=taps_fir_lpf_3K_1;
+		pSps->ncoef=fir_txlpf[pChan->txlpf].taps;
 		pSps->size_coef=2;
-		pSps->coef=(void*)coef_fir_lpf_3K_1;
-		pSps->nx=taps_fir_lpf_3K_1;
-		pSps->calcAdjust=(gain_fir_lpf_3K_1);
+		pSps->coef=(void*)fir_txlpf[pChan->txlpf].coefs;
+		pSps->nx=fir_txlpf[pChan->txlpf].taps;
+		pSps->calcAdjust=(fir_txlpf[pChan->txlpf].gain);
 #endif
 		pSps->size_x=2;
 		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));

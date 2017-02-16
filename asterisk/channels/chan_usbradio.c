@@ -17,7 +17,8 @@
  *
  * This program is free software, distributed under the terms of
  * the GNU General Public License Version 2. See the LICENSE file
-  * at the top of the source tree.
+ * at the top of the source tree.
+ * 20160829      inad            added rxlpf rxhpf txlpf txhpf
  */
 
 /*! \file
@@ -33,7 +34,7 @@
 /*** MODULEINFO
 	<depend>ossaudio</depend>
         <depend>usb</depend>
-        <defaultenabled>yes</defaultenabled> 	 	 
+        <defaultenabled>yes</defaultenabled>
  ***/
 
 #include "asterisk.h"
@@ -596,6 +597,10 @@ struct chan_usbradio_pvt {
 	float	txctcssgain;
 	char 	txmixa;
 	char 	txmixb;
+    int		rxlpf;
+    int		rxhpf;
+    int		txlpf;
+    int		txhpf;
 
 	char	invertptt;
 
@@ -5268,7 +5273,17 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_UINT("area",o->area)
 			M_STR("ukey",o->ukey)
  			M_UINT("duplex3",o->duplex3)
-			M_END(;			
+        
+            M_UINT("rxlpf",o->rxlpf)
+            M_UINT("rxhpf",o->rxhpf)
+            M_UINT("txlpf",o->txlpf)
+            M_UINT("txhpf",o->txhpf)
+//            ast_log(LOG_NOTICE,"rxlpf: %d\n",o->rxlpf);
+//            ast_log(LOG_NOTICE,"rxhpf: %d\n",o->rxhpf);
+//            ast_log(LOG_NOTICE,"txlpf: %d\n",o->txlpf);
+//            ast_log(LOG_NOTICE,"txhpf: %d\n",o->txhpf);
+        
+			M_END(;
 			);
 			for(i = 0; i < 32; i++)
 			{
@@ -5343,7 +5358,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_UINT("rxsquelchadj", o->rxsquelchadj)
 			M_UINT("fever", o->fever)
 			M_STR("devstr", o->devstr)
-			M_END(;
+            M_END(;
 			);
 		}
 		ast_config_destroy(cfg1);
@@ -5431,6 +5446,11 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 		tChan.name=o->name;
 		tChan.fever = o->fever;
 
+        tChan.rxhpf=o->rxhpf;
+        tChan.rxlpf=o->rxlpf;
+        tChan.txhpf=o->txhpf;
+        tChan.txlpf=o->txlpf;
+        
 		o->pmrChan=createPmrChannel(&tChan,FRAME_SIZE);
 									 
 		o->pmrChan->radioDuplex=o->radioduplex;
