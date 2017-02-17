@@ -54,7 +54,7 @@ Here is what comes to mind first:
 ---> recognizes a few remote text commands.
 ---> no busy, deaf or mute.
 ---> no capacity limits.
----> no banned or privare station list.
+---> no banned or private station list.
 ---> no admin list, only local 127.0.0.1 access.
 ---> no welcome text message.
 ---> no login or connect timeouts.
@@ -86,6 +86,10 @@ If the linux box is protected by a NAT router,
 leave the IP address as 0.0.0.0,
 do not use 127.0.0.1
 
+*/
+/*
+Modification
+10-24-2016 Roselito de los Reyes KI9H Fixed listing of nodes from Echolink client where only nodes < 299999 are displayed.
 */
 
 #include "asterisk.h"
@@ -1156,7 +1160,10 @@ static int el_text(struct ast_channel *ast, const char *text)
 	char *arg3 = NULL,delim = ' ',*saveptr,*cp,*pkt;
 	char buf[200],*ptr,str[200],*arg4 = NULL,*strs[MAXLINKSTRS];
 	int i,j,k,x;
-
+	int tnode; // KI9H 10-24-2016
+	
+	/* Added modification to list nodes in echolink client that is > 29999 */
+	
 	strncpy(buf,text,sizeof(buf) - 1);
 	ptr = strchr(buf, (int)'\r'); 
 	if (ptr) *ptr = '\0';
@@ -1201,8 +1208,10 @@ static int el_text(struct ast_channel *ast, const char *text)
 			k = 0;
 			for(x = 0; x < i; x++)
 			{
-			    if ((*(strs[x] + 1) < '3') ||
-			        (*(strs[x] + 1) > '4'))
+			    tnode = atoi(strs[x] + 1); // KI9H
+			    if (tnode < 3000000) // added 10-24-2016 by KI9H
+			    /* if ((*(strs[x] + 1) < '3') ||
+			        (*(strs[x] + 1) > '4')) -- taken out on 10-24-2016 KI9H */
 
 			    {
 				    if (strlen(pkt + k) >= 32)
@@ -1222,7 +1231,9 @@ static int el_text(struct ast_channel *ast, const char *text)
 			k = strlen(pkt);
 			for(x = 0; x < i; x++)
 			{
-			    if (*(strs[x] + 1) == '3')
+			    tnode = atoi(strs[x] + 1); // KI9H
+			    if ((tnode > 3000000) && (tnode < 4000000)) // KI9H 10-24-2016
+			    // if (*(strs[x] + 1) == '3') -- commented KI9H 10-24-2016
 			    {
 				    if (strlen(pkt + k) >= 32)
 				    {
