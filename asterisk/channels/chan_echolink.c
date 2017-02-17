@@ -1214,7 +1214,7 @@ static int el_text(struct ast_channel *ast, const char *text)
 			        (*(strs[x] + 1) > '4')) -- taken out on 10-24-2016 KI9H */
 
 			    {
-				    if (strlen(pkt + k) >= 32)
+				    if (strlen(pkt + k) >= 29) // reduced from 32 so it would format better 12-14-2016 KI9H
 				    {
 					k = strlen(pkt);
 					strcat(pkt,"\r    ");
@@ -1235,7 +1235,7 @@ static int el_text(struct ast_channel *ast, const char *text)
 			    if ((tnode > 3000000) && (tnode < 4000000)) // KI9H 10-24-2016
 			    // if (*(strs[x] + 1) == '3') -- commented KI9H 10-24-2016
 			    {
-				    if (strlen(pkt + k) >= 32)
+				    if (strlen(pkt + k) >= 29) // reduced from 32 so it would format better 12-14-2016 KI9H
 				    {
 					k = strlen(pkt);
 					strcat(pkt,"\r    ");
