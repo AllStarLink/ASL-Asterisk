@@ -155,7 +155,7 @@ Modification
 #define EL_MAX_SERVERS 3
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
-#define	EL_MAX_CALL_LIST 30
+#define	EL_MAX_CALL_LIST 60
 #define	EL_APRS_SERVER "aprs.echolink.org"
 #define	EL_APRS_INTERVAL 600
 #define	EL_APRS_START_DELAY 10
