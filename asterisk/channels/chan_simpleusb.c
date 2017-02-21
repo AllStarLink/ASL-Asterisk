@@ -28,12 +28,12 @@
  */
 
 /*** MODULEINFO
-        <defaultenabled>yes</defaultenabled> 	 	 
+        <defaultenabled>yes</defaultenabled>
  ***/
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 536 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 537 $")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -211,7 +211,7 @@ START_CONFIG
 
 	; invertptt = 0
 
-        ; duplex = 1		; duplex mode    
+        ; duplex = 1		; duplex mode
 
 	; duplex3 = 0		; duplex 3 gain setting (0 to disable)
 
@@ -1459,7 +1459,7 @@ static void *hidthread(void *arg)
 			if (usb_dev == NULL) continue;
 			if ((usb_dev->descriptor.idProduct & 0xff00) != N1KDO_PRODUCT_ID) continue;
 			if (o->index != (usb_dev->descriptor.idProduct & 0xf)) continue;
-			ast_log(LOG_NOTICE,"N1KDO port %d, USB device %s usbradio channel %s\n",
+			ast_log(LOG_NOTICE,"N1KDO port %d, USB device %s simpleusb channel %s\n",
 				usb_dev->descriptor.idProduct & 0xf,s,o->name);
 			strcpy(o->devstr,s);
 			isn1kdo = 1;
@@ -1770,7 +1770,7 @@ static void *hidthread(void *arg)
 						fr.samples = 0;
 						fr.frametype = AST_FRAME_TEXT;
 						fr.subclass = 0;
-						fr.src = "chan_usbradio";
+						fr.src = "chan_simpleusb";
 						fr.offset = 0;
 						fr.mallocd=0;
 						fr.delivery.tv_sec = 0;
@@ -1815,7 +1815,7 @@ static void *hidthread(void *arg)
 						fr.samples = 0;
 						fr.frametype = AST_FRAME_TEXT;
 						fr.subclass = 0;
-						fr.src = "chan_usbradio";
+						fr.src = "chan_simpleusb";
 						fr.offset = 0;
 						fr.mallocd=0;
 						fr.delivery.tv_sec = 0;
@@ -1835,7 +1835,7 @@ static void *hidthread(void *arg)
 					j = k & (1 << ppinshift[i]); /* set the bit accordingly */
 					if (j != o->rxppsq)
 					{
-						if(o->debuglevel)printf("chan_usbradio() hidthread: update rxppsq = %d\n",j);
+						if(o->debuglevel)printf("chan_simpleusb() hidthread: update rxppsq = %d\n",j);
 						o->rxppsq = j;
 					}
 				}
@@ -2267,7 +2267,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 		cnt = sscanf(text,"%s %d",cmd,&i);
 		if (cnt < 2) return 0;
 		o->rxctcssoverride = !i;
-	        if(o->debuglevel)ast_log(LOG_NOTICE,"parse usbradio RXCTCSS cmd: %s\n",text);
+	        if(o->debuglevel)ast_log(LOG_NOTICE,"parse simpleusb RXCTCSS cmd: %s\n",text);
 		return 0;		
 	}
 
