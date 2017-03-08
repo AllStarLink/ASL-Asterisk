@@ -1,0 +1,27 @@
+#/usr/lib/systemd/system/asterisk.service
+[Unit]
+Description=Asterisk PBX and telephony daemon
+Documentation=man:asterisk(8)
+Wants=network.target
+After=network.target
+BindsTo=dev-dahdi-pseudo.device
+# Below requires a addition to udev rules
+# See /srv//patches/patch-dahdi.rules
+After=dev-dahdi-pseudo.device
+
+
+[Service]
+Type=simple
+StandardOutput=null
+ExecStart=/usr/sbin/asterisk -g -f -C /etc/asterisk/asterisk.conf
+ExecStop=/usr/sbin/asterisk -rx 'stop now'
+ExecReload=/usr/sbin/asterisk -rx 'module reload'
+
+# safe_asterisk emulation
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+
