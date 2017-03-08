@@ -1,9 +1,0 @@
-#!/bin/sh
-cat << END
-/*
- * version.h 
- * Automatically generated
- */
-#define ZAPTEL_VERSION "${ZAPTELVERSION}"
-
-END

@@ -1,9 +1,0 @@
-#! /usr/bin/perl -w
-use strict;
-use File::Basename;
-BEGIN { my $dir = dirname($0); unshift(@INC, "$dir", "$dir/zconf"); }
-
-use Zaptel::Hardware;
-
-my $hardware = Zaptel::Hardware->scan;
-print join("\n", $hardware->drivers),"\n";

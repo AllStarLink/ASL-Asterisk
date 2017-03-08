@@ -1,4 +1,0 @@
-MENUSELECT_MODULES=tor2 torisa wct4xxp wctc4xxp wcte12xp wcusb xpp 
-MENUSELECT_UTILS=fxotune fxstest sethdlc-new ztdiag 
-MENUSELECT_FIRMWARE=
-MENUSELECT_BUILD_DEPS=ztdynamic wct4xxp wctc4xxp wctdm24xxp 
