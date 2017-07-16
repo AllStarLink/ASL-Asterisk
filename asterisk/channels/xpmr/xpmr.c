@@ -2178,7 +2178,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	} else {
 		// force delay to be true
 		if (pChan->rxSquelchDelay == 0)
-			pChan->rxSquelchDelay = (30/8)-1;
+			pChan->rxSquelchDelay = 30;
 	}
 
 	if(pChan->rxSquelchDelay>RXSQDELAYBUFSIZE/8-1)
