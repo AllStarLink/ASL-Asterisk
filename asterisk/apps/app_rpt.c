@@ -45,7 +45,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program 
- *  version 0.327 11/24/2016
+ *  version 0.328 07/13/2017
  * 
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -6863,7 +6863,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 			ast_cli(fd, "Keyups since system initialization...............: %d\n", totalkeyups);
 			ast_cli(fd, "DTMF commands today..............................: %d\n", dailyexecdcommands);
 			ast_cli(fd, "DTMF commands since system initialization........: %d\n", totalexecdcommands);
-			ast_cli(fd, "Last DTMF command executed.......................: %s\n", 
+			ast_cli(fd, "Last DTMF command executed.......................: %s\n",
 			(lastdtmfcommand && strlen(lastdtmfcommand)) ? lastdtmfcommand : not_applicable);
 			hours = dailytxtime/3600000;
 			dailytxtime %= 3600000;
@@ -6872,7 +6872,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 			seconds = dailytxtime/1000;
 			dailytxtime %= 1000;
 
-			ast_cli(fd, "TX time today....................................: %02d:%02d:%02d.%d\n",
+			ast_cli(fd, "TX time today....................................: %02d:%02d:%02d:%02d\n",
 				hours, minutes, seconds, dailytxtime);
 
 			hours = (int) totaltxtime/3600000;
@@ -6882,7 +6882,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 			seconds = (int)  totaltxtime/1000;
 			totaltxtime %= 1000;
 
-			ast_cli(fd, "TX time since system initialization..............: %02d:%02d:%02d.%d\n",
+			ast_cli(fd, "TX time since system initialization..............: %02d:%02d:%02d:%02d\n",
 				 hours, minutes, seconds, (int) totaltxtime);
 
                        	hours = uptime/3600;
@@ -6995,13 +6995,13 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 				int hours, minutes, seconds;
 				long long connecttime = s->connecttime;
 				char conntime[21];
-				hours = (int) connecttime/3600000;
-				connecttime %= 3600000;
-				minutes = (int) connecttime/60000;
-				connecttime %= 60000;
-				seconds = (int)  connecttime/1000;
-				connecttime %= 1000;
-				snprintf(conntime, 20, "%02d:%02d:%02d.%d",
+				hours = connecttime/3600000L;
+				connecttime %= 3600000L;
+				minutes =  connecttime/60000L;
+				connecttime %= 60000L;
+				seconds =  connecttime/1000L;
+				connecttime %= 1000L;
+				snprintf(conntime, 20, "%02d:%02d:%02d:%02d",
 					hours, minutes, seconds, (int) connecttime);
 				conntime[20] = 0;
 				if(s->thisconnected)
@@ -7185,11 +7185,11 @@ static int rpt_do_xnode(int fd, int argc, char *argv[])
 				int hours, minutes, seconds;
 				long long connecttime = s->connecttime;
 				char conntime[21];
-				hours = (int) connecttime/3600000;
-				connecttime %= 3600000;
-				minutes = (int) connecttime/60000;
-				connecttime %= 60000;
-				seconds = (int)  connecttime/1000;
+				hours = connecttime/3600000L;
+				connecttime %= 3600000L;
+				minutes = connecttime/60000L;
+				connecttime %= 60000L;
+				seconds = (int)  connecttime/1000L;
 				connecttime %= 1000;
 				snprintf(conntime, 20, "%02d:%02d:%02d",
 					hours, minutes, seconds);
@@ -24488,12 +24488,12 @@ static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m,
 				int hours, minutes, seconds;
 				long long connecttime = s->connecttime;
 				char conntime[21];
-				hours = (int) connecttime/3600000;
-				connecttime %= 3600000;
-				minutes = (int) connecttime/60000;
-				connecttime %= 60000;
-				seconds = (int)  connecttime/1000;
-				connecttime %= 1000;
+				hours = connecttime/3600000L;
+				connecttime %= 3600000L;
+				minutes = connecttime/60000L;
+				connecttime %= 60000L;
+				seconds = (int)  connecttime/1000L;
+				connecttime %= 1000L;
 				snprintf(conntime, 20, "%02d:%02d:%02d",
 					hours, minutes, seconds);
 				conntime[20] = 0;
@@ -24857,7 +24857,7 @@ static int rpt_manager_do_stats(struct mansession *s, const struct message *m, c
 			seconds = dailytxtime/1000;
 			dailytxtime %= 1000;
 
-			astman_append(s, "TxTimeToday: %02d:%02d:%02d.%d\r\n",
+			astman_append(s, "TxTimeToday: %02d:%02d:%02d:%02d\r\n",
 				hours, minutes, seconds, dailytxtime);
 
 			hours = (int) totaltxtime/3600000;
@@ -24867,7 +24867,7 @@ static int rpt_manager_do_stats(struct mansession *s, const struct message *m, c
 			seconds = (int)  totaltxtime/1000;
 			totaltxtime %= 1000;
 
-			astman_append(s, "TxTimeSinceSystemInitialization: %02d:%02d:%02d.%d\r\n",
+			astman_append(s, "TxTimeSinceSystemInitialization: %02d:%02d:%02d:%02d\r\n",
 				 hours, minutes, seconds, (int) totaltxtime);
 
   			sprintf(str, "NodesCurrentlyConnectedToUs: ");
