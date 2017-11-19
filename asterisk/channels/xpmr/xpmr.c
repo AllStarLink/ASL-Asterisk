@@ -2206,6 +2206,10 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps->outputGain=(1.0*M_Q8);
 		pChan->prxVoiceMeasure=pSps->sink;
 		pChan->prxVoiceAdjust=&(pSps->outputGain);
+	} else {
+		// force delay to be true
+		if (pChan->rxSquelchDelay == 0)
+			pChan->rxSquelchDelay = 30;
 	}
 
 	if(pChan->rxSquelchDelay>RXSQDELAYBUFSIZE/8-1)
@@ -2218,7 +2222,10 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pSps=pChan->spsDelayLine=pSps->nextSps=createPmrSps(pChan);
 		pChan->spsRxSquelchDelay=pSps;
 		pSps->sigProc=DelayLine;
-		pSps->source=pChan->pRxSpeaker;
+		if (pChan->rxDeEmpEnable)
+			pSps->source=pChan->pRxSpeaker;
+		else
+			pSps->source=pChan->pRxHpf;
 		pSps->sink=pChan->pRxSpeaker;
 		pChan->spsRxOut=pSps;					 // OUTPUT STRUCTURE!
 		pSps->enabled=1;
