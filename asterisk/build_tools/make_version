@@ -1,28 +1,5 @@
 #!/bin/sh
 
-#
-# Update the .version file, if necessary
-#
-
-set -e
-
-if test -d ../.git; then
-    VERSION=$(git describe --always)
-else
-    VERSION=unknown
-fi
-
-if test -f .version; then
-	if test "${VERSION}" = "$(cat .version)"; then
-		# .version file up to date
-		exit 0
-	fi
-
-	if test "${VERSION}" = "unknown"; then
-		# don't overwrite an existing .version with "unknown"
-		exit 0
-	fi
-fi
-
+VERSION="GIT Version "$(git log -1 --format="%h")
+echo "${VERSION}"
 echo "${VERSION}" > .version
-
