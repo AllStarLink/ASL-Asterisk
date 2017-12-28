@@ -1874,7 +1874,7 @@ static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
 static int rpt_do_setvar(int fd, int argc, char *argv[]);
 static int rpt_do_showvars(int fd, int argc, char *argv[]);
-static int rpt_do_frog(int fd, int argc, char *argv[]);
+static int rpt_do_asl(int fd, int argc, char *argv[]);
 static int rpt_do_page(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
@@ -1947,9 +1947,9 @@ static char showvars_usage[] =
 "Usage: rpt showvars <nodename>\n"
 "       Display all the Asterisk channel variables for a node.\n";
 
-static char frog_usage[] =
-"Usage: frog [warp_factor]\n"
-"       Performs frog-in-a-blender calculations (Jacobsen Corollary)\n";
+static char asl_usage[] =
+"Usage: asl [Unused value]\n"
+"       Do ASL Stuff\n";
 
 static char page_usage[] =
 "Usage: rpt page <nodename> <baud> <capcode> <[ANT]Text....>\n"
@@ -2032,9 +2032,9 @@ static struct ast_cli_entry  cli_showvars =
         { { "rpt", "showvars" }, rpt_do_showvars,
 		"Display Asterisk channel variables", showvars_usage };
 
-static struct ast_cli_entry  cli_frog =
-        { { "frog" }, rpt_do_frog,
-               "Perform frog-in-a-blender calculations", frog_usage };
+static struct ast_cli_entry  cli_asl =
+        { { "asl" }, rpt_do_asl,
+               "Do ASL stuff", asl_usage };
 
 static struct ast_cli_entry  cli_page =
         { { "rpt", "page" }, rpt_do_page,
@@ -7743,11 +7743,11 @@ static int rpt_do_showvars(int fd, int argc, char *argv[])
 }
 
 /*
-* Perform frong-in-a-blender calculations (Jacobsen Corollary) 
+* Do ASL Stuff
 */
-                                                                               
-                                                  
-static int rpt_do_frog(int fd, int argc, char *argv[])
+
+
+static int rpt_do_asl(int fd, int argc, char *argv[])
 {
        double warpone = 75139293848.398696166028333356763;
        double warpfactor = 1.0;
@@ -7756,10 +7756,10 @@ static int rpt_do_frog(int fd, int argc, char *argv[])
        if ((argc > 1) && (sscanf(argv[1],"%lf",&warpfactor) != 1))
                 return RESULT_SHOWUSAGE;
 
-       ast_cli(fd, "A frog in a blender with a base diameter of 3 inches going\n");
-       ast_cli(fd, "%lf RPM will be travelling at warp factor %lf,\n",
+       ast_cli(fd, "This command doe not do anything\n");
+       ast_cli(fd, "73 Steve N4IRS\n",
                warpfactor * warpfactor * warpfactor * warpone,warpfactor);
-       ast_cli(fd,"based upon the Jacobsen Frog Corollary.\n");
+       ast_cli(fd,"Replace a command that does nothing but waste space. RIP WB6NIL\n");
        return RESULT_SUCCESS;
 }
 
@@ -8014,18 +8014,18 @@ static char *handle_cli_showvars(struct ast_cli_entry *e,
 	return res2cli(rpt_do_showvars(a->fd,a->argc,a->argv));
 }
 
-static char *handle_cli_frog(struct ast_cli_entry *e,
+static char *handle_cli_asl(struct ast_cli_entry *e,
 	int cmd, struct ast_cli_args *a)
 {
         switch (cmd) {
         case CLI_INIT:
-                e->command = "frog";
-                e->usage = frog_usage;
+                e->command = "asl";
+                e->usage = asl_usage;
                 return NULL;
         case CLI_GENERATE:
                 return NULL;
 	}
-	return res2cli(rpt_do_frog(a->fd,a->argc,a->argv));
+	return res2cli(rpt_do_asl(a->fd,a->argc,a->argv));
 }
 
 static char *handle_cli_localplay(struct ast_cli_entry *e,
@@ -8103,7 +8103,7 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_localplay,"Playback an audio file (local)"),
 	AST_CLI_DEFINE(handle_cli_sendall,"Send a Text message to all connected nodes"),
 	AST_CLI_DEFINE(handle_cli_sendtext,"Send a Text message to a specified nodes"),
-	AST_CLI_DEFINE(handle_cli_frog,"Perform frog-in-a-blender calculations"),
+	AST_CLI_DEFINE(handle_cli_asl,"Do ASL stuff"),
 	AST_CLI_DEFINE(handle_cli_page,"Send a page to a user on a node")
 };
 
@@ -25277,7 +25277,7 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_fun1);
 	ast_cli_unregister(&cli_setvar);
 	ast_cli_unregister(&cli_showvars);
-	ast_cli_unregister(&cli_frog);
+	ast_cli_unregister(&cli_asl);
 	ast_cli_unregister(&cli_page);
 	res |= ast_cli_unregister(&cli_cmd);
 #endif
@@ -25355,7 +25355,7 @@ static int load_module(void)
 	ast_cli_register(&cli_fun1);
 	ast_cli_register(&cli_setvar);
 	ast_cli_register(&cli_showvars);
-	ast_cli_register(&cli_frog);
+	ast_cli_register(&cli_asl);
 	ast_cli_register(&cli_page);
 	res = ast_cli_register(&cli_cmd);
 #endif
