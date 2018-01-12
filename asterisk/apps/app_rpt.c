@@ -44,9 +44,9 @@
  */
 /*! \file
  *
- * \brief Radio Repeater / Remote Base program 
- *  version 0.328 07/13/2017
- * 
+ * \brief Radio Repeater / Remote Base program
+ *  version 0.329 01/12/2018
+ *
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
  * \note Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
@@ -582,11 +582,11 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c" */
+#include "mdc_decode.c"
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_encode.c" */
+#include "mdc_encode.c"
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
@@ -20780,11 +20780,19 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						mdc1200_send(myrpt,ustr);
 						mdc1200_cmd(myrpt,ustr);
 					}
+                                        /* if for Stun ACK W9CR */
+                                        if ((op == 0x0b) && (arg == 0x00))
+                                        {
+                                                myrpt->lastunit = unitID;
+                                                sprintf(ustr,"STUN ACK %04X",unitID);
+					}
 					/* if for STS (status)  */
 					if (op == 0x46)
 					{
 						myrpt->lastunit = unitID;
 						sprintf(ustr,"S%04X-%X",unitID,arg & 0xf);
+
+
 #ifdef	_MDC_ENCODE_H_
 						mdc1200_ack_status(myrpt,unitID);
 #endif
@@ -25099,6 +25107,14 @@ static void * mdcgen_alloc(struct ast_channel *chan, void *params)
 	else if (p->type[0] == 'A')
 	{
 		mdc_encoder_set_packet(ps->mdc,0x23,0,p->UnitID);
+	}
+	else if (p->type[0] == 'K') // kill a unit W9CR
+	{
+		mdc_encoder_set_packet(ps->mdc,0x22b,0x00,p->UnitID);
+	}
+	else if (p->type[0] == 'U') // UnKill a unit W9CR
+	{
+		mdc_encoder_set_packet(ps->mdc,0x2b,0x0c,p->UnitID);
 	}
 	else
 	{
