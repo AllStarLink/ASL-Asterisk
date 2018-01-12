@@ -208,6 +208,15 @@ Obviously, it is not valid to use *ANY* of the duplex=3 modes in a voted and/or 
 #include "asterisk.h"
 #include "../astver.h"
 
+/*
+ * Please change this revision number when you make a edit
+ * use the simple format MMDDYY
+*/
+
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 011218 $")
+// ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
+
+
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
