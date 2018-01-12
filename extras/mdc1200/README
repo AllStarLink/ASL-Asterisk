@@ -5,3 +5,5 @@ To enable MDC1200 decoding in app_rpt, copy mdc_decode.c and mdc_decode.h to /us
 /* #include "mdc_decode.c" */
 
 
+This code was enabled full time on 01/12/2018
+Additional features added by W9CR. Diff to follow

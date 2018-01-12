@@ -1,0 +1,122 @@
+--- app_rpt_after.c	2018-01-12 17:05:35.000000000 +0000
++++ app_rpt_before.c	2018-01-12 18:33:37.000000000 +0000
+@@ -130,7 +130,7 @@
+  *  44 - Echolink announce node # & Callsign
+  *  45 - Link Activity timer enable
+  *  46 - Link Activity timer disable
+- *  47 - Reset "Link Config Changed" Flag
++ *  47 - Reset "Link Config Changed" Flag 
+  *  48 - Send Page Tone (Tone specs separated by parenthesis)
+  *  49 - Disable incoming connections (control state noice)
+  *  50 - Enable incoming connections (control state noicd)
+@@ -144,11 +144,11 @@
+  *  58 - Tx CTCSS On Input only Enable
+  *  59 - Tx CTCSS On Input only Disable
+  *  60 - Send MDC-1200 Burst (cop,60,type,UnitID[,DestID,SubCode])
+- *     Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call
++ *     Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call 
+  *     (SelCall or Alert), or 'SX' for STS (ststus), where X is 0-F.
+  *     DestID and subcode are only specified for  the 'C' type message.
+  *     UnitID is the local systems UnitID. DestID is the MDC1200 ID of
+- *     the radio being called, and the subcodes are as follows:
++ *     the radio being called, and the subcodes are as follows: 
+  *          Subcode '8205' is Voice Selective Call for Spectra ('Call')
+  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
+  *             Astro-Saber('Call')
+@@ -156,7 +156,7 @@
+  *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
+  *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
+  *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
+- *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR])
++ *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR]) 
+  *  65 - Send POCSAG page (equipped channel types only)
+  *
+  * ilink cmds:
+@@ -1408,6 +1408,7 @@
+ static int channel_revert(struct rpt *myrpt);
+ static int channel_steer(struct rpt *myrpt, char *data);
+ static void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
++static void rpt_manager_trigger(struct rpt *myrpt, char *event, char *value);
+ 
+ AST_MUTEX_DEFINE_STATIC(nodeloglock);
+ 
+@@ -4674,6 +4675,8 @@
+ 	struct flock fl;
+ 	time_t	t;
+ 
++	rpt_manager_trigger(myrpt, "MDC-1200", data);
++
+ 	if (!fromnode)
+ 	{
+ 		ast_verbose("Got MDC-1200 data %s from local system (%s)\n",
+@@ -5482,6 +5485,7 @@
+ 	buf[1] = 0;
+ 	if (newval > 0) buf[0] = '1';
+ 	pbx_builtin_setvar_helper(myrpt->rxchannel, varname, buf);
++	rpt_manager_trigger(myrpt, varname, buf);
+ 	if (newval >= 0) rpt_event_process(myrpt);
+ 	return;
+ }
+@@ -5504,8 +5508,10 @@
+ 	if (n) snprintf(obuf,sizeof(obuf) - 1,"%d,%s",n,buf);
+ 	else strcpy(obuf,"0");
+ 	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_ALINKS",obuf);
++	rpt_manager_trigger(myrpt, "RPT_ALINKS", obuf);
+ 	snprintf(obuf,sizeof(obuf) - 1,"%d",n);
+ 	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_NUMALINKS",obuf);
++	rpt_manager_trigger(myrpt, "RPT_NUMALINKS", obuf);
+ 	ast_mutex_lock(&myrpt->lock);
+ 	__mklinklist(myrpt,NULL,buf,0);
+ 	ast_mutex_unlock(&myrpt->lock);
+@@ -5514,8 +5520,10 @@
+ 	if (n) snprintf(obuf,sizeof(obuf) - 1,"%d,%s",n,buf);
+ 	else strcpy(obuf,"0");
+ 	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_LINKS",obuf);
++	rpt_manager_trigger(myrpt, "RPT_LINKS", obuf);
+ 	snprintf(obuf,sizeof(obuf) - 1,"%d",n);
+ 	pbx_builtin_setvar_helper(myrpt->rxchannel,"RPT_NUMLINKS",obuf);
++	rpt_manager_trigger(myrpt, "RPT_NUMLINKS", obuf);
+ 	rpt_event_process(myrpt);
+ 	return;
+ }
+@@ -18676,10 +18684,14 @@
+ {
+ int	res;
+ pthread_attr_t	attr;
+-char	cmd[MAXDTMF+1] = "",c;
++char	cmd[MAXDTMF+1] = "",c,tone[10];
+ 
+ 
+ 	c = c_in & 0x7f;
++
++	sprintf(tone,"%c",c);
++	rpt_manager_trigger(myrpt, "DTMF", tone);
++
+ 	if (myrpt->p.archivedir)
+ 	{
+ 		char str[100];
+@@ -24269,10 +24281,24 @@
+ 	return res;
+ }
+ 
++static void rpt_manager_trigger(struct rpt *myrpt, char *event, char *value)
++{
++	manager_event(EVENT_FLAG_CALL, event,
++		"Node: %s\r\n"
++		"Channel: %s\r\n"
++		"EventValue: %s\r\n"
++		"LastKeyedTime: %s\r\n"
++		"LastTxKeyedTime: %s\r\n",
++                myrpt->name, myrpt->rxchannel->name, value,
++                ctime(&myrpt->lastkeyedtime), ctime(&myrpt->lasttxkeyedtime)
++        );
++}
++
+ #ifndef OLD_ASTERISK
+ /*!\brief callback to display list of locally configured nodes
+    \addtogroup Group_AMI
+  */
++
+ static int manager_rpt_local_nodes(struct mansession *s, const struct message *m)
+ {
+     int i;

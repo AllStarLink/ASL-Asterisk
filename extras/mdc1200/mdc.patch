@@ -1,0 +1,96 @@
+--- app_rpt_before_mdc.c	2018-01-12 19:35:41.659742662 +0000
++++ app_rpt_after.c	2018-01-12 17:05:35.000000000 +0000
+@@ -44,9 +44,9 @@
+  */
+ /*! \file
+  *
+- * \brief Radio Repeater / Remote Base program 
+- *  version 0.328 07/13/2017
+- * 
++ * \brief Radio Repeater / Remote Base program
++ *  version 0.329 01/12/2018
++ *
+  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
+  *
+  * \note Serious contributions by Steve RoDgers, WA6ZFT <hwstar@rodgers.sdcoxmail.com>
+@@ -130,7 +130,7 @@
+  *  44 - Echolink announce node # & Callsign
+  *  45 - Link Activity timer enable
+  *  46 - Link Activity timer disable
+- *  47 - Reset "Link Config Changed" Flag 
++ *  47 - Reset "Link Config Changed" Flag
+  *  48 - Send Page Tone (Tone specs separated by parenthesis)
+  *  49 - Disable incoming connections (control state noice)
+  *  50 - Enable incoming connections (control state noicd)
+@@ -144,11 +144,11 @@
+  *  58 - Tx CTCSS On Input only Enable
+  *  59 - Tx CTCSS On Input only Disable
+  *  60 - Send MDC-1200 Burst (cop,60,type,UnitID[,DestID,SubCode])
+- *     Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call 
++ *     Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call
+  *     (SelCall or Alert), or 'SX' for STS (ststus), where X is 0-F.
+  *     DestID and subcode are only specified for  the 'C' type message.
+  *     UnitID is the local systems UnitID. DestID is the MDC1200 ID of
+- *     the radio being called, and the subcodes are as follows: 
++ *     the radio being called, and the subcodes are as follows:
+  *          Subcode '8205' is Voice Selective Call for Spectra ('Call')
+  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
+  *             Astro-Saber('Call')
+@@ -156,7 +156,7 @@
+  *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
+  *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
+  *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
+- *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR]) 
++ *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR])
+  *  65 - Send POCSAG page (equipped channel types only)
+  *
+  * ilink cmds:
+@@ -582,11 +582,11 @@
+ 
+ /* Un-comment the following to include support decoding of MDC-1200 digital tone
+    signalling protocol (using KA6SQG's GPL'ed implementation) */
+-/* #include "mdc_decode.c" */
++#include "mdc_decode.c"
+ 
+ /* Un-comment the following to include support encoding of MDC-1200 digital tone
+    signalling protocol (using KA6SQG's GPL'ed implementation) */
+-/* #include "mdc_encode.c" */
++#include "mdc_encode.c"
+ 
+ /* Un-comment the following to include support for notch filters in the
+    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
+@@ -20780,11 +20780,19 @@
+ 						mdc1200_send(myrpt,ustr);
+ 						mdc1200_cmd(myrpt,ustr);
+ 					}
++                                        /* if for Stun ACK W9CR */
++                                        if ((op == 0x0b) && (arg == 0x00))
++                                        {
++                                                myrpt->lastunit = unitID;
++                                                sprintf(ustr,"STUN ACK %04X",unitID);
++					}
+ 					/* if for STS (status)  */
+ 					if (op == 0x46)
+ 					{
+ 						myrpt->lastunit = unitID;
+ 						sprintf(ustr,"S%04X-%X",unitID,arg & 0xf);
++
++
+ #ifdef	_MDC_ENCODE_H_
+ 						mdc1200_ack_status(myrpt,unitID);
+ #endif
+@@ -25100,6 +25108,14 @@
+ 	{
+ 		mdc_encoder_set_packet(ps->mdc,0x23,0,p->UnitID);
+ 	}
++	else if (p->type[0] == 'K') // kill a unit W9CR
++	{
++		mdc_encoder_set_packet(ps->mdc,0x22b,0x00,p->UnitID);
++	}
++	else if (p->type[0] == 'U') // UnKill a unit W9CR
++	{
++		mdc_encoder_set_packet(ps->mdc,0x2b,0x0c,p->UnitID);
++	}
+ 	else
+ 	{
+ 		ast_log(LOG_ERROR, "Dont know MDC encode type '%s'\n", p->type);
