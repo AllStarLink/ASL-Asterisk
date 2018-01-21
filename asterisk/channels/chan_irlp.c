@@ -301,6 +301,8 @@ static const struct ast_channel_tech irlp_tech = {
 };
 
 
+
+
 /* begin functions */
 
 void static reset_stuff(void)
