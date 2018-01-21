@@ -1471,6 +1471,9 @@ int	i;
 	return(NULL);
 }
 
+/* begin functions */
+
+
 /*
  * Functions related to the threading used in app_rpt dealing with locking
 */
