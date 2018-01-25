@@ -478,6 +478,7 @@ enum {REM_MODE_FM,REM_MODE_USB,REM_MODE_LSB,REM_MODE_AM};
 
 #include "asterisk.h"
 #include "radiocontrol.h"
+#include "uchameleon.h"
 #include "../astver.h"
 
 /*
