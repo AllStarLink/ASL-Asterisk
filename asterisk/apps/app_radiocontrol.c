@@ -20,6 +20,26 @@ static char *remote_rig_rtx450="rtx450";
 static char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
 
 
+enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
+      HF_SCAN_DOWN_FAST,HF_SCAN_UP_SLOW,HF_SCAN_UP_QUICK,HF_SCAN_UP_FAST};
+
+/*
+* Forward decl's - these suppress compiler warnings when funcs coded further down the file than thier invokation
+*/
+
+static int setrbi(struct rpt *myrpt);
+static int set_ft897(struct rpt *myrpt);
+static int set_ft100(struct rpt *myrpt);
+static int set_ft950(struct rpt *myrpt);
+static int set_ic706(struct rpt *myrpt);
+static int set_xcat(struct rpt *myrpt);
+static int setkenwood(struct rpt *myrpt);
+static int set_tm271(struct rpt *myrpt);
+static int set_tmd700(struct rpt *myrpt);
+static int setrbi_check(struct rpt *myrpt);
+static int setxpmr(struct rpt *myrpt, int dotx);
+
+
 
 static int sendrxkenwood(struct rpt *myrpt, char *txstr, char *rxstr,
 	char *cmpstr)
