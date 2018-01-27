@@ -14231,22 +14231,24 @@ static void do_scheduler(struct rpt *myrpt)
 /* single thread with one file (request) to dial */
 static void *rpt(void *this)
 {
-struct	rpt *myrpt = (struct rpt *)this;
-char *tele,*idtalkover,c,myfirst,*p;
-int ms = MSWAIT,i,lasttx=0,lastexttx = 0,lastpatchup = 0,val,identqueued,othertelemqueued;
-int tailmessagequeued,ctqueued,dtmfed,lastmyrx,localmsgqueued;
-unsigned int u;
-FILE *fp;
-struct stat mystat;
-struct ast_channel *who;
-struct dahdi_confinfo ci;  /* conference info */
-time_t	t,was;
-struct rpt_link *l,*m;
-struct rpt_tele *telem;
-char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
+	struct	rpt *myrpt = (struct rpt *)this;
+	char *tele,*idtalkover,c,myfirst,*p;
+	int ms = MSWAIT,i,lasttx=0,lastexttx = 0,lastpatchup = 0,val,identqueued,othertelemqueued;
+	int tailmessagequeued,ctqueued,dtmfed,lastmyrx,localmsgqueued;
+	unsigned int u;
+	FILE *fp;
+	struct stat mystat;
+	struct ast_channel *who;
+	struct dahdi_confinfo ci;  /* conference info */
+	time_t	t,was;
+	struct rpt_link *l,*m;
+	struct rpt_tele *telem;
+	char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 
-	if (myrpt->p.archivedir) mkdir(myrpt->p.archivedir,0600);
+	if (myrpt->p.archivedir)
+		mkdir(myrpt->p.archivedir,0600);
+
 	sprintf(tmpstr,"%s/%s",myrpt->p.archivedir,myrpt->name);
 	mkdir(tmpstr,0600);
 	myrpt->ready = 0;
