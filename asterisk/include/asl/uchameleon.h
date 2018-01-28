@@ -1,5 +1,8 @@
+/* uchameleon header */
+
 static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
+
 static int matchkeyword(char *string, char **param, char *keywords[]);
 static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
 static void *uchameleon_monitor_thread(void *this);
@@ -62,14 +65,11 @@ static int uchameleon_connect(struct daq_entry_tag *t);
  * Uchameleon alarm handler
  */
 
-
 static void uchameleon_alarm_handler(struct daq_pin_entry_tag *p);
 
 /*
  * Initialize pins
  */
-
-
 
 static int uchameleon_pin_init(struct daq_entry_tag *t);
 
@@ -93,7 +93,6 @@ static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
 
 
-
 /*
  * Reset a minimum or maximum reading
  */
@@ -101,14 +100,11 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
 static int uchameleon_reset_minmax(struct daq_entry_tag *t, int pin, int minmax);
 
 
-
 /*
  * Queue up a tx command (used exclusively by uchameleon_monitor() )
  */
 
-static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff;
-
-
+static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff);
 
 
 /*
@@ -119,19 +115,44 @@ static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff;
  */
 static void *uchameleon_monitor_thread(void *this);
 
+/*
+ * Parse a request METER request for telemetry thread
+ * This is passed in a comma separated list of items from the function table entry
+ * There should be 3 or 4 fields in the function table entry: device, channel, meter face, and  optionally: filter
+ */
+
+static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args);
 
 
+/*
+ * Handle USEROUT telemetry
+ */
+
+static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args);
+
+/*
+*  Playback a meter reading
+*/
+static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 
+/*
+*  Set or reset a USER Output bit
+*/
+static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 
+/*
+*  Execute shell command
+*/
+static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 
 
-
-
-
-
-
+		/*
+		 **********************
+		 * End of DAQ functions*
+		 * *********************
+		 */
 
 
 
