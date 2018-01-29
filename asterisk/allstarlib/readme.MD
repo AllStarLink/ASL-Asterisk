@@ -1,1 +1,1 @@
-AllStarLink libraries live here
+AllStarLink non binary libraries live here
