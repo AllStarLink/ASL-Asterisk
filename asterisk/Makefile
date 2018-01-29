@@ -350,6 +350,7 @@ makeopts.embed_rules: menuselect.makeopts
 	@$(MAKE) --no-print-directory $(MOD_SUBDIRS_EMBED_LIBS)
 
 $(SUBDIRS): include/asterisk/version.h include/asterisk/buildopts.h defaults.h makeopts.embed_rules
+$(ALLSTAR): include/allstar/radiocontrol.h include/allstar/uchameleon.h include/allstar/mdc_decode.h include/allstar/mdc_encode.h
 
 # ensure that all module subdirectories are processed before 'main' during
 # a parallel build, since if there are modules selected to be embedded the
