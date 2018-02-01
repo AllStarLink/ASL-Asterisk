@@ -2,6 +2,9 @@
  *
  *  */
 
+
+#include "allstar/allstarutils.h"
+
 /*
  * DAQ subsystem
  */
@@ -76,7 +79,7 @@ struct daq_tag{
  * DAQ variables
  */
 
-static struct daq_tag daq;
+struct daq_tag daq;
 
 
 
@@ -86,13 +89,13 @@ static struct daq_tag daq;
  * ***********************************
  */
 
-static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
+int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2);
 
 static int matchkeyword(char *string, char **param, char *keywords[]);
-static int explode_string(char *str, char *strp[], int limit, char delim, char quote);
-static void *uchameleon_monitor_thread(void *this);
-static char *strupr(char *str);
+static int explode_string1(char *str, char *strp[], int limit, char delim, char quote);
+void *uchameleon_monitor_thread(void *this);
+// char *strupr(char *str);
 
 /*
  * **************************
@@ -101,17 +104,38 @@ static char *strupr(char *str);
  */
 
 
-static int saynum(struct ast_channel *mychannel, int num);
+int saynum1(struct ast_channel *mychannel, int num);
 static int sayfile(struct ast_channel *mychannel,char *fname);
-static int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
-static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
-static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
+int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
+
+
+
+static void rpt_telem_select1(struct rpt *myrpt, int command_source, struct rpt_link *mylink)
+{
+int	src;
+
+	if (mylink && mylink->chan)
+	{
+		src = LINKMODE_GUI;
+		if (mylink->phonemode) src = LINKMODE_PHONE;
+		else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+		else if (!strncasecmp(mylink->chan->name,"tlb",8)) src = LINKMODE_TLB;
+		if (myrpt->p.linkmodedynamic[src] && (mylink->linkmode >= 1) &&
+		    (mylink->linkmode < 0x7ffffffe))
+				mylink->linkmode = LINK_HANG_TIME;
+	}
+	if (!myrpt->p.telemdynamic) return;
+	if (myrpt->telemmode == 0) return;
+	if (myrpt->telemmode == 0x7fffffff) return;
+	myrpt->telemmode = TELEM_HANG_TIME;
+	return;
+}
 
 /*
  * Open a daq device
  */
 
-static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
+struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 {
 	int fd;
 	struct daq_entry_tag *t;
@@ -163,7 +187,7 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
  */
 
 
-static int daq_close(struct daq_entry_tag *t)
+int daq_close(struct daq_entry_tag *t)
 {
 	int res  = -1;
 
@@ -186,7 +210,7 @@ static int daq_close(struct daq_entry_tag *t)
  * Look up a device entry for a particular device name
  */
 
-static struct daq_entry_tag *daq_devtoentry(char *name)
+struct daq_entry_tag *daq_devtoentry(char *name)
 {
 	struct daq_entry_tag *e = daq.hw;
 
@@ -204,8 +228,7 @@ static struct daq_entry_tag *daq_devtoentry(char *name)
  * Do something with the daq subsystem
  */
 
-static int daq_do_long( struct daq_entry_tag *t, int pin, int cmd,
-void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
+int daq_do_long( struct daq_entry_tag *t, int pin, int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 {
 	int res = -1;
 
@@ -223,7 +246,7 @@ void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
  * Short version of above
  */
 
-static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int arg1)
+int daq_do( struct daq_entry_tag *t, int pin, int cmd, int arg1)
 {
 	int a1 = arg1;
 
@@ -235,7 +258,7 @@ static int daq_do( struct daq_entry_tag *t, int pin, int cmd, int arg1)
  * Function to reset the long term minimum or maximum
  */
 
-static int daq_reset_minmax(char *device, int pin, int minmax)
+int daq_reset_minmax(char *device, int pin, int minmax)
 {
 	int res = -1;
 	struct daq_entry_tag *t;
@@ -256,7 +279,7 @@ static int daq_reset_minmax(char *device, int pin, int minmax)
  * Initialize DAQ subsystem
  */
 
-static void daq_init(struct ast_config *cfg)
+void daq_init(struct ast_config *cfg)
 {
 	struct ast_variable *var;
 	struct daq_entry_tag **t_next, *t = NULL;
@@ -304,7 +327,7 @@ static void daq_init(struct ast_config *cfg)
  * Uninitialize DAQ Subsystem
  */
 
-static void daq_uninit(void)
+void daq_uninit(void)
 {
 	struct daq_entry_tag *t_next, *t;
 
@@ -325,7 +348,7 @@ static void daq_uninit(void)
 
 
 
-static int uchameleon_thread_start(struct daq_entry_tag *t)
+int uchameleon_thread_start(struct daq_entry_tag *t)
 {
 	int res, tries = 50;
 	pthread_attr_t attr;
@@ -362,12 +385,12 @@ static int uchameleon_thread_start(struct daq_entry_tag *t)
         return 0;
 }
 
-static int uchameleon_connect(struct daq_entry_tag *t)
+int uchameleon_connect(struct daq_entry_tag *t)
 {
 	int count;
-	static char *idbuf = "id\n";
-	static char *ledbuf = "led on\n";
-	static char *expect = "Chameleon";
+	char *idbuf = "id\n";
+	char *ledbuf = "led on\n";
+	char *expect = "Chameleon";
 	char rxbuf[20];
 
         if((t->fd = serial_open(t->dev, B115200, 0)) == -1){
@@ -404,7 +427,7 @@ static int uchameleon_connect(struct daq_entry_tag *t)
  */
 
 
-static void uchameleon_alarm_handler(struct daq_pin_entry_tag *p)
+void uchameleon_alarm_handler(struct daq_pin_entry_tag *p)
 {
 	char *valuecopy;
 	int i, busy;
@@ -418,7 +441,7 @@ static void uchameleon_alarm_handler(struct daq_pin_entry_tag *p)
 		return;
 	}
 
-	argc = explode_string(valuecopy, argv, 6, ',', 0);
+	argc = explode_string1(valuecopy, argv, 6, ',', 0);
 
 	if(debug >= 3){
 		ast_log(LOG_NOTICE, "Alarm event on device %s, pin %d, state = %d\n", argv[0], p->num, p->value);
@@ -464,7 +487,7 @@ static void uchameleon_alarm_handler(struct daq_pin_entry_tag *p)
 /*
  * Initialize pins
  */
-static int uchameleon_pin_init(struct daq_entry_tag *t)
+int uchameleon_pin_init(struct daq_entry_tag *t)
 {
 	int i;
 	struct ast_config *ourcfg;
@@ -485,13 +508,13 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 	while(var2){
 		unsigned int pin;
 		int x = 0;
-		static char *pin_keywords[]={"inadc","inp","in","out",NULL};
+		char *pin_keywords[]={"inadc","inp","in","out",NULL};
 		if((var2->name[0] < '0')||(var2->name[0] > '9')){
 			var2 = var2->next;
 			continue;
 		}
 		pin = (unsigned int) atoi(var2->name);
-		i = matchkeyword((char *)var2->value, NULL, pin_keywords);
+		i = matchkeyword1((char *)var2->value, NULL, pin_keywords);
 		if(debug >= 3)
 			ast_log(LOG_NOTICE, "Pin = %d, Pintype = %d\n", pin, i);
 		if(i && i < 5){
@@ -524,7 +547,7 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 
 		strncpy(s,var->value,sizeof(s));
 
-		if(explode_string(s, argv, 6, ',', 0) != 6){
+		if(explode_string1(s, argv, 6, ',', 0) != 6){
 			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
 			var = var->next;
 			continue;
@@ -570,7 +593,7 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
  * Open the serial channel and test for the uchameleon device at the end of the link
  */
 
-static int uchameleon_open(struct daq_entry_tag *t)
+int uchameleon_open(struct daq_entry_tag *t)
 {
 	int res;
 
@@ -596,7 +619,7 @@ static int uchameleon_open(struct daq_entry_tag *t)
  * Close uchameleon
  */
 
-static int uchameleon_close(struct daq_entry_tag *t)
+int uchameleon_close(struct daq_entry_tag *t)
 {
 	int res = 0;
 	char *ledpat="led pattern 253\n";
@@ -657,7 +680,7 @@ static int uchameleon_close(struct daq_entry_tag *t)
  * Uchameleon generic interface which supports monitor thread
  */
 
-static int uchameleon_do_long( struct daq_entry_tag *t, int pin,
+int uchameleon_do_long( struct daq_entry_tag *t, int pin,
 int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
 {
 	int i,j,x;
@@ -893,7 +916,7 @@ int cmd, void (*exec)(struct daq_pin_entry_tag *), int *arg1, void *arg2)
  * Reset a minimum or maximum reading
  */
 
-static int uchameleon_reset_minmax(struct daq_entry_tag *t, int pin, int minmax)
+int uchameleon_reset_minmax(struct daq_entry_tag *t, int pin, int minmax)
 {
 	struct daq_pin_entry_tag *p;
 
@@ -926,7 +949,7 @@ static int uchameleon_reset_minmax(struct daq_entry_tag *t, int pin, int minmax)
  * Queue up a tx command (used exclusively by uchameleon_monitor() )
  */
 
-static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
+void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
 {
 	struct daq_tx_entry_tag *q;
 
@@ -960,7 +983,7 @@ static void uchameleon_queue_tx(struct daq_entry_tag *t, char *txbuff)
  * started by uchameleon_open() and shutdown by uchameleon_close()
  *
  */
-static void *uchameleon_monitor_thread(void *this)
+void *uchameleon_monitor_thread(void *this)
 {
 	int pin = 0, sample = 0;
 	int i,res,valid,adc_acquire;
@@ -999,7 +1022,7 @@ static void *uchameleon_monitor_thread(void *this)
 				ast_log(LOG_NOTICE, "Received: %s\n", rxbuff);
 			valid = 0;
 			/* Parse return string */
-			i = explode_string(rxbuff, rxargs, 3, ' ', 0);
+			i = explode_string1(rxbuff, rxargs, 3, ' ', 0);
 			if(i == 3){
 				if(!strcmp(rxargs[0],"pin")){
 					valid = 1;
@@ -1214,7 +1237,7 @@ static void *uchameleon_monitor_thread(void *this)
  */
 
 
-static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
 {
 	int i,res,files,filter,val;
 	int pin = 0;
@@ -1234,7 +1257,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 	char *sound_files[MAX_METER_FILES+1];
 	char *range_strings[MAX_DAQ_RANGES+1];
 	char *bitphrases[3];
-	static char *filter_keywords[]={"none","max","min","stmin","stmax","stavg",NULL};
+	char *filter_keywords[]={"none","max","min","stmin","stmax","stavg",NULL};
 	struct daq_entry_tag *entry;
 
 	if(!(myargs = ast_strdup(args))){ /* Make a local copy to slice and dice */
@@ -1242,7 +1265,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 		return -1;
 	}
 
-	i = explode_string(myargs, argv, 4, ',', 0);
+	i = explode_string1(myargs, argv, 4, ',', 0);
 	if((i != 4) && (i != 3)){ /* Must have 3 or 4 substrings, no more, no less */
 		ast_log(LOG_WARNING,"Wrong number of arguments for meter telemetry function is: %d s/b 3 or 4", i);
 		ast_free(myargs);
@@ -1254,7 +1277,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 	}
 
 	if(i == 4){
-		filter = matchkeyword(argv[3], NULL, filter_keywords);
+		filter = matchkeyword1(argv[3], NULL, filter_keywords);
 		if(!filter){
 			ast_log(LOG_WARNING,"Unsupported filter type: %s\n",argv[3]);
 			ast_free(myargs);
@@ -1358,7 +1381,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 		/*
  		* Parse range entries
  		*/
-		if((numranges = explode_string(start, range_strings, MAX_DAQ_RANGES, ',', 0)) < 2 ){
+		if((numranges = explode_string1(start, range_strings, MAX_DAQ_RANGES, ',', 0)) < 2 ){
 			ast_log(LOG_WARNING, "At least 2 ranges required for range() in meter face %s\n", argv[2]);
 			ast_free(myargs);
 			ast_free(meter_face);
@@ -1379,7 +1402,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 		*start++ = 0;
 		*end = 0;
 		sounds = end + 2;
-		if(2 != explode_string(start, bitphrases, 2, ',', 0)){
+		if(2 != explode_string1(start, bitphrases, 2, ',', 0)){
 			ast_log(LOG_WARNING, "2 phrases required for bit() in meter face %s\n", argv[2]);
 			ast_free(myargs);
 			ast_free(meter_face);
@@ -1465,7 +1488,7 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 
 	/* Split up the sounds string */
 
-	files = explode_string(sounds, sound_files, MAX_METER_FILES, ',', 0);
+	files = explode_string1(sounds, sound_files, MAX_METER_FILES, ',', 0);
 	if(files == 0){
 		ast_log(LOG_WARNING,"No sound files to say for meter %s\n",argv[2]);
 		ast_free(myargs);
@@ -1492,11 +1515,11 @@ static int handle_meter_tele(struct rpt *myrpt, struct ast_channel *mychannel, c
 				}
 				if(debug)
 					ast_log(LOG_NOTICE,"integer = %d, decimal = %d\n", integer, decimal);
-				res = saynum(mychannel, integer);
+				res = saynum1(mychannel, integer);
 				if(!res && precision && decimal){
 					res = sayfile(mychannel,"point");
 					if(!res)
-						res = saynum(mychannel, decimal);
+						res = saynum1(mychannel, decimal);
 				}
 			}
 			if(metertype == 2){
@@ -1522,7 +1545,7 @@ done:
  * Handle USEROUT telemetry
  */
 
-static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
+int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel, char *args)
 {
 	int argc, i, pin, reqstate, res;
 	char *myargs;
@@ -1537,7 +1560,7 @@ static int handle_userout_tele(struct rpt *myrpt, struct ast_channel *mychannel,
 	if(debug >= 3)
 		ast_log(LOG_NOTICE, "String: %s\n", myargs);
 
-	argc = explode_string(myargs, argv, 10, ',', 0);
+	argc = explode_string1(myargs, argv, 10, ',', 0);
 	if(argc < 4){ /* Must have at least 4 arguments */
 		ast_log(LOG_WARNING,"Incorrect number of arguments for USEROUT function");
 		ast_free(myargs);
@@ -1585,7 +1608,7 @@ done:
 *  Playback a meter reading
 */
 
-static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 
 	if (myrpt->remote)
@@ -1605,7 +1628,7 @@ static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int co
 *  Set or reset a USER Output bit
 */
 
-static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 
 	if (myrpt->remote)
@@ -1623,7 +1646,7 @@ static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int 
 *  Execute shell command
 */
 
-static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char *cp;
 
@@ -1654,6 +1677,107 @@ static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int comm
 	return DC_COMPLETE;
 }
 
+
+/*
+* Break up a delimited string into a table of substrings
+*
+* str - delimited string ( will be modified )
+* strp- list of pointers to substrings (this is built by this function), NULL will be placed at end of list
+* limit- maximum number of substrings to process
+* delim- user specified delimeter
+* quote- user specified quote for escaping a substring. Set to zero to escape nothing.
+*
+* Note: This modifies the string str, be suer to save an intact copy if you need it later.
+*
+* Returns number of substrings found.
+*/
+
+
+static int explode_string1(char *str, char *strp[], int limit, char delim, char quote)
+{
+int     i,l,inquo;
+
+        inquo = 0;
+        i = 0;
+        strp[i++] = str;
+        if (!*str)
+           {
+                strp[0] = 0;
+                return(0);
+           }
+        for(l = 0; *str && (l < limit) ; str++)
+        {
+		if(quote)
+		{
+                	if (*str == quote)
+                   	{
+                        	if (inquo)
+                           	{
+                                	*str = 0;
+                                	inquo = 0;
+                           	}
+                        	else
+                           	{
+                                	strp[i - 1] = str + 1;
+                                	inquo = 1;
+                           	}
+			}
+		}
+                if ((*str == delim) && (!inquo))
+                {
+                        *str = 0;
+			l++;
+                        strp[i++] = str + 1;
+                }
+        }
+        strp[i] = 0;
+        return(i);
+
+}
+
+
+/*
+* Match a keyword in a list, and return index of string plus 1 if there was a match,* else return 0.
+* If param is passed in non-null, then it will be set to the first character past the match
+*/
+
+static int matchkeyword1(char *string, char **param, char *keywords[])
+{
+int	i,ls;
+	for( i = 0 ; keywords[i] ; i++){
+		ls = strlen(keywords[i]);
+		if(!ls){
+			if(param)
+				*param = NULL;
+			return 0;
+		}
+		if(!strncmp(string, keywords[i], ls)){
+			if(param)
+				*param = string + ls;
+			return i + 1;
+		}
+	}
+	if(param)
+		*param = NULL;
+	return 0;
+}
+
+
+
+//# Say a file - streams file to output channel
+
+static int sayfile(struct ast_channel *mychannel,char *fname)
+{
+int	res;
+
+	res = ast_streamfile(mychannel, fname, mychannel->language);
+	if (!res)
+		res = ast_waitstream(mychannel, "");
+	else
+		 ast_log(LOG_WARNING, "ast_streamfile %s failed on %s\n", fname, mychannel->name);
+	ast_stopstream(mychannel);
+	return res;
+}
 
 /*
  **********************

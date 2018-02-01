@@ -479,6 +479,8 @@ enum {REM_MODE_FM,REM_MODE_USB,REM_MODE_LSB,REM_MODE_AM};
 #include "asterisk.h"
 #include "allstar/radiocontrol.h"
 #include "allstar/uchameleon.h"
+#include "allstar/allstarutils.h"
+
 #include "../astver.h"
 
 /*
@@ -556,11 +558,11 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "allstar/mdc_decode.c"
+#include "mdc_decode.c"
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "allstar/mdc_encode.c"
+#include "mdc_encode.c"
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
@@ -1310,6 +1312,7 @@ char archivedir[MAXNODESTR];
 char str[MAXNODESTR * 2];
 } nodelog;
 
+/*
 static int service_scan(struct rpt *myrpt);
 static int set_mode_ft897(struct rpt *myrpt, char newmode);
 static int set_mode_ft100(struct rpt *myrpt, char newmode);
@@ -1320,8 +1323,10 @@ static int setrem(struct rpt *myrpt);
 static int setrtx_check(struct rpt *myrpt);
 static int channel_revert(struct rpt *myrpt);
 static int channel_steer(struct rpt *myrpt, char *data);
-static void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
+*/
+//static void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
 static void rpt_manager_trigger(struct rpt *myrpt, char *event, char *value);
+
 
 AST_MUTEX_DEFINE_STATIC(nodeloglock);
 
@@ -2193,13 +2198,14 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+//static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+//static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+//static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+//static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+
 
 /*
 * Function table
@@ -2503,26 +2509,7 @@ static void set_linkmode(struct rpt_link *mylink, int linkmode)
 	return;
 }
 
-static void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink)
-{
-int	src;
 
-	if (mylink && mylink->chan)
-	{
-		src = LINKMODE_GUI;
-		if (mylink->phonemode) src = LINKMODE_PHONE;
-		else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
-		else if (!strncasecmp(mylink->chan->name,"tlb",8)) src = LINKMODE_TLB;
-		if (myrpt->p.linkmodedynamic[src] && (mylink->linkmode >= 1) &&
-		    (mylink->linkmode < 0x7ffffffe))
-				mylink->linkmode = LINK_HANG_TIME;
-	}
-	if (!myrpt->p.telemdynamic) return;
-	if (myrpt->telemmode == 0) return;
-	if (myrpt->telemmode == 0x7fffffff) return;
-	myrpt->telemmode = TELEM_HANG_TIME;
-	return;
-}
 
 static int altlink(struct rpt *myrpt,struct rpt_link *mylink)
 {
@@ -6964,7 +6951,7 @@ static int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan)
 	return 0;
 }
 
-static int split_freq(char *mhz, char *decimals, char *freq);
+//static int split_freq(char *mhz, char *decimals, char *freq);
 
 
 //### BEGIN TELEMETRY CODE SECTION
@@ -9017,322 +9004,28 @@ treataslocal:
 
 static void send_tele_link(struct rpt *myrpt,char *cmd);
 
-/*
- *  More repeater telemetry routines.
- */
 
-static void rpt_telemetry(struct rpt *myrpt,int mode, void *data)
+void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink)
 {
-struct rpt_tele *tele;
-struct rpt_link *mylink = NULL;
-int res,vmajor,vminor,i,ns;
-pthread_attr_t attr;
-char *v1, *v2,mystr[300],*p,haslink,lat[100],lon[100],elev[100];
-char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
-time_t	t,was;
-unsigned int k;
-FILE *fp;
-struct stat mystat;
-struct rpt_link *l;
+int	src;
 
-	if(debug >= 6)
-		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
-
-
-	if ((mode == ID) && is_paging(myrpt))
+	if (mylink && mylink->chan)
 	{
-		myrpt->deferid = 1;
-		return;
+		src = LINKMODE_GUI;
+		if (mylink->phonemode) src = LINKMODE_PHONE;
+		else if (!strncasecmp(mylink->chan->name,"echolink",8)) src = LINKMODE_ECHOLINK;
+		else if (!strncasecmp(mylink->chan->name,"tlb",8)) src = LINKMODE_TLB;
+		if (myrpt->p.linkmodedynamic[src] && (mylink->linkmode >= 1) &&
+		    (mylink->linkmode < 0x7ffffffe))
+				mylink->linkmode = LINK_HANG_TIME;
 	}
-
-	switch(mode)
-	{
-	    case CONNECTED:
- 		mylink = (struct rpt_link *) data;
-		if ((mylink->name[0] == '3') && (!myrpt->p.eannmode)) return;
-		break;
-	    case REMDISC:
- 		mylink = (struct rpt_link *) data;
-		if ((mylink->name[0] == '3') && (!myrpt->p.eannmode)) return;
-		if ((!mylink) || (mylink->name[0] == '0')) return;
-		if ((!mylink->gott) && (!mylink->isremote) && (!mylink->outbound) &&
-		    mylink->chan && strncasecmp(mylink->chan->name,"echolink",8) &&
-			strncasecmp(mylink->chan->name,"tlb",3)) return;
-		break;
-	    case VARCMD:
-		if (myrpt->telemmode < 2) return;
-		break;
-	    case UNKEY:
-	    case LOCUNKEY:
-		if (myrpt->p.nounkeyct) return;
-		/* if any of the following are defined, go ahead and do it,
-		   otherwise, dont bother */
-		v1 = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name,
-			"unlinkedct");
-		v2 = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name,
-			"remotect");
-		if (telem_lookup(myrpt,NULL, myrpt->name, "remotemon") &&
-		  telem_lookup(myrpt,NULL, myrpt->name, "remotetx") &&
-		  telem_lookup(myrpt,NULL, myrpt->name, "cmdmode") &&
-		  (!(v1 && telem_lookup(myrpt,NULL, myrpt->name, v1))) &&
-		  (!(v2 && telem_lookup(myrpt,NULL, myrpt->name, v2)))) return;
-		break;
-	    case LINKUNKEY:
- 		mylink = (struct rpt_link *) data;
-		if (myrpt->p.locallinknodesn)
-		{
-			int v,w;
-
-			w = 0;
-			for(v = 0; v < myrpt->p.locallinknodesn; v++)
-			{
-				if (strcmp(mylink->name,myrpt->p.locallinknodes[v])) continue;
-				w = 1;
-				break;
-			}
-			if (w) break;
-		}
-		if (!ast_variable_retrieve(myrpt->cfg, myrpt->name, "linkunkeyct"))
-			return;
-		break;
-	    default:
-		break;
-	}
-	if (!myrpt->remote) /* dont do if we are a remote */
-	{
-		/* send appropriate commands to everyone on link(s) */
-		switch(mode)
-		{
-
-		    case REMGO:
-			send_tele_link(myrpt,"REMGO");
-			return;
-		    case REMALREADY:
-			send_tele_link(myrpt,"REMALREADY");
-			return;
-		    case REMNOTFOUND:
-			send_tele_link(myrpt,"REMNOTFOUND");
-			return;
-		    case COMPLETE:
-			send_tele_link(myrpt,"COMPLETE");
-			return;
-		    case PROC:
-			send_tele_link(myrpt,"PROC");
-			return;
-		    case TERM:
-			send_tele_link(myrpt,"TERM");
-			return;
-		    case MACRO_NOTFOUND:
-			send_tele_link(myrpt,"MACRO_NOTFOUND");
-			return;
-		    case MACRO_BUSY:
-			send_tele_link(myrpt,"MACRO_BUSY");
-			return;
-		    case CONNECTED:
-			mylink = (struct rpt_link *) data;
-			if ((!mylink) || (mylink->name[0] == '0')) return;
-			sprintf(mystr,"CONNECTED,%s,%s",myrpt->name,mylink->name);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case CONNFAIL:
-			mylink = (struct rpt_link *) data;
-			if ((!mylink) || (mylink->name[0] == '0')) return;
-			sprintf(mystr,"CONNFAIL,%s",mylink->name);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case REMDISC:
-			mylink = (struct rpt_link *) data;
-			if ((!mylink) || (mylink->name[0] == '0')) return;
-			l = myrpt->links.next;
-			haslink = 0;
-			/* dont report if a link for this one still on system */
-			if (l != &myrpt->links)
-			{
-				rpt_mutex_lock(&myrpt->lock);
-				while(l != &myrpt->links)
-				{
-					if (l->name[0] == '0')
-					{
-						l = l->next;
-						continue;
-					}
-					if (!strcmp(l->name,mylink->name))
-					{
-						haslink = 1;
-						break;
-					}
-					l = l->next;
-				}
-				rpt_mutex_unlock(&myrpt->lock);
-			}
-			if (haslink) return;
-			sprintf(mystr,"REMDISC,%s",mylink->name);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case STATS_TIME:
-			t = time(NULL);
-			sprintf(mystr,"STATS_TIME,%u",(unsigned int) t);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case STATS_VERSION:
-			p = strstr(tdesc, "version");
-			if (!p) return;
-			if(sscanf(p, "version %d.%d", &vmajor, &vminor) != 2)
-				return;
-			sprintf(mystr,"STATS_VERSION,%d.%d",vmajor,vminor);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case STATS_GPS:
-			fp = fopen(GPSFILE,"r");
-			if (!fp) break;
-			if (fstat(fileno(fp),&mystat) == -1) break;
-			if (mystat.st_size >= 100) break;
-			elev[0] = 0;
-			if (fscanf(fp,"%u %s %s %s",&k,lat,lon,elev) < 3) break;
-			fclose(fp);
-			was = (time_t) k;
-			time(&t);
-			if ((was + GPS_VALID_SECS) < t) break;
-			sprintf(mystr,"STATS_GPS,%s,%s,%s,%s",myrpt->name,
-				lat,lon,elev);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case ARB_ALPHA:
-			sprintf(mystr,"ARB_ALPHA,%s",(char *)data);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case REV_PATCH:
-			p = (char *)data;
-			for(i = 0; p[i]; i++) if (p[i] == ',') p[i] = '^';
-			sprintf(mystr,"REV_PATCH,%s,%s",myrpt->name,p);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case LASTNODEKEY:
-			if (!myrpt->lastnodewhichkeyedusup[0]) return;
-			sprintf(mystr,"LASTNODEKEY,%s",myrpt->lastnodewhichkeyedusup);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case LASTUSER:
-			if ((!myrpt->lastdtmfuser[0]) && (!myrpt->curdtmfuser[0])) return;
-			else if (myrpt->lastdtmfuser[0] && (!myrpt->curdtmfuser[0]))
-				sprintf(mystr,"LASTUSER,%s",myrpt->lastdtmfuser);
-			else if ((!myrpt->lastdtmfuser[0]) && myrpt->curdtmfuser[0])
-				sprintf(mystr,"LASTUSER,%s",myrpt->curdtmfuser);
-			else
-			{
-				if (strcmp(myrpt->curdtmfuser,myrpt->lastdtmfuser))
-					sprintf(mystr,"LASTUSER,%s,%s",myrpt->curdtmfuser,myrpt->lastdtmfuser);
-				else
-					sprintf(mystr,"LASTUSER,%s",myrpt->curdtmfuser);
-			}
-			send_tele_link(myrpt,mystr);
-			return;
-		    case STATUS:
-			rpt_mutex_lock(&myrpt->lock);
-			sprintf(mystr,"STATUS,%s,%d",myrpt->name,myrpt->callmode);
-			/* make our own list of links */
-			l = myrpt->links.next;
-			while(l != &myrpt->links)
-			{
-				char s;
-
-				if (l->name[0] == '0')
-				{
-					l = l->next;
-					continue;
-				}
-				s = 'T';
-				if (!l->mode) s = 'R';
-				if (l->mode > 1) s = 'L';
-				if (!l->thisconnected) s = 'C';
-				snprintf(mystr + strlen(mystr),sizeof(mystr),",%c%s",
-					s,l->name);
-				l = l->next;
-			}
-			rpt_mutex_unlock(&myrpt->lock);
-			send_tele_link(myrpt,mystr);
-			return;
-		    case FULLSTATUS:
-			rpt_mutex_lock(&myrpt->lock);
-			sprintf(mystr,"STATUS,%s,%d",myrpt->name,myrpt->callmode);
-			/* get all the nodes */
-			__mklinklist(myrpt,NULL,lbuf,0);
-			rpt_mutex_unlock(&myrpt->lock);
-			/* parse em */
-			ns = finddelim(lbuf,strs,MAXLINKLIST);
-			/* sort em */
-			if (ns) qsort((void *)strs,ns,sizeof(char *),mycompar);
-			/* go thru all the nodes in list */
-			for(i = 0; i < ns; i++)
-			{
-				char s,m = 'T';
-
-				/* if a mode spec at first, handle it */
-				if ((*strs[i] < '0') || (*strs[i] > '9'))
-				{
-					m = *strs[i];
-					strs[i]++;
-				}
-				s = 'T';
-				if (m == 'R') s = 'R';
-				if (m == 'C') s = 'C';
-				snprintf(mystr + strlen(mystr),sizeof(mystr),",%c%s",
-					s,strs[i]);
-			}
-			send_tele_link(myrpt,mystr);
-			return;
-		}
-	}
-	tele = ast_malloc(sizeof(struct rpt_tele));
-	if (!tele)
-	{
-		ast_log(LOG_WARNING, "Unable to allocate memory\n");
-		pthread_exit(NULL);
-		return;
-	}
-	/* zero it out */
-	memset((char *)tele,0,sizeof(struct rpt_tele));
-	tele->rpt = myrpt;
-	tele->mode = mode;
-	if (mode == PARROT) {
-		tele->submode.p = data;
-		tele->parrot = (unsigned int) tele->submode.i;
-		tele->submode.p = 0;
-	}
-	else mylink = (struct rpt_link *) (void *) data;
-	rpt_mutex_lock(&myrpt->lock);
-	if((mode == CONNFAIL) || (mode == REMDISC) || (mode == CONNECTED) ||
-	    (mode == LINKUNKEY)){
-		memset(&tele->mylink,0,sizeof(struct rpt_link));
-		if (mylink){
-			memcpy(&tele->mylink,mylink,sizeof(struct rpt_link));
-		}
-	}
-	else if ((mode == ARB_ALPHA) || (mode == REV_PATCH) ||
-	    (mode == PLAYBACK) || (mode == LOCALPLAY) ||
-            (mode == VARCMD) || (mode == METER) || (mode == USEROUT)) {
-		strncpy(tele->param, (char *) data, TELEPARAMSIZE - 1);
-		tele->param[TELEPARAMSIZE - 1] = 0;
-	}
-	if ((mode == REMXXX) || (mode == PAGE) || (mode == MDC1200)) tele->submode.p= data;
-	insque((struct qelem *)tele, (struct qelem *)myrpt->tele.next);
-	rpt_mutex_unlock(&myrpt->lock);
-        pthread_attr_init(&attr);
-        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	res = ast_pthread_create(&tele->threadid,&attr,rpt_tele_thread,(void *) tele);
-	if(res < 0){
-		rpt_mutex_lock(&myrpt->lock);
-		remque((struct qlem *) tele); /* We don't like stuck transmitters, remove it from the queue */
-		rpt_mutex_unlock(&myrpt->lock);
-		ast_log(LOG_WARNING, "Could not create telemetry thread: %s",strerror(res));
-	}
-	if(debug >= 6)
-			ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() exit\n");
-
+	if (!myrpt->p.telemdynamic) return;
+	if (myrpt->telemmode == 0) return;
+	if (myrpt->telemmode == 0x7fffffff) return;
+	myrpt->telemmode = TELEM_HANG_TIME;
 	return;
 }
 
-//## END TELEMETRY SECTION
 
 /*
  *  This is the main entry point from the Asterisk call handler to app_rpt when a new "call" is detected and passed off
@@ -12646,385 +12339,6 @@ int	i,rv ;
 	if (rxbuf[cmdlen + 4] != 0xfb) return(1);
 	if (rxbuf[cmdlen + 5] != 0xfd) return(1);
 	return(0);
-}
-
-static int setrbi(struct rpt *myrpt)
-{
-char tmp[MAXREMSTR] = "",*s;
-unsigned char rbicmd[5];
-int	band,txoffset = 0,txpower = 0,rxpl;
-
-	/* must be a remote system */
-	if (!myrpt->remoterig) return(0);
-	if (!myrpt->remoterig[0]) return(0);
-	/* must have rbi hardware */
-	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
-	if (setrbi_check(myrpt) == -1) return(-1);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
-	s = strchr(tmp,'.');
-	/* if no decimal, is invalid */
-
-	if (s == NULL){
-		if(debug)
-			printf("@@@@ Frequency needs a decimal\n");
-		return -1;
-	}
-
-	*s++ = 0;
-	if (strlen(tmp) < 2){
-		if(debug)
-			printf("@@@@ Bad MHz digits: %s\n", tmp);
-	 	return -1;
-	}
-
-	if (strlen(s) < 3){
-		if(debug)
-			printf("@@@@ Bad KHz digits: %s\n", s);
-	 	return -1;
-	}
-
-	if ((s[2] != '0') && (s[2] != '5')){
-		if(debug)
-			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
-	 	return -1;
-	}
-
-	band = rbi_mhztoband(tmp);
-	if (band == -1){
-		if(debug)
-			printf("@@@@ Bad Band: %s\n", tmp);
-	 	return -1;
-	}
-
-	rxpl = rbi_pltocode(myrpt->rxpl);
-
-	if (rxpl == -1){
-		if(debug)
-			printf("@@@@ Bad TX PL: %s\n", myrpt->rxpl);
-	 	return -1;
-	}
-
-
-	switch(myrpt->offset)
-	{
-	    case REM_MINUS:
-		txoffset = 0;
-		break;
-	    case REM_PLUS:
-		txoffset = 0x10;
-		break;
-	    case REM_SIMPLEX:
-		txoffset = 0x20;
-		break;
-	}
-	switch(myrpt->powerlevel)
-	{
-	    case REM_LOWPWR:
-		txpower = 0;
-		break;
-	    case REM_MEDPWR:
-		txpower = 0x20;
-		break;
-	    case REM_HIPWR:
-		txpower = 0x10;
-		break;
-	}
-	rbicmd[0] = 0;
-	rbicmd[1] = band | txpower | 0xc0;
-	rbicmd[2] = (*(s - 2) - '0') | txoffset | 0x80;
-	if (s[2] == '5') rbicmd[2] |= 0x40;
-	rbicmd[3] = ((*s - '0') << 4) + (s[1] - '0');
-	rbicmd[4] = rxpl;
-	if (myrpt->txplon) rbicmd[4] |= 0x40;
-	if (myrpt->rxplon) rbicmd[4] |= 0x80;
-	rbi_out(myrpt,rbicmd);
-	return 0;
-}
-
-static int setrtx(struct rpt *myrpt)
-{
-char tmp[MAXREMSTR] = "",*s,rigstr[200],pwr,res = 0;
-int	band,txoffset = 0,txpower = 0,rxpl,txpl,mysplit;
-float ofac;
-double txfreq;
-
-	/* must be a remote system */
-	if (!myrpt->remoterig) return(0);
-	if (!myrpt->remoterig[0]) return(0);
-	/* must have rtx hardware */
-	if (!ISRIG_RTX(myrpt->remoterig)) return(0);
-	/* must be a usbradio interface type */
-	if (!IS_XPMR(myrpt)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
-	s = strchr(tmp,'.');
-	/* if no decimal, is invalid */
-
-	if(debug)printf("setrtx() %s %s\n",myrpt->name,myrpt->remoterig);
-
-	if (s == NULL){
-		if(debug)
-			printf("@@@@ Frequency needs a decimal\n");
-		return -1;
-	}
-	*s++ = 0;
-	if (strlen(tmp) < 2){
-		if(debug)
-			printf("@@@@ Bad MHz digits: %s\n", tmp);
-	 	return -1;
-	}
-
-	if (strlen(s) < 3){
-		if(debug)
-			printf("@@@@ Bad KHz digits: %s\n", s);
-	 	return -1;
-	}
-
-	if ((s[2] != '0') && (s[2] != '5')){
-		if(debug)
-			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
-	 	return -1;
-	}
-
-	band = rbi_mhztoband(tmp);
-	if (band == -1){
-		if(debug)
-			printf("@@@@ Bad Band: %s\n", tmp);
-	 	return -1;
-	}
-
-	rxpl = rbi_pltocode(myrpt->rxpl);
-	
-	if (rxpl == -1){
-		if(debug)
-			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
-	 	return -1;
-	}
-
-	txpl = rbi_pltocode(myrpt->txpl);
-
-	if (txpl == -1){
-		if(debug)
-			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
-	 	return -1;
-	}
-
-	switch(myrpt->offset)
-	{
-	    case REM_MINUS:
-		txoffset = 0;
-		break;
-	    case REM_PLUS:
-		txoffset = 0x10;
-		break;
-	    case REM_SIMPLEX:
-		txoffset = 0x20;
-		break;
-	}
-	switch(myrpt->powerlevel)
-	{
-	    case REM_LOWPWR:
-		txpower = 0;
-		break;
-	    case REM_MEDPWR:
-		txpower = 0x20;
-		break;
-	    case REM_HIPWR:
-		txpower = 0x10;
-		break;
-	}
-
-	res = setrtx_check(myrpt);
-	if (res < 0) return res;
-	mysplit = myrpt->splitkhz;
-	if (!mysplit)
-	{
-		if (!strcmp(myrpt->remoterig,remote_rig_rtx450))
-			mysplit = myrpt->p.default_split_70cm;
-		else
-			mysplit = myrpt->p.default_split_2m;
-	}
-	if (myrpt->offset != REM_SIMPLEX)
-		ofac = ((float) mysplit) / 1000.0;
-	else ofac = 0.0;
-	if (myrpt->offset == REM_MINUS) ofac = -ofac;
-
-	txfreq = atof(myrpt->freq) +  ofac;
-	pwr = 'L';
-	if (myrpt->powerlevel == REM_HIPWR) pwr = 'H';
-	if (!res)
-	{
-		sprintf(rigstr,"SETFREQ %s %f %s %s %c",myrpt->freq,txfreq,
-			(myrpt->rxplon) ? myrpt->rxpl : "0.0",
-			(myrpt->txplon) ? myrpt->txpl : "0.0",pwr);
-		send_usb_txt(myrpt,rigstr);
-		rpt_telemetry(myrpt,COMPLETE,NULL);
-		res = 0;
-	}
-	return 0;
-}
-
-static int setxpmr(struct rpt *myrpt, int dotx)
-{
-	char rigstr[200];
-	int rxpl,txpl;
-
-	/* must be a remote system */
-	if (!myrpt->remoterig) return(0);
-	if (!myrpt->remoterig[0]) return(0);
-	/* must not have rtx hardware */
-	if (ISRIG_RTX(myrpt->remoterig)) return(0);
-	/* must be a usbradio interface type */
-	if (!IS_XPMR(myrpt)) return(0);
-
-	if(debug)printf("setxpmr() %s %s\n",myrpt->name,myrpt->remoterig );
-
-	rxpl = rbi_pltocode(myrpt->rxpl);
-
-	if (rxpl == -1){
-		if(debug)
-			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
-	 	return -1;
-	}
-
-	if (dotx)
-	{
-		txpl = rbi_pltocode(myrpt->txpl);
-		if (txpl == -1){
-			if(debug)
-				printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
-		 	return -1;
-		}
-		sprintf(rigstr,"SETFREQ 0.0 0.0 %s %s L",
-			(myrpt->rxplon) ? myrpt->rxpl : "0.0",
-			(myrpt->txplon) ? myrpt->txpl : "0.0");
-	}
-	else
-	{
-		sprintf(rigstr,"SETFREQ 0.0 0.0 %s 0.0 L",
-			(myrpt->rxplon) ? myrpt->rxpl : "0.0");
-
-	}
-	send_usb_txt(myrpt,rigstr);
-	return 0;
-}
-
-
-static int setrbi_check(struct rpt *myrpt)
-{
-char tmp[MAXREMSTR] = "",*s;
-int	band,txpl;
-
-	/* must be a remote system */
-	if (!myrpt->remote) return(0);
-	/* must have rbi hardware */
-	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
-	s = strchr(tmp,'.');
-	/* if no decimal, is invalid */
-
-	if (s == NULL){
-		if(debug)
-			printf("@@@@ Frequency needs a decimal\n");
-		return -1;
-	}
-
-	*s++ = 0;
-	if (strlen(tmp) < 2){
-		if(debug)
-			printf("@@@@ Bad MHz digits: %s\n", tmp);
-	 	return -1;
-	}
-
-	if (strlen(s) < 3){
-		if(debug)
-			printf("@@@@ Bad KHz digits: %s\n", s);
-	 	return -1;
-	}
-
-	if ((s[2] != '0') && (s[2] != '5')){
-		if(debug)
-			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
-	 	return -1;
-	}
-
-	band = rbi_mhztoband(tmp);
-	if (band == -1){
-		if(debug)
-			printf("@@@@ Bad Band: %s\n", tmp);
-	 	return -1;
-	}
-
-	txpl = rbi_pltocode(myrpt->txpl);
-
-	if (txpl == -1){
-		if(debug)
-			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
-	 	return -1;
-	}
-	return 0;
-}
-
-static int setrtx_check(struct rpt *myrpt)
-{
-char tmp[MAXREMSTR] = "",*s;
-int	band,txpl,rxpl;
-
-	/* must be a remote system */
-	if (!myrpt->remote) return(0);
-	/* must have rbi hardware */
-	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
-	s = strchr(tmp,'.');
-	/* if no decimal, is invalid */
-
-	if (s == NULL){
-		if(debug)
-			printf("@@@@ Frequency needs a decimal\n");
-		return -1;
-	}
-
-	*s++ = 0;
-	if (strlen(tmp) < 2){
-		if(debug)
-			printf("@@@@ Bad MHz digits: %s\n", tmp);
-	 	return -1;
-	}
-
-	if (strlen(s) < 3){
-		if(debug)
-			printf("@@@@ Bad KHz digits: %s\n", s);
-	 	return -1;
-	}
-
-	if ((s[2] != '0') && (s[2] != '5')){
-		if(debug)
-			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
-	 	return -1;
-	}
-
-	band = rbi_mhztoband(tmp);
-	if (band == -1){
-		if(debug)
-			printf("@@@@ Bad Band: %s\n", tmp);
-	 	return -1;
-	}
-
-	txpl = rbi_pltocode(myrpt->txpl);
-
-	if (txpl == -1){
-		if(debug)
-			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
-	 	return -1;
-	}
-
-	rxpl = rbi_pltocode(myrpt->rxpl);
-
-	if (rxpl == -1){
-		if(debug)
-			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
-	 	return -1;
-	}
-	return 0;
 }
 
 

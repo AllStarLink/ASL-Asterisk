@@ -1,47 +1,430 @@
 
 
+
+#include "allstar/allstarutils.h"
+
+
 #define	KENWOOD_RETRIES 5
 
 #define FT897_SERIAL_DELAY 75000		/* # of usec to wait between some serial commands on FT-897 */
 #define FT100_SERIAL_DELAY 75000		/* # of usec to wait between some serial commands on FT-897 */
 
 
-static char *remote_rig_ft950="ft950";
-static char *remote_rig_ft897="ft897";
-static char *remote_rig_ft100="ft100";
-static char *remote_rig_rbi="rbi";
-static char *remote_rig_kenwood="kenwood";
-static char *remote_rig_tm271="tm271";
-static char *remote_rig_tmd700="tmd700";
-static char *remote_rig_ic706="ic706";
-static char *remote_rig_xcat="xcat";
-static char *remote_rig_rtx150="rtx150";
-static char *remote_rig_rtx450="rtx450";
-static char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
+char *remote_rig_ft950="ft950";
+char *remote_rig_ft897="ft897";
+char *remote_rig_ft100="ft100";
+char *remote_rig_rbi="rbi";
+char *remote_rig_kenwood="kenwood";
+char *remote_rig_tm271="tm271";
+char *remote_rig_tmd700="tmd700";
+char *remote_rig_ic706="ic706";
+char *remote_rig_xcat="xcat";
+char *remote_rig_rtx150="rtx150";
+char *remote_rig_rtx450="rtx450";
+char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
 
 
 enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
       HF_SCAN_DOWN_FAST,HF_SCAN_UP_SLOW,HF_SCAN_UP_QUICK,HF_SCAN_UP_FAST};
 
 /*
-* Forward decl's - these suppress compiler warnings when funcs coded further down the file than thier invokation
+* Forward decl's - these suppress compiler warnings when funcs coded further down the file than their invocation
+*/
+/*
+int setrbi(struct rpt *myrpt);
+int set_ft897(struct rpt *myrpt);
+int set_ft100(struct rpt *myrpt);
+int set_ft950(struct rpt *myrpt);
+int set_ic706(struct rpt *myrpt);
+int set_xcat(struct rpt *myrpt);
+int setkenwood(struct rpt *myrpt);
+int set_tm271(struct rpt *myrpt);
+int set_tmd700(struct rpt *myrpt);
+int setrbi_check(struct rpt *myrpt);
+int setxpmr(struct rpt *myrpt, int dotx);
 */
 
-static int setrbi(struct rpt *myrpt);
-static int set_ft897(struct rpt *myrpt);
-static int set_ft100(struct rpt *myrpt);
-static int set_ft950(struct rpt *myrpt);
-static int set_ic706(struct rpt *myrpt);
-static int set_xcat(struct rpt *myrpt);
-static int setkenwood(struct rpt *myrpt);
-static int set_tm271(struct rpt *myrpt);
-static int set_tmd700(struct rpt *myrpt);
-static int setrbi_check(struct rpt *myrpt);
-static int setxpmr(struct rpt *myrpt, int dotx);
+
+int setrbi(struct rpt *myrpt)
+{
+char tmp[MAXREMSTR] = "",*s;
+unsigned char rbicmd[5];
+int	band,txoffset = 0,txpower = 0,rxpl;
+
+	/* must be a remote system */
+	if (!myrpt->remoterig) return(0);
+	if (!myrpt->remoterig[0]) return(0);
+	/* must have rbi hardware */
+	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
+	if (setrbi_check(myrpt) == -1) return(-1);
+	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	s = strchr(tmp,'.');
+	/* if no decimal, is invalid */
+
+	if (s == NULL){
+		if(debug)
+			printf("@@@@ Frequency needs a decimal\n");
+		return -1;
+	}
+
+	*s++ = 0;
+	if (strlen(tmp) < 2){
+		if(debug)
+			printf("@@@@ Bad MHz digits: %s\n", tmp);
+	 	return -1;
+	}
+
+	if (strlen(s) < 3){
+		if(debug)
+			printf("@@@@ Bad KHz digits: %s\n", s);
+	 	return -1;
+	}
+
+	if ((s[2] != '0') && (s[2] != '5')){
+		if(debug)
+			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
+	 	return -1;
+	}
+
+	band = rbi_mhztoband(tmp);
+	if (band == -1){
+		if(debug)
+			printf("@@@@ Bad Band: %s\n", tmp);
+	 	return -1;
+	}
+
+	rxpl = rbi_pltocode(myrpt->rxpl);
+
+	if (rxpl == -1){
+		if(debug)
+			printf("@@@@ Bad TX PL: %s\n", myrpt->rxpl);
+	 	return -1;
+	}
 
 
+	switch(myrpt->offset)
+	{
+	    case REM_MINUS:
+		txoffset = 0;
+		break;
+	    case REM_PLUS:
+		txoffset = 0x10;
+		break;
+	    case REM_SIMPLEX:
+		txoffset = 0x20;
+		break;
+	}
+	switch(myrpt->powerlevel)
+	{
+	    case REM_LOWPWR:
+		txpower = 0;
+		break;
+	    case REM_MEDPWR:
+		txpower = 0x20;
+		break;
+	    case REM_HIPWR:
+		txpower = 0x10;
+		break;
+	}
+	rbicmd[0] = 0;
+	rbicmd[1] = band | txpower | 0xc0;
+	rbicmd[2] = (*(s - 2) - '0') | txoffset | 0x80;
+	if (s[2] == '5') rbicmd[2] |= 0x40;
+	rbicmd[3] = ((*s - '0') << 4) + (s[1] - '0');
+	rbicmd[4] = rxpl;
+	if (myrpt->txplon) rbicmd[4] |= 0x40;
+	if (myrpt->rxplon) rbicmd[4] |= 0x80;
+	rbi_out(myrpt,rbicmd);
+	return 0;
+}
 
-static int sendrxkenwood(struct rpt *myrpt, char *txstr, char *rxstr,
+int setrtx(struct rpt *myrpt)
+{
+char tmp[MAXREMSTR] = "",*s,rigstr[200],pwr,res = 0;
+int	band,txoffset = 0,txpower = 0,rxpl,txpl,mysplit;
+float ofac;
+double txfreq;
+
+	/* must be a remote system */
+	if (!myrpt->remoterig) return(0);
+	if (!myrpt->remoterig[0]) return(0);
+	/* must have rtx hardware */
+	if (!ISRIG_RTX(myrpt->remoterig)) return(0);
+	/* must be a usbradio interface type */
+	if (!IS_XPMR(myrpt)) return(0);
+	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	s = strchr(tmp,'.');
+	/* if no decimal, is invalid */
+
+	if(debug)printf("setrtx() %s %s\n",myrpt->name,myrpt->remoterig);
+
+	if (s == NULL){
+		if(debug)
+			printf("@@@@ Frequency needs a decimal\n");
+		return -1;
+	}
+	*s++ = 0;
+	if (strlen(tmp) < 2){
+		if(debug)
+			printf("@@@@ Bad MHz digits: %s\n", tmp);
+	 	return -1;
+	}
+
+	if (strlen(s) < 3){
+		if(debug)
+			printf("@@@@ Bad KHz digits: %s\n", s);
+	 	return -1;
+	}
+
+	if ((s[2] != '0') && (s[2] != '5')){
+		if(debug)
+			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
+	 	return -1;
+	}
+
+	band = rbi_mhztoband(tmp);
+	if (band == -1){
+		if(debug)
+			printf("@@@@ Bad Band: %s\n", tmp);
+	 	return -1;
+	}
+
+	rxpl = rbi_pltocode(myrpt->rxpl);
+
+	if (rxpl == -1){
+		if(debug)
+			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
+	 	return -1;
+	}
+
+	txpl = rbi_pltocode(myrpt->txpl);
+
+	if (txpl == -1){
+		if(debug)
+			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
+	 	return -1;
+	}
+
+	switch(myrpt->offset)
+	{
+	    case REM_MINUS:
+		txoffset = 0;
+		break;
+	    case REM_PLUS:
+		txoffset = 0x10;
+		break;
+	    case REM_SIMPLEX:
+		txoffset = 0x20;
+		break;
+	}
+	switch(myrpt->powerlevel)
+	{
+	    case REM_LOWPWR:
+		txpower = 0;
+		break;
+	    case REM_MEDPWR:
+		txpower = 0x20;
+		break;
+	    case REM_HIPWR:
+		txpower = 0x10;
+		break;
+	}
+
+	res = setrtx_check(myrpt);
+	if (res < 0) return res;
+	mysplit = myrpt->splitkhz;
+	if (!mysplit)
+	{
+		if (!strcmp(myrpt->remoterig,remote_rig_rtx450))
+			mysplit = myrpt->p.default_split_70cm;
+		else
+			mysplit = myrpt->p.default_split_2m;
+	}
+	if (myrpt->offset != REM_SIMPLEX)
+		ofac = ((float) mysplit) / 1000.0;
+	else ofac = 0.0;
+	if (myrpt->offset == REM_MINUS) ofac = -ofac;
+
+	txfreq = atof(myrpt->freq) +  ofac;
+	pwr = 'L';
+	if (myrpt->powerlevel == REM_HIPWR) pwr = 'H';
+	if (!res)
+	{
+		sprintf(rigstr,"SETFREQ %s %f %s %s %c",myrpt->freq,txfreq,
+			(myrpt->rxplon) ? myrpt->rxpl : "0.0",
+			(myrpt->txplon) ? myrpt->txpl : "0.0",pwr);
+		send_usb_txt(myrpt,rigstr);
+		rpt_telemetry(myrpt,COMPLETE,NULL);
+		res = 0;
+	}
+	return 0;
+}
+
+int setxpmr(struct rpt *myrpt, int dotx)
+{
+	char rigstr[200];
+	int rxpl,txpl;
+
+	/* must be a remote system */
+	if (!myrpt->remoterig) return(0);
+	if (!myrpt->remoterig[0]) return(0);
+	/* must not have rtx hardware */
+	if (ISRIG_RTX(myrpt->remoterig)) return(0);
+	/* must be a usbradio interface type */
+	if (!IS_XPMR(myrpt)) return(0);
+
+	if(debug)printf("setxpmr() %s %s\n",myrpt->name,myrpt->remoterig );
+
+	rxpl = rbi_pltocode(myrpt->rxpl);
+
+	if (rxpl == -1){
+		if(debug)
+			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
+	 	return -1;
+	}
+
+	if (dotx)
+	{
+		txpl = rbi_pltocode(myrpt->txpl);
+		if (txpl == -1){
+			if(debug)
+				printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
+		 	return -1;
+		}
+		sprintf(rigstr,"SETFREQ 0.0 0.0 %s %s L",
+			(myrpt->rxplon) ? myrpt->rxpl : "0.0",
+			(myrpt->txplon) ? myrpt->txpl : "0.0");
+	}
+	else
+	{
+		sprintf(rigstr,"SETFREQ 0.0 0.0 %s 0.0 L",
+			(myrpt->rxplon) ? myrpt->rxpl : "0.0");
+
+	}
+	send_usb_txt(myrpt,rigstr);
+	return 0;
+}
+
+
+int setrbi_check(struct rpt *myrpt)
+{
+char tmp[MAXREMSTR] = "",*s;
+int	band,txpl;
+
+	/* must be a remote system */
+	if (!myrpt->remote) return(0);
+	/* must have rbi hardware */
+	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
+	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	s = strchr(tmp,'.');
+	/* if no decimal, is invalid */
+
+	if (s == NULL){
+		if(debug)
+			printf("@@@@ Frequency needs a decimal\n");
+		return -1;
+	}
+
+	*s++ = 0;
+	if (strlen(tmp) < 2){
+		if(debug)
+			printf("@@@@ Bad MHz digits: %s\n", tmp);
+	 	return -1;
+	}
+
+	if (strlen(s) < 3){
+		if(debug)
+			printf("@@@@ Bad KHz digits: %s\n", s);
+	 	return -1;
+	}
+
+	if ((s[2] != '0') && (s[2] != '5')){
+		if(debug)
+			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
+	 	return -1;
+	}
+
+	band = rbi_mhztoband(tmp);
+	if (band == -1){
+		if(debug)
+			printf("@@@@ Bad Band: %s\n", tmp);
+	 	return -1;
+	}
+
+	txpl = rbi_pltocode(myrpt->txpl);
+
+	if (txpl == -1){
+		if(debug)
+			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
+	 	return -1;
+	}
+	return 0;
+}
+
+int setrtx_check(struct rpt *myrpt)
+{
+char tmp[MAXREMSTR] = "",*s;
+int	band,txpl,rxpl;
+
+	/* must be a remote system */
+	if (!myrpt->remote) return(0);
+	/* must have rbi hardware */
+	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
+	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	s = strchr(tmp,'.');
+	/* if no decimal, is invalid */
+
+	if (s == NULL){
+		if(debug)
+			printf("@@@@ Frequency needs a decimal\n");
+		return -1;
+	}
+
+	*s++ = 0;
+	if (strlen(tmp) < 2){
+		if(debug)
+			printf("@@@@ Bad MHz digits: %s\n", tmp);
+	 	return -1;
+	}
+
+	if (strlen(s) < 3){
+		if(debug)
+			printf("@@@@ Bad KHz digits: %s\n", s);
+	 	return -1;
+	}
+
+	if ((s[2] != '0') && (s[2] != '5')){
+		if(debug)
+			printf("@@@@ KHz must end in 0 or 5: %c\n", s[2]);
+	 	return -1;
+	}
+
+	band = rbi_mhztoband(tmp);
+	if (band == -1){
+		if(debug)
+			printf("@@@@ Bad Band: %s\n", tmp);
+	 	return -1;
+	}
+
+	txpl = rbi_pltocode(myrpt->txpl);
+
+	if (txpl == -1){
+		if(debug)
+			printf("@@@@ Bad TX PL: %s\n", myrpt->txpl);
+	 	return -1;
+	}
+
+	rxpl = rbi_pltocode(myrpt->rxpl);
+
+	if (rxpl == -1){
+		if(debug)
+			printf("@@@@ Bad RX PL: %s\n", myrpt->rxpl);
+	 	return -1;
+	}
+	return 0;
+}
+
+int sendrxkenwood(struct rpt *myrpt, char *txstr, char *rxstr,
 	char *cmpstr)
 {
 int	i,j;
@@ -56,7 +439,7 @@ int	i,j;
 	return(-1);
 }
 
-static int setkenwood(struct rpt *myrpt)
+int setkenwood(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],band,decimals[MAXREMSTR],band1,band2;
@@ -102,7 +485,7 @@ int powers[] = {2,1,0};
 	return 0;
 }
 
-static int set_tmd700(struct rpt *myrpt)
+int set_tmd700(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],offset[20],decimals[MAXREMSTR];
@@ -151,7 +534,7 @@ int band;
 	return 0;
 }
 
-static int set_tm271(struct rpt *myrpt)
+int set_tm271(struct rpt *myrpt)
 {
 char rxstr[RAD_SERIAL_BUFLEN],txstr[RAD_SERIAL_BUFLEN],freq[20];
 char mhz[MAXREMSTR],decimals[MAXREMSTR];
@@ -185,7 +568,7 @@ int powers[] = {2,1,0};
 
 
 
-static int sendkenwood(struct rpt *myrpt,char *txstr, char *rxstr)
+int sendkenwood(struct rpt *myrpt,char *txstr, char *rxstr)
 {
 int	i;
 
@@ -201,7 +584,7 @@ int	i;
 }
 
 /* take a PL frequency and turn it into a code */
-static int kenwood_pltocode(char *str)
+int kenwood_pltocode(char *str)
 {
 int i;
 char *s;
@@ -293,7 +676,7 @@ char *s;
 }
 
 /* take a PL frequency and turn it into a code */
-static int tm271_pltocode(char *str)
+int tm271_pltocode(char *str)
 {
 int i;
 char *s;
@@ -391,7 +774,7 @@ char *s;
 }
 
 /* take a PL frequency and turn it into a code */
-static int ft950_pltocode(char *str)
+int ft950_pltocode(char *str)
 {
 int i;
 char *s;
@@ -488,7 +871,7 @@ char *s;
 	return -1;
 }
 /* take a PL frequency and turn it into a code */
-static int ft100_pltocode(char *str)
+int ft100_pltocode(char *str)
 {
 int i;
 char *s;
@@ -584,7 +967,7 @@ char *s;
 
 
 
-static int check_freq_kenwood(int m, int d, int *defmode)
+int check_freq_kenwood(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -609,7 +992,7 @@ static int check_freq_kenwood(int m, int d, int *defmode)
 }
 
 
-static int check_freq_tm271(int m, int d, int *defmode)
+int check_freq_tm271(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -633,7 +1016,7 @@ static int check_freq_tm271(int m, int d, int *defmode)
 /* Check for valid rbi frequency */
 /* Hard coded limits now, configurable later, maybe? */
 
-static int check_freq_rbi(int m, int d, int *defmode)
+int check_freq_rbi(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -673,7 +1056,7 @@ static int check_freq_rbi(int m, int d, int *defmode)
 /* Check for valid rtx frequency */
 /* Hard coded limits now, configurable later, maybe? */
 
-static int check_freq_rtx(int m, int d, int *defmode, struct rpt *myrpt)
+int check_freq_rtx(int m, int d, int *defmode, struct rpt *myrpt)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -709,7 +1092,7 @@ static int check_freq_rtx(int m, int d, int *defmode, struct rpt *myrpt)
  * Convert decimals of frequency to int
  */
 
-static int decimals2int(char *fraction)
+int decimals2int(char *fraction)
 {
 	int i;
 	char len = strlen(fraction);
@@ -728,7 +1111,7 @@ static int decimals2int(char *fraction)
 * Split frequency into mhz and decimals
 */
 
-static int split_freq(char *mhz, char *decimals, char *freq)
+int split_freq(char *mhz, char *decimals, char *freq)
 {
 	char freq_copy[MAXREMSTR];
 	char *decp;
@@ -751,7 +1134,7 @@ static int split_freq(char *mhz, char *decimals, char *freq)
 * Split ctcss frequency into hertz and decimal
 */
 
-static int split_ctcss_freq(char *hertz, char *decimal, char *freq)
+int split_ctcss_freq(char *hertz, char *decimal, char *freq)
 {
 	char freq_copy[MAXREMSTR];
 	char *decp;
@@ -778,7 +1161,7 @@ static int split_ctcss_freq(char *hertz, char *decimal, char *freq)
 /* Hard coded limits now, configurable later, maybe? */
 
 
-static int check_freq_ft897(int m, int d, int *defmode)
+int check_freq_ft897(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -867,7 +1250,7 @@ static int check_freq_ft897(int m, int d, int *defmode)
 * Set a new frequency for the FT897
 */
 
-static int set_freq_ft897(struct rpt *myrpt, char *newfreq)
+int set_freq_ft897(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
 	int fd,m,d;
@@ -898,7 +1281,7 @@ static int set_freq_ft897(struct rpt *myrpt, char *newfreq)
 
 /* ft-897 simple commands */
 
-static int simple_command_ft897(struct rpt *myrpt, char command)
+int simple_command_ft897(struct rpt *myrpt, char command)
 {
 	unsigned char cmdstr[5];
 
@@ -912,7 +1295,7 @@ static int simple_command_ft897(struct rpt *myrpt, char command)
 
 /* ft-897 offset */
 
-static int set_offset_ft897(struct rpt *myrpt, char offset)
+int set_offset_ft897(struct rpt *myrpt, char offset)
 {
 	unsigned char cmdstr[5];
 	int mysplit,res;
@@ -969,7 +1352,7 @@ static int set_offset_ft897(struct rpt *myrpt, char offset)
 
 /* ft-897 mode */
 
-static int set_mode_ft897(struct rpt *myrpt, char newmode)
+int set_mode_ft897(struct rpt *myrpt, char newmode)
 {
 	unsigned char cmdstr[5];
 
@@ -1002,7 +1385,7 @@ static int set_mode_ft897(struct rpt *myrpt, char newmode)
 
 /* Set tone encode and decode modes */
 
-static int set_ctcss_mode_ft897(struct rpt *myrpt, char txplon, char rxplon)
+int set_ctcss_mode_ft897(struct rpt *myrpt, char txplon, char rxplon)
 {
 	unsigned char cmdstr[5];
 
@@ -1025,7 +1408,7 @@ static int set_ctcss_mode_ft897(struct rpt *myrpt, char txplon, char rxplon)
 
 /* Set transmit and receive ctcss tone frequencies */
 
-static int set_ctcss_freq_ft897(struct rpt *myrpt, char *txtone, char *rxtone)
+int set_ctcss_freq_ft897(struct rpt *myrpt, char *txtone, char *rxtone)
 {
 	unsigned char cmdstr[5];
 	char hertz[MAXREMSTR],decimal[MAXREMSTR];
@@ -1060,7 +1443,7 @@ static int set_ctcss_freq_ft897(struct rpt *myrpt, char *txtone, char *rxtone)
 
 
 
-static int set_ft897(struct rpt *myrpt)
+int set_ft897(struct rpt *myrpt)
 {
 	int res;
 
@@ -1121,7 +1504,7 @@ static int set_ft897(struct rpt *myrpt)
 	return res;
 }
 
-static int closerem_ft897(struct rpt *myrpt)
+int closerem_ft897(struct rpt *myrpt)
 {
 	simple_command_ft897(myrpt, 0x88); /* PTT off */
 	return 0;
@@ -1133,7 +1516,7 @@ static int closerem_ft897(struct rpt *myrpt)
 * Interval is in Hz, resolution is 10Hz
 */
 
-static int multimode_bump_freq_ft897(struct rpt *myrpt, int interval)
+int multimode_bump_freq_ft897(struct rpt *myrpt, int interval)
 {
 	int m,d;
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -1178,7 +1561,7 @@ static int multimode_bump_freq_ft897(struct rpt *myrpt, int interval)
 /* Hard coded limits now, configurable later, maybe? */
 
 
-static int check_freq_ft100(int m, int d, int *defmode)
+int check_freq_ft100(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -1267,7 +1650,7 @@ static int check_freq_ft100(int m, int d, int *defmode)
 * Set a new frequency for the ft100
 */
 
-static int set_freq_ft100(struct rpt *myrpt, char *newfreq)
+int set_freq_ft100(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
 	int fd,m,d;
@@ -1298,7 +1681,7 @@ static int set_freq_ft100(struct rpt *myrpt, char *newfreq)
 
 /* ft-897 simple commands */
 
-static int simple_command_ft100(struct rpt *myrpt, unsigned char command, unsigned char p1)
+int simple_command_ft100(struct rpt *myrpt, unsigned char command, unsigned char p1)
 {
 	unsigned char cmdstr[5];
 
@@ -1313,7 +1696,7 @@ static int simple_command_ft100(struct rpt *myrpt, unsigned char command, unsign
 
 /* ft-897 offset */
 
-static int set_offset_ft100(struct rpt *myrpt, char offset)
+int set_offset_ft100(struct rpt *myrpt, char offset)
 {
 	unsigned char p1;
 
@@ -1339,7 +1722,7 @@ static int set_offset_ft100(struct rpt *myrpt, char offset)
 
 /* ft-897 mode */
 
-static int set_mode_ft100(struct rpt *myrpt, char newmode)
+int set_mode_ft100(struct rpt *myrpt, char newmode)
 {
 	unsigned char p1;
 
@@ -1368,7 +1751,7 @@ static int set_mode_ft100(struct rpt *myrpt, char newmode)
 
 /* Set tone encode and decode modes */
 
-static int set_ctcss_mode_ft100(struct rpt *myrpt, char txplon, char rxplon)
+int set_ctcss_mode_ft100(struct rpt *myrpt, char txplon, char rxplon)
 {
 	unsigned char p1;
 
@@ -1385,7 +1768,7 @@ static int set_ctcss_mode_ft100(struct rpt *myrpt, char txplon, char rxplon)
 
 /* Set transmit and receive ctcss tone frequencies */
 
-static int set_ctcss_freq_ft100(struct rpt *myrpt, char *txtone, char *rxtone)
+int set_ctcss_freq_ft100(struct rpt *myrpt, char *txtone, char *rxtone)
 {
 	unsigned char p1;
 
@@ -1393,7 +1776,7 @@ static int set_ctcss_freq_ft100(struct rpt *myrpt, char *txtone, char *rxtone)
 	return simple_command_ft100(myrpt,0x90,p1);
 }
 
-static int set_ft100(struct rpt *myrpt)
+int set_ft100(struct rpt *myrpt)
 {
 	int res;
 
@@ -1438,7 +1821,7 @@ static int set_ft100(struct rpt *myrpt)
 	return res;
 }
 
-static int closerem_ft100(struct rpt *myrpt)
+int closerem_ft100(struct rpt *myrpt)
 {
 	simple_command_ft100(myrpt, 0x0f,0); /* PTT off */
 	return 0;
@@ -1450,7 +1833,7 @@ static int closerem_ft100(struct rpt *myrpt)
 * Interval is in Hz, resolution is 10Hz
 */
 
-static int multimode_bump_freq_ft100(struct rpt *myrpt, int interval)
+int multimode_bump_freq_ft100(struct rpt *myrpt, int interval)
 {
 	int m,d;
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -1498,7 +1881,7 @@ static int multimode_bump_freq_ft100(struct rpt *myrpt, int interval)
 /* Hard coded limits now, configurable later, maybe? */
 
 
-static int check_freq_ft950(int m, int d, int *defmode)
+int check_freq_ft950(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -1571,7 +1954,7 @@ static int check_freq_ft950(int m, int d, int *defmode)
 * Set a new frequency for the ft950
 */
 
-static int set_freq_ft950(struct rpt *myrpt, char *newfreq)
+int set_freq_ft950(struct rpt *myrpt, char *newfreq)
 {
 	char cmdstr[20];
 	int fd,m,d;
@@ -1596,7 +1979,7 @@ static int set_freq_ft950(struct rpt *myrpt, char *newfreq)
 
 /* ft-950 offset */
 
-static int set_offset_ft950(struct rpt *myrpt, char offset)
+int set_offset_ft950(struct rpt *myrpt, char offset)
 {
 	char *cmdstr;
 
@@ -1622,7 +2005,7 @@ static int set_offset_ft950(struct rpt *myrpt, char offset)
 
 /* ft-950 mode */
 
-static int set_mode_ft950(struct rpt *myrpt, char newmode)
+int set_mode_ft950(struct rpt *myrpt, char newmode)
 {
 	char *cmdstr;
 
@@ -1652,7 +2035,7 @@ static int set_mode_ft950(struct rpt *myrpt, char newmode)
 
 /* Set tone encode and decode modes */
 
-static int set_ctcss_mode_ft950(struct rpt *myrpt, char txplon, char rxplon)
+int set_ctcss_mode_ft950(struct rpt *myrpt, char txplon, char rxplon)
 {
 	char *cmdstr;
 
@@ -1672,7 +2055,7 @@ static int set_ctcss_mode_ft950(struct rpt *myrpt, char txplon, char rxplon)
 
 /* Set transmit and receive ctcss tone frequencies */
 
-static int set_ctcss_freq_ft950(struct rpt *myrpt, char *txtone, char *rxtone)
+int set_ctcss_freq_ft950(struct rpt *myrpt, char *txtone, char *rxtone)
 {
 	char cmdstr[10];
 	int c;
@@ -1687,7 +2070,7 @@ static int set_ctcss_freq_ft950(struct rpt *myrpt, char *txtone, char *rxtone)
 
 
 
-static int set_ft950(struct rpt *myrpt)
+int set_ft950(struct rpt *myrpt)
 {
 	int res;
 	char *cmdstr;
@@ -1761,7 +2144,7 @@ static int set_ft950(struct rpt *myrpt)
 * Interval is in Hz, resolution is 10Hz
 */
 
-static int multimode_bump_freq_ft950(struct rpt *myrpt, int interval)
+int multimode_bump_freq_ft950(struct rpt *myrpt, int interval)
 {
 	int m,d;
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -1808,7 +2191,7 @@ static int multimode_bump_freq_ft950(struct rpt *myrpt, int interval)
 /* Check to see that the frequency is valid */
 /* returns 0 if frequency is valid          */
 
-static int check_freq_ic706(int m, int d, int *defmode, char mars)
+int check_freq_ic706(int m, int d, int *defmode, char mars)
 {
 	int dflmd = REM_MODE_FM;
 	int rv=0;
@@ -1919,7 +2302,7 @@ static int check_freq_ic706(int m, int d, int *defmode, char mars)
 }
 
 /* take a PL frequency and turn it into a code */
-static int ic706_pltocode(char *str)
+int ic706_pltocode(char *str)
 {
 	int i;
 	char *s;
@@ -2090,7 +2473,7 @@ static int ic706_pltocode(char *str)
 
 /* ic-706 simple commands */
 
-static int simple_command_ic706(struct rpt *myrpt, char command, char subcommand)
+int simple_command_ic706(struct rpt *myrpt, char command, char subcommand)
 {
 	unsigned char cmdstr[10];
 
@@ -2108,7 +2491,7 @@ static int simple_command_ic706(struct rpt *myrpt, char command, char subcommand
 * Set a new frequency for the ic706
 */
 
-static int set_freq_ic706(struct rpt *myrpt, char *newfreq)
+int set_freq_ic706(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -2142,7 +2525,7 @@ static int set_freq_ic706(struct rpt *myrpt, char *newfreq)
 
 /* ic-706 offset */
 
-static int set_offset_ic706(struct rpt *myrpt, char offset)
+int set_offset_ic706(struct rpt *myrpt, char offset)
 {
 	unsigned char c;
 	int mysplit,res;
@@ -2204,7 +2587,7 @@ static int set_offset_ic706(struct rpt *myrpt, char offset)
 
 /* ic-706 mode */
 
-static int set_mode_ic706(struct rpt *myrpt, char newmode)
+int set_mode_ic706(struct rpt *myrpt, char newmode)
 {
 	unsigned char c;
 
@@ -2236,7 +2619,7 @@ static int set_mode_ic706(struct rpt *myrpt, char newmode)
 
 /* Set tone encode and decode modes */
 
-static int set_ctcss_mode_ic706(struct rpt *myrpt, char txplon, char rxplon)
+int set_ctcss_mode_ic706(struct rpt *myrpt, char txplon, char rxplon)
 {
 	unsigned char cmdstr[10];
 	int rv;
@@ -2269,7 +2652,7 @@ static int set_ctcss_mode_ic706(struct rpt *myrpt, char txplon, char rxplon)
 #if 0
 /* Set transmit and receive ctcss tone frequencies */
 
-static int set_ctcss_freq_ic706(struct rpt *myrpt, char *txtone, char *rxtone)
+int set_ctcss_freq_ic706(struct rpt *myrpt, char *txtone, char *rxtone)
 {
 	unsigned char cmdstr[10];
 	char hertz[MAXREMSTR],decimal[MAXREMSTR];
@@ -2318,7 +2701,7 @@ static int set_ctcss_freq_ic706(struct rpt *myrpt, char *txtone, char *rxtone)
 }
 #endif
 
-static int vfo_ic706(struct rpt *myrpt)
+int vfo_ic706(struct rpt *myrpt)
 {
 	unsigned char cmdstr[10];
 
@@ -2331,7 +2714,7 @@ static int vfo_ic706(struct rpt *myrpt)
 	return(civ_cmd(myrpt,cmdstr,6));
 }
 
-static int mem2vfo_ic706(struct rpt *myrpt)
+int mem2vfo_ic706(struct rpt *myrpt)
 {
 	unsigned char cmdstr[10];
 
@@ -2344,7 +2727,7 @@ static int mem2vfo_ic706(struct rpt *myrpt)
 	return(civ_cmd(myrpt,cmdstr,6));
 }
 
-static int select_mem_ic706(struct rpt *myrpt, int slot)
+int select_mem_ic706(struct rpt *myrpt, int slot)
 {
 	unsigned char cmdstr[10];
 
@@ -2359,7 +2742,7 @@ static int select_mem_ic706(struct rpt *myrpt, int slot)
 	return(civ_cmd(myrpt,cmdstr,8));
 }
 
-static int set_ic706(struct rpt *myrpt)
+int set_ic706(struct rpt *myrpt)
 {
 	int res = 0,i;
 
@@ -2425,7 +2808,7 @@ static int set_ic706(struct rpt *myrpt)
 * Interval is in Hz, resolution is 10Hz
 */
 
-static int multimode_bump_freq_ic706(struct rpt *myrpt, int interval)
+int multimode_bump_freq_ic706(struct rpt *myrpt, int interval)
 {
 	int m,d;
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -2485,7 +2868,7 @@ static int multimode_bump_freq_ic706(struct rpt *myrpt, int interval)
 /* returns 0 if frequency is valid          */
 
 
-static int check_freq_xcat(int m, int d, int *defmode)
+int check_freq_xcat(int m, int d, int *defmode)
 {
 	int dflmd = REM_MODE_FM;
 
@@ -2519,7 +2902,7 @@ static int check_freq_xcat(int m, int d, int *defmode)
 	return 0;
 }
 
-static int simple_command_xcat(struct rpt *myrpt, char command, char subcommand)
+int simple_command_xcat(struct rpt *myrpt, char command, char subcommand)
 {
 	unsigned char cmdstr[10];
 
@@ -2537,7 +2920,7 @@ static int simple_command_xcat(struct rpt *myrpt, char command, char subcommand)
 * Set a new frequency for the xcat
 */
 
-static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
+int set_freq_xcat(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
@@ -2569,7 +2952,7 @@ static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
 	return(civ_cmd(myrpt,cmdstr,11));
 }
 
-static int set_offset_xcat(struct rpt *myrpt, char offset)
+int set_offset_xcat(struct rpt *myrpt, char offset)
 {
 	unsigned char c,cmdstr[20];
         int mysplit;
@@ -2623,7 +3006,7 @@ static int set_offset_xcat(struct rpt *myrpt, char offset)
 
 /* Set transmit and receive ctcss tone frequencies */
 
-static int set_ctcss_freq_xcat(struct rpt *myrpt, char *txtone, char *rxtone)
+int set_ctcss_freq_xcat(struct rpt *myrpt, char *txtone, char *rxtone)
 {
 	unsigned char cmdstr[10];
 	char hertz[MAXREMSTR],decimal[MAXREMSTR];
@@ -2671,7 +3054,7 @@ static int set_ctcss_freq_xcat(struct rpt *myrpt, char *txtone, char *rxtone)
 	return(civ_cmd(myrpt,cmdstr,9));
 }
 
-static int set_xcat(struct rpt *myrpt)
+int set_xcat(struct rpt *myrpt)
 {
 	int res = 0;
 
@@ -2710,7 +3093,7 @@ static int set_xcat(struct rpt *myrpt)
 /*
 * Dispatch to correct I/O handler
 */
-static int setrem(struct rpt *myrpt)
+int setrem(struct rpt *myrpt)
 {
 char	str[300];
 char	*offsets[] = {"SIMPLEX","MINUS","PLUS"};
@@ -2823,7 +3206,7 @@ printf("FREQ,%s,%s,%s,%s,%s,%s,%d,%d\n",myrpt->freq,
 	return res;
 }
 
-static int closerem(struct rpt *myrpt)
+int closerem(struct rpt *myrpt)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return closerem_ft897(myrpt);
@@ -2837,7 +3220,7 @@ static int closerem(struct rpt *myrpt)
 * Dispatch to correct RX frequency checker
 */
 
-static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
+int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return check_freq_ft897(m, d, defmode);
@@ -2868,7 +3251,7 @@ static int check_freq(struct rpt *myrpt, int m, int d, int *defmode)
    rv=1 if tx frequency in ok.
 */
 
-static char check_tx_freq(struct rpt *myrpt)
+char check_tx_freq(struct rpt *myrpt)
 {
 	int i,rv=0;
 	int radio_mhz, radio_decimals, ulimit_mhz, ulimit_decimals, llimit_mhz, llimit_decimals;
@@ -3016,7 +3399,7 @@ static char check_tx_freq(struct rpt *myrpt)
 * Dispatch to correct frequency bumping function
 */
 
-static int multimode_bump_freq(struct rpt *myrpt, int interval)
+int multimode_bump_freq(struct rpt *myrpt, int interval)
 {
 	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
 		return multimode_bump_freq_ft897(myrpt, interval);
@@ -3035,7 +3418,7 @@ static int multimode_bump_freq(struct rpt *myrpt, int interval)
 * Queue announcment that scan has been stopped
 */
 
-static void stop_scan(struct rpt *myrpt)
+void stop_scan(struct rpt *myrpt)
 {
 	myrpt->hfscanstop = 1;
 	rpt_telemetry(myrpt,SCAN,0);
@@ -3046,7 +3429,7 @@ static void stop_scan(struct rpt *myrpt)
 */
 
 
-static int service_scan(struct rpt *myrpt)
+int service_scan(struct rpt *myrpt)
 {
 	int res, interval;
 	char mhz[MAXREMSTR], decimals[MAXREMSTR], k10=0i, k100=0;
@@ -3112,7 +3495,7 @@ static int service_scan(struct rpt *myrpt)
 /*
 	retrieve memory setting and set radio
 */
-static int get_mem_set(struct rpt *myrpt, char *digitbuf)
+int get_mem_set(struct rpt *myrpt, char *digitbuf)
 {
 	int res=0;
 	if(debug)ast_log(LOG_NOTICE," digitbuf=%s\n", digitbuf);
@@ -3125,7 +3508,7 @@ static int get_mem_set(struct rpt *myrpt, char *digitbuf)
 	steer the radio selected channel to either one programmed into the radio
 	or if the radio is VFO agile, to an rpt.conf memory location.
 */
-static int channel_steer(struct rpt *myrpt, char *data)
+int channel_steer(struct rpt *myrpt, char *data)
 {
 	int res=0;
 
@@ -3154,7 +3537,7 @@ static int channel_steer(struct rpt *myrpt, char *data)
 }
 /*
 */
-static int channel_revert(struct rpt *myrpt)
+int channel_revert(struct rpt *myrpt)
 {
 	int res=0;
 	if(debug)ast_log(LOG_NOTICE,"remoterig=%s, nowchan=%02d, waschan=%02d\n",myrpt->remoterig,myrpt->nowchan,myrpt->waschan);
@@ -3170,11 +3553,17 @@ static int channel_revert(struct rpt *myrpt)
 	}
 	return(res);
 }
+
+
+
+
+
+
 /*
 * Remote base function
 */
 
-static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char *s,*s1,*s2;
 	int i,j,p,r,ht,k,l,ls2,m,d,offset,offsave, modesave, defmode;
