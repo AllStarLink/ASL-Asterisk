@@ -10086,59 +10086,6 @@ int	res;
 
 
 
-/*
-* Shift out a formatted serial bit stream
-*/
-
-static void rbi_out_parallel(struct rpt *myrpt,unsigned char *data)
-    {
-#ifdef __i386__
-    int i,j;
-    unsigned char od,d;
-    static volatile long long delayvar;
-
-    for(i = 0 ; i < 5 ; i++){
-        od = *data++;
-        for(j = 0 ; j < 8 ; j++){
-            d = od & 1;
-            outb(d,myrpt->p.iobase);
-	    /* >= 15 us */
-	    for(delayvar = 1; delayvar < 15000; delayvar++);
-            od >>= 1;
-            outb(d | 2,myrpt->p.iobase);
-	    /* >= 30 us */
-	    for(delayvar = 1; delayvar < 30000; delayvar++);
-            outb(d,myrpt->p.iobase);
-	    /* >= 10 us */
-	    for(delayvar = 1; delayvar < 10000; delayvar++);
-            }
-        }
-	/* >= 50 us */
-        for(delayvar = 1; delayvar < 50000; delayvar++);
-#endif
-    }
-
-static void rbi_out(struct rpt *myrpt,unsigned char *data)
-{
-struct dahdi_radio_param r;
-
-	memset(&r,0,sizeof(struct dahdi_radio_param));
-	r.radpar = DAHDI_RADPAR_REMMODE;
-	r.data = DAHDI_RADPAR_REM_RBI1;
-	/* if setparam ioctl fails, its probably not a pciradio card */
-	if (ioctl(myrpt->zaprxchannel->fds[0],DAHDI_RADIO_SETPARAM,&r) == -1)
-	{
-		rbi_out_parallel(myrpt,data);
-		return;
-	}
-	r.radpar = DAHDI_RADPAR_REMCOMMAND;
-	memcpy(&r.data,data,5);
-	if (ioctl(myrpt->zaprxchannel->fds[0],DAHDI_RADIO_SETPARAM,&r) == -1)
-	{
-		ast_log(LOG_WARNING,"Cannot send RBI command for channel %s\n",myrpt->zaprxchannel->name);
-		return;
-	}
-}
 
 static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes,
 	unsigned char *rxbuf, int rxmaxbytes, int asciiflag)
@@ -10292,30 +10239,6 @@ static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes
         return(index);
 }
 
-static int civ_cmd(struct rpt *myrpt,unsigned char *cmd, int cmdlen)
-{
-unsigned char rxbuf[100];
-int	i,rv ;
-
-	rv = serial_remote_io(myrpt,cmd,cmdlen,rxbuf,(myrpt->p.dusbabek) ? 6 : cmdlen + 6,0);
-	if (rv == -1) return(-1);
-	if (myrpt->p.dusbabek)
-	{
-		if (rxbuf[0] != 0xfe) return(1);
-		if (rxbuf[1] != 0xfe) return(1);
-		if (rxbuf[4] != 0xfb) return(1);
-		if (rxbuf[5] != 0xfd) return(1);
-		return(0);
-	}
-	if (rv != (cmdlen + 6)) return(1);
-	for(i = 0; i < 6; i++)
-		if (rxbuf[i] != cmd[i]) return(1);
-	if (rxbuf[cmdlen] != 0xfe) return(1);
-	if (rxbuf[cmdlen + 1] != 0xfe) return(1);
-	if (rxbuf[cmdlen + 4] != 0xfb) return(1);
-	if (rxbuf[cmdlen + 5] != 0xfd) return(1);
-	return(0);
-}
 
 
 static int handle_remote_dtmf_digit(struct rpt *myrpt,char c, char *keyed, int phonemode)
