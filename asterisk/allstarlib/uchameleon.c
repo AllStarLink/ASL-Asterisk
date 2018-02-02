@@ -164,6 +164,53 @@ static int serial_open(char *fname, int speed, int stop2)
 
 
 /*
+ * Receive a string from the serial device
+ */
+
+static int serial_rx(int fd, char *rxbuf, int rxmaxbytes, unsigned timeoutms, char termchr)
+{
+	char c;
+	int i, j, res;
+
+	if ((!rxmaxbytes) || (rxbuf == NULL)){
+		return 0;
+	}
+	memset(rxbuf,0,rxmaxbytes);
+	for(i = 0; i < rxmaxbytes; i++){
+		if(timeoutms){
+			res = serial_rxready(fd, timeoutms);
+			if(res < 0)
+				return -1;
+			if(!res){
+				break;
+			}
+		}
+		j = read(fd,&c,1);
+		if(j == -1){
+			ast_log(LOG_WARNING,"read failed: %s\n", strerror(errno));
+			return -1;
+		}
+		if (j == 0)
+			return i ;
+		rxbuf[i] = c;
+		if (termchr){
+			rxbuf[i + 1] = 0;
+			if (c == termchr) break;
+		}
+	}
+	if(i && debug >= 6) {
+		printf("i = %d\n",i);
+		printf("String returned was:\n");
+		for(j = 0; j < i; j++)
+			printf("%02X ", (unsigned char ) rxbuf[j]);
+		printf("\n");
+	}
+	return i;
+}
+
+
+
+/*
  * Write some bytes to the serial port, then optionally expect a fixed response
  */
 

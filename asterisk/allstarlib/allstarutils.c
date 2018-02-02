@@ -348,6 +348,401 @@ struct rpt_link *l;
 }
 
 
+
+
+int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration, int amplitude)
+{
+	int res;
+
+        if ((res = ast_tonepair_start(chan, f1, f2, duration, amplitude)))
+                return res;
+
+        while(chan->generatordata) {
+		if (ast_safe_sleep(chan,1)) return -1;
+	}
+
+        return 0;
+}
+
+
+int play_tone(struct ast_channel *chan, int freq, int duration, int amplitude)
+{
+	return play_tone_pair(chan, freq, 0, duration, amplitude);
+}
+
+
+/*
+* Return 1 if rig is multimode capable
+*/
+
+static int multimode_capable(struct rpt *myrpt)
+{
+	if(!strcmp(myrpt->remoterig, remote_rig_ft897))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_ft100))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_ft950))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_ic706))
+		return 1;
+	return 0;
+}
+
+
+//# Say a number -- streams corresponding sound file
+
+static int saynum(struct ast_channel *mychannel, int num)
+{
+	int res;
+	res = ast_say_number(mychannel, num, NULL, mychannel->language, NULL);
+	if(!res)
+		res = ast_waitstream(mychannel, "");
+	else
+		ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
+	ast_stopstream(mychannel);
+	return res;
+}
+
+
+
+
+
+//### BEGIN TELEMETRY CODE SECTION
+/*
+ * Routine to process various telemetry commands that are in the myrpt structure
+ * Used extensively when links and build/torn down and other events are processed by the
+ * rpt_master threads.
+ */
+
+ /*
+  *
+  * WARNING:  YOU ARE NOW HEADED INTO ONE GIANT MAZE OF SWITCH STATEMENTS THAT DO MOST OF THE WORK FOR
+  *           APP_RPT.  THE MAJORITY OF THIS IS VERY UNDOCUMENTED CODE AND CAN BE VERY HARD TO READ.
+  *           IT IS ALSO PROBABLY THE MOST ERROR PRONE PART OF THE CODE, ESPECIALLY THE PORTIONS
+  *           RELATED TO THREADED OPERATIONS.
+  */
+
+static void handle_varcmd_tele(struct rpt *myrpt,struct ast_channel *mychannel,char *varcmd)
+{
+char	*strs[100],*p,buf[100],c;
+int	i,j,k,n,res,vmajor,vminor;
+float	f;
+time_t	t;
+unsigned int t1;
+#ifdef	NEW_ASTERISK
+struct	ast_tm localtm;
+#else
+struct	tm localtm;
+#endif
+
+	n = finddelim(varcmd,strs,100);
+	if (n < 1) return;
+	if (!strcasecmp(strs[0],"REMGO"))
+	{
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_go");
+		return;
+	}
+	if (!strcasecmp(strs[0],"REMALREADY"))
+	{
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_already");
+		return;
+	}
+	if (!strcasecmp(strs[0],"REMNOTFOUND"))
+	{
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/remote_notfound");
+		return;
+	}
+	if (!strcasecmp(strs[0],"COMPLETE"))
+	{
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		res = telem_lookup(myrpt,mychannel, myrpt->name, "functcomplete");
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		else
+			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
+		ast_stopstream(mychannel);
+		return;
+	}
+	if (!strcasecmp(strs[0],"PROC"))
+	{
+		wait_interval(myrpt, DLY_TELEM, mychannel);
+		res = telem_lookup(myrpt, mychannel, myrpt->name, "patchup");
+		if(res < 0){ /* Then default message */
+			sayfile(mychannel, "rpt/callproceeding");
+		}
+		return;
+	}
+	if (!strcasecmp(strs[0],"TERM"))
+	{
+		/* wait a little bit longer */
+		if (wait_interval(myrpt, DLY_CALLTERM, mychannel) == -1) return;
+		res = telem_lookup(myrpt, mychannel, myrpt->name, "patchdown");
+		if(res < 0){ /* Then default message */
+			sayfile(mychannel, "rpt/callterminated");
+		}
+		return;
+	}
+	if (!strcasecmp(strs[0],"MACRO_NOTFOUND"))
+	{
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/macro_notfound");
+		return;
+	}
+	if (!strcasecmp(strs[0],"MACRO_BUSY"))
+	{
+		if (!wait_interval(myrpt, DLY_TELEM, mychannel))
+			sayfile(mychannel, "rpt/macro_busy");
+		return;
+	}
+	if (!strcasecmp(strs[0],"CONNECTED"))
+	{
+
+		if (n < 3) return;
+		if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1) return;
+		res = saynode(myrpt,mychannel,strs[2]);
+		if (!res)
+		    res = ast_streamfile(mychannel, "rpt/connected", mychannel->language);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		else
+			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
+		ast_stopstream(mychannel);
+		res = ast_streamfile(mychannel, "digits/2", mychannel->language);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		else
+			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
+		ast_stopstream(mychannel);
+		saynode(myrpt,mychannel,strs[1]);
+		return;
+	}
+	if (!strcasecmp(strs[0],"CONNFAIL"))
+	{
+
+		if (n < 2) return;
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		res = saynode(myrpt,mychannel,strs[1]);
+		if (!res)
+		   sayfile(mychannel, "rpt/connection_failed");
+		return;
+	}
+	if (!strcasecmp(strs[0],"REMDISC"))
+	{
+
+		if (n < 2) return;
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		res = saynode(myrpt,mychannel,strs[1]);
+		if (!res)
+		   sayfile(mychannel, "rpt/remote_disc");
+		return;
+	}
+	if (!strcasecmp(strs[0],"STATS_TIME"))
+	{
+		if (n < 2) return;
+		if (sscanf(strs[1],"%u",&t1) != 1) return;
+		t = t1;
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		rpt_localtime(&t, &localtm, myrpt->p.timezone);
+		t1 = rpt_mktime(&localtm,NULL);
+		/* Say the phase of the day is before the time */
+		if((localtm.tm_hour >= 0) && (localtm.tm_hour < 12))
+			p = "rpt/goodmorning";
+		else if((localtm.tm_hour >= 12) && (localtm.tm_hour < 18))
+			p = "rpt/goodafternoon";
+		else
+			p = "rpt/goodevening";
+		if (sayfile(mychannel,p) == -1) return;
+		/* Say the time is ... */
+		if (sayfile(mychannel,"rpt/thetimeis") == -1) return;
+		/* Say the time */
+	    	res = ast_say_time(mychannel, t1, "", mychannel->language);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		return;
+	}
+	if (!strcasecmp(strs[0],"STATS_VERSION"))
+	{
+		if (n < 2) return;
+		if(sscanf(strs[1], "%d.%d", &vmajor, &vminor) != 2) return;
+    		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		/* Say "version" */
+		if (sayfile(mychannel,"rpt/version") == -1) return;
+		res = ast_say_number(mychannel, vmajor, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (saycharstr(mychannel,".") == -1) return;
+		if(!res) /* Say "Y" */
+			ast_say_number(mychannel, vminor, "", mychannel->language, (char *) NULL);
+		if (!res){
+			res = ast_waitstream(mychannel, "");
+			ast_stopstream(mychannel);
+		}
+		else
+			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
+		return;
+	}
+	if (!strcasecmp(strs[0],"STATS_GPS"))
+	{
+		if (n < 5) return;
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		if (saynode(myrpt,mychannel,strs[1]) == -1) return;
+		if (sayfile(mychannel,"location") == -1) return;
+		c = *(strs[2] + strlen(strs[2]) - 1);
+		*(strs[2] + strlen(strs[2]) - 1) = 0;
+		if (sscanf(strs[2],"%2d%d.%d",&i,&j,&k) != 3) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (sayfile(mychannel,"degrees") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (saycharstr(mychannel,strs[2] + 4) == -1) return;
+		if (sayfile(mychannel,"minutes") == -1) return;
+		if (sayfile(mychannel,(c == 'N') ? "north" : "south") == -1) return;
+		if (sayfile(mychannel,"rpt/latitude") == -1) return;
+		c = *(strs[3] + strlen(strs[3]) - 1);
+		*(strs[3] + strlen(strs[3]) - 1) = 0;
+		if (sscanf(strs[3],"%3d%d.%d",&i,&j,&k) != 3) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (sayfile(mychannel,"degrees") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (saycharstr(mychannel,strs[3] + 5) == -1) return;
+		if (sayfile(mychannel,"minutes") == -1) return;
+		if (sayfile(mychannel,(c == 'E') ? "east" : "west") == -1) return;
+		if (sayfile(mychannel,"rpt/longitude") == -1) return;
+		if (!*strs[4]) return;
+		c = *(strs[4] + strlen(strs[4]) - 1);
+		*(strs[4] + strlen(strs[4]) - 1) = 0;
+		if (sscanf(strs[4],"%f",&f) != 1) return;
+		if (myrpt->p.gpsfeet)
+		{
+			if (c == 'M') f *= 3.2808399;
+		}
+		else
+		{
+			if (c != 'M') f /= 3.2808399;
+		}
+		sprintf(buf,"%0.1f",f);
+		if (sscanf(buf,"%d.%d",&i,&j) != 2) return;
+		res = ast_say_number(mychannel, i, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (saycharstr(mychannel,".") == -1) return;
+		res = ast_say_number(mychannel, j, "", mychannel->language, (char *) NULL);
+		if (!res)
+			res = ast_waitstream(mychannel, "");
+		ast_stopstream(mychannel);
+		if (sayfile(mychannel,(myrpt->p.gpsfeet) ? "feet" : "meters") == -1) return;
+		if (saycharstr(mychannel,"AMSL") == -1) return;
+		ast_stopstream(mychannel);
+		return;
+	}
+	if (!strcasecmp(strs[0],"ARB_ALPHA"))
+	{
+		if (n < 2) return;
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+	    	saycharstr(mychannel, strs[1]);
+		return;
+	}
+	if (!strcasecmp(strs[0],"REV_PATCH"))
+	{
+		/* Parts of this section taken from app_parkandannounce */
+		char *tpl_working, *tpl_current, *tpl_copy;
+		char *tmp[100], *myparm;
+		int looptemp=0,i=0, dres = 0;
+
+		if (n < 3) return;
+	    	if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+
+
+		tpl_working = ast_strdup(strs[2]);
+		tpl_copy = tpl_working;
+		myparm = strsep(&tpl_working,"^");
+		tpl_current=strsep(&tpl_working, ":");
+		while(tpl_current && looptemp < sizeof(tmp)) {
+			tmp[looptemp]=tpl_current;
+			looptemp++;
+			tpl_current=strsep(&tpl_working,":");
+		}
+		for(i=0; i<looptemp; i++) {
+			if(!strcmp(tmp[i], "PARKED")) {
+				ast_say_digits(mychannel, atoi(myparm), "", mychannel->language);
+			} else if(!strcmp(tmp[i], "NODE")) {
+				ast_say_digits(mychannel, atoi(strs[1]), "", mychannel->language);
+			} else {
+				dres = ast_streamfile(mychannel, tmp[i], mychannel->language);
+				if(!dres) {
+					dres = ast_waitstream(mychannel, "");
+				} else {
+					ast_log(LOG_WARNING, "ast_streamfile of %s failed on %s\n", tmp[i], mychannel->name);
+					dres = 0;
+				}
+			}
+		}
+		ast_free(tpl_copy);
+		return;
+	}
+	if (!strcasecmp(strs[0],"LASTNODEKEY"))
+	{
+		if (n < 2) return;
+		if (!atoi(strs[1])) return;
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		saynode(myrpt,mychannel,strs[1]);
+		return;
+	}
+	if (!strcasecmp(strs[0],"LASTUSER"))
+	{
+		if (n < 2) return;
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		sayphoneticstr(mychannel,strs[1]);
+		if (n < 3) return;
+		sayfile(mychannel,"and");
+		sayphoneticstr(mychannel,strs[2]);
+		return;
+	}
+	if (!strcasecmp(strs[0],"STATUS"))
+	{
+		if (n < 3) return;
+		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) return;
+		saynode(myrpt,mychannel,strs[1]);
+		if (atoi(strs[2]) > 0) sayfile(mychannel, "rpt/autopatch_on");
+		else if (n == 3)
+		{
+			sayfile(mychannel,"rpt/repeat_only");
+			return;
+		}
+		for(i = 3; i < n; i++)
+		{
+			saynode(myrpt,mychannel,strs[i] + 1);
+			if (*strs[i] == 'T') sayfile(mychannel,"rpt/tranceive");
+			else if (*strs[i] == 'R') sayfile(mychannel,"rpt/monitor");
+			else if (*strs[i] == 'L') sayfile(mychannel,"rpt/localmonitor");
+			else sayfile(mychannel,"rpt/connecting");
+		}
+		return;
+	}
+	ast_log(LOG_WARNING,"Got unknown link telemetry command: %s\n",strs[0]);
+	return;
+}
+
+
+
+
 /*
  *  Threaded telemetry handling routines - goes hand in hand with the previous routine (see above)
  *  This routine does a lot of processing of what you "hear" when app_rpt is running.

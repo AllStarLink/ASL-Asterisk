@@ -8,7 +8,7 @@ int explode_string1(char *str, char *strp[], int limit, char delim, char quote);
 void *uchameleon_monitor_thread(void *this);
 
 
-static int saynum1(struct ast_channel *mychannel, int num);
+//static int saynum1(struct ast_channel *mychannel, int num);
 static int sayfile(struct ast_channel *mychannel,char *fname);
 //static void rpt_telem_select1(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 
