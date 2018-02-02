@@ -27,22 +27,22 @@ char *remote_rig_ppp16="ppp16";	  		// parallel port programmable 16 channels
 enum {HF_SCAN_OFF,HF_SCAN_DOWN_SLOW,HF_SCAN_DOWN_QUICK,
       HF_SCAN_DOWN_FAST,HF_SCAN_UP_SLOW,HF_SCAN_UP_QUICK,HF_SCAN_UP_FAST};
 
+
+
 /*
-* Forward decl's - these suppress compiler warnings when funcs coded further down the file than their invocation
+* Return 1 if rig is narrow capable
 */
-/*
-int setrbi(struct rpt *myrpt);
-int set_ft897(struct rpt *myrpt);
-int set_ft100(struct rpt *myrpt);
-int set_ft950(struct rpt *myrpt);
-int set_ic706(struct rpt *myrpt);
-int set_xcat(struct rpt *myrpt);
-int setkenwood(struct rpt *myrpt);
-int set_tm271(struct rpt *myrpt);
-int set_tmd700(struct rpt *myrpt);
-int setrbi_check(struct rpt *myrpt);
-int setxpmr(struct rpt *myrpt, int dotx);
-*/
+
+static int narrow_capable(struct rpt *myrpt)
+{
+	if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
+		return 1;
+	if(!strcmp(myrpt->remoterig, remote_rig_tm271))
+		return 1;
+	return 0;
+}
 
 
 int setrbi(struct rpt *myrpt)

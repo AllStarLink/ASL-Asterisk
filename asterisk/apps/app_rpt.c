@@ -1569,20 +1569,6 @@ static int multimode_capable(struct rpt *myrpt)
 		return 1;
 	return 0;
 }	
-/*
-* Return 1 if rig is narrow capable
-*/
-
-static int narrow_capable(struct rpt *myrpt)
-{
-	if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
-		return 1;
-	if(!strcmp(myrpt->remoterig, remote_rig_tmd700))
-		return 1;
-	if(!strcmp(myrpt->remoterig, remote_rig_tm271))
-		return 1;
-	return 0;
-}	
 
 static char is_paging(struct rpt *myrpt)
 {

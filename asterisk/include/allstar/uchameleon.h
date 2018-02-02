@@ -2,16 +2,15 @@
 #ifndef UCHAMELEON_H
 #define UCHAMELEON_H
 
-static int matchkeyword1(char *string, char **param, char *keywords[]);
+//static int matchkeyword1(char *string, char **param, char *keywords[]);
+
 int explode_string1(char *str, char *strp[], int limit, char delim, char quote);
 void *uchameleon_monitor_thread(void *this);
-//char *strupr(char *str);
+
 
 static int saynum1(struct ast_channel *mychannel, int num);
 static int sayfile(struct ast_channel *mychannel,char *fname);
-//int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
-static void rpt_telem_select1(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
-
+//static void rpt_telem_select1(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 
 struct daq_entry_tag *daq_open(int type, char *name, char *dev);
 
@@ -150,10 +149,6 @@ int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_sou
 		 * End of DAQ functions*
 		 * *********************
 		 */
-
-
-
-
 #endif /* UCHAMELEON_H  */
 
 

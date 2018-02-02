@@ -1,7 +1,11 @@
+/* General utils for Allstar */
+
 
 #include "allstar/allstarutils.h"
+
+
 /*
- *  More repeater telemetry routines.
+ *  Repeater telemetry routines. Used radiocontrol, uchameleon and app_rpt.
  */
 
 void rpt_telemetry(struct rpt *myrpt,int mode, void *data)
