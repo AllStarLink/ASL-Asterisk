@@ -44,6 +44,166 @@ static int narrow_capable(struct rpt *myrpt)
 	return 0;
 }
 
+/* Doug Hall RBI-1 serial data definitions:
+ *
+ * Byte 0: Expansion external outputs
+ * Byte 1:
+ *	Bits 0-3 are BAND as follows:
+ *	Bits 4-5 are POWER bits as follows:
+ *		00 - Low Power
+ *		01 - Hi Power
+ *		02 - Med Power
+ *	Bits 6-7 are always set
+ * Byte 2:
+ *	Bits 0-3 MHZ in BCD format
+ *	Bits 4-5 are offset as follows:
+ *		00 - minus
+ *		01 - plus
+ *		02 - simplex
+ *		03 - minus minus (whatever that is)
+ *	Bit 6 is the 0/5 KHZ bit
+ *	Bit 7 is always set
+ * Byte 3:
+ *	Bits 0-3 are 10 KHZ in BCD format
+ *	Bits 4-7 are 100 KHZ in BCD format
+ * Byte 4: PL Tone code and encode/decode enable bits
+ *	Bits 0-5 are PL tone code (comspec binary codes)
+ *	Bit 6 is encode enable/disable
+ *	Bit 7 is decode enable/disable
+ */
+
+/* take the frequency from the 10 mhz digits (and up) and convert it
+   to a band number */
+
+static int rbi_mhztoband(char *str)
+{
+int	i;
+
+	i = atoi(str) / 10; /* get the 10's of mhz */
+	switch(i)
+	{
+	    case 2:
+		return 10;
+	    case 5:
+		return 11;
+	    case 14:
+		return 2;
+	    case 22:
+		return 3;
+	    case 44:
+		return 4;
+	    case 124:
+		return 0;
+	    case 125:
+		return 1;
+	    case 126:
+		return 8;
+	    case 127:
+		return 5;
+	    case 128:
+		return 6;
+	    case 129:
+		return 7;
+	    default:
+		break;
+	}
+	return -1;
+}
+
+
+
+/* take a PL frequency and turn it into a code */
+static int rbi_pltocode(char *str)
+{
+int i;
+char *s;
+
+	s = strchr(str,'.');
+	i = 0;
+	if (s) i = atoi(s + 1);
+	i += atoi(str) * 10;
+	switch(i)
+	{
+	    case 670:
+		return 0;
+	    case 719:
+		return 1;
+	    case 744:
+		return 2;
+	    case 770:
+		return 3;
+	    case 797:
+		return 4;
+	    case 825:
+		return 5;
+	    case 854:
+		return 6;
+	    case 885:
+		return 7;
+	    case 915:
+		return 8;
+	    case 948:
+		return 9;
+	    case 974:
+		return 10;
+	    case 1000:
+		return 11;
+	    case 1035:
+		return 12;
+	    case 1072:
+		return 13;
+	    case 1109:
+		return 14;
+	    case 1148:
+		return 15;
+	    case 1188:
+		return 16;
+	    case 1230:
+		return 17;
+	    case 1273:
+		return 18;
+	    case 1318:
+		return 19;
+	    case 1365:
+		return 20;
+	    case 1413:
+		return 21;
+	    case 1462:
+		return 22;
+	    case 1514:
+		return 23;
+	    case 1567:
+		return 24;
+	    case 1622:
+		return 25;
+	    case 1679:
+		return 26;
+	    case 1738:
+		return 27;
+	    case 1799:
+		return 28;
+	    case 1862:
+		return 29;
+	    case 1928:
+		return 30;
+	    case 2035:
+		return 31;
+	    case 2107:
+		return 32;
+	    case 2181:
+		return 33;
+	    case 2257:
+		return 34;
+	    case 2336:
+		return 35;
+	    case 2418:
+		return 36;
+	    case 2503:
+		return 37;
+	}
+	return -1;
+}
+
 
 int setrbi(struct rpt *myrpt)
 {

@@ -110,6 +110,120 @@ int wait_interval(struct rpt *myrpt, int type, struct ast_channel *chan);
 
 
 
+
+/*
+ * Generic serial port open command
+ */
+
+static int serial_open(char *fname, int speed, int stop2)
+{
+	struct termios mode;
+	int fd;
+
+	fd = open(fname,O_RDWR);
+	if (fd == -1)
+	{
+		if(debug >= 1)
+			ast_log(LOG_WARNING,"Cannot open serial port %s\n",fname);
+		return -1;
+	}
+
+	memset(&mode, 0, sizeof(mode));
+	if (tcgetattr(fd, &mode)) {
+		if(debug >= 1){
+			ast_log(LOG_WARNING, "Unable to get serial parameters on %s: %s\n", fname, strerror(errno));
+		}
+		return -1;
+	}
+#ifndef	SOLARIS
+	cfmakeraw(&mode);
+#else
+        mode.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP
+                        |INLCR|IGNCR|ICRNL|IXON);
+        mode.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+        mode.c_cflag &= ~(CSIZE|PARENB|CRTSCTS);
+        mode.c_cflag |= CS8;
+	if(stop2)
+		mode.c_cflag |= CSTOPB;
+	mode.c_cc[VTIME] = 3;
+	mode.c_cc[VMIN] = 1;
+#endif
+
+	cfsetispeed(&mode, speed);
+	cfsetospeed(&mode, speed);
+	if (tcsetattr(fd, TCSANOW, &mode)){
+		if(debug >= 1)
+			ast_log(LOG_WARNING, "Unable to set serial parameters on %s: %s\n", fname, strerror(errno));
+		return -1;
+	}
+	usleep(100000);
+	if (debug >= 3)
+		ast_log(LOG_NOTICE,"Opened serial port %s\n",fname);
+	return(fd);
+}
+
+
+/*
+ * Write some bytes to the serial port, then optionally expect a fixed response
+ */
+
+static int serial_io(int fd, char *txbuf, char *rxbuf, int txbytes, int rxmaxbytes, unsigned int timeoutms, char termchr)
+{
+	int i;
+
+	if(debug >= 7)
+		ast_log(LOG_NOTICE,"fd = %d\n",fd);
+
+	if ((rxmaxbytes) && (rxbuf != NULL)){
+		if((i = serial_rxflush(fd, 10)) == -1)
+			return -1;
+		if(debug >= 7)
+			ast_log(LOG_NOTICE,"%d bytes flushed prior to write\n", i);
+	}
+
+	if(write(fd, txbuf, txbytes) != txbytes){
+		ast_log(LOG_WARNING,"write failed: %s\n", strerror(errno));
+		return -1;
+	}
+
+	return serial_rx(fd, rxbuf, rxmaxbytes, timeoutms, termchr);
+}
+
+
+/*
+ * Return a pointer to the first non-whitespace character
+ */
+
+static char *eatwhite(char *s)
+{
+	while((*s == ' ') || (*s == 0x09)){ /* get rid of any leading white space */
+		if(!*s)
+			break;
+		s++;
+	}
+	return s;
+}
+
+/*
+ * Send a null-terminated string to the serial device (without RX-flush)
+ */
+
+static int serial_txstring(int fd, char *txstring)
+{
+	int txbytes;
+
+	txbytes = strlen(txstring);
+
+	if(debug > 5)
+		ast_log(LOG_NOTICE, "sending: %s\n", txstring);
+
+	if(write(fd, txstring, txbytes) != txbytes){
+		ast_log(LOG_WARNING,"write failed: %s\n", strerror(errno));
+		return -1;
+	}
+	return 0;
+}
+
 static void rpt_telem_select1(struct rpt *myrpt, int command_source, struct rpt_link *mylink)
 {
 int	src;
