@@ -2,6 +2,14 @@
 #ifndef RADIO_H
 #define RADIO_H
 
+
+/*
+ * Structure that holds information regarding app_rpt operation
+*/
+struct rpt;
+struct rpt_link;
+
+
 char *remote_rig_ft950="ft950";
 char *remote_rig_ft897="ft897";
 char *remote_rig_ft100="ft100";

@@ -5873,7 +5873,7 @@ static int rpt_do_asl(int fd, int argc, char *argv[])
        if ((argc > 1) && (sscanf(argv[1],"%lf",&warpfactor) != 1))
                 return RESULT_SHOWUSAGE;
 
-       ast_cli(fd, "This command doe not do anything\n");
+       ast_cli(fd, "This command does not do anything\n");
        ast_cli(fd, "73 Steve N4IRS\n",
                warpfactor * warpfactor * warpfactor * warpone,warpfactor);
        ast_cli(fd,"Replace a command that does nothing but waste space. RIP WB6NIL\n");

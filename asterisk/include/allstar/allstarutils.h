@@ -2,6 +2,11 @@
 #ifndef ALLSTARUTILS_H
 #define ALLSTARUTILS_H
 
+/*
+ * Structure that holds information regarding app_rpt operation
+*/
+struct rpt;
+
 
 void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
 //static int multimode_capable(struct rpt *myrpt);

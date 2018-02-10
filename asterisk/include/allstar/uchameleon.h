@@ -2,6 +2,18 @@
 #ifndef UCHAMELEON_H
 #define UCHAMELEON_H
 
+/*
+ * Structure that holds information regarding app_rpt operation
+*/
+struct rpt;
+struct rpt_link;
+struct ast_config;
+struct daq_pin_entry_tag;
+
+
+
+
+
 //static int matchkeyword1(char *string, char **param, char *keywords[]);
 
 int explode_string1(char *str, char *strp[], int limit, char delim, char quote);
