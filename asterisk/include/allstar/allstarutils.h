@@ -7,7 +7,7 @@
 */
 struct rpt;
 
-
+void rpt_telem_select(struct rpt *myrpt, int command_source, struct rpt_link *mylink);
 void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
 //static int multimode_capable(struct rpt *myrpt);
 int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration, int amplitude);
