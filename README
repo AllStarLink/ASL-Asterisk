@@ -1,9 +1,8 @@
 This is the Asterisk source package for AllStarLink 
 
 asterisk-1.4.23pre
-libpri-1.4.7
 
-This a patched version of Asterisk to run with uClibc on an embedded mini-itx system.
+This branch will be merged into dev
 
 
 
