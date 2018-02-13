@@ -139,7 +139,7 @@ int daemon(int, int);  /* defined in libresolv of all places */
 /*! \brief Welcome message when starting a CLI interface */
 #define WELCOME_MESSAGE \
         ast_verbose("\n"); \
-	ast_verbose("AllStarLink Asterisk Version 1.01 1/1/2018 "ASTERISK_VERSION"\n"); \
+	ast_verbose("AllStarLink Asterisk Version 1.01 2/13/2018 "ASTERISK_VERSION"\n"); \
         ast_verbose("Copyright (C) 1999 - 2018 Digium, Inc. Jim Dixon, AllStarLink Inc. and others.\n"); \
 	ast_verbose("Created by Mark Spencer <markster@digium.com>\n"); \
 	ast_verbose("Asterisk comes with ABSOLUTELY NO WARRANTY; type 'core show warranty' for details.\n"); \

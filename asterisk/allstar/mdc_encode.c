@@ -33,7 +33,7 @@
 -*/
 
 #include <stdlib.h>
-#include "mdc_encode.h"
+#include "allstar/mdc_encode.h"
 
 static unsigned char sin8[] = {
       127, 130, 133, 136, 139, 142, 145, 148, 151, 154, 157, 160,

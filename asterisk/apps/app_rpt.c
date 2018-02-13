@@ -527,10 +527,10 @@ enum{DAQ_TYPE_UCHAMELEON};
 
 /*
  * Please change this revision number when you make a edit
- * use the simple format MMDDYY
+ * use the simple format YYMMDD (better for sort)
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 011218 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 #include <signal.h>
@@ -584,11 +584,11 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "mdc_decode.c"
+#include "../allstar/mdc_decode.c"
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "mdc_encode.c"
+#include "../allstar/mdc_encode.c"
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */

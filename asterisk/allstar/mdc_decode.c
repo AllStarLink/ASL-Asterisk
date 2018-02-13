@@ -35,7 +35,7 @@
 -*/
 
 #include <stdlib.h>
-#include "mdc_decode.h"
+#include "allstar/mdc_decode.h"
 
 mdc_decoder_t * mdc_decoder_new(int sampleRate)
 {
