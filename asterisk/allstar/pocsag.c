@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdint.h>
-#include "pocsag.h"
+#include "allstar/pocsag.h"
 
 /* String values for numeric paging */
 static char nstr[] = "0123456789*U -()";

@@ -210,10 +210,10 @@ Obviously, it is not valid to use *ANY* of the duplex=3 modes in a voted and/or 
 
 /*
  * Please change this revision number when you make a edit
- * use the simple format MMDDYY
+ * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 011218 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 
@@ -255,7 +255,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 011218 $")
 #include "asterisk/manager.h"
 
 
-#include "pocsag.c"
+#include "../allstar/pocsag.c"
 
 /* Un-comment this if you wish Digital milliwatt output rather then real audio
    when transmitting (for debugging only) */
