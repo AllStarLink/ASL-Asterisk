@@ -1,7 +1,7 @@
 MENUSELECT_APPS=app_ivrdemo app_osplookup app_skel 
 MENUSELECT_CDR=cdr_odbc cdr_pgsql cdr_radius cdr_sqlite cdr_tds 
 MENUSELECT_CHANNELS=chan_alsa chan_features chan_gtalk chan_h323 chan_mgcp chan_misdn chan_nbs chan_oss chan_phone chan_skinny chan_vpb 
-MENUSELECT_CODECS=codec_ilbc codec_lpc10 codec_speex 
+MENUSELECT_CODECS=codec_lpc10 codec_speex 
 MENUSELECT_FORMATS=format_ogg_vorbis 
 MENUSELECT_FUNCS=func_curl func_odbc 
 MENUSELECT_PBX=pbx_gtkconsole 

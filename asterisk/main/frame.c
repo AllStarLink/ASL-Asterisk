@@ -116,7 +116,7 @@ static struct ast_format_list AST_FORMAT_LIST[] = {					/*!< Bit number: comment
 	{ 1, AST_FORMAT_LPC10, "lpc10", "LPC10", 7, 20, 20, 20, 20 },		/*!<  8: codec_lpc10.c */ 
 	{ 1, AST_FORMAT_G729A, "g729", "G.729A", 10, 10, 230, 10, 20, AST_SMOOTHER_FLAG_G729 },	/*!<  9: Binary commercial distribution */
 	{ 1, AST_FORMAT_SPEEX, "speex", "SpeeX", 10, 10, 60, 10, 20 },		/*!< 10: codec_speex.c */
-	{ 1, AST_FORMAT_ILBC, "ilbc", "iLBC", 50, 30, 30, 30, 30 },		/*!< 11: codec_ilbc.c */ /* inc=30ms - workaround */
+	{ 1, AST_FORMAT_ILBC, "ilbc", "iLBC", 38, 20, 20, 20, 20 },		/*!< 11: codec_ilbc.c */ /* inc=20ms - workaround */
 	{ 1, AST_FORMAT_G726_AAL2, "g726aal2", "G.726 AAL2", 40, 10, 300, 10, 20 },	/*!<  12: codec_g726.c */
 	{ 1, AST_FORMAT_G722, "g722", "G722"},					/*!< 13 */
 	{ 0, 0, "nothing", "undefined" },
@@ -1487,7 +1487,7 @@ int ast_codec_get_samples(struct ast_frame *f)
                 samples = g723_samples(f->data, f->datalen);
 		break;
 	case AST_FORMAT_ILBC:
-		samples = 240 * (f->datalen / 50);
+		samples = 160 * (f->datalen / 38);
 		break;
 	case AST_FORMAT_GSM:
 		samples = 160 * (f->datalen / 33);
@@ -1526,7 +1526,7 @@ int ast_codec_get_len(int format, int samples)
 	/* XXX Still need speex, g723, and lpc10 XXX */	
 	switch(format) {
 	case AST_FORMAT_ILBC:
-		len = (samples / 240) * 50;
+		len = (samples / 160) * 38;
 		break;
 	case AST_FORMAT_GSM:
 		len = (samples / 160) * 33;

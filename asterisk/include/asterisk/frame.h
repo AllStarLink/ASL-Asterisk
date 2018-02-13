@@ -553,7 +553,7 @@ struct ast_frame *ast_frame_enqueue(struct ast_frame *head, struct ast_frame *f,
 /*! \brief Gets duration in ms of interpolation frame for a format */
 static inline int ast_codec_interp_len(int format) 
 { 
-	return (format == AST_FORMAT_ILBC) ? 30 : 20;
+	return 20;
 }
 
 /*!
