@@ -3,7 +3,7 @@
 ;
 ; Module Loader configuration file
 ;
-; By default DIAL does NOT load every module, only what is needed
+; By default AllStarLink does NOT load every module, only what is needed
 
 ; You can enable or disable any of the asterisk modules
 ; All modules are compiled and installed.
@@ -12,7 +12,7 @@
 ; To disable a module: noload => module_name.so
 
 ; You will want to enable the channel driver modules you will be using.
-; There are below in the Channel Driver section
+; They are below in the Channel Driver section
 ; The most common Channel drivers for app_rpt are:
 ; chan_echolink.so   echolink channel driver
 ; chan_simpleusb.so  Simple USB Radio Interface Channel Drive

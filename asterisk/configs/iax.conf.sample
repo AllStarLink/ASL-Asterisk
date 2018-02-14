@@ -3,6 +3,7 @@
 
 ; ulaw, alaw, GSM and ADPCM should only be used, 
 ; the rest of the standard Asterisk codecs
+; This needs to be updated
 ; (speex, ilbc, lpc10, etc) should be avoided.
 
 ; The ulaw and alaw codecs have the best audio quality,
@@ -59,6 +60,7 @@ disallow = all
 allow = ulaw
 allow = adpcm
 allow = gsm
+allow = ilbc
 
 codecpriority = host
 context = radio-secure
