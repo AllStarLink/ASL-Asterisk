@@ -11,11 +11,11 @@
 TODO
 -include ../menuselect.makeopts ../menuselect.makedeps
 
-MENUSELECT_CATEGORY=CDR
-MENUSELECT_DESCRIPTION=Call Detail Recording
+MENUSELECT_CATEGORY=ALLSTARLIB
+MENUSELECT_DESCRIPTION=Allstar Radio Lib
 
-ALL_C_MODS:=$(patsubst %.c,%,$(wildcard cdr_*.c))
-ALL_CC_MODS:=$(patsubst %.cc,%,$(wildcard cdr_*.cc))
+ALL_C_MODS:=$(patsubst %.c,%,$(wildcard *.c))
+ALL_CC_MODS:=$(patsubst %.cc,%,$(wildcard *.cc))
 
 C_MODS:=$(filter-out $(MENUSELECT_CDR),$(ALL_C_MODS))
 CC_MODS:=$(filter-out $(MENUSELECT_CDR),$(ALL_CC_MODS))
