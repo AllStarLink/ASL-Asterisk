@@ -1,0 +1,167 @@
+;
+; pi.conf: chan_pi driver Configuration File, for use with dsp features enabled
+; Copy to pi.conf to use
+
+[general]
+
+dsp = yes
+
+[1]
+
+rxboost = 1		; 0 - 20db attenuator inserted
+			; 1 - 20db attenuator removed
+			; Set to 1 for additonal gain if using a low-level receiver output
+
+rxctcssrelax = 1	; reduce talkoff from radios w/o CTCSS Tx HPF
+			; Do not change this, leave this as a 1
+
+rxsqhyst = 3000         ; Setting Squelch Hysteresis
+                        ; 3000 is the default amount.
+                        ; An amount of 500 seems good.
+                        ; Then set the squelch to the highest number revealed when doing a "radio
+                        ; tune rxsquelch" - running the command multiple (like 20) times in a row.
+                        ; <http://allstarnode.com/wiki/lib/exe/fetch.php?media=asterisk-notes-wj8g.pdf>
+
+txctcssdefault = 100.0	; default tx ctcss freq, any frequency permitted
+rxctcssfreqs = 100.0	; rx ctcss freqs in floating point. must be in table
+txctcssfreqs = 100.0	; tx ctcss freqs, any frequency permitted
+
+carrierfrom = dsp	; no,hw,hwinvert,dsp 
+			; no - no carrier detection at all
+			; hw - from the COR line on the hw (Active high)
+			; hwinvert - from the inverted COR line on the hw (Active low)
+			; dsp - from RX noise using dsp techniques
+
+ctcssfrom = dsp		; no,hw,hwinvert,dsp
+			; no - no CTCSS decoding, system will be carrier squelch
+			; hw - from the CTCSS line on the hw (Active high)
+			; hwinvert - from the inverted CTCSS line on the hw (Active low) 
+			; dsp - CTCSS decoding using RX audio in DSP.
+			; rxdemod option must be set to flat for this to work.
+
+rxdemod = flat          ; input type from radio: no,speaker,flat
+			; no - RX audio input not used
+			; flat - Use RX audio from discriminator (before de-emphasis)
+			; speaker - use de-emphasized audio 
+
+rxsquelchdelay = 30	; delayline in ms carrier squelch tail eliminator 
+
+rxondelay = 0           ; Number of 20mSec intervals following the release of PTT.
+                        ; Uncomment and/or adjust for simplex nodes to eliminate "Ping Ponging"
+                        ; or "Relay Racing". A positive value here will instruct the hwradio
+                        ; driver to ignore the COR line for a specified number of 20mSec
+                        ; intervals following the release of PTT. Use this ONLY on simplex
+                        ; nodes, and leave commented out for repeaters or other full duplex nodes.
+
+txprelim = yes		; Audio processing on output channel: no,yes
+			; no - Audio is not pre-emphasized and limited. 
+			; Suitable for use on a microphone input
+			; yes - Audio is pre-emphasized and limited.
+			; Suitable for direct connection to an FM modulator
+
+txlimonly = no		; Audio limiting with no pre-emphasis on output channel: no,yes
+			; no - Audio is not limited. 
+			; yes - Audio is  limited.
+			; Suitable for transmitters with no limiting but with pre-emphasis.
+
+txtoctype = notone	; Transmit tone control type: no,phase,notone
+			; no - CTCSS tone encoding with no hang time
+			; phase - encode CTCSS and reverse phase 
+			; AKA ("reverse burst") before unkeying TX
+			; notone - encode CTCSS and stop sending tone before unkeying TX
+			; AKA ("chicken burst")
+
+txmix = composite	; Transmit output: voice,composite
+			; voice - output voice only
+			; composite - voice and tone
+
+invertptt = 0		; Invert PTT: 0,1 
+			; 0 - ground to transmit
+			; 1 - open to transmit
+			; This is the collector lead of the 2n4401 on the modified
+			; hw sound fob.
+			; please refer to the howto for the procedure to do this.
+
+duplex = 0		; Duplex 0,1
+			; 0 - half duplex
+			; 1 - full duplex
+
+
+[2]
+
+rxboost = 1		; 0 - 20db attenuator inserted
+			; 1 - 20db attenuator removed
+			; Set to 1 for additonal gain if using a low-level receiver output
+
+rxctcssrelax = 1	; reduce talkoff from radios w/o CTCSS Tx HPF
+			; Do not change this, leave this as a 1
+
+rxsqhyst = 3000         ; Setting Squelch Hysteresis
+                        ; 3000 is the default amount.
+                        ; An amount of 500 seems good.
+                        ; Then set the squelch to the highest number revealed when doing a "radio
+                        ; tune rxsquelch" - running the command multiple (like 20) times in a row.
+                        ; <http://allstarnode.com/wiki/lib/exe/fetch.php?media=asterisk-notes-wj8g.pdf>
+
+txctcssdefault = 100.0	; default tx ctcss freq, any frequency permitted
+rxctcssfreqs = 100.0	; rx ctcss freqs in floating point. must be in table
+txctcssfreqs = 100.0	; tx ctcss freqs, any frequency permitted
+
+carrierfrom = dsp	; no,hw,hwinvert,dsp 
+			; no - no carrier detection at all
+			; hw - from the COR line on the hw sound fob (Active high)
+			; hwinvert - from the inverted COR line on the hw sound fob (Active low)
+			; dsp - from RX noise using dsp techniques
+
+ctcssfrom = dsp		; no,hw,hwinvert,dsp
+			; no - no CTCSS decoding, system will be carrier squelch
+			; hw - from the CTCSS line on the hw sound fob (Active high)
+			; hwinvert - from the inverted CTCSS line on the hw sound fob (Active low) 
+			; dsp - CTCSS decoding using RX audio in DSP.
+			; rxdemod option must be set to flat for this to work.
+
+rxdemod = flat          ; input type from radio: no,speaker,flat
+			; no - RX audio input not used
+			; flat - Use RX audio from discriminator (before de-emphasis)
+			; speaker - use de-emphasized audio 
+
+rxsquelchdelay = 30	; delayline in ms carrier squelch tail eliminator 
+
+rxondelay = 0           ; Number of 20mSec intervals following the release of PTT.
+                        ; Uncomment and/or adjust for simplex nodes to eliminate "Ping Ponging"
+                        ; or "Relay Racing". A positive value here will instruct the hwradio
+                        ; driver to ignore the COR line for a specified number of 20mSec
+                        ; intervals following the release of PTT. Use this ONLY on simplex
+                        ; nodes, and leave commented out for repeaters or other full duplex nodes.
+
+txprelim = yes		; Audio processing on left output channel: no,yes
+			; no - Audio is not pre-emphasized and limited. 
+			; Suitable for use on a microphone input
+			; yes - Audio is pre-emphasized and limited.
+			; Suitable for direct connection to an FM modulator
+
+txlimonly = yes		; Audio limiting with no pre-emphasis on output channel: no,yes
+			; no - Audio is not limited. 
+			; yes - Audio is  limited.
+			; Suitable for transmitters with no limiting but with pre-emphasis.
+
+txtoctype = notone	; Transmit tone control type: no,phase,notone
+			; no - CTCSS tone encoding with no hang time
+			; phase - encode CTCSS and reverse phase 
+			; AKA ("reverse burst") before unkeying TX
+			; notone - encode CTCSS and stop sending tone before unkeying TX
+			; AKA ("chicken burst")
+
+txmix = composite	; Transmit output: voice,composite
+			; voice - output voice only
+			; composite - voice and tone
+
+invertptt = 0		; Invert PTT: 0,1 
+			; 0 - ground to transmit
+			; 1 - open to transmit
+
+duplex = 0		; Duplex 0,1
+			; 0 - half duplex
+			; 1 - full duplex
+
+

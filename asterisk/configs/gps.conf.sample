@@ -2,115 +2,33 @@
 ;
 [general]
 
-call = W6XYZ    ; required -- change to real value
-password = 12345  ; required -- also change to real value
-;comment = Asterisk app_rpt server ; comment sent in APRS data
-;icon = >  ; Icon code for APRS data display (see below)
-;server = second.aprs.net ; APRS-IS server to use
-;port = 10151 ; TCP port to use with server
-;comport = /dev/ttyS0 ; Serial port connect to GPS device
-;baudrate = 4800 ; Baud rate for the serial port
-;debug = n ; set this for debug output
+call = W1AW-1			; callsign (including SSID) for APRS purposes
+password = 12345		; Password for APRS-IS server for above callsign
+comment = AllStar Node 1999 	; Text to be displayed associated with this station
+server = rotate.aprs2.net	; APRS-IS server to report information to
+port = 14580			; port on server to send data
+interval = 600			; Beacon interval in seconds
+icon = r			; A CAR (default) Icon to be displayed for station on APRS display (see http://docs.allstarlink.org/drupal/node/14)
+comport = /dev/ttyS0		; Serial port for GPS receiver (specify this only if using GPS receiver)
+baudrate = 4800			; Baud rate for GPS receiver (specify this only if using GPS receiver)
+debug = n			; set this for debug output
+freq = 145.000			; Display Frequency of station
+tone = 100.0			; CTCSS tone of station (0.0 for none)
+lat = 12.3456			; Fixed (default) latitude in decimal degrees
+lon = -123.4567			; Fixed (default) longitude in decimal degrees
+elev = 123.4			; Elevation of Antenna in Meters (*NOT* HAAT)
+power = 1			; Power level (see http://docs.allstarlink.org/drupal/node/14)
+height = 2			; Antenna Height in HAAT (see http://docs.allstarlink.org/drupal/node/14)
+gain = 3			; Antenna Gain (see http://docs.allstarlink.org/drupal/node/14)
+dir = 0				; Antenna Direction (see http://docs.allstarlink.org/drupal/node/14)
 
+; ehlert = 
+; interval = 
+; ttcomment = 
+; ttlat = 
+; ttlist = 
+; ttlon = 
+; ttoffset = 
+; ttsplit = 
 
-;  The following are the recognized APRS icon codes: 
-;  
-;  NOTE: Since the semicolon (';') is recognized by the
-;  Asterisk config subsystem as a comment, we use the
-;  question-mark ('?') instead when we want to specify
-;  a 'portable tent'.
-;  
-;  
-;  ! - 3 vert bars (EMERGENCY)
-;  " - RAIN
-;  # - DIGI
-;  
-;  $ - SUN (always yellow)
-;  % - DX CLUSTER
-;  & - HF GATEway
-;  ' - AIRCRAFT (small)
-;  ( - CLOUDY
-;  ) - Hump
-;  * - SNOW
-;  + - Cross
-;  , - reverse L shape
-;  
-;  - - QTH
-;  . - X
-;  / - Dot
-;  0-9 Numerial Boxes
-;  : - FIRE
-;  ? - Portable tent (note different then standard ';')
-;  < - Advisory flag
-;  = - RAILROAD ENGINE
-;  > - CAR (SSID-9)
-;  
-;  @ - HURRICANE or tropical storm
-;  A - reserved
-;  B - Blowing Snow  (also BBS)
-;  C - reserved
-;  D - Drizzle
-;  E - Smoke
-;  F - Freezing rain
-;  G - Snow Shower
-;  H - Haze
-;  
-;  I - Rain Shower   (Also TCP-IP)
-;  J - Lightening
-;  K - School
-;  L - Lighthouse
-;  M - MacAPRS
-;  N - Navigation Buoy
-;  O - BALLOON
-;  P - Police
-;  Q - QUAKE
-;  
-;  R - RECREATIONAL VEHICLE
-;  S - Space/Satellite
-;  T - THUNDERSTORM
-;  U - BUS
-;  V - VORTAC Nav Aid
-;  W - National WX Service Site
-;  X - HELO  (SSID-5)
-;  Y - YACHT (sail SSID-6)
-;  Z - UNIX X-APRS
-;  
-;  [ - RUNNER
-;  \ - TRIANGLE   (DF)
-;  ] - BOX with X (PBBS's)
-;  ^ - LARGE AIRCRAFT
-;  _ - WEATHER SURFACE CONDITIONS (always blue)
-;  ` - Satellite Ground Station
-;  a - AMBULANCE
-;  b - BIKE
-;  c - DX spot by callsign
-;  
-;  d - Dual Garage (Fire dept)
-;  e - SLEET
-;  f - FIRE TRUCK
-;  g - GALE FLAGS
-;  h - HOSPITAL
-;  i - IOTA (islands on the air)
-;  j - JEEP (SSID-12)
-;  k - TRUCK (SSID-14)
-;  l - AREAS (box,circle,line,triangle) See below
-;  
-;  m - MILEPOST (box displays 2 letters if in {35})
-;  n - small triangle
-;  o - small circle
-;  p - PARTLY CLOUDY
-;  q - GRID SQUARE (4 digit.  Not shown below 128 miles)
-;  r - ANTENNA
-;  s - SHIP (pwr boat SSID-8)
-;  t - TORNADO
-;  u - TRUCK (18 wheeler)
-;  
-;  v - VAN (SSID-15)
-;  w - FLOODING(water)
-;  x - diamond (NODE)
-;  y - YAGI @ QTH
-;  z - WinAPRS
-;  { - FOG
-;  | - reserved (Stream Switch)
-;  } - diamond 
-;  ~ - reserved (Stream Switch)
+#includeifexists custom/gps.conf

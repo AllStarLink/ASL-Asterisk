@@ -1,0 +1,12 @@
+[tlb0]
+call=W6ABC-R            ; Call of the app_rpt station
+port=44966              ; Start of UDP port range (this port, port + 1)
+astnode=1999            ; app_rpt node associated with this instance (for incoming connections)
+context=radio-secure    ; Asterisk context for incoming connections
+codec=ULAW              ; Default CODEC to be used
+
+
+[nodes]
+1001 = W6ABC,12.34.56.78,44966      ; This one is for W6ABC at ip 12.34.56.78:44966 default CODEC
+1002 = W1XYZ,11.22.33.44,1234,G726  ; This one is for W1XYZ at ip 11.22.33.44:1234 with G726 CODEC
+
