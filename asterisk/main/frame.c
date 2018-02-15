@@ -118,7 +118,7 @@ static struct ast_format_list AST_FORMAT_LIST[] = {					/*!< Bit number: comment
 	{ 1, AST_FORMAT_SPEEX, "speex", "SpeeX", 10, 10, 60, 10, 20 },		/*!< 10: codec_speex.c */
 	{ 1, AST_FORMAT_ILBC, "ilbc", "iLBC", 38, 20, 20, 20, 20 },		/*!< 11: codec_ilbc.c */ /* inc=20ms - workaround */
 	{ 1, AST_FORMAT_G726_AAL2, "g726aal2", "G.726 AAL2", 40, 10, 300, 10, 20 },	/*!<  12: codec_g726.c */
-	{ 1, AST_FORMAT_G722, "g722", "G722"},					/*!< 13 */
+	{ 1, AST_FORMAT_G722, "g722", "G722", 80, 10, 150, 10, 20 },		/*!< 13 */
 	{ 0, 0, "nothing", "undefined" },
 	{ 0, 0, "nothing", "undefined" },
 	{ 0, 0, "nothing", "undefined" },

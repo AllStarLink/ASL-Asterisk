@@ -141,6 +141,7 @@ load => codec_adpcm.so ;			Adaptive Differential PCM Coder/Decoder
 load => codec_alaw.so ;				A-law Coder/Decoder                               
 load => codec_a_mu.so ;				A-law and Mulaw direct Coder/Decoder              
 noload => codec_dahdi.so ;			Generic DAHDI Transcoder Codec Translato          
+load => codec_g722.so ;
 load => codec_g726.so ;				ITU G.726-32kbps G726 Transcoder                  
 load => codec_gsm.so ;				GSM Coder/Decoder                                 
 load => codec_ulaw.so ;				mu-Law Coder/Decoder                              
