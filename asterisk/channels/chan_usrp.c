@@ -46,10 +46,10 @@ MYPORT (optional) is the UDP socket that Asterisk listens on for this channel
 
 /*
  * Please change this revision number when you make a edit
- * use the simple format MMDDYY
+ * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 011218 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180112 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 #include <stdio.h>
