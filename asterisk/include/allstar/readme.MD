@@ -1,1 +1,1 @@
-AllStarLink include files live here
+AllStarLink Asterisk header files live here
