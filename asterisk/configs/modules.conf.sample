@@ -8,10 +8,7 @@
 ; You can enable or disable any of the asterisk modules
 ; All modules are compiled and installed.
 
-; To enable a module: load => module_name.so
-; To disable a module: noload => module_name.so
-
-These are examples ONLY DO NOT UNCOMMENT them here. 
+; These are examples ONLY DO NOT UNCOMMENT them here. 
 
 ; You will want to enable the channel driver modules you will be using.
 ; They are below in the Channel Driver section
