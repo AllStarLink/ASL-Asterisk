@@ -16,3 +16,5 @@ Supported variables events:
 Supported decoders events:
   - EventName: "MDC-1200", EventValue: UnitID
   - EventName: "DTMF"    , EventValue: DTMF character
+
+This code was added to app_rpt.c on 01/12/2018
