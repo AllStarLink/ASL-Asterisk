@@ -268,7 +268,7 @@ ASTERISKVERSION:=$(shell GREP=$(GREP) AWK=$(AWK) build_tools/make_version .)
 
 ASTCFLAGS+=$(MALLOC_DEBUG)$(BUSYDETECT)$(OPTIONS)
 
-MOD_SUBDIRS:=res channels pbx apps codecs formats cdr funcs main
+MOD_SUBDIRS:=res channels pbx apps codecs formats cdr funcs main 
 OTHER_SUBDIRS:=utils agi
 SUBDIRS:=$(OTHER_SUBDIRS) $(MOD_SUBDIRS)
 SUBDIRS_INSTALL:=$(SUBDIRS:%=%-install)
@@ -350,7 +350,7 @@ makeopts.embed_rules: menuselect.makeopts
 	@$(MAKE) --no-print-directory $(MOD_SUBDIRS_EMBED_LIBS)
 
 $(SUBDIRS): include/asterisk/version.h include/asterisk/buildopts.h defaults.h makeopts.embed_rules
-$(ALLSTAR): include/allstar/radiocontrol.h include/allstar/uchameleon.h include/allstar/mdc_decode.h include/allstar/mdc_encode.h
+#$(ALLSTAR): include/allstar/radiocontrol.h include/allstar/uchameleon.h include/allstar/mdc_decode.h include/allstar/mdc_encode.h
 
 # ensure that all module subdirectories are processed before 'main' during
 # a parallel build, since if there are modules selected to be embedded the

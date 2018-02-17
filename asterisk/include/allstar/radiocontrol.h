@@ -409,12 +409,7 @@ int channel_steer(struct rpt *myrpt, char *data);
 */
 int channel_revert(struct rpt *myrpt);
 
-/*
-* Remote base function
-*/
-
 int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-
 
 #endif /* RADIO_H  */
 

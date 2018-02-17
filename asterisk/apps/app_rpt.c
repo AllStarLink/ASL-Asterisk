@@ -558,15 +558,17 @@ struct ast_flags config_flags = { CONFIG_FLAG_WITHCOMMENTS };
 
 /* Un-comment the following to include support decoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "../allstarlib/mdc_decode.c"
+#include "./mdc_decode.c"
 
 /* Un-comment the following to include support encoding of MDC-1200 digital tone
    signalling protocol (using KA6SQG's GPL'ed implementation) */
-#include "../allstarlib/mdc_encode.c"
+#include "./mdc_encode.c"
 
 /* Un-comment the following to include support for notch filters in the
    rx audio stream (using Tony Fisher's mknotch (mkfilter) implementation) */
 /* #include "rpt_notch.c" */
+
+
 
 
 #ifdef	__RPT_NOTCH
@@ -983,7 +985,7 @@ typedef struct
 /*
  * Populate rpt structure with data
 */ 
-static struct rpt
+ struct rpt
 {
 	ast_mutex_t lock;
 	ast_mutex_t remlock;
@@ -1312,19 +1314,7 @@ char archivedir[MAXNODESTR];
 char str[MAXNODESTR * 2];
 } nodelog;
 
-/*
-static int service_scan(struct rpt *myrpt);
-static int set_mode_ft897(struct rpt *myrpt, char newmode);
-static int set_mode_ft100(struct rpt *myrpt, char newmode);
-static int set_mode_ic706(struct rpt *myrpt, char newmode);
-static int simple_command_ft897(struct rpt *myrpt, char command);
-static int simple_command_ft100(struct rpt *myrpt, unsigned char command, unsigned char p1);
-static int setrem(struct rpt *myrpt);
-static int setrtx_check(struct rpt *myrpt);
-static int channel_revert(struct rpt *myrpt);
-static int channel_steer(struct rpt *myrpt, char *data);
-*/
-//static void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
+
 static void rpt_manager_trigger(struct rpt *myrpt, char *event, char *value);
 
 
@@ -1395,6 +1385,10 @@ int	i;
 	}
 	return(NULL);
 }
+
+#include "./radiocontrol.c"
+#include "./allstarutils.c"
+#include "./uchameleon.c"
 
 /* begin functions */
 
@@ -2158,36 +2152,43 @@ static int tone_detect(tone_detect_state_t *s, int16_t *amp, int samples)
 }
 
 
-
 /*
 * Define function protos for function table here
 */
 
-static int function_ilink(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+//static void rpt_telemetry(struct rpt *myrpt,int mode, void *data);
+int function_ilink(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
 int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-//static int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-//static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
-//static int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink);
+void donodelog(struct rpt *myrpt,char *str);
+void do_dtmf_local(struct rpt *myrpt, char c);
+void mdc1200_ack_status(struct rpt *myrpt, short UnitID);
+int sayphoneticstr(struct ast_channel *mychannel,char *str);
+int connect_link(struct rpt *myrpt, char* node, int mode, int perma);
 
 
+
+#include "allstar/radiocontrol.h"
 /*
 * Function table
 */
 
-static struct function_table_tag function_table[] = {
+struct function_table_tag function_table[] = {
 	{"cop", function_cop},
 	{"autopatchup", function_autopatchup},
 	{"autopatchdn", function_autopatchdn},
 	{"ilink", function_ilink},
 	{"status", function_status},
-	{"remote", function_remote},
+//	{"remote", function_remote},
 	{"macro", function_macro},
 	{"playback", function_playback},
 	{"localplay", function_localplay},
@@ -2197,6 +2198,79 @@ static struct function_table_tag function_table[] = {
 
 
 } ;
+
+/*
+*  Playback a meter reading
+*/
+
+int function_meter(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+	if(debug)
+		ast_log(LOG_NOTICE, "meter param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+
+	rpt_telem_select(myrpt,command_source,mylink);
+	rpt_telemetry(myrpt,METER,param);
+	return DC_COMPLETE;
+}
+
+
+
+/*
+*  Set or reset a USER Output bit
+*/
+
+int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+		ast_log(LOG_NOTICE, "userout param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+
+	rpt_telem_select(myrpt,command_source,mylink);
+	rpt_telemetry(myrpt,USEROUT,param);
+	return DC_COMPLETE;
+}
+
+
+/*
+*  Execute shell command
+*/
+
+int function_cmd(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+{
+	char *cp;
+
+	if (myrpt->remote)
+		return DC_ERROR;
+
+	ast_log(LOG_NOTICE, "cmd param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+
+	if (param) {
+		if (*param == '#') /* to execute asterisk cli command */
+		{
+			ast_cli_command(nullfd,param + 1);
+		}
+		else
+		{
+			cp = ast_malloc(strlen(param) + 10);
+			if (!cp)
+			{
+				ast_log(LOG_NOTICE,"Unable to alloc");
+				return DC_ERROR;
+			}
+			memset(cp,0,strlen(param) + 10);
+			sprintf(cp,"%s &",param);
+			ast_safe_system(cp);
+			free(cp);
+		}
+	}
+	return DC_COMPLETE;
+}
 
 
 /*
@@ -2602,7 +2676,7 @@ struct        rpt_link *l;
 }
 
 /* node logging function */
-static void donodelog(struct rpt *myrpt,char *str)
+void donodelog(struct rpt *myrpt,char *str)
 {
 struct nodelog *nodep;
 char	datestr[100];
@@ -2627,7 +2701,7 @@ char	datestr[100];
 }
 
 /* must be called locked */
-static void do_dtmf_local(struct rpt *myrpt, char c)
+void do_dtmf_local(struct rpt *myrpt, char c)
 {
 int	i;
 char	digit;
@@ -2909,7 +2983,7 @@ static void mdc1200_cmd(struct rpt *myrpt, char *data)
 
 #ifdef	_MDC_ENCODE_H_
 
-static void mdc1200_ack_status(struct rpt *myrpt, short UnitID)
+void mdc1200_ack_status(struct rpt *myrpt, short UnitID)
 {
 struct	mdcparams *mdcp;
 
@@ -6490,7 +6564,7 @@ int	res;
 
 //# Say a phonetic words -- streams corresponding sound file
 
-static int sayphoneticstr(struct ast_channel *mychannel,char *str)
+int sayphoneticstr(struct ast_channel *mychannel,char *str)
 {
 int	res;
 
@@ -7197,7 +7271,7 @@ static void send_old_newkey(struct ast_channel *chan)
  *  2: Already connected to this node
  */
 
-static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
+int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 {
 	char *s, *s1, *s2, *tele,*cp;
 	char lstr[MAXLINKLIST],*strs[MAXLINKLIST];
@@ -7459,7 +7533,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 * Internet linking function
 */
 
-static int function_ilink(struct rpt *myrpt, char *param, char *digits, int command_source, struct rpt_link *mylink)
+int function_ilink(struct rpt *myrpt, char *param, char *digits, int command_source, struct rpt_link *mylink)
 {
 
 	char *s1,*s2,tmp[300];
@@ -7826,7 +7900,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 * Autopatch up
 */
 
-static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	pthread_attr_t attr;
 	int i, index, paramlength,nostar = 0;
@@ -7945,7 +8019,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 * Autopatch down
 */
 
-static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+ int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	if (myrpt->p.s[myrpt->p.sysstate_cur].txdisable || myrpt->p.s[myrpt->p.sysstate_cur].autopatchdisable)
 		return DC_ERROR;
@@ -7974,7 +8048,7 @@ static int function_autopatchdn(struct rpt *myrpt, char *param, char *digitbuf, 
 /*
 * Status
 */
-static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_status(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	struct rpt_tele *telem;
 
@@ -8057,7 +8131,7 @@ static int function_status(struct rpt *myrpt, char *param, char *digitbuf, int c
 /*
 *  Macro-oni (without Salami)
 */
-static int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+int function_macro(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 char	*val;
 int	i;
@@ -8103,7 +8177,7 @@ int	i;
 *  Playback a recording globally
 */
 
-static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+ int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 
 	if (myrpt->remote)
@@ -8126,7 +8200,7 @@ static int function_playback(struct rpt *myrpt, char *param, char *digitbuf, int
  * *  Playback a recording locally
  * */
 
-static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+ int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 
         if (myrpt->remote)
@@ -8148,7 +8222,7 @@ static int function_localplay(struct rpt *myrpt, char *param, char *digitbuf, in
 * COP - Control operator
 */
 
-static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
+ int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int command_source, struct rpt_link *mylink)
 {
 	char string[50],fname[50];
 	char paramcopy[500];
@@ -9660,8 +9734,7 @@ int	res;
 
 
 
-
-static int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes,
+int serial_remote_io(struct rpt *myrpt, unsigned char *txbuf, int txbytes,
 	unsigned char *rxbuf, int rxmaxbytes, int asciiflag)
 {
 	int i,j,index,oldmode,olddata;

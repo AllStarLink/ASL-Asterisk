@@ -3801,9 +3801,6 @@ int channel_revert(struct rpt *myrpt)
 
 
 
-
-
-
 /*
 * Remote base function
 */
@@ -4312,4 +4309,7 @@ invalid_freq:
 	}
 	return DC_INDETERMINATE;
 }
+
+
+
 
