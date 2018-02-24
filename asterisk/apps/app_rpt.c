@@ -280,6 +280,9 @@
 
 /*** MODULEINFO
 	<depend>tonezone</depend>
+	<depend>radio</depend>
+	<depend>allstarutils</depend>
+	<depend>uchameleon</depend>
 	<defaultenabled>no</defaultenabled>
  ***/
 
@@ -2188,7 +2191,7 @@ struct function_table_tag function_table[] = {
 	{"autopatchdn", function_autopatchdn},
 	{"ilink", function_ilink},
 	{"status", function_status},
-//	{"remote", function_remote},
+	{"remote", function_remote},
 	{"macro", function_macro},
 	{"playback", function_playback},
 	{"localplay", function_localplay},
