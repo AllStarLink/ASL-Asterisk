@@ -1,5 +1,7 @@
 #!/bin/sh -e
 
+# iLBC is now installed by default This is no longer needed.
+
 if [ -f codecs/ilbc/iLBC_define.h ]; then
     echo "***"
     echo "The iLBC source code appears to already be present and does not"

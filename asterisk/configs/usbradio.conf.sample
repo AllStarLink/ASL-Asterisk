@@ -1,6 +1,10 @@
-;
+; If you are going to use this channel driver, you MUST enable it in modules.conf
+; noload => chan_usbradio.so ;                    CM1xx USB Cards with Radio Interface Channel Driver (DSP)
+; to:
+; load => chan_usbradio.so ;                    CM1xx USB Cards with Radio Interface Channel Driver (DSP)
+
 ; Usbradio channel driver Configuration File
-;
+
 
 [general]
 

@@ -672,6 +672,8 @@ config:
 		if [ -f /etc/redhat-release -o -f /etc/fedora-release ]; then \
 			$(INSTALL) -m 755 contrib/init.d/rc.redhat.asterisk $(DESTDIR)/etc/rc.d/init.d/asterisk; \
 			if [ -z "$(DESTDIR)" ]; then /sbin/chkconfig --add asterisk; fi; \
+
+
 		elif [ -f /etc/debian_version ] && [ -f /etc/systemd/system.conf ]; then \
 			$(INSTALL) -m 755 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
 			if [ -z "$(DESTDIR)" ]; then /bin/systemctl enable asterisk.service; fi; \

@@ -8,8 +8,7 @@
 ; You can enable or disable any of the asterisk modules
 ; All modules are compiled and installed.
 
-; To enable a module: load => module_name.so
-; To disable a module: noload => module_name.so
+; These are examples ONLY DO NOT UNCOMMENT them here. 
 
 ; You will want to enable the channel driver modules you will be using.
 ; They are below in the Channel Driver section
@@ -19,6 +18,10 @@
 ; chan_usbradio.so   USB Console Channel Driver
 ; chan_usrp.so       USRP Channel Module
 ; chan_voter.so      radio Voter channel driver
+
+; To enable a module: load => module_name.so
+; To disable a module: noload => module_name.so
+
 
 [modules]
 
@@ -135,12 +138,16 @@ noload => chan_voter.so ;			Radio Voter Channel Driver
 ; ADPCM          good            55 kbps
 ; GSM            mediocre        36 kbps
 ; g726aal2
-; ilbc
+; ilbc				 28 kbps
+; g722
+
+
 
 load => codec_adpcm.so ;			Adaptive Differential PCM Coder/Decoder           
 load => codec_alaw.so ;				A-law Coder/Decoder                               
 load => codec_a_mu.so ;				A-law and Mulaw direct Coder/Decoder              
 noload => codec_dahdi.so ;			Generic DAHDI Transcoder Codec Translato          
+load => codec_g722.so ;
 load => codec_g726.so ;				ITU G.726-32kbps G726 Transcoder                  
 load => codec_gsm.so ;				GSM Coder/Decoder                                 
 load => codec_ulaw.so ;				mu-Law Coder/Decoder                              
