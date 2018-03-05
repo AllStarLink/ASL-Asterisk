@@ -426,15 +426,6 @@ datafiles: _all
 	done
 	mkdir -p $(DESTDIR)$(AGI_DIR)
 	$(MAKE) -C sounds install
-# N4IRS
-	mkdir -p /usr/local/bin
-	for x in ../allstar/updatenodelist/*; do \
-		$(INSTALL) -m 744 $$x /usr/local/bin ; \
-	done
-
-	mkdir -p /lib/systemd/system
-	$(INSTALL) -m 744 contrib/systemd/updatenodelist.service /lib/systemd/system ; \
-	systemctl enable updatenodelist.service
 
 update: 
 	@if [ -d .svn ]; then \
