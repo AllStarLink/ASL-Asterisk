@@ -9,22 +9,12 @@ set -o errexit
 #                                               #
 #################################################
 #
-
-id=$(lsb_release -is)
-release=$(lsb_release -rs)
-codename=$(lsb_release -cs)
-
-uname_kernel_name=$(uname -s)
-uname_kernel_release=$(uname -r)
-uname_kernel_version=$(uname -v)
-uname_machine=$(uname -m)
-uname_processor=$(uname -p)
-uname_hardware_platform=$(uname -i)
-uname_operating_system=$(uname -o)
+# Functions must be defined before they are used
+#
 
 function check_pi_version() {
-  local -r REVCODE=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
-  local -rA REVISIONS=(
+  declare -gr REVCODE=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
+  declare -grA REVISIONS=(
     [0002]="Model B Rev 1, 256 MB RAM"
     [0003]="Model B Rev 1 ECN0001, 256 MB RAM"
     [0004]="Model B Rev 2, 256 MB RAM"
@@ -52,9 +42,38 @@ function check_pi_version() {
     [a02082]="3 Model B, 1 GB RAM"
     [a22082]="3 Model B, 1 GB RAM"
   )
-echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+# echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
 }
 
+############### Start Here #######################################
+
+# Try to collect general data
+id=$(lsb_release -is)
+release=$(lsb_release -rs)
+codename=$(lsb_release -cs)
+
+uname_kernel_name=$(uname -s)
+uname_kernel_release=$(uname -r)
+uname_kernel_version=$(uname -v)
+uname_machine=$(uname -m)
+uname_processor=$(uname -p)
+uname_hardware_platform=$(uname -i)
+uname_operating_system=$(uname -o)
+
+FREE_MEM=$(free -m | awk 'NR==2{printf "%s MB of %s MB (%.2f%%)\n", $3,$2,$3*100/$2 }')
+DISK_USED=$(df -h | awk '$NF=="/"{printf "%d GB of %d GB (%s)\n", $3,$2,$5}')
+CPU_LOAD=$(top -bn1 | grep load | awk '{printf "%.2f\n", $(NF-2)}')
+
+# Get Armbian info if available
+if [ -f /etc/armbian-release ] ; then source /etc/armbian-release ; fi
+
+# Get TI Debian if info available
+if [ -f /boot/SOC.sh ] ; then source /boot/SOC.sh
+
+# Get Raspbian info if available
+# if [ $id == "Raspbian" ] ; then
+
+echo ""
 #
 if [ $id == "Raspbian" ]
 then
@@ -65,6 +84,7 @@ then
         # echo # linux-headers = raspberrypi-kernel-headers
         # grep -i '^Revision'  /proc/cpuinfo | tr -d ' ' | cut -d ':' -f 2
         check_pi_version
+	echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
 fi
 
 if [ -f /etc/armbian-release ]
@@ -110,7 +130,25 @@ then
         echo boot_fstype=$boot_fstype   # fat
         echo serial_tty=$serial_tty     # ttyO2
         echo usbnet_mem=$usbnet_mem     # 16384
-        echo # linux-headers = linux-headers-$BRANCH-$LINUXFAMILY
+        echo # linux-headers = linux-headers-uname -r -y
+fi
+
+if [ $uname_machine == "x86_64" ]
+
+then
+        echo "=== Intel / AMD Debian ==="
+        echo id = $id             # Debian
+        echo release = $release   # 9.3
+        echo codename = $codename # stretch
+        echo kernel-name = $uname_kernel_name
+        echo kernel-release = $uname_kernel_release
+        echo kernel-version = $uname_kernel_version
+        echo machine = $uname_machine
+        echo operating-system = $uname_operating_system
+	echo Free Memory = $FREE_MEM
+	echo Disk Used = $DISK_USED
+	echo CPU Load = $CPU_LOAD
+        echo # linux-headers = linux-headers-uname -r -y
 fi
 
 
