@@ -2,6 +2,7 @@
 #AllStarLink Asterisk configure script
 #by N8THN Feb. 012, 2018
 #VERSION 1.90
+#release date 20180323-1
 /usr/bin/clear
 INTERACTIVE=True
 CONFIGS=/etc/asterisk
