@@ -48,6 +48,7 @@ function check_pi_version() {
 ############### Start Here #######################################
 
 # Try to collect general data
+# which lsb_release
 id=$(lsb_release -is)
 release=$(lsb_release -rs)
 codename=$(lsb_release -cs)
@@ -65,35 +66,60 @@ DISK_USED=$(df -h | awk '$NF=="/"{printf "%d GB of %d GB (%s)\n", $3,$2,$5}')
 CPU_LOAD=$(top -bn1 | grep load | awk '{printf "%.2f\n", $(NF-2)}')
 
 # Get Armbian info if available
-if [ -f /etc/armbian-release ] ; then source /etc/armbian-release ; fi
+if [ -f /etc/armbian-release ]
+then
+	source /etc/armbian-release
+	system_type=armbian
+fi
 
 # Get TI Debian if info available
-if [ -f /boot/SOC.sh ] ; then source /boot/SOC.sh
+if [ -f /boot/SOC.sh ]
+then
+	source /boot/SOC.sh
+	system_type=ti_debian
+fi
 
 # Get Raspbian info if available
-# if [ $id == "Raspbian" ] ; then
+if [ $id == "Raspbian" ]
+then
+	check_pi_version
+	system_type=rpi
+fi
+
+# Get Intel / AMD info if available
+if [ $uname_machine == "x86_64" ]
+then
+        system_type=intel-amd
+fi
 
 echo ""
 #
-if [ $id == "Raspbian" ]
+if [ $system_type == rpi ]
 then
         echo "=== Raspbian ==="
         echo id=$id             # Raspbian
         echo release=$release   # 9.4
         echo codename=$codename # stretch
+        echo Free Memory = $FREE_MEM
+        echo Disk Used = $DISK_USED
+        echo CPU Load = $CPU_LOAD
+
         # echo # linux-headers = raspberrypi-kernel-headers
         # grep -i '^Revision'  /proc/cpuinfo | tr -d ' ' | cut -d ':' -f 2
         check_pi_version
 	echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
 fi
 
-if [ -f /etc/armbian-release ]
+if [ $system_type == armbian ]
 then
         source /etc/armbian-release
         echo "=== Armbian ==="
         echo id=$id             # Debian
         echo release=$release   # 9.3
         echo codename=$codename # stretch
+        echo Free Memory = $FREE_MEM
+        echo Disk Used = $DISK_USED
+        echo CPU Load = $CPU_LOAD
 
         echo BOARD=$BOARD
         echo BOARD_NAME=$BOARD_NAME
@@ -109,7 +135,7 @@ then
         echo # linux-headers = linux-headers-$BRANCH-$LINUXFAMILY
 fi
 
-if [ -f /boot/SOC.sh ]
+if [ $system_type == ti_debian ]
 then
         source /boot/SOC.sh
         echo "=== Beagle Debian ==="
@@ -123,6 +149,9 @@ then
         # echo processor=$uname_processor
         # echo hardware-platform=$uname_hardware_platform
         echo operating-system=$uname_operating_system
+        echo Free Memory = $FREE_MEM
+        echo Disk Used = $DISK_USED
+        echo CPU Load = $CPU_LOAD
 
         echo format=$format
         echo board=$board       # omap3_beagle
@@ -133,7 +162,8 @@ then
         echo # linux-headers = linux-headers-uname -r -y
 fi
 
-if [ $uname_machine == "x86_64" ]
+if [ $system_type == intel-amd ]
+
 
 then
         echo "=== Intel / AMD Debian ==="
@@ -151,4 +181,11 @@ then
         echo # linux-headers = linux-headers-uname -r -y
 fi
 
+
+# dpkg --get-selections | grep -q linux-headers-$(uname -r)
+
+# if [ $? -eq 1 ]
+# then
+#         apt-get install linux-headers-$(uname -r)
+# fi
 
