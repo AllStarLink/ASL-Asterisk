@@ -13,8 +13,8 @@ set -o errexit
 #
 
 function check_pi_version() {
-  declare -gr REVCODE=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
-  declare -grA REVISIONS=(
+  declare -r REVCODE=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
+  declare -rA REVISIONS=(
     [0002]="Model B Rev 1, 256 MB RAM"
     [0003]="Model B Rev 1 ECN0001, 256 MB RAM"
     [0004]="Model B Rev 2, 256 MB RAM"
@@ -42,7 +42,7 @@ function check_pi_version() {
     [a02082]="3 Model B, 1 GB RAM"
     [a22082]="3 Model B, 1 GB RAM"
   )
-# echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
 }
 
 ############### Start Here #######################################
@@ -107,7 +107,7 @@ then
         # echo # linux-headers = raspberrypi-kernel-headers
         # grep -i '^Revision'  /proc/cpuinfo | tr -d ' ' | cut -d ':' -f 2
         check_pi_version
-	echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+#	echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
 fi
 
 if [ $system_type == armbian ]
