@@ -1,0 +1,46 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          updatenodelist
+# Required-Start:    $all
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      2 3 4 5 
+# Short-Description: Run /usr/local/bin/rc.updatenodelist if it exist
+### END INIT INFO
+
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+. /lib/init/vars.sh
+. /lib/lsb/init-functions
+
+do_start() {
+	if [ -x /usr/local/bin/rc.updatenodelist ]; then
+	        [ "$VERBOSE" != no ] && log_begin_msg "Running ASL Node List Updater"
+		/usr/local/bin/rc.updatenodelist &
+		ES=$?
+		[ "$VERBOSE" != no ] && log_end_msg $ES
+		return $ES
+	fi
+}
+
+case "$1" in
+    start)
+	do_start
+        ;;
+    reload|force-reload)
+        echo "Error: argument '$1' not supported" >&2
+        exit 3
+        ;;
+    stop)
+        killall -9 rc.updatenodelist
+        ;;
+    restart)
+        killall -9 rc.updatenodelist
+        do_start
+        ;;
+    *)
+        echo "Usage: $0 start|stop" >&2
+        exit 3
+        ;;
+esac

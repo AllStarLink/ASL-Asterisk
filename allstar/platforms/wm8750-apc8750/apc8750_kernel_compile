@@ -1,0 +1,75 @@
+#! /bin/sh
+
+# Revision: .000000003
+# refrenced from:
+
+# apt-get install ntp -y
+# dpkg-reconfigure tzdata
+
+apt-get update
+apt-get upgrade
+
+# install the required tools
+# apt-get install uboot-mkimage -y
+apt-get install u-boot-tools -y
+
+apt-get install libncurses5-dev -y
+apt-get install bc -y
+apt-get install lzop -y
+
+apt-get install g++ -y
+apt-get install make -y
+apt-get install build-essential -y
+apt-get install subversion -y
+apt-get install git -y
+
+cd /srv
+git clone --depth 1 https://github.com/linux-wmt/linux-vtwm.git
+cd /srv/linux-vtwm
+
+# Cross Compile on build-server:
+# make help ARCH=arm CROSS_COMPILE=/usr/bin/arm-none-eabi-
+
+# Build The kernel
+cp /srv/platforms/wm8750-apc8750/config .config
+make
+make modules
+make modules_install
+make zImage
+make dtbs
+
+# Installation
+
+# Get the kernel version
+KV=`make kernelversion`
+
+cat arch/arm/boot/zImage arch/arm/boot/dts/wm8750-apc8750.dtb >arch/arm/boot/zImage_w_dtb
+mkimage -A arm -O linux -T kernel -C none -a 0x8000 -e 0x8000 -n "apc-via Linux" -d arch/arm/boot/zImage_w_dtb ./uzImage.bin
+
+# build the scriptcmd for the uboot process
+# https://gitorious.org/linux-on-via-vt8500/pages/HowToUbootScriptcmd
+# Generate the final scriptcmd file (the one with a binary header) by issuing a command like this:
+# mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "My scriptcmd" -d script.txt scriptcmd
+
+# build .deb files
+# deb-pkg seems to have a problem with armel vs armhf so....
+# https://lists.debian.org/debian-arm/2012/05/msg00020.html
+# KBUILD_DEBARCH=armhf make deb-pkg
+
+
+# Backup boot files
+
+# mkdir /srv/new_boot
+# mkdir /srv/back_boot
+
+# Backup existing boot files
+# cp /boot/scriptcmd /srv/back_boot/scriptcmd
+# mv /boot/uzImage /srv/back_boot/uzImage
+
+# Stage new boot files
+# cp uzImage /srv/new_boot
+
+# put the new files in /boot
+# cp /srv/new_boot/uzImage /boot/uzImage
+
+

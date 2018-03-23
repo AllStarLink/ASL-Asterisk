@@ -1,0 +1,12 @@
+These scripts, patches and files were moved off older ASL install repositories. They are being updated.
+Read them before you execute them. If you are planning to build AllStarLink Asterisk
+from source, they should help.
+
+There is no single script that will install AllStarLink Asterisk from source on your target machine.
+I expect if you want to build from source, you have some idea what you are doing. Otherwise use
+the apt-get install method
+
+This directory is a work in progress.
+
+Steve N4IRS
+
