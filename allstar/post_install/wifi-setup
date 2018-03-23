@@ -2,6 +2,7 @@
 # wifi-setup for use with AllstarLink first-time script
 # N8THN
 # V1.0
+#release date 20180323-1
 
 if (whiptail --title "WIFI setup" --yesno "Would you like to set up connection to WIFI?" 20 80) then
 ANSWER=$?
