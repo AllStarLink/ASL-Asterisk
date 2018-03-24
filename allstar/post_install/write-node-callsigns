@@ -1,19 +1,10 @@
-#!/usr/bin/env bash
-set -o errexit
-
-# N4IRS 07/26/2017
-
-#################################################
-#                                               #
-#                                               #
-#                                               #
-#################################################
-
+#!/bin/bash
+#
 #  Created by Marshall Dias
 #  Modified by Doug, WA3DSP 8/18/2015
-#  Downloaded from http://hamvoip.org/downloads/write_node_callsigns.tar.gz
-#  Modified by Steve N4IRS 4/11/2016
-
+#
+# using ULAW format
+#
 # Script to write Calls to /var/lib/asterisk/sounds/rpt/nodenames
 # which will then be used in place of node numbers. This script
 # will NOT overwrite exisitng files unless you use the -o option.
@@ -28,44 +19,13 @@ set -o errexit
 
 # See all comments below
 
-# N4IRS
-# Check for astdb.php from Tim WD6AWP. If not found download it from the allmon2 git repository
-# Is astdb.php installed?
-which astdb.php > /dev/null 2>&1
-if [ $? -ne 0 ]
-then
-  echo "astdb.php not found in path"
-  wget https://github.com/tsawyer/allmon2/raw/master/astdb.php -O /usr/local/bin/astdb.php
-  chmod +x /usr/local/bin/astdb.php
-fi
-
-# Backup existing nodenames directory
-mv /var/lib/asterisk/sounds/rpt/nodenames /var/lib/asterisk/sounds/rpt/nodenames.save
-mkdir -p /var/lib/asterisk/sounds/rpt/nodenames
-
-# Check for asterisk gsm sound files
-if [ ! -d /var/lib/asterisk/sounds-gsm ]
-then
-  echo "GSM sound directory not found"
-  mkdir -p /srv/download
-  cd /srv/download
-  wget http://downloads.digium.com/pub/telephony/sounds/releases/asterisk-core-sounds-en-gsm-1.4.9.tar.gz
-  wget http://downloads.digium.com/pub/telephony/sounds/releases/asterisk-extra-sounds-en-gsm-1.4.8.tar.gz
-  mkdir -p /var/lib/asterisk/sounds-gsm
-  tar zxvf /srv/download/asterisk-core-sounds-en-gsm-1.4.9.tar.gz -C /var/lib/asterisk/sounds-gsm
-  tar zxvf /srv/download/asterisk-extra-sounds-en-gsm-1.4.8.tar.gz -C /var/lib/asterisk/sounds-gsm
-fi
- 
-# get a fresh copy of the nodelist text file
-cd /var/log/asterisk
-/usr/local/bin/astdb.php
-
 # Set the source directory to the Allstar database on your system.
 # 'locate astdb.php'  This file will exist if you are running any of the
 # images from hamvoip.org or you have installed allmon or lsnodes on
 # your system. For the BBB and RPi2 it will generally be /var/log/asterisk
 
-SRCDIR=/var/log/asterisk
+#SRCDIR=/var/log/asterisk
+SRCDIR=/var/www/html/allmon2
 
 # Set the destination directory.
 # Use a tmp directory for testing
@@ -80,8 +40,8 @@ DESTDIR=/var/lib/asterisk/sounds/rpt/nodenames
 # Definitions of sound file directories
 
 NODENAMES=/var/lib/asterisk/sounds/rpt/nodenames
-LETTERS=/var/lib/asterisk/sounds-gsm/letters
-NUMBERS=/var/lib/asterisk/sounds-gsm/digits
+LETTERS=/var/lib/asterisk/sounds/letters
+NUMBERS=/var/lib/asterisk/sounds/digits
 STRING=""
 
 usage()
@@ -162,10 +122,10 @@ make_call ()
   char=${foo:$i:1}
 
                 case ${foo:$i:1} in
-                [0-9]*) FILENAME=$NUMBERS/$char.gsm ;;
-                "/") FILENAME=$LETTERS/slash.gsm ;;
-                "-") FILENAME=$LETTERS/dash.gsm ;;
-                [a-z]*|[A-Z]*) FILENAME=$LETTERS/$char.gsm ;;
+                [0-9]*) FILENAME=$NUMBERS/$char.ulaw ;;
+                "/") FILENAME=$LETTERS/slash.ulaw ;;
+                "-") FILENAME=$LETTERS/dash.ulaw ;;
+                [a-z]*|[A-Z]*) FILENAME=$LETTERS/$char.ulaw ;;
                 esac
 STRING="$STRING $FILENAME"
 done
@@ -176,14 +136,14 @@ write_call ()
 {
 if [ ! $OVERWRITE ]
  then
-   if [ -f "$DESTDIR/$f1.gsm" ]
+   if [ -f "$DESTDIR/$f1.ulaw" ]
      then
-        echo "$DESTDIR/$f1.gsm exists - not overwriting"
+        echo "$DESTDIR/$f1.ulaw exists - not overwriting"
         return
    fi
 fi
-echo "Writing $DESTDIR/$f1.gsm"
-cat $STRING > "$DESTDIR/$f1.gsm"
+echo "Writing $DESTDIR/$f1.ulaw"
+cat $STRING > "$DESTDIR/$f1.ulaw"
 }
 
 # If no node given process all nodes
@@ -210,5 +170,4 @@ else
   make_call
   write_call
 fi
-
 
