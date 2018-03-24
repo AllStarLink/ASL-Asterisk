@@ -141,9 +141,9 @@ else
         # rewrite /etc/network/interfaces
         sed -i "/iface $ETH inet/c\iface $ETH inet dhcp" /etc/network/interfaces
         sed -i "/iface wlan0 inet/c\iface wlan0 inet dhcp" /etc/network/interfaces
-        sed -i '/address/c\' /etc/network/interfaces
-        sed -i '/netmask/c\' /etc/network/interfaces
-        sed -i '/gateway/c\' /etc/network/interfaces
+        sed -i '/address/d' /etc/network/interfaces
+        sed -i '/netmask/d' /etc/network/interfaces
+        sed -i '/gateway/d' /etc/network/interfaces
         whiptail --msgbox "Finished writing settings in interfaces for DHCP addressing." 10 78
 
 fi
