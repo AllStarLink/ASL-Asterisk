@@ -25,7 +25,7 @@
 # your system. For the BBB and RPi2 it will generally be /var/log/asterisk
 
 #SRCDIR=/var/log/asterisk
-SRCDIR=/var/www/html/allmon2
+SRCDIR=/var/www/html/allmon
 
 # Set the destination directory.
 # Use a tmp directory for testing
