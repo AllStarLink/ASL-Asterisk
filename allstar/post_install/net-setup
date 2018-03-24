@@ -1,8 +1,8 @@
 #!/bin/bash
 # Origianl by N4IRS
 # mod4whip N8THN
-# V1.3 Mar 22
-#release date 20180323-1
+# V1.2 Feb 25
+#date 20180324
 # Network interface setup script
 #
 # Function calculates number of bit in a netmask
@@ -99,24 +99,34 @@ numbits=$nbits
 if [ "$DHCPCD_YN" = "YES" ]; then
 # write dhcpd.conf
         cp -r /etc/dhcpcd.conf /etc/dhcpcd.conf.orig
+        sed -i '/^interface/d' /etc/dhcpcd.conf
+        sed -i '/^static/d' /etc/dhcpcd.conf
         echo "# define static profile for eth0" >> /etc/dhcpcd.conf
         echo "interface $ETH" >> /etc/dhcpcd.conf
         echo "static ip_address=$IPADDR/$numbits" >> /etc/dhcpcd.conf
         echo "static routers=$DGW" >> /etc/dhcpcd.conf
         echo "static domain_name_servers=$PDNS, $SDNS" >> /etc/dhcpcd.conf
+        ip link show | grep wlan > /dev/null
+        if [ $? = 0 ]; then
         echo "# define static profile for wlan " >> /etc/dhcpcd.conf
         echo "interface wlan0" >> /etc/dhcpcd.conf
         echo "static ip_address=$IPADDR/$numbits" >> /etc/dhcpcd.conf
         echo "static routers=$DGW" >> /etc/dhcpcd.conf
         echo "static domain_name_servers=$PDNS, $SDNS" >> /etc/dhcpcd.conf
-
+        fi
         whiptail --msgbox "Finished writing DHCPCD settings for static IP addressing." 10 78
 else
         # rewrite /etc/network/interfaces
+        sed -i '/address/d' /etc/network/interfaces
+        sed -i '/netmask/d' /etc/network/interfaces
+        sed -i '/gateway/d' /etc/network/interfaces
         sed -i "/iface $ETH inet/c\iface $ETH inet static" /etc/network/interfaces
         sed -i "/iface $ETH inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW" /etc/network/interfaces
+        ip link show | grep wlan > /dev/null
+        if [ $? = 0 ] ;then
         sed -i "/iface wlan0 inet/c\iface $ETH inet static" /etc/network/interfaces
         sed -i "/iface wlan0 inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW" /etc/network/interfaces
+        fi
         whiptail --msgbox "Finished writing settings in interfaces file for static IP addressing." 10 78
 fi
 }
@@ -140,7 +150,10 @@ if [ "$DHCPCD_YN" = "YES" ]; then
 else
         # rewrite /etc/network/interfaces
         sed -i "/iface $ETH inet/c\iface $ETH inet dhcp" /etc/network/interfaces
+        ip link show | grep wlan > /dev/null
+        if [ $? =0 }; then
         sed -i "/iface wlan0 inet/c\iface wlan0 inet dhcp" /etc/network/interfaces
+        fi
         sed -i '/address/d' /etc/network/interfaces
         sed -i '/netmask/d' /etc/network/interfaces
         sed -i '/gateway/d' /etc/network/interfaces
@@ -164,6 +177,4 @@ else
 do_dhcpcd_yn
 do_static_dhcp_menu
 fi
-
-
 
