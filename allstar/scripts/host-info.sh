@@ -42,7 +42,10 @@ function check_pi_version() {
     [a02082]="3 Model B, 1 GB RAM"
     [a22082]="3 Model B, 1 GB RAM"
   )
-echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+# echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+
+RPI_REVCODE=${REVCODE}
+RPI_REVISION=${REVISIONS[${REVCODE}]}
 }
 
 ############### Start Here #######################################
@@ -97,9 +100,9 @@ echo ""
 if [ $system_type == rpi ]
 then
         echo "=== Raspbian ==="
-        echo id=$id             # Raspbian
-        echo release=$release   # 9.4
-        echo codename=$codename # stretch
+        echo id = $id             # Raspbian
+        echo release = $release   # 9.4
+        echo codename = $codename # stretch
         echo Free Memory = $FREE_MEM
         echo Disk Used = $DISK_USED
         echo CPU Load = $CPU_LOAD
@@ -107,7 +110,8 @@ then
         # echo # linux-headers = raspberrypi-kernel-headers
         # grep -i '^Revision'  /proc/cpuinfo | tr -d ' ' | cut -d ':' -f 2
         check_pi_version
-#	echo "Raspberry Pi ${REVISIONS[${REVCODE}]} (${REVCODE})"
+	echo "Raspberry Pi $RPI_REVISION ($RPI_REVCODE)"
+
 fi
 
 if [ $system_type == armbian ]
