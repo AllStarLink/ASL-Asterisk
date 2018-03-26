@@ -7,7 +7,7 @@ chmod +x /install-repository
 ./install-repository
 
 If Raspbian:
-apt-get install raspberrypi-kernel-headers -y
+apt-get install linux-headers-`uname -r` -y
 
 Otherwise:
 apt-get install linux-headers-`uname -r` -y
