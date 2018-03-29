@@ -12,7 +12,7 @@ set -o errexit
 # Functions must be defined before they are used
 #
 
-function check_pi_version() {
+function get_pi_version() {
   declare -r REVCODE=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
   declare -rA REVISIONS=(
     [0002]="Model B Rev 1, 256 MB RAM"
@@ -50,12 +50,21 @@ RPI_REVISION=${REVISIONS[${REVCODE}]}
 
 ############### Start Here #######################################
 
-# Try to collect general data
 # which lsb_release
 id=$(lsb_release -is)
 release=$(lsb_release -rs)
 codename=$(lsb_release -cs)
 
+# If exists /proc/device-tree/
+DEVTREE_MODEL=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/model)
+DEVTREE_COMPATABLE=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/compatible)
+
+# If exists /proc/cpuinfo
+CPUINFO_MODEL=$(awk '/model name/ {print $4}' /proc/cpuinfo)
+CPUINFO_HARDWARE=$(awk '/Hardware/ {print $3}' /proc/cpuinfo)
+CPUINFO_REVISION=$(awk '/Revision/ {print $3}' /proc/cpuinfo)
+
+# which uname
 uname_kernel_name=$(uname -s)
 uname_kernel_release=$(uname -r)
 uname_kernel_version=$(uname -v)
@@ -85,36 +94,39 @@ fi
 # Get Raspbian info if available
 if [ $id == "Raspbian" ]
 then
-	check_pi_version
+#	get_pi_version
 	system_type=rpi
 fi
 
+
 # Get Intel / AMD info if available
-if [ $uname_machine == "x86_64" ]
+if [ $uname_machine == "x86_64" ] || [ $uname_machine == "i686" ]
 then
         system_type=intel-amd
 fi
 
 echo ""
 #
-if [ $system_type == rpi ]
+if [[ $system_type == rpi ]]
 then
         echo "=== Raspbian ==="
         echo id = $id             # Raspbian
         echo release = $release   # 9.4
         echo codename = $codename # stretch
+	echo Device Tree Compatable = $DEVTREE_COMPATABLE
+        echo Device Tree Model = $DEVTREE_MODEL
         echo Free Memory = $FREE_MEM
         echo Disk Used = $DISK_USED
         echo CPU Load = $CPU_LOAD
 
         # echo # linux-headers = raspberrypi-kernel-headers
         # grep -i '^Revision'  /proc/cpuinfo | tr -d ' ' | cut -d ':' -f 2
-        check_pi_version
+        get_pi_version
 	echo "Raspberry Pi $RPI_REVISION ($RPI_REVCODE)"
 
 fi
 
-if [ $system_type == armbian ]
+if [[ $system_type == armbian ]]
 then
         source /etc/armbian-release
         echo "=== Armbian ==="
@@ -139,7 +151,7 @@ then
         echo # linux-headers = linux-headers-$BRANCH-$LINUXFAMILY
 fi
 
-if [ $system_type == ti_debian ]
+if [[ $system_type == ti_debian ]]
 then
         source /boot/SOC.sh
         echo "=== Beagle Debian ==="
@@ -166,7 +178,7 @@ then
         echo # linux-headers = linux-headers-uname -r -y
 fi
 
-if [ $system_type == intel-amd ]
+if [[ $system_type == intel-amd ]]
 
 
 then
