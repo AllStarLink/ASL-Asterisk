@@ -56,8 +56,10 @@ release=$(lsb_release -rs)
 codename=$(lsb_release -cs)
 
 # If exists /proc/device-tree/
-DEVTREE_MODEL=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/model)
-DEVTREE_COMPATABLE=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/compatible)
+if [[ -d "/proc/device-tree" && ! -L " /proc/device-tree" ]] ; then
+	DEVTREE_MODEL=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/model)
+	DEVTREE_COMPATABLE=$(awk '{print $1} {print $2} {print $3} {print $4} {print $5} {print $6}' /proc/device-tree/compatible)
+fi
 
 # If exists /proc/cpuinfo
 CPUINFO_MODEL=$(awk '/model name/ {print $4}' /proc/cpuinfo)
