@@ -13,8 +13,8 @@ if [ `whoami` != root ]; then
 fi
 # set variables for current values
 ##############################################
-hostfile=/tmp/hosts
-hostnamefile=/tmp/hostname
+hostfile=/etc/hosts
+hostnamefile=/etc/hostname
 
 # returns empty if currently DHCP
 IP=$(grep Address= /etc/systemd/network/eth0.network | awk -F'=' '{print $2}' | awk -F'/' '{print $1}')
