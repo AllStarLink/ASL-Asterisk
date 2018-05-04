@@ -1,9 +1,9 @@
 #!/bin/bash
 # Origianl by N4IRS
 # mod4whip N8THN
-# V2.0 Apr 2018
+# V2.1 May 2018
 
-# release date 20180420
+# release date 20180503
 
 # Network interface setup script
 #
@@ -138,11 +138,11 @@ else
         sed -i '/netmask/d' /etc/network/interfaces
         sed -i '/gateway/d' /etc/network/interfaces
         sed -i "/iface $ETH inet/c\iface $ETH inet static" /etc/network/interfaces
-        sed -i "/iface $ETH inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW" /etc/network/interfaces
+        sed -i "/iface $ETH inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW \ndns-nameservers $PDNS $SDNS" /etc/network/interfaces
         ip link show | grep wlan > /dev/null
         if [ $? = 0 ] ;then
         sed -i "/iface wlan0 inet/c\iface $ETH inet static" /etc/network/interfaces
-        sed -i "/iface wlan0 inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW" /etc/network/interfaces
+        sed -i "/iface wlan0 inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW \ndns-nameservers $PDNS $SDNS" /etc/network/interfaces
         fi
         whiptail --msgbox "Finished writing settings in interfaces file for static IP addressing\nChanges will take effect after reboot" 10 78
 fi
@@ -174,6 +174,7 @@ else
         sed -i '/address/d' /etc/network/interfaces
         sed -i '/netmask/d' /etc/network/interfaces
         sed -i '/gateway/d' /etc/network/interfaces
+        sed -i '/dns-nameservers/d' /etc/network/interfaces
         whiptail --msgbox "Finished writing settings in interfaces for DHCP addressing\nChanges will take effect after reboot" 10 78
 
 fi
