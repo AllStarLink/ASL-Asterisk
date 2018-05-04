@@ -1,9 +1,9 @@
 #!/bin/bash
 #ASL-MENU
-#V2.0
-#2018 March
+#V2.1
+#2018 May
 #By N8THN
-#release date 20180323-1
+#release date 20180503
 clear
 
 # define variables
@@ -372,6 +372,14 @@ clear
 $ASTERISK -rvvv
 }
 
+do_bash_shell() {
+echo "do_bash_shell" >> $logfile
+whiptail --msgbox "Type   exit   to return to ASL-MENU" 20 60 2
+/bin/bash
+}
+
+
+
 ############### Diagnostics menu sub sections
 
 do_ping_google_dns() {
@@ -525,6 +533,17 @@ whiptail --msgbox "Uploading diagnostic file to ASL Admin team" 20 60 2
 }
 
 ################### OS subsections
+
+do_sethost() {
+echo "do_sethost" >> $logfile
+/usr/local/sbin/set-host
+}
+
+do_netsetup() {
+echo "do_netsetup" >> $logfile
+/usr/local/sbin/net-setup
+}
+
 
 do_edit_allmon_config() {
 echo "do_edit_allmon_config" >> $logfile
@@ -860,7 +879,6 @@ cat << _EOF > $FIREWALLFILE
 -A fail2ban-asterisk-tcp -j RETURN
 -A fail2ban-ssh -j RETURN
 COMMIT
-
 _EOF
 
 $IPTABLES_RESTORE < $FIREWALLFILE
@@ -901,7 +919,6 @@ cat << _EOF > $FIREWALLFILE
 -A INPUT -j REJECT --reject-with icmp-port-unreachable
 -A FORWARD -j REJECT --reject-with icmp-port-unreachable
 COMMIT
-
 _EOF
 
 $IPTABLES_RESTORE < $FIREWALLFILE
@@ -939,9 +956,7 @@ whiptail --msgbox "This will install basic fail2ban filter rules to help protect
 get_node_info
 cat << _EOF > $FAIL2BANFILE
 ; use a semi-colon to comment out a line item
-
 [ssh]
-
 enabled = true
 port = ssh
 filter = sshd
@@ -951,9 +966,7 @@ banaction = iptables-allports
 findtime = 150
 maxretry = 3
 ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-
 [asterisk-tcp]
-
 enabled = true
 port = $MGRPORT
 filter = asterisk
@@ -963,7 +976,6 @@ banaction = iptables-allports
 findtime = 300
 maxretry = 5
 ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-
 [asterisk]
 enabled  = true
 filter   = asterisk
@@ -972,7 +984,6 @@ protocol = all
 logpath  = /var/log/asterisk/messages
 maxretry = 5
 ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-
 _EOF
 
 whiptail --msgbox "File $FAIL2BANFILE created.\nRestarting fail2ban service with the new rules" 20 60 2
@@ -1168,6 +1179,7 @@ RET=0
       "8 " "System Security Menu" \
       "9 " "System Diagnostics Menu" \
       "0 " "Information" \
+      "S " "Start a bash shell" \
       3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -eq 1 ]; then
@@ -1184,6 +1196,7 @@ RET=0
         8\ *) do_sys_security_menu ;;
         9\ *) do_sys_diags_menu ;;
         0\ *) info_main_menu ;;
+        S\ *) do_bash_shell ;;
         *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
       esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
     else
@@ -1248,10 +1261,12 @@ RET=0
       "B " "Run apt-get upgrade" \
       "C " "Install/upgrade firewall" \
       "D " "Install/upgrade fail2ban" \
-      "E " "Install ASL Addons Menu" \
-      "F " "Change CPU performance (overclocking)" \
-      "G " "Use asl-menu at login" \
-      "H " "Information" \
+      "E " "Set hostname and domain name" \
+      "F " "Set DHCP or STATIC IP" \
+      "G " "Install ASL Addons Menu" \
+      "H " "Change CPU performance (overclocking)" \
+      "I " "Use asl-menu at login" \
+      "J " "Information" \
       3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -eq 1 ]; then
@@ -1262,10 +1277,12 @@ RET=0
         B\ *) do_apt_get_upgrade ;;
         C\ *) do_install_firewall ;;
         D\ *) do_install_fail2ban ;;
-        E\ *) do_addon_packages_menu ;;
-        F\ *) do_cpu_clocking_menu ;;
-        G\ *) do_use_aslmenu ;;
-        H\ *) info_OS_menu ;;
+        E\ *) do_sethost ;;
+        F\ *) do_netsetup ;;
+        G\ *) do_addon_packages_menu ;;
+        H\ *) do_cpu_clocking_menu ;;
+        I\ *) do_use_aslmenu ;;
+        J\ *) info_OS_menu ;;
         *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
       esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
     else
@@ -1488,5 +1505,3 @@ check_config_files
 do_main_menu
 clear
 exit 0
-
-
