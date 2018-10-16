@@ -171,7 +171,7 @@ USBRADIOMODULE=NO
 echo "USBRADIOMODULE=NO" >> $logfile
 fi
 # is rxchannel
-grep '^rxchannel[ \t]*=[ \t]*radio' $CONFIGS/rpt.conf > /dev/null
+grep -i '^rxchannel[ \t]*=[ \t]*Radio' $CONFIGS/rpt.conf > /dev/null
 if [ $? -eq 0 ]; then
 RXCHUSBRADIO=YES
 else
@@ -194,7 +194,7 @@ SIMPLEUSBMODULE=YES
 else
 SIMPLEUSBMODULE=NO
 fi
-grep '^rxchannel[ \t]*=[ \t]*Simple' $CONFIGS/rpt.conf > /dev/null
+grep -i '^rxchannel[ \t]*=[ \t]*Simple' $CONFIGS/rpt.conf > /dev/null
 if [ $? -eq 0 ]; then
 RXCHSIMPLEUSB=YES
 else
