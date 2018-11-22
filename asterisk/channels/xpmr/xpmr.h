@@ -24,6 +24,7 @@
  * A license has been granted to Digium (via disclaimer) for the use of
  * this code.
  *
+ * 20160829      inad            added rxlpf rxhpf txlpf txhpf
  */
 
 /*! \file
@@ -636,6 +637,10 @@ typedef struct	t_pmr_chan
 
 	char radioDuplex;
 	char rxNoiseFilType;
+    int	 rxlpf;
+    int	 rxhpf;
+    int	 txlpf;
+    int	 txhpf;
 
 	char    *pStr;
 

@@ -1,7 +1,0 @@
-To enable MDC1200 decoding in app_rpt, copy mdc_decode.c and mdc_decode.h to /usr/src/asterisk/apps, and refer to the following in app_rpt.c:
-
-/* Un-comment the following to include support for MDC-1200 digital tone
-   signalling protocol (using KA6SQG's GPL'ed implementation) */
-/* #include "mdc_decode.c" */
-
-

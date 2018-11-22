@@ -1,0 +1,197 @@
+#!/bin/bash
+# Origianl by N4IRS
+# mod4whip N8THN
+# V2.1 May 2018
+
+# release date 20180503
+
+# Network interface setup script
+#
+#
+DHCPCDPATH=/etc/dhcpcd.conf
+INTPATH=/etc/network/interfaces
+IFUPDPATH=/etc/network/if-up.d/touchfile
+RESOLVPATH=/etc/resolv.conf
+
+#HOSTN=$(cat /etc/hostname)
+#FQDN=$(hostname -f)
+#DOMN=$(hostname -d)
+#HOSTNAME=`echo $FQDN |awk -F. '{ print $1 }'`
+DPKG_QUERY=$(which dpkg-query)
+
+ETHS=$(ip -o link show | awk -F': ' '{print $2}' | grep ^en)
+MULTI=$(ip -o link show | awk -F': ' '{print $2}' | grep -c ^en)
+if [ $MULTI -gt 1 ]; then
+MULTIETH="YES"
+else
+MULTIETH="NO"
+fi
+
+ETH=$(ip -o link show | awk -F': ' '{print $2}' | grep ^en)
+if [ $? = "1" ]; then
+        ETH=eth0
+fi
+
+
+mask2cidr() {
+    nbits=0
+    IFS=.
+    for dec in $1 ; do
+        case $dec in
+            255) let nbits+=8;;
+            254) let nbits+=7 ; break ;;
+            252) let nbits+=6 ; break ;;
+            248) let nbits+=5 ; break ;;
+            240) let nbits+=4 ; break ;;
+            224) let nbits+=3 ; break ;;
+            192) let nbits+=2 ; break ;;
+            128) let nbits+=1 ; break ;;
+            0) let nbits+=0 ; break ;;
+            *) whiptail --msgbox "Error: parsing netmask $dec is not recognised" 20 60 1; exit 1
+        esac
+    done
+}
+
+
+do_dhcpcd_yn() {
+systemctl status dhcpcd 2> /dev/null 1> /dev/null
+if [ $? = 0 ]; then
+DHCPCD_YN=YES
+else
+DHCPCD_YN=NO
+fi
+}
+
+
+do_static_dhcp_menu() {
+  while true; do
+    FUNIP=$(whiptail --title "DHCP or Static" --menu "Network addressing options" 20 80 5 --cancel-button Back --ok-button Select \
+      "S Static" "Set Static IP addressing" \
+      "D DHCP" "Set DHCP addressing" \
+      3>&1 1>&2 2>&3)
+    RETIP=$?
+    if [ $RETIP -eq 1 ]; then
+      return
+    elif [ $RETIP -eq 0 ]; then
+      case "$FUNIP" in
+        S\ *) do_set_static ;;
+        D\ *) do_set_dhcp ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUNA" 20 60 1
+    fi
+  done
+  return
+}
+
+
+do_set_static() {
+if [ $MULTIETH = "YES" ]; then
+ETH_IFACE=$(whiptail --inputbox "Enter Ethernet interface to use:\n$ETHS \n" 20 78 3>&1 1>&2 2>&3)
+ETH=$ETH_IFACE
+fi
+IPADDR=$(whiptail --inputbox "Enter the IP address for interface $ETH \nin the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
+NETMASK=$(whiptail --inputbox "Enter the netmask in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
+mask2cidr $NETMASK
+numbits=$nbits
+DGW=$(whiptail --inputbox "Enter the default gateway in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
+PDNS=$(whiptail --inputbox "Enter the address of the primary nameserver in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
+SDNS=$(whiptail --inputbox "Enter the address of the secondary nameserver in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
+if (whiptail --yesno "So we have: \n\nIP Address/CIDR  : $IPADDR/$numbits\nNetmask          : $NETMASK\nDefault Gateway  : $DGW\nPrimary DNS      : $PDNS\nSecondary DNS    : $SDNS\n\nSelect yes to continue or no to start over." 30 80); then
+# yes, write it
+do_static_write
+else
+# no, re-enter
+do_set_static
+fi
+}
+
+do_static_write() {
+if [ "$DHCPCD_YN" = "YES" ]; then
+# write dhcpd.conf
+        cp -r /etc/dhcpcd.conf /etc/dhcpcd.conf.orig
+        whiptail --msgbox "Removing any previous static entries" 20 60 2
+        sed -i '/^profile static/d' /etc/dhcpcd.conf
+        sed -i '/^interface/d' /etc/dhcpcd.conf
+        sed -i '/^static/d' /etc/dhcpcd.conf
+        whiptail --msgbox "Writing static settings in /etc/dhcpcd.conf" 20 60 2
+        echo "# define static profile for eth0" >> /etc/dhcpcd.conf
+        echo "profile static_$ETH" >> /etc/dhcpcd.conf
+        echo "interface $ETH" >> /etc/dhcpcd.conf
+        echo "static ip_address=$IPADDR/$numbits" >> /etc/dhcpcd.conf
+        echo "static routers=$DGW" >> /etc/dhcpcd.conf
+        echo "static domain_name_servers=$PDNS, $SDNS" >> /etc/dhcpcd.conf
+        ip link show | grep wlan > /dev/null
+        if [ $? = 0 ]; then
+        whiptail --msgbox "Wireless interface found  Writing settings for wlan0 also" 20 60 1
+        echo "# define static profile for wlan " >> /etc/dhcpcd.conf
+        echo "profile static_wlan0" >> /etc/dhcpcd.conf
+        echo "interface wlan0" >> /etc/dhcpcd.conf
+        echo "static ip_address=$IPADDR/$numbits" >> /etc/dhcpcd.conf
+        echo "static routers=$DGW" >> /etc/dhcpcd.conf
+        echo "static domain_name_servers=$PDNS, $SDNS" >> /etc/dhcpcd.conf
+        fi
+        whiptail --msgbox "Finished writing DHCPCD settings for static IP addressing\nChanges will take effect after reboot" 10 78
+else
+        # rewrite /etc/network/interfaces
+        whiptail --msgbox "DHCPCD not used, writing settings to /etc/network/interfaces" 20 60 2
+        sed -i '/address/d' /etc/network/interfaces
+        sed -i '/netmask/d' /etc/network/interfaces
+        sed -i '/gateway/d' /etc/network/interfaces
+        sed -i "/iface $ETH inet/c\iface $ETH inet static" /etc/network/interfaces
+        sed -i "/iface $ETH inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW \ndns-nameservers $PDNS $SDNS" /etc/network/interfaces
+        ip link show | grep wlan > /dev/null
+        if [ $? = 0 ] ;then
+        sed -i "/iface wlan0 inet/c\iface $ETH inet static" /etc/network/interfaces
+        sed -i "/iface wlan0 inet static/a address $IPADDR \nnetmask $NETMASK \ngateway $DGW \ndns-nameservers $PDNS $SDNS" /etc/network/interfaces
+        fi
+        whiptail --msgbox "Finished writing settings in interfaces file for static IP addressing\nChanges will take effect after reboot" 10 78
+fi
+}
+
+do_set_dhcp() {
+if [ "$DHCPCD_YN" = "YES" ]; then
+        # read /etc/dhcpcd.conf and comment out any static settings.
+        cp -f /etc/dhcpcd.conf /etc/dhcpcd.conf.static
+        # profile static_eth0
+        sed -i 's/^profile static*/#&/' /etc/dhcpcd.conf
+        # interface eth0
+        sed -i "s/^interface $ETH/#&/" /etc/dhcpcd.conf
+        # static ip_address=192.168.1.23/24
+        sed -i 's/^static ip_add*/#&/' /etc/dhcpcd.conf
+        # static routers=192.168.1.1
+        sed -i 's/^static router*/#&/' /etc/dhcpcd.conf
+        # static domain_name_servers=192.168.1.1
+        sed -i 's/^static domain_nam*/#&/' /etc/dhcpcd.conf
+
+        whiptail --msgbox "Commented out any static IP settings in /etc/dhcpcd.conf \nreturning to DHCP IP addressing\nChanges will take effect after reboot" 10 78
+else
+        # rewrite /etc/network/interfaces
+        sed -i "/iface $ETH inet/c\iface $ETH inet dhcp" /etc/network/interfaces
+        ip link show | grep wlan > /dev/null
+        if [ $? =0 }; then
+        sed -i "/iface wlan0 inet/c\iface wlan0 inet dhcp" /etc/network/interfaces
+        fi
+        sed -i '/address/d' /etc/network/interfaces
+        sed -i '/netmask/d' /etc/network/interfaces
+        sed -i '/gateway/d' /etc/network/interfaces
+        sed -i '/dns-nameservers/d' /etc/network/interfaces
+        whiptail --msgbox "Finished writing settings in interfaces for DHCP addressing\nChanges will take effect after reboot" 10 78
+
+fi
+}
+
+########  Main body here
+if (whiptail --title "Network setup" --yesno "Network DHCP or Static setup.\n\nDo you want to do this now?" 15 78) then
+ ANSWER=$?
+else
+ ANSWER=$?
+fi
+
+if [ $ANSWER = 1 ]
+then
+        whiptail --msgbox "You may set up your IP address settings later" 8 78
+        exit 0
+else
+do_dhcpcd_yn
+do_static_dhcp_menu
+fi

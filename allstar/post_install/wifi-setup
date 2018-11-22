@@ -1,0 +1,89 @@
+#!/bin/bash
+# wifi-setup for use with AllstarLink first-time script
+# N8THN
+# V1.0
+#release date 20180323-1
+
+if (whiptail --title "WIFI setup" --yesno "Would you like to set up connection to WIFI?" 20 80) then
+ANSWER=$?
+else
+ANSWER=$?
+fi
+
+if [ $ANSWER = 1 ]; then    # answered no
+        whiptail --msgbox "You may run wifi-setup at another time." 10 80 5
+        exit 0
+else
+
+get_country() {
+        CNTRY=$(whiptail --inputbox "Enter the two letter Country code.\nCommon two letter codes are.\nUS GB FR DE SE" 16 78 --title "Country Code" 3>&1 1>&2 2>&3)
+        COUNTRY=$(echo "$CNTRY" | tr '[:lower:]' '[:upper:]')
+}
+
+get_ssid() {
+        SSID=$(whiptail --inputbox "Enter the SSID of the network to connect to." 8 78 --title "SSID" 3>&1 1>&2 2>&3)
+}
+
+get_psk() {
+        PSK=$(whiptail --inputbox "Enter the Pre Shared Key for $SSID" 8 78 --title "PSK" 3>&1 1>&2 2>&3)
+}
+
+write_wpa() {
+cp -f /etc/wpa_supplicant/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant.conf.orig
+cat << _EOF > /etc/wpa_supplicant/wpa_supplicant.conf
+country=$COUNTRY
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+ap_scan=1
+fast_reauth=1
+
+network={
+        ssid="$SSID"
+        psk="$PSK"
+        id_str="1"
+        priority=100
+}
+network={
+        ssid="Network_2"
+        psk="yourpresharedkey"
+        id_str="2"
+        priority=99
+}
+network={
+        ssid="Network_3"
+        psk="yourpresharedkey"
+        id_str="3"
+        priority=98
+}
+
+_EOF
+
+}
+
+do_info() {
+        whiptail --msgbox "To add additional WIFI networks, edit the /etc/wpa_supplicant/wpa_supplicant.conf file" 20 80
+}
+
+do_verify_settings() {
+if (whiptail --title "Verify settings" --yesno "Make sure you don't have a tyyppo.\nSSID=$SSID \nPSK=$PSK \n\nSelect <Yes> to save these settings, <No> to start over." 20 80) then
+ANSWER=$?
+else
+ANSWER=$?
+fi
+}
+
+get_country
+get_ssid
+get_psk
+do_verify_settings
+while [ $ANSWER = 1 ]; do
+        get_ssid
+        get_psk
+        do_verify_settings
+done
+write_wpa
+do_info
+
+fi
+exit 0
+

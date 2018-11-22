@@ -217,7 +217,7 @@ ASTCFLAGS+=-Wall -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations
 
 UNAME_M:=$(shell uname -m)
 ifeq ($(UNAME_M),armv7l)
-ASTCFLAGS+=-Wno-unused-result
+ASTCFLAGS+=-lpthread -Wno-unused-result
 endif
 
 ifeq ($(AST_DEVMODE),yes)
@@ -258,13 +258,13 @@ endif
 
 ASTERISKVERSION:=$(shell GREP=$(GREP) AWK=$(AWK) build_tools/make_version .)
 
-ifneq ($(wildcard .version),)
-  ASTERISKVERSIONNUM:=$(shell $(AWK) -F. '{printf "%01d%02d%02d", $$1, $$2, $$3}' .version)
-endif
+# ifneq ($(wildcard .version),)
+#   ASTERISKVERSIONNUM:=$(shell $(AWK) -F. '{printf "%01d%02d%02d", $$1, $$2, $$3}' .version)
+# endif
 
-ifneq ($(wildcard .svn),)
-  ASTERISKVERSIONNUM=999999
-endif
+# ifneq ($(wildcard .svn),)
+#   ASTERISKVERSIONNUM=999999
+# endif
 
 ASTCFLAGS+=$(MALLOC_DEBUG)$(BUSYDETECT)$(OPTIONS)
 
@@ -672,9 +672,14 @@ config:
 		if [ -f /etc/redhat-release -o -f /etc/fedora-release ]; then \
 			$(INSTALL) -m 755 contrib/init.d/rc.redhat.asterisk $(DESTDIR)/etc/rc.d/init.d/asterisk; \
 			if [ -z "$(DESTDIR)" ]; then /sbin/chkconfig --add asterisk; fi; \
-		elif [ -f /etc/debian_version ]; then \
-			$(INSTALL) -m 755 contrib/init.d/rc.debian.asterisk $(DESTDIR)/etc/init.d/asterisk; \
-			if [ -z "$(DESTDIR)" ]; then /usr/sbin/update-rc.d asterisk start 50 2 3 4 5 . stop 91 2 3 4 5 .; fi; \
+
+
+		elif [ -f /etc/debian_version ] && [ -f /etc/systemd/system.conf ]; then \
+			$(INSTALL) -m 755 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
+			if [ -z "$(DESTDIR)" ]; then /bin/systemctl enable asterisk.service; fi; \
+                elif [ -f /etc/debian_version ] && [ ! -f /etc/systemd/system.conf ]; then \
+                        $(INSTALL) -m 755 contrib/init.d/rc.debian.asterisk $(DESTDIR)/etc/init.d/asterisk; \
+                        if [ -z "$(DESTDIR)" ]; then /usr/sbin/update-rc.d asterisk start 50 2 3 4 5 . stop 91 0 1 6 .; fi; \
 		elif [ -f /etc/gentoo-release ]; then \
 			$(INSTALL) -m 755 contrib/init.d/rc.gentoo.asterisk $(DESTDIR)/etc/init.d/asterisk; \
 			if [ -z "$(DESTDIR)" ]; then /sbin/rc-update add asterisk default; fi; \

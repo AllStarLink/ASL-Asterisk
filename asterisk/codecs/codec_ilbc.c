@@ -55,11 +55,11 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
 #include "ilbc_slin_ex.h"
 
 #define USE_ILBC_ENHANCER	0
-#define ILBC_MS 			30
-/* #define ILBC_MS			20 */
+/*#define ILBC_MS 			30 */
+#define ILBC_MS			20
 
-#define	ILBC_FRAME_LEN	50	/* apparently... */
-#define	ILBC_SAMPLES	240	/* 30ms at 8000 hz */
+#define	ILBC_FRAME_LEN	38	/* apparently... */
+#define	ILBC_SAMPLES	160	/* 20ms at 8000 hz */
 #define	BUFFER_SAMPLES	8000
 
 struct ilbc_coder_pvt {
@@ -107,7 +107,7 @@ static struct ast_frame *ilbctolin_sample(void)
 	f.frametype = AST_FRAME_VOICE;
 	f.subclass = AST_FORMAT_ILBC;
 	f.datalen = sizeof(ilbc_slin_ex);
-	/* All frames are 30 ms long */
+	/* All frames are 20 ms long */
 	f.samples = ILBC_SAMPLES;
 	f.mallocd = 0;
 	f.offset = 0;
@@ -135,7 +135,7 @@ static int ilbctolin_framein(struct ast_trans_pvt *pvt, struct ast_frame *f)
 	}
 
 	if (f->datalen % ILBC_FRAME_LEN) {
-		ast_log(LOG_WARNING, "Huh?  An ilbc frame that isn't a multiple of 50 bytes long from %s (%d)?\n", f->src, f->datalen);
+		ast_log(LOG_WARNING, "Huh?  An ilbc frame that isn't a multiple of 38 bytes long from %s (%d)?\n", f->src, f->datalen);
 		return -1;
 	}
 	

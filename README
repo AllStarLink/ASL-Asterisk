@@ -1,54 +1,9 @@
-This is the Asterisk source package for ACID and LIMEY LINUX
+This is the Asterisk source package for AllStarLink 
 
 asterisk-1.4.23pre
-libpri-1.4.7
-zaptel 1.4.12.1
 
-This a patched version of Asterisk to run with uClibc on an embedded mini-itx system and on an ACID automatic install disk.
+This branch will be merged into dev
 
-ACID BUILD INSTRUCTIONS
-----------------------
-
-The build is automatically handled by the astupd.sh script.
-
-
-LIMEY LINUX BUILD INSTRUCTIONS
------------------------------
-
-First, unpack this archive in /usr/src on the target system.
-
-If you are doing a new install, then use one of the following targets:
-
-make install_pciradio
-
-or
-
-make install_usbradio
-
-
-Choose the correct target for your hardware configuration. install_pciradio
-is for users with quad radio PCI cards, and install_usbradio is for users with
-a modified USB sound FOB, or commercially available URI.
-
-When the build completes, run the savecfg script on the target to save the
-Asterisk config files in /mnt/cf/syscfg.tgz so that they are loaded every
-time the system boots up.
-
-If you are doing an upgrade on a target already configured, then use this
-target:
-
-make upgrade
-
-DETAILS
--------
-
-The supplied Makefile will build zaptel, libpri and asterisk, then install them
-in the correct directories. Once they are installed, then the Makefile runs the
-svastbin script to generate the astbin.tgz file, and copies it to /mnt/cf.
-
-With a copy astbin.tgz the system will automatically unpack the asterisk
-binaries each time it is booted, load the correct drivers, and then start
-Asterisk.
 
 
 

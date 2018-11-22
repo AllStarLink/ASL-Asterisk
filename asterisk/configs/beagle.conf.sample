@@ -1,29 +1,25 @@
-;
-; chan_beagle.c configuration file
-;
+; If you are going to use this channel driver, you MUST enable it in modules.conf
+; enable it in modules.conf
+; change:
+; noload => chan_beagle.so ;                      Beagleboard Radio Interface Channel Driver
+; to:
+; load => chan_beagle.so ;                      Beagleboard Radio Interface Channel Driver
 
-[ch0]               ; left channel
-                    ; this starts the definition block for a device
+[general]
 
+[1]
+carrierfrom = hwinvert
+ctcssfrom = hwinvert
+invertptt = 0
+duplex = 1
+rxondelay = 0
+eeprom = 0
 
-carrierfrom=hw		; Carrier Detect Source
-			        ; Options - no,hw,hwinvert
-			        ; no - no carrier detection at all
-			        ; hw - via GPIO COR connection
-			        ; hwinvert - same as above but inverted polarity.
-
-ctcssfrom=dsp		; CTCSS Decoder Source
-			        ; Options - no,hw,hwinvert
-			        ; no - no carrier detection at all
-			        ; hw - via GPIO CTCSS connection
-			        ; hwinvert - same as above but inverted polarity.
-
-invertptt=0         ; Invert PTT 
-			        ; 0 = ground to transmit, 1 = open to transmit
-			        ; This is the collector lead of the 2N4401 transistor
-			        ; on the modified usb sound adapter.
-
-duplex=0            ; Connected Radio Device Duplex Capability
-                                ; 0 = Simplex (PTT / Release to Listen)
-                                ; 1 = Duplex (simultaneous Tx and Rx)
+[2]
+carrierfrom = hwinvert
+ctcssfrom = hwinvert
+invertptt = 0
+duplex = 1
+rxondelay = 0
+eeprom = 0
 

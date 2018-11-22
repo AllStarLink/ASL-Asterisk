@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -o errexit
+
+# N4IRS 07/26/2017
+# mod4whip N8THN 2018
+#release date 20180323-1
+#################################################
+#                                               #
+#                                               #
+#                                               #
+#################################################
+
+SAVESITE=http://backup.allstarlink.org
+
+if [ -r /etc/asterisk/savenode.conf ]
+then
+        .  /etc/asterisk/savenode.conf
+else
+        whiptail --msgbox "Savenode.conf file does not exist. Exiting." 20 60 2
+        exit 0
+fi
+
+if [ .$ENABLE = "." ]
+then
+        exit 0
+fi
+
+if [ $ENABLE -eq 0 ]
+then
+        exit 0
+fi
+
+whiptail --msgbox "Saving Asterisk node configuration to $SAVESITE" 20 60 2
+
+cd / && tar czf /tmp/astsave.tgz  etc/asterisk > /dev/null
+if [ $? -eq 0 ]
+then
+        wget -q --timeout=60 --tries=1 --post-file=/tmp/astsave.tgz  \
+            --http-user=$NODE --http-password=$PASSWORD -O- \
+            $SAVESITE/savenode.cgi
+        if [ $? -ne 0 ]
+        then
+                whiptail --msgbox "Error in transfer." 20 60 2
+        else
+                whiptail --msgbox "File transfer successful." 20 60 2
+        fi
+fi
+#rm -r /tmp/astsave.tgz > /dev/null
+exit 0
+

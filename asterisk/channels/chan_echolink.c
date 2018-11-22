@@ -90,6 +90,14 @@ do not use 127.0.0.1
 
 #include "asterisk.h"
 
+/*
+ * Please change this revision number when you make a edit
+ * use the simple format YYMMDD
+*/
+
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180112 $")
+// ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
+
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -151,7 +159,7 @@ do not use 127.0.0.1
 #define EL_MAX_SERVERS 3
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
-#define	EL_MAX_CALL_LIST 30
+#define	EL_MAX_CALL_LIST 60
 #define	EL_APRS_SERVER "aprs.echolink.org"
 #define	EL_APRS_INTERVAL 600
 #define	EL_APRS_START_DELAY 10

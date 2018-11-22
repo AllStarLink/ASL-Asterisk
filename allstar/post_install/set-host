@@ -1,0 +1,92 @@
+#!/bin/sh
+# original script by N4IRS
+# mod4whiptail N8THN
+# V1.0 Feb 23, 2018
+#release date 20180323-1
+#
+#
+#
+#check if root or sudo
+if [ `whoami` != root ]; then
+        whiptail --msgbox "This script must be run as root or with sudo" 20 60 2
+    exit
+fi
+# set variables for current values
+##############################################
+hostfile=/etc/hosts
+hostnamefile=/etc/hostname
+
+# returns empty if currently DHCP
+IP=$(grep Address= /etc/systemd/network/eth0.network | awk -F'=' '{print $2}' | awk -F'/' '{print $1}')
+        if [ -z $IP ]
+                then IP=DHCP
+        fi
+
+HOSTN=$(cat /etc/hostname)
+FQDN=$(hostname -f)
+DOMN=$(hostname -d)
+        if [ -z $DOMN ]; then
+                DOMN="NOT SET"
+        fi
+
+HOSTNAME=`echo $FQDN |awk -F. '{ print $1 }'`
+
+if (whiptail --yesno "Existing hostname is $HOSTN\nExisting Domain Name is $DOMN\nExisting FQDN is $FQDN\nIP address is $IP\n\nDo you want to change this?" 15 80) then
+# great, now we have to do some work :)
+HOSTNAME=$(whiptail --inputbox "Current hostname is $HOSTN Enter New hostname." 8 78 "$HOSTNAME" --title "Hostname" 3>&1 1>&2 2>&3)
+DOMAIN=$(whiptail --inputbox "Current domain is $DOMN Enter New domain or leave blank for none." 8 78 "$DOMN" --title "Domainname" 3>&1 1>&2 2>&3)
+# Display all this stuff again so they know if they made a mistake....
+FQDN2="$HOSTN.$DOMN"
+whiptail --msgbox "Existing hostname is $HOSTN\nExisting Domain Name is $DOMN\nExisting FQDN is $FQDN2 \
+\nIP address is $IP\n\nNew hostname is $HOSTNAME\nNew Domain is $DOMAIN\nNew FQDN is $HOSTNAME.$DOMAIN\n with and IP address $IP" 20 80
+# okay, make it so number one.  ..........................may have been watching star trek while writing this.
+
+        echo $HOSTNAME > $hostnamefile
+# if domain not set then
+if [ -z $DOMAIN ]; then
+        FQDN=$HOSTNAME
+        else
+        FQDN=$HOSTNAME.$DOMAIN
+fi
+
+
+        if [ $IP = DHCP ]; then
+                whiptail --msgbox "Setting for DHCP" 8 78
+                #echo setting DHCP
+                # create /etc/hosts for DHCP
+                echo "127.0.0.1         localhost" > $hostfile
+                echo "127.0.0.1         $FQDN   $HOSTNAME" >> $hostfile
+                echo >> $hostfile
+                echo "# The following lines are desirable for IPv6 capable hosts" >> $hostfile
+                echo "::1     localhost ip6-localhost ip6-loopback" >> $hostfile
+                echo "ff02::1 ip6-allnodes" >> $hostfile
+                echo "ff02::2 ip6-allrouters" >> $hostfile
+                echo >> $hostfile
+
+        else
+
+                whiptail --msgbox "Setting for STATIC" 8 78
+                #echo setting static
+                # create /etc/hosts for static IP
+                echo "127.0.0.1         localhost" > $hostfile
+                echo "$IP               $FQDN   $HOSTNAME" >> $hostfile
+                echo >> $hostfile
+                echo "# The following lines are desirable for IPv6 capable hosts" >> $hostfile
+                echo "::1     localhost ip6-localhost ip6-loopback" >> $hostfile
+                echo "ff02::1 ip6-allnodes" >> $hostfile
+                echo "ff02::2 ip6-allrouters" >> $hostfile
+                echo >> $hostfile
+
+        fi
+
+
+
+else
+        whiptail --msgbox "We will leave this alone for now." 8 78
+        # comment this out.....maybe
+    exit 0
+fi
+
+
+exit 0
+

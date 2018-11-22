@@ -66,3 +66,8 @@
 		<member name="EXTRA-SOUNDS-EN-G722" displayname="English, G.722 format">
 		</member>
 	</category>
+        <category name="MENUSELECT_ASL_SOUNDS" displayname="AllStarLink Sound Packages" positive_output="yes">
+                <member name="ASL-SOUNDS-EN-ULAW" displayname="English, mu-Law format">
+                </member>
+        </category>
+

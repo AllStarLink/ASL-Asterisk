@@ -1,107 +1,111 @@
-;
-; chan_usbradio.c configuration file
-;
-; 20101011 0920
-;
-; This sample configuration file is for repeater operation using a pair of
-; GM300, M1225 or CDM1550 mobile radios or a single R1225 repeater 
-; or some other equivalent.
+; If you are going to use this channel driver, you MUST enable it in modules.conf
+; noload => chan_usbradio.so ;                    CM1xx USB Cards with Radio Interface Channel Driver (DSP)
+; to:
+; load => chan_usbradio.so ;                    CM1xx USB Cards with Radio Interface Channel Driver (DSP)
+
+; Usbradio channel driver Configuration File
+
 
 [general]
 
-[usb]               ; USB Channel Name e.g. usb or usb1, usb2, ...
-                    ; this starts the definition block for a device
+[usb_1999]
 
-hwtype=0		    ; USB Sound Adapter Hardware Type
-			        ; Set to 0 for USB sound adapaters modified using
-			        ; the instructions from usbfob.pdf. 
-			        ; Set to 1 for DingTel/W9SH modified usb adapters.
+eeprom = 0			; EEPROM installed: 0,1
+				; 0 = no (default)
+                        	; 1 = yes
+
+hdwtype = 0			; Leave this set to 0 for USB sound fobs modified using
+				; the instructions from usbfob.pdf. Use a setting of 
+				; 1 is for Dingotel/Sph interfaces.
  
-rxboost=0		    ; Rx Audio Boost
-			        ; 0 = 20db attenuator inserted, 
-			        ; 1= 20db attenuator removed
-			        ; Set to 1 for additonal gain if using a low-level
-			        ; receiver output.
+rxboost = 1			; 0 - 20db attenuator inserted
+				; 1 - 20db attenuator removed
+				; Set to 1 for additonal gain if using a low-level receiver output
 
-rxctcssrelax=1		; Rx CTCSS Decoder Criteria Relax
-			        ; reduce CTCSS talkoff from radios w/o CTCSS Tx HPF
-			        ; Set to 1 for Amateur and FRS radios.
+rxctcssrelax = 1		; reduce talkoff from radios w/o CTCSS TX HPF
+				; Do not change this, leave this as a 1
 
-txctcssdefault=88.5 ; Tx CTCSS Default Encode
-                    ; Encodes this tone if no other tone in use.
+rxsqhyst = 3000         	; Setting Squelch Hysteresis
+                        	; 3000 is the default amount.
+                        	; An amount of 500 seems good.
+                        	; Then set the squelch to the highest number revealed when doing a "radio
+                        	; tune rxsquelch" - running the command multiple (like 20) times in a row.
+                        	; <http://allstarnode.com/wiki/lib/exe/fetch.php?media=asterisk-notes-wj8g.pdf>
 
-rxctcssfreqs=88.5	; rx ctcss frequency. this must be in the tone table.
-txctcssfreqs=88.5	; tx ctcss frequency. any frequency is permitted.
+txctcssdefault = 100.0		; default TX CTCSS frequency, any frequency permitted
+rxctcssfreqs = 100.0,91.5	; RX CTCSS frequencies list in floating point. must be in table
+txctcssfreqs = 100.0,91.5	; TX CTCSS frequencies list. any frequency permitted. will follow RX CTCSS frequency
+rxctcssoverride = 0		; Set to 1 to start out in carrier squelch mode
 
-carrierfrom=dsp		; Carrier Detect Source
-			        ; Options - no,usb,usbinvert,dsp,vox 
-			        ; no - no carrier detection at all
-			        ; usb - via USB radio adapter COR connection
-			        ; usbinvert - same as above but inverted polarity.
-			        ; dsp - from RX noise using dsp methods
-			        ; vox - voice activated via RX audio
+carrierfrom = dsp		; no,usb,usbinvert,dsp,vox 
+				; no - no carrier detection at all
+				; usb - from the COR line on the USB sound fob (Active high)
+				; usbinvert - from the inverted COR line on the USB sound fob (Active low)
+				; dsp - from RX noise using DSP techniques
+				; vox - voice activated from RX audio
 
-ctcssfrom=dsp		; CTCSS Decoder Source
-			        ; Options = no,usb,dsp
-			        ; no - CTCSS decoding, system will be carrier squelch
-			        ; usb - CTCSS decoding using input from USB adapter 
-			        ; usbinvert - same as above but inverted polarity.
-			        ; dsp - CTCSS decoding using RX audio in DSP.
-			        ; rxdemod option must be set to flat for this to work.
+ctcssfrom = dsp			; no,usb,usbinvert,dsp
+				; no - no CTCSS decoding, system will be carrier squelch
+				; usb - from the CTCSS line on the USB sound fob (Active high)
+				; usbinvert - from the inverted CTCSS line on the USB sound fob (Active low) 
+				; dsp - CTCSS decoding using RX audio in DSP.
+				; rxdemod option must be set to flat for this to work.
 
-rxdemod=flat        ; Rx Audio Source Type from Radio
-			        ; Options = no, flat, speaker
-			        ; no - RX audio input not used
-			        ; flat - source is un-filtered discriminator signal
-			        ; speaker - source is filtered, de-emphasized audio 
+rxdemod = flat          	; input type from radio: no,speaker,flat
+				; no - RX audio input not used
+				; flat - Use RX audio from discriminator (before de-emphasis)
+				; speaker - use de-emphasized audio 
 
-txprelim=yes		; Tx Audio PreEmphasis and Limiting in software
-			        ; no - Audio is not pre-emphasized and limited. 
-			        ; for application to radio microphone input
-			        ; yes - Audio is pre-emphasized, limited and filtered
-			        ; for direct connection to an FM modulator
+rxsquelchdelay = 30		; delayline in ms carrier squelch tail eliminator 
 
-txtoctype=notone	; Transmit Tone Turn Off Code method: 
-			        ; Options = no,phase,notone
-			        ; no     - CTCSS tone encodes up to tx carrier drop
-			        ; phase  - encode reverse phase before tx carrier drop 
-			        ;          AKA ("reverse burst") before unkeying TX
-			        ; notone - drop tone, wait and then drop carrier
-			        ;          AKA ("chicken burst")
+rxondelay = 0           	; Number of 20mSec intervals following the release of PTT.
+                        	; Uncomment and/or adjust for simplex nodes to eliminate "Ping Ponging"
+                        	; or "Relay Racing". A positive value here will instruct the usbradio
+                        	; driver to ignore the COR line for a specified number of 20mSec
+                        	; intervals following the release of PTT. Use this ONLY on simplex
+                        	; nodes, and leave commented out for repeaters or other full duplex nodes.
 
-txmixa=composite   	; Tx Mix Output Channel A (Left) Output Type
-			        ; Options = no,voice,tone,composite,auxvoice
-			        ; no - Do not output anything
-			        ; voice - output voice only
-			        ; tone - CTCSS tone only
-			        ; composite - voice and tone
-			        ; auxvoice - voice output for monitoring
+txboost = 0             	; Add transmitter audio gain boost: 0,1
 
-txmixb=no           ; Tx Mix Output Channel B (Right) Output Type  
-			        ; See txmixa above.
+txprelim = yes			; Audio processing on left output channel: no,yes
+				; no - Audio is not pre-emphasized and limited. 
+				; Suitable for use on a microphone input
+				; yes - Audio is pre-emphasized and limited.
+				; Suitable for direct connection to an FM modulator
 
-invertptt=0         ; Invert PTT 
-			        ; 0 = ground to transmit, 1 = open to transmit
-			        ; This is the collector lead of the 2N4401 transistor
-			        ; on the modified usb sound adapter.
+txlimonly = yes			; Audio limiting with no pre-emphasis on output channel: no,yes
+				; no - Audio is not limited. 
+				; yes - Audio is  limited.
+				; Suitable for transmitters with no limiting but with pre-emphasis.
 
-duplex=0            ; Connected Radio Device Duplex Capability
-                                ; 0 = Simplex (PTT / Release to Listen)
-                                ; 1 = Duplex (simultaneous Tx and Rx)
+txtoctype = notone		; Transmit tone control type: no,phase,notone
+				; no - CTCSS tone encoding with no hang time
+				; phase - encode CTCSS and reverse phase 
+				; AKA ("reverse burst") before unkeying TX
+				; notone - encode CTCSS and stop sending tone before unkeying TX
+				; AKA ("chicken burst")
 
-eeprom=1            ; 1 = Indicates that an EEPROM internal to the radio
-                    ;     adapter and cable is expected. 
-                    ; 0 = no warning message if no EEPROM found.
+txmixa = composite		; Left channel output: no,voice,tone,composite,auxvoice
+				; no - Do not output anything
+				; voice - output voice only
+				; tone - CTCSS tone only
+				; composite - voice and tone
+				; auxvoice - auxiliary voice output at headphone level for monitoring
 
+txmixb = no			; Right channel output: no,voice,tone,composite, auxvoice
+                        	; no - Do not output anything
+                        	; voice - output voice only
+                        	; tone - CTCSS tone only
+                        	; composite - voice and tone
+                        	; auxvoice - auxiliary voice output at headphone level for monitoring
 
-;gpioX=in	    ; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
+invertptt = 0			; Invert PTT: 0,1 
+				; 0 - ground to transmit
+				; 1 - open to transmit
 
+duplex = 0			; Duplex 0,1
+				; 0 - half duplex
+				; 1 - full duplex
+duplex3 = 0			; duplex 3 gain setting (0 to disable) ???
 
-
-; the following settings are for systems built with an
-; integral synthesized radio only.
-
-rxfreq=146520000    ; Rx Frequency in Hz - must match xcvr capabilities
-txfreq=146520000    ; Tx Frequency in Hz - must match xcvr capabilities
-
-; end of file
+#includeifexists custom/usbradio.conf

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -o errexit
+
+# N4IRS 07/26/2017
+
+################################################
+#                                              #                                                                                   #
+#      Blacklist video moduke                  #                                                                                   #
+#                                              #                                                                                   #
+################################################
+
+echo 'blacklist gma500_gfx' >> /etc/modprobe.d/blacklist.conf
+# depmod -ae
+update-initramfs -u
+

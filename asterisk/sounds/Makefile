@@ -10,17 +10,22 @@
 # This program is free software, distributed under the terms of
 # the GNU General Public License
 #
+# Added support for AllStarLink sound files N4IRS
 
 .PHONY: dist-clean all uninstall have_download install
 
 -include $(ASTTOPDIR)/menuselect.makeopts $(ASTTOPDIR)/makeopts
 
 PWD:=$(shell pwd)
+
 SOUNDS_DIR:=$(DESTDIR)$(ASTDATADIR)/sounds
 MOH_DIR:=$(DESTDIR)$(ASTDATADIR)/moh
+ASL_DIR:=$(DESTDIR)$(ASTDATADIR)/sounds/rpt
 CORE_SOUNDS_VERSION:=1.4.9
 EXTRA_SOUNDS_VERSION:=1.4.8
 SOUNDS_URL:=http://downloads.digium.com/pub/telephony/sounds/releases
+ASL_SOUNDS_URL:=http://dvswitch.org/files/AllStarLink
+
 MCS:=$(subst -EN-,-en-,$(MENUSELECT_CORE_SOUNDS))
 MCS:=$(subst -FR-,-fr-,$(MCS))
 MCS:=$(subst -ES-,-es-,$(MCS))
@@ -32,6 +37,7 @@ MCS:=$(subst -G729,-g729,$(MCS))
 MCS:=$(subst -G722,-g722,$(MCS))
 CORE_SOUNDS:=$(MCS:CORE-SOUNDS-%=asterisk-core-sounds-%-$(CORE_SOUNDS_VERSION).tar.gz)
 CORE_SOUND_TAGS:=$(MCS:CORE-SOUNDS-%=$(SOUNDS_DIR)/.asterisk-core-sounds-%-$(CORE_SOUNDS_VERSION))
+
 MES:=$(subst -EN-,-en-,$(MENUSELECT_EXTRA_SOUNDS))
 MES:=$(subst -FR-,-fr-,$(MES))
 MES:=$(subst -ES-,-es-,$(MES))
@@ -43,6 +49,7 @@ MES:=$(subst -G729,-g729,$(MES))
 MES:=$(subst -G722,-g722,$(MES))
 EXTRA_SOUNDS:=$(MES:EXTRA-SOUNDS-%=asterisk-extra-sounds-%-$(EXTRA_SOUNDS_VERSION).tar.gz)
 EXTRA_SOUND_TAGS:=$(MES:EXTRA-SOUNDS-%=$(SOUNDS_DIR)/.asterisk-extra-sounds-%-$(EXTRA_SOUNDS_VERSION))
+
 MM:=$(subst -FREEPLAY-,-freeplay-,$(MENUSELECT_MOH))
 MM:=$(subst -WAV,-wav,$(MM))
 MM:=$(subst -ULAW,-ulaw,$(MM))
@@ -52,12 +59,20 @@ MM:=$(subst -G729,-g729,$(MM))
 MM:=$(subst -G722,-g722,$(MM))
 MOH:=$(MM:MOH-%=asterisk-moh-%.tar.gz)
 MOH_TAGS:=$(MM:MOH-%=$(MOH_DIR)/.asterisk-moh-%)
+
+MMM:=$(subst -SOUNDS-,-sounds-,$(MENUSELECT_ASL_SOUNDS))
+MMM:=$(subst -EN,-en,$(MMM))
+MMM:=$(subst -ULAW,-ulaw,$(MMM))
+MMM:=$(subst -GSM,-gsm,$(MMM))
+ASL:=$(MMM:ASL-%=asterisk-asl-%.tar.gz)
+ASL_TAGS:=$(MMM:ASL-%=$(ASL_DIR)/.asterisk-asl-%)
+
 # If "fetch" is used, --continue is not a valid option.
 ifeq ($(WGET),wget)
 WGET_ARGS:=--continue
 endif
 
-all: $(CORE_SOUNDS) $(EXTRA_SOUNDS) $(MOH)
+all: $(CORE_SOUNDS) $(EXTRA_SOUNDS) $(MOH) $(ASL) 
 
 have_download:
 	@if test "$(DOWNLOAD)" = ":" ; then \
@@ -130,6 +145,13 @@ $(MOH_DIR)/.asterisk-moh-%: have_download
 	(cd $(MOH_DIR); cat $(PWD)/$${PACKAGE} | gzip -d | tar xof -) && \
 	touch $@
 
+$(ASL_DIR)/.asterisk-asl-sounds-%: have_download
+	@PACKAGE=$(subst $(ASL_DIR)/.asterisk,asterisk,$@).tar.gz; \
+	if test ! -f $${PACKAGE}; then $(DOWNLOAD) $(WGET_ARGS) $(ASL_SOUNDS_URL)/$${PACKAGE}; fi; \
+        if test ! -f $${PACKAGE}; then exit 1; fi; \
+	(cd $(ASL_DIR); cat $(PWD)/$${PACKAGE} | gzip -d | tar xof -) && \
+	touch $@
+
 asterisk-core-%.tar.gz: have_download
 	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(SOUNDS_URL)/$@;fi
 
@@ -139,13 +161,16 @@ asterisk-extra-%.tar.gz: have_download
 asterisk-moh-%.tar.gz: have_download
 	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(SOUNDS_URL)/$@;fi
 
+asterisk-asl-en-ulaw.tar.gz: have_download
+	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(SOUNDS_URL)/$@;fi
+
 dist-clean:
 	rm -f *.tar.gz
 
-$(SOUNDS_DIR) $(MOH_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr:
+$(SOUNDS_DIR) $(MOH_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr $(ASL_DIR):
 	mkdir -p $@
 
-install: $(SOUNDS_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr $(MOH_DIR) $(CORE_SOUND_TAGS) $(EXTRA_SOUND_TAGS) $(MOH_TAGS)
+install: $(SOUNDS_DIR) $(SOUNDS_DIR)/es $(SOUNDS_DIR)/fr $(MOH_DIR) $(ASL_DIR) $(CORE_SOUND_TAGS) $(EXTRA_SOUND_TAGS) $(MOH_TAGS) $(ASL_TAGS)
 
 uninstall:
 	rm -rf $(SOUNDS_DIR)

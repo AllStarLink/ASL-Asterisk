@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -o errexit
+
+# N4IRS 07/26/2017
+
+#################################################
+#                                               #
+#                                               #
+#                                               #
+#################################################
+
+cd /var/log
+logrotate -f /etc/logrotate.conf
+find . -name "*.gz" -exec rm -rf {} \;
+find . -name "*.?" -exec rm -rf {} \;

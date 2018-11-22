@@ -1,0 +1,1507 @@
+#!/bin/bash
+#ASL-MENU
+#V2.1
+#2018 May
+#By N8THN
+#release date 20181016
+clear
+
+# define variables
+rm -f /tmp/asl-menu.log
+logfile=/tmp/asl-menu.log
+#logfile=/dev/null
+## all other variables defined in get_node_info
+
+
+check_if_root() {
+echo "check_if_root" >> $logfile
+if [ `whoami` != root ]; then
+        whiptail --msgbox "This script must be run as root or with sudo" 20 60 2
+        exit 1
+fi
+}
+
+check_config_files() {
+echo "check_config_files" >> $logfile
+if [ ! -f $CONFIGS/rpt.conf ]; then
+        whiptail --msgbox "ASL config files not in $CONFIGS directory  Exiting" 20 60 2
+        exit 1
+fi
+}
+
+calc_wt_size() {
+echo "doing calc_wt_size" >> $logfile
+  WT_HEIGHT=22
+  WT_WIDTH=$(tput cols)
+
+  if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
+    WT_WIDTH=80
+  fi
+  if [ "$WT_WIDTH" -gt 178 ]; then
+    WT_WIDTH=120
+  fi
+  WT_MENU_HEIGHT=$(($WT_HEIGHT-7))
+}
+
+get_node_info() {
+echo "get_node_info" >> $logfile
+CONFIGS=/etc/asterisk
+WEBROOT=/var/www/html
+TMP=/tmp
+
+FAIL2BANFILE=/etc/fail2ban/jail.local
+FIREWALLFILE=/etc/iptables.conf
+
+APTGET=$(which apt-get)
+PING=$(which ping)
+USERADD=$(which useradd)
+USERDEL=$(which userdel)
+DPKG_QUERY=$(which dpkg-query)
+SERVICE=$(which service)
+IPTABLES=$(which iptables)
+IPTABLES_RESTORE=$(which iptables-restore)
+IFCONFIG=$(which ifconfig)
+LSMOD=$(which lsmod)
+UPDATE_RCD=$(which update-rc.d)
+GLOBALIP=$(ip a | grep "scope global" | grep -Po '(?<=inet )[\d.]+')
+
+ASTERISK=/usr/sbin/asterisk
+ASTRES=/usr/local/sbin/astres.sh
+ASTUP=/usr/local/sbin/astup.sh
+ASTDN=/usr/local/sbin/astdn.sh
+SAVENODE=/usr/local/sbin/save-node
+RESTORENODE=/usr/local/sbin/restore-node
+FIRSTTIME=/usr/local/sbin/first-time
+
+MONTHDAY=$(date +%Y-%m-%d)
+DATEEXT=$(date +%Y-%m-%d.%H:%M)
+FILEDATENAME=$(date +%Y%m%d%H%M)
+
+REBOOT_NEEDED=0
+AST_RESTART=0
+
+HTTPPORT=80
+HTTPSPORT=443
+ECHOPORT1=5198
+ECHOPORT2=5199
+ECHOPORT3=5200
+NODENUM=$(grep -o '^\[[0-9]*\]' $CONFIGS/rpt.conf | sed 's/.*\[\([^]]*\)\].*/\1/g')
+CALLSIGN=$(grep '^idrecording =' $CONFIGS/rpt.conf | awk -F'=' '{print $2}' | sed 's/|\i//' | sed -e 's/^\(.\{9\}\).*/\1/')
+REGPASSWD=$(grep 'register =' $CONFIGS/iax.conf | awk -F'=' '{print $2}' | awk -F'   ;' '{print $1}')
+INTERFACE=$(grep '^rxchannel' $CONFIGS/rpt.conf | awk -F'=' '{print $2}' | awk -F'  ;' '{print$1}')
+ECHOLINKCALLSIGN=$(awk '/call =/' $CONFIGS/echolink.conf | awk '{print $3}')
+ECHOLINKASTNODE=$(awk '/astnode =/' $CONFIGS/echolink.conf | awk '{print $3}')
+ECHOLINKNODE=$(awk '/^node =/' $CONFIGS/echolink.conf | awk '{print $3}')
+#SSHPORT=$(grep '^Port ' /etc/ssh/sshd_config | awk -F" " '{print $2}')
+SSHPORT=$(grep 'Port ' /etc/ssh/sshd_config | awk -F" " '{print $2}')
+RTCMPORT=$(grep '^port[ \t]*=' /etc/asterisk/voter.conf | awk -F"=" '{print $2}' |grep -oe '\([0-9.]*\)')
+IAXPORT=$(grep '^bindport[ \t]*=' $CONFIGS/iax.conf | awk -F"=" '{print $2}' |grep -oe '\([0-9.]*\)')
+MGRPORT=$(grep '^port[ \t]*=' $CONFIGS/manager.conf | awk -F"=" '{print $2}' |grep -oe '\([0-9.]*\)')
+USBRADIOMODULE=$(grep '^load[ \t]*=>[ \t]*chan_usbradio.so' $CONFIGS/modules.conf)
+
+sendtoadminfile=/tmp/$NODENUM.$FILEDATENAME.tgz
+}
+
+###### Info pages
+
+info_main_menu() {
+echo "info_main_menu" >> $logfile
+whiptail --msgbox "Use the information menu option on each sub menu for a more detailed \
+explanation of each option \nPlease vist http://allstarlink.org for more information \
+" 20 60 2
+}
+
+info_config_menu() {
+echo "info_config_menu" >> $logfile
+whiptail --msgbox "Manually edit the ASL configuration files\nYou may wish to use the Backup Restore Menu\nto backup you current configuration first" 20 60 2
+}
+
+info_backup_restore_menu() {
+echo "info_backup_restore_menu" >> $logfile
+whiptail --msgbox "Auto savenode uses the save-node script to archive your configuration in .tgz format and uploads to ASL backup server \
+Restore node retrieves the list from the ASL backup server and allows you to choose which one to use \
+The Local backup copies you configuration files to a separate directory under the name of YEAR-MONTH-DAY for reference \
+The Local backup also creates an archive file in .tgz format which you may download using the backup-server webpage interface \
+for off-site storage of your configuration\n \
+The Restore backup allows you to restore from either a YEAR-MONTH-DAY folder or an archive .tgz file you uploaded using the backup-server webpage interface \
+" 20 60 2
+}
+
+info_OS_menu() {
+echo "info_OS_menu" >> $logfile
+whiptail --msgbox "Apt-get update is used to updates the repositories with the latest packages \
+Apt-get upgrade will upgrade all of the packages on your system \
+firewall and fail2ban are two of the basic security features you should use if you have a public IP address \
+The ASL addons menu list available packages to enhance your ASL node \
+Change CPU performance is for Raspberry Pi systems only \
+" 20 60 2
+}
+
+info_security_menu() {
+echo "info_security_menu" >> $logfile
+whiptail --msgbox "Tools to help secure you system and ASL node \
+Please be mindfull so you do not disable your system \
+" 20 60 2
+}
+
+info_diagnostics_menu() {
+echo "info_diagnostics_menu" >> $logfile
+whiptail --msgbox "Tools to help diagnose a possibly problem with you configuration \
+Also allows you to create a file with the listed menu options to download and send to the ASL admin team \
+or someone else who may be able to help \
+" 20 60 2
+}
+
+info_asl_addons_menu() {
+echo "info_asl_addons_menu" >> $logfile
+whiptail --msgbox "Please encourage developers to create an apt-get package that we may add to this menu" 20 60 2
+}
+
+###### Configuration checks
+
+do_check_is_usbradio() {
+echo "do_check_is_usbradio" >> $logfile
+# is module loaded
+grep '^load[ \t]*=>[ \t]*chan_usbradio.so' $CONFIGS/modules.conf > /dev/null
+if [ $? -eq 0 ]; then
+USBRADIOMODULE=YES
+echo "USBRADIOMODULE=YES" >> $logfile
+else
+USBRADIOMODULE=NO
+echo "USBRADIOMODULE=NO" >> $logfile
+fi
+# is rxchannel
+grep -i '^rxchannel[ \t]*=[ \t]*Radio' $CONFIGS/rpt.conf > /dev/null
+if [ $? -eq 0 ]; then
+RXCHUSBRADIO=YES
+else
+RXCHUSBRADIO=NO
+fi
+if [ $USBRADIOMODULE = "YES" ] && [ $RXCHUSBRADIO = "YES" ]; then
+USBRADIO_YN=YES
+echo "USBRADIO_YN=YES" >> $logfile
+else
+USBRADIO_YN=NO
+echo "USBRADIO_YN=NO" >> $logfile
+fi
+}
+
+do_check_is_simpleusb() {
+echo "do_check_is_simpleusb" >> $logfile
+grep '^load[ \t]*=>[ \t]*chan_simpleusb.so' $CONFIGS/modules.conf > /dev/null
+if [ $? -eq 0 ]; then
+SIMPLEUSBMODULE=YES
+else
+SIMPLEUSBMODULE=NO
+fi
+grep -i '^rxchannel[ \t]*=[ \t]*Simple' $CONFIGS/rpt.conf > /dev/null
+if [ $? -eq 0 ]; then
+RXCHSIMPLEUSB=YES
+else
+RXCHSIMPLEUSB=NO
+fi
+if [ $SIMPLEUSBMODULE = "YES" ] && [ $RXCHSIMPLEUSB = "YES" ]; then
+SIMPLEUSB_YN=YES
+echo "SIMPLEUSB_YN=YES" >> $logfile
+else
+SIMPLEUSB_YN=NO
+echo "SIMPLEUSB_YN=NO" >> $logfile
+fi
+}
+
+do_check_is_rpi() {
+echo "do_check_is_rpi" >> $logfile
+uname -n | grep raspberry > /dev/null
+if [ $? -eq 0 ]; then
+RPI_YN=YES
+echo "RPI_YN=YES" >> $logfile
+else
+RPI_YN=NO
+echo "RPI_YN=NO" >> $logfiile
+fi
+}
+
+do_is_f2b_installed() {
+echo "do_is_f2b_installed" >> $logfile
+$DPKG_QUERY -l | grep fail2ban > /dev/null
+if [ $? -eq 0 ]; then
+F2B_YN=YES
+echo "F2B_YN=YES" >> $logfile
+else
+F2B_YN=NO
+echo "F2B_YN=NO" >> $logfile
+fi
+}
+
+do_is_fw_installed() {
+echo "do_is_fw_installed" >> $logfile
+$DPKG_QUERY -l | grep iptables > /dev/null
+if [ $? = 0 ] && [ -f /etc/network/if-up.d/firewall ]; then
+IPTAB_YN=YES
+echo "IPTAB_YN=YES" >> $logfile
+else
+IPTAB_YN=NO
+echo "IPTAB_YN=NO" >> $logfile
+fi
+}
+
+do_is_webserver_installed() {
+echo "do_is_webserver_installed" >> $logfile
+$DPKG_QUERY -l | grep apache2 > /dev/null
+if [ $? -eq 0 ]; then
+WEBSERVE_YN=YES
+echo "WEBSERVE_YN=YES" >> $logfile
+else
+WEBSERVE_YN=NO
+echo "WEBSERVE_YN=NO" >> $logfile
+fi
+}
+
+do_is_allmon_installed() {
+echo "do_is_allmon_installed" >> $logfile
+#if [ -f $WEBROOT/allmon2/index.php ] && [ -f $WEBROOT/allmon2/controlpanel.php ]; then
+$DPKG_QUERY -l | grep allmon2 > /dev/null
+if [ $? -eq 0 ]; then
+ALLMON_YN=YES
+echo "ALLMON_YN=YES" >> $logfile
+else
+ALLMON_YN=NO
+echo "ALLMON_YN=NO" >> $logfile
+fi
+}
+
+do_is_govutils_installed() {
+echo "do_is_govutils_installed" >> $logfile
+$DPKG_QUERY -l | grep cpufrequtils > /dev/null
+if [ $? -eq 0 ]; then
+CPUFREQUTILS="YES"
+else
+CPUFREQUTILS="NO"
+fi
+$DPKG_QUERY -l | grep sysfsutils > /dev/null
+if [ $? -eq 0 ]; then
+SYSFSUTILS="YES"
+else
+SYSFSUTILS="NO"
+fi
+if [ $CPUFREQUTILS = "YES" ] && [ $SYSFSUTILS = "YES" ]; then
+GOVUTILS="YES"
+echo "GOVUTILS=YES" >> $logfile
+else
+GOVUTILS="NO"
+echo "GOVUTILS=NO" >> $logfile
+fi
+}
+
+do_nothing() {
+echo "do_nothing" >> $logfile
+# place to land the menu options that aren't done yet
+whiptail --msgbox "Option not configured yet" 20 60 2
+}
+
+do_finish() {
+echo "do_finish" >> $logfile
+        if [ $AST_RESTART -eq 1 ]; then
+                whiptail --title "Asterisk restart required" --yesno "Asterisk reload is required for changes to take effect restart Asterisk now?" 8 78
+                if [ $? -eq 0 ]; then #yes
+                $ASTRES
+                whiptail --msgbox "Asterisk has been restarted" 20 60 2
+                else
+                whiptail --msgbox "Please restart Asterisk at your convenience" 20 60 2
+                fi
+        fi
+        # check if reboot needed.
+        if [ $REBOOT_NEEDED -eq 1 ]; then
+        whiptail --title "Reboot is required" --yesno "Reboot required for changes to take effect Reboot now?" 8 78
+                if [ $? -eq 0 ]; then # yes
+                sync
+                reboot -t 30
+                else
+                whiptail --msgbox "You may reboot the machine at your convenience" 20 60 2
+                fi
+        fi
+       exit 0
+}
+
+do_exit() {
+echo "do_exit" >> $logfile
+        if (whiptail --title "Exit Yes or No" --yesno "Exit Yes or No" 8 78) then
+            do_finish
+        else
+            do_main_menu
+        fi
+}
+
+################## main menu simple subfunctions
+
+do_run_firsttime() {
+echo "do_run_firsttime" >> $logfile
+touch /etc/asterisk/firsttime
+/usr/local/sbin/first-time
+rm -f /etc/asterisk/firsttime
+}
+
+do_node_setup() {
+echo "do_node_setup" >> $logfile
+/usr/local/sbin/node-setup
+}
+
+do_radio_tune_menu() {
+echo "do_radio_tune_menu" >> $logfile
+do_check_is_usbradio
+if [ $USBRADIO_YN = "YES" ]; then
+/usr/sbin/radio-tune-menu
+else
+whiptail --msgbox "USBradio must be enabled in modules.conf and selected in rpt.conf" 20 60 2
+fi
+}
+
+do_simpleusb_tune_menu() {
+echo "do_simpleusb_tune_menu" >> $logfile
+do_check_is_simpleusb
+if [ $SIMPLEUSB_YN = "YES" ]; then
+/usr/sbin/simpleusb-tune-menu
+else
+whiptail --msgbox "SimpleUSB must be enabled in modules.conf and selected in rpt.conf" 20 60 2
+fi
+}
+
+do_asl_cli() {
+echo "do_asl_cli" >> $logfile
+clear
+$ASTERISK -rvvv
+}
+
+do_bash_shell() {
+echo "do_bash_shell" >> $logfile
+whiptail --msgbox "Type   exit   to return to ASL-MENU" 20 60 2
+/bin/bash
+}
+
+
+
+############### Diagnostics menu sub sections
+
+do_ping_google_dns() {
+echo "do_ping_google_dns" >> $logfile
+DNSPINGRESULTS=$($PING 8.8.8.8 -c4)
+whiptail --msgbox "DNS ping results:\n\n$DNSPINGRESULTS" 20 60 2
+}
+
+do_ping_reg_asl() {
+echo "do_ping_reg_asl" >> $logfile
+REGASLPINGRESULTS=$($PING register.allstarlink.org -c4)
+whiptail --msgbox "register.allstarlink.org ping results:\n\n$REGASLPINGRESULTS" 20 60 2
+}
+
+do_iax_show_reg() {
+echo "do_iax_show_reg" >> $logfile
+IAXSHOWREG=$($ASTERISK -rx "iax2 show registry")
+whiptail --msgbox "IAX2 show registry:\n\n$IAXSHOWREG" 20 70 2
+}
+
+do_asl_version_show() {
+echo "do_asl_version_show" >> $logfile
+ASLVERS=$($ASTERISK -rx "core show version")
+whiptail --msgbox "ASL Version:\n$ASLVERS" 20 70 2
+}
+
+do_validate_updatenodelist_running() {
+echo "do_validate_updatenodelist_running" >> $logfile
+ps -aux | grep updatenodelist
+if [ $? -eq 0 ]; then #yes
+whiptail --msgbox "updatenodeslist program IS running" 20 60 2
+else
+whiptail --msgbox "updatenodeslist program is NOT running" 20 60 2
+fi
+}
+
+do_updatenodelist_restart() {
+echo "do_updatenodelist_restart" >> $logfile
+$SERVICE updatenodelist restart
+whiptail --msgbox "The updatenodelist program has been restarted" 20 60 2
+
+}
+
+do_astres() {
+echo "do_astres" >> $logfile
+$ASTRES
+AST_RESTART=0
+whiptail --msgbox "Asterisk service has been restarted" 20 60 2
+}
+
+do_astup() {
+echo "do_astup" >> $logfile
+$ASTUP
+whiptail --msgbox "Asterisk service has been started" 20 60 2
+}
+
+do_astdn() {
+echo "do_astdn" >> $logfile
+$ASTDN
+AST_RESTART=0
+whiptail --msgbox "Asterisk service has been stopped" 20 60 2
+}
+
+do_upload_diag() {
+echo "do_upload_diag" >> $logfile
+whiptail --msgbox "This will gather node number, password, basic system configuration and \nany error messages from the log files." 20 60 2
+RETEMAIL=$(whiptail --inputbox "Please enter a contact email for us to get back with you" 8 78 --title "Contact email address" 3>&1 1>&2 2>&3)
+whiptail --msgbox "Please have a little patience while we gather a few system details" 20 60 2
+echo "return email: $RETEMAIL" > $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "NODE=$NODENUM" >> $sendtoadminfile
+echo "REGPASS=$REGPASSWD" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Call sign: $CALLSIGN" >> $sendtoadminfile
+echo "Interface type: $INTERFACE" >> $sendtoadminfile
+echo "Echolink Callsign: $ECHOLINKCALLSIGN" >> $sendtoadminfile
+echo "Echolink node: $ECHOLINKNODE  ASL node used: $ECHOASTNODE" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Ping test to 8.8.8.8" >> $sendtoadminfile
+$PING 8.8.8.8 -c4 >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Ping test to register.allstarlink.org" >> $sendtoadminfile
+$PING register.allstarlink.org -c4 >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Ouput of ifconfig" >> $sendtoadminfile
+$IFCONFIG >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Output of lsmod grep dahdi" >> $sendtoadminfile
+$LSMOD | grep dahdi >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "IAX2 registry" >> $sendtoadminfile
+$ASTERISK -rx "iax2 show registry" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Asterisk version:" >> $sendtoadminfile
+$ASTERISK -rx "core show version" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "Current date and time: $DATEEXT" >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "updatenodelist service running?" >> $sendtoadminfile
+ps -aux | grep updatenodelist >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "/tmp/rpt_extnodes-temp file" >> $sendtoadminfile
+ls -l /tmp/rpt_extnodes-temp >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "/var/lib/asterisk/rpt_extnodes file" >> $sendtoadminfile
+ls -l /var/lib/asterisk/rpt_extnodes >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "####### Begin warnings from messages file" >> $sendtoadminfile
+cat /var/log/asterisk/messages | grep WARNING >> $sendtoadminfile
+echo "" >> $sendtoadminfile
+echo "####### Begin warnings from messages.1 file" >> $sendtoadminfile
+cat /var/log/asterisk/messages.1 | grep WARNING >> $sendtoadminfile
+whiptail --msgbox "Use the backup-server option to retrieve the $sendtoadminfile file \nsimply rename with .txt extension after download" 30 70 2
+
+return
+
+##########This part skipped as its not used yet###############################################################################################################
+SENDDIAGS_SITE=http://backup.allstarlink.org
+if [ -r /etc/asterisk/savenode.conf ]
+then
+        .  /etc/asterisk/savenode.conf
+else
+        whiptail --msgbox "Savenode.conf file does not exist please edit and set it to enabled" 20 60 2
+        return
+fi
+
+if [ .$ENABLE = "." ]
+then
+        whiptail --msgbox "Savenode.conf file not set to enable" 20 60 2
+        return
+fi
+
+if [ $ENABLE -eq 0 ]
+then
+        whiptail --msgbox "Savenode.conf file not set to enable" 20 60 2
+        return
+fi
+
+whiptail --msgbox "Uploading diagnostic file to ASL Admin team" 20 60 2
+
+        wget -q --timeout=60 --tries=1 --post-file=$sendtoadminfile  \
+            --http-user=$NODE --http-password=$PASSWORD -O- \
+            $SENDDIAGS_SITE/uploaddiags.cgi
+        if [ $? -ne 0 ]
+        then
+                whiptail --msgbox "There was an error uploading the file to ASL admin team"
+        fi
+
+}
+
+################### OS subsections
+
+do_sethost() {
+echo "do_sethost" >> $logfile
+/usr/local/sbin/set-host
+}
+
+do_netsetup() {
+echo "do_netsetup" >> $logfile
+/usr/local/sbin/net-setup
+}
+
+
+do_edit_allmon_config() {
+echo "do_edit_allmon_config" >> $logfile
+if [ ! -f $WEBROOT/allmon2/allmon.ini.php ]; then
+        whiptail --msgbox "Allmon2 config file not found, is Allmon2 installed?" 20 60 2
+        else
+        nano $WEBROOT/allmon2/allmon.ini.php
+fi
+}
+
+do_apt_get_update() {
+echo "do_apt_get_update" >> $logfile
+whiptail --msgbox "Grab a cup of coffee if you have not run this in a while\nUpdating repository information" 20 60 2
+$APTGET update
+whiptail --msgbox "Done running apt-get update" 20 60 2
+}
+
+do_apt_get_upgrade() {
+echo "do_apt_get_upgrade" >> $logfile
+whiptail --msgbox "Might be a good time for lunch this could take a while" 20 60 2
+$APTGET -y upgrade
+whiptail --msgbox "Done running apt-get upgrade" 20 60 2
+}
+
+do_install_firewall() {
+echo "do_install_firewall" >> $logfile
+if (whiptail --title "Install firewall?" --yesno "Would you like to install the iptables firewall?" 20 60) then
+do_is_fw_installed
+        if [ $IPTAB_YN = "YES" ]; then
+                whiptail --msgbox "We will update the iptables firewall to latest version\nuse the System Security Menu page for configuration options" 20 60 2
+                $APTGET update
+                $APTGET -y install --only-upgrade iptables
+        else
+                whiptail --msgbox "We will install iptables firewall\nuse the System Security Menu page for configuration options" 20 60 2
+        fi
+        $APTGET update
+        $APTGET -y install iptables
+        do_set_precon_firewall
+        echo "#!/bin/sh" > /etc/network/if-up.d/firewall
+        echo "iptables-restore < /etc/iptables.conf" >> /etc/network/if-up.d/firewall
+        chmod +x /etc/network/if-up.d/firewall
+        whiptail --msgbox "The preconfigured firewall rules have been loaded\nYou may edit the firewall rules from the System Securities Menu" 20 60 2
+fi
+}
+
+do_install_fail2ban() {
+echo "do_install_fail2ban" >> $logfile
+if (whiptail --title "Install fail2ban?" --yesno "A FIREWALL MUST BE INSTALLED FIRST\n\nWould you like to install the fail2ban firewall addon?" 20 60) then
+        do_is_f2b_installed
+        if [ $F2B_YN = "YES" ]; then
+                whiptail --msgbox "We will update the fail2ban package to latest version\nuse the System Security Menu page for configuration options" 20 60 2
+                $APTGET update
+                $APTGET -y install --only-upgrade fail2ban
+        else
+                whiptail --msgbox "We will install the fail2ban package\nuse the System Security Menu page for configuration options" 20 60 2
+                $APTGET update
+                $APTGET -y install fail2ban
+                do_set_precon_firewall
+                do_set_precon_fail2ban
+        fi
+        whiptail --msgbox "The pre-configured firewall and fail2ban rules have been loaded\nYou may edit the fail2ban rules from the System Securities Menu" 20 60 2
+fi
+}
+
+do_install_allmon() {
+echo "do_install_allmon" >> $logfile
+        do_is_allmon_installed
+        if [ $ALLMON_YN = "YES" ]; then
+                whiptail --msgbox "We will update the Allmon package to the latest version" 20 60 2
+                $APTGET -y install --only-upgrade allmon2
+        else
+                whiptail --msgbox "We will install the Allmon package with the latest version" 20 60 2
+                $APTGET -y install allmon2
+#                cd $WEBROOT && git clone https://github.com/tsawyer/allmon2.git
+                if (whiptail --title "Copy allmon config" --yesno "Would you like to copy the allmon.ini.php file, created in the node-setup script?" 20 60) then
+                mv -f $WEBROOT/allmon2/allmon.ini.php $WEBROOT/allmon2/allmon.ini.php.$DATEEXT 2>/dev/null #backup default
+                cp -f $CONFIGS/allmon.ini.php $WEBROOT/allmon2/allmon.ini.php 2>/dev/null #copy what node-setup script created
+                fi
+        fi
+        whiptail --msgbox "You may edit the allmon.ini.php file from the ASL edit config files menu" 20 60 2
+}
+
+do_install_webserver() {
+echo "do_install_webserver" >> $logfile
+do_is_webserver_installed
+if (whiptail --title "Install webserver and dependencies?" --yesno "Would you like to install/update webserver?" 20 60) then
+        if [ $WEEBSERVE_YN = "YES" ]; then
+                whiptail --msgbox "We will update Apache2 webserver and PHP support packages" 20 60 2
+                $APTGET -y install --only-upgrade apache2
+                $APTGET -y install --only-upgrade php
+        else
+                whiptail --msgbox "We will install Apache2 webserver and PHP support" 20 60 2
+                $APTGET update
+                $APTGET -y install apache2
+                $APTGET -y install php
+        fi
+fi
+}
+
+do_install_cpu_clocking() {
+echo "do_install_cpu_clocking" >> $logfile
+whiptail --msgbox "Adjust CPU overclocking settings" 20 60 2
+#check if packages loaded
+do_check_is_rpi
+if [ $RPI_YN = "NO" ]; then
+        whiptail --msgbox "This option currently available only for Raspberry Pi" 20 60 2
+else
+        do_is_govutils_installed
+        if [ $GOVUTILS = "YES" ]; then
+                whiptail --msgbox "We will update the governor packages" 20 60 2
+                $APTGET update
+                $APTGET -y install --only-upgrade cpufrequtils
+                $APTGET -y install --only-upgrade sysfsutils
+                $UPDATE_RCD raspi-config disable
+        else
+                whiptail --msgbox "We will install the governor utilities packages" 20 60 2
+                $APTGET update
+                $APTGET -y install cpufrequtils
+                $APTGET -y install sysfsutils
+                $UPDATE_RCD raspi-config disable
+        fi
+fi
+}
+
+do_set_cpu_ondemand() {
+echo "do_set_cpu_ondemand" >> $logfile
+do_is_govutils_installed
+if [ $GOVUTILS = "NO" ]; then
+        whiptail --msgbox "The governor utilities packages must be installed before using this option" 20 60 2
+else
+        echo "GOVERNOR=\"ondemand\"" > /etc/default/cpufrequtils
+        /etc/init.d/cpufrequtils restart
+        whiptail --msgbox "The governor is now set to ondemand" 20 60 2
+fi
+}
+
+do_set_cpu_conservative() {
+echo "do_set_cpu_conservative" >> $logfile
+do_is_govutils_installed
+if [ $GOVUTILS = "NO" ]; then
+        whiptail --msgbox "The governor utilities packages must be installed before using this option" 20 60 2
+else
+        echo "GOVERNOR=\"conservative\"" > /etc/default/cpufrequtils
+        /etc/init.d/cpufrequtils restart
+        whiptail --msgbox "The governor is now set to conservative" 20 60 2
+fi
+}
+
+do_set_cpu_performance() {
+echo "do_set_cpu_performance" >> $logfile
+do_is_govutils_installed
+if [ $GOVUTILS = "NO" ]; then
+        whiptail --msgbox "The governor utilities packages must be installed before using this option" 20 60 2
+else
+        echo "GOVERNOR=\"performance\"" > /etc/default/cpufrequtils
+        /etc/init.d/cpufrequtils restart
+        whiptail --msgbox "The governor is now set to performance" 20 60 2
+fi
+}
+
+do_set_cpu_powersave() {
+echo "do_set_cpu_powersave" >> $logfile
+do_is_govutils_installed
+if [ $GOVUTILS = "NO" ]; then
+        whiptail --msgbox "The governor utilities packages must be installed before using this option" 20 60 2
+else
+        echo "GOVERNOR=\"powersave\"" > /etc/default/cpufrequtils
+        /etc/init.d/cpufrequtils restart
+        whiptail --msgbox "The governor is now set to powersave" 20 60 2
+fi
+}
+
+
+do_savenode() {
+echo "do_savenode" >> $logfile
+$SAVENODE
+}
+
+do_restorenode() {
+echo "do_restorenode" >> $logfile
+$RESTORENODE
+}
+
+do_local_conf_backup() {
+echo "do_local_conf_backup" >> $logfile
+whiptail --msgbox "Configuration files will be backed up locally" 20 60 2
+mkdir $CONFIGS/$FILEDATENAME > /dev/null
+cp -r $CONFIGS/*.conf $CONFIGS/$FILEDATENAME
+cd / && tar czf /tmp/$FILEDATENAME.tgz  etc/asterisk > /dev/null
+whiptail --msgbox "Configuration files backed up to $CONFIGS/$FILEDATENAME \nA tgz file is also available using the backup-server webpage" 20 60 2
+}
+
+do_local_conf_restore() {
+echo "do_local_conf_restore" >> $logfile
+BACKUPSAVAIL=NO
+BACKUPTGZ=$(ls /tmp/*.tgz 2> /dev/null)
+if [ $? -eq 0 ]; then
+BACKUPSAVAIL=YES
+fi
+BACKUPDIRS=$(ls -d $CONFIGS/*/ | grep /20)
+if [ $? -eq 0 ]; then
+BACKUPSAVAIL=YES
+fi
+
+if [ "$BACKUPSAVAIL" = "YES" ]; then
+whiptail --msgbox "Restoring a backup will overwrite the existing configuration" 20 60 2
+RESTOREFROM=$(whiptail --inputbox "Input full path of which backup to use:\n$BACKUPDIRS\n$BACKUPTGZ" 20 60 --title "Enter backup to use" 3>&1 1>&2 2>&3)
+        if [ $? = 0 ]; then
+                ISTGZ=".tgz"
+                if `echo ${RESTOREFROM} | grep "${ISTGZ}" 1>/dev/null 2>&1`; then
+                        cd / && tar xzf $RESTOREFROM
+                        AST_RESTART=1
+                        whiptail --msgbox "The tgz file has been exploded back to original location" 20 60 2
+                else
+                        if [ ! -f $RESTOREFROM/rpt.conf ] || [ ! -f $RESTOREFROM/extensions.conf ] || [ ! -f $RESTOREFROM/iax.conf ]; then
+                                whiptail --msgbox "The backup selected to restore does not contain ASL configuration files" 20 60 2
+                        else
+                                cp -r $RESTOREFROM/*.conf $CONFIGS
+                                whiptail --msgbox "Configuration from local backup $RESTOREFROM \nhas been restored, ASL restart required" 20 60 2
+                                AST_RESTART=1
+                        fi
+                fi
+        fi
+else
+whiptail --msgbox "No available backups to restore" 20 60 2
+fi
+}
+
+do_local_conf_delete() {
+echo "do_local_conf_delete" >> $logfile
+BACKUPSAVAIL=NO
+BACKUPTGZ=$(ls /tmp/*.tgz 2> /dev/null)
+if [ $? -eq 0 ]; then
+BACKUPSAVAIL=YES
+fi
+BACKUPDIRS=$(ls -d $CONFIGS/*/ | grep /20)
+if [ $? -eq 0 ]; then
+BACKUPSAVAIL=YES
+fi
+
+if [ "$BACKUPSAVAIL" = "YES" ]; then
+whiptail --msgbox "Delete a set of locally backed up configuration files" 20 60 2
+DELETERESTORE=$(whiptail --inputbox "Input full path of which backup to delete:\n$BACKUPDIRS\n$BACKUPTGZ" 20 60 --title "Enter backup to delete" 3>&1 1>&2 2>&3)
+        if [ $? = 0 ]; then
+                if [ "$DELETERESTORE" = "" ]; then
+                        whiptail --msgbox "Nothing entered" 20 60 2
+                else
+                        rm -fr $DELETERESTORE
+                        whiptail --msgbox "$DELETERESTORE has been deleted" 20 60 2
+                fi
+        fi
+else
+whiptail --msgbox "No available backups to restore" 20 60 2
+fi
+}
+
+
+do_webserver_backup() {
+echo "do_webserver_backup" >> $logfile
+if [ -f /usr/local/bin/backup-server/router.php ]; then
+        whiptail --msgbox "Open a web browser on separate computer and go to http://$GLOBALIP:8080 \n\nUse ctrl c to close the backup-server" 20 60 2
+        /usr/local/bin/backup-server/backup-server.sh
+#       cd /usr/local/sbin/backup-server && sudo -u nobody /usr/bin/php -S 0.0.0.0:8080 -t . router.php
+else
+        whiptail --msgbox "The backup-server software does not seem to be installed" 20 60 2
+fi
+}
+
+do_use_aslmenu() {
+# use asl-menu on login for user account
+ANSWER=1
+REALID=$(who am i | awk '{print $1}')
+if (whiptail --title "asl-menu at login" --yesno "Would you like to start the asl-menu script\nat login by default for user: $REALID?" --defaultno 20 80 2 3>&1 1>&2 2>&3) then
+ANSWER=$?
+fi
+if [ "$ANSWER" = "0" ]; then
+        cat /home/$REALID/.bashrc |grep asl-menu > /dev/null
+        if [ $? = "1" ]; then
+        echo "sudo /usr/local/sbin/asl-menu" >> /home/$REALID/.bashrc
+        whiptail --msgbox "asl-menu will start at login for user $REALID" 20 60 2
+        else
+        whiptail --msgbox "asl-menu already starts for user $REALID at login." 20 60 2
+        fi
+else
+        sed -i '/asl-menu/c\' /home/$REALID/.bashrc
+        whiptail --msgbox "the asl-menu autostart at login has been disabled\nYou may run the asl-menu script by typing sudo /usr/local/sbin/asl-menu" 20 60 2
+fi
+}
+
+
+###################  security sub sections
+
+do_set_precon_firewall() {
+echo "do_set_precon_firewall" >> $logfile
+do_is_fw_installed
+if [ $IPTAB_YN = "YES" ]; then
+do_is_f2b_installed
+if [ $F2B_YN = "YES" ]; then
+whiptail --msgbox "This will only allow the ports necessary for ASL to function.\nAll other ports will be blocked, fail2ban enabled." 20 60 2
+whiptail --msgbox "Using port numbers listed in current configuration files." 20 60 2
+get_node_info
+#  IF FAIL2BAN INSTALLED
+cat << _EOF > $FIREWALLFILE
+# Generated by asl-menu
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:fail2ban-asterisk-tcp - [0:0]
+:fail2ban-ssh - [0:0]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -s 192.168.0.0/16 -j ACCEPT
+-A INPUT -s 10.0.0.0/24 -j ACCEPT
+-A INPUT -s 172.16.0.0/20 -j ACCEPT
+-A INPUT -p tcp -j fail2ban-asterisk-tcp
+-A INPUT -p tcp -j fail2ban-ssh
+-A INPUT -p udp -m udp --dport $IAXPORT -j ACCEPT
+-A INPUT -p udp -m udp --dport $MGRPORT -j ACCEPT
+-A INPUT -p udp -m udp --dport $ECHOPORT1 -j ACCEPT
+-A INPUT -p udp -m udp --dport $ECHOPORT2 -j ACCEPT
+-A INPUT -p udp -m udp --dport $RTCMPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $SSHPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $HTTPPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $HTTPSPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $IAXPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $ECHOPORT3 -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $MGRPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $RTCMPORT -j ACCEPT
+-A INPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+-A INPUT -j REJECT --reject-with icmp-port-unreachable
+-A FORWARD -j REJECT --reject-with icmp-port-unreachable
+-A fail2ban-asterisk-tcp -j RETURN
+-A fail2ban-ssh -j RETURN
+COMMIT
+_EOF
+
+$IPTABLES_RESTORE < $FIREWALLFILE
+whiptail --msgbox "Firewall rules installed and loaded." 20 60 2
+#reload firewall rules and set active.
+
+else
+
+whiptail --msgbox "This will only allow the ports necessary for ASL to function.\nAll other ports will be blocked." 20 60 2
+whiptail --msgbox "Using port numbers listed in current configuration files." 20 60 2
+get_node_info
+# IF FAIL2BAN NOT INSTALLED
+
+cat << _EOF > $FIREWALLFILE
+# Generated by asl-menu
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -s 192.168.0.0/16 -j ACCEPT
+-A INPUT -s 10.0.0.0/24 -j ACCEPT
+-A INPUT -s 172.16.0.0/20 -j ACCEPT
+-A INPUT -p udp -m udp --dport $IAXPORT -j ACCEPT
+-A INPUT -p udp -m udp --dport $MGRPORT -j ACCEPT
+-A INPUT -p udp -m udp --dport $ECHOPORT1 -j ACCEPT
+-A INPUT -p udp -m udp --dport $ECHOPORT2 -j ACCEPT
+-A INPUT -p udp -m udp --dport $RTCMPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $SSHPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $HTTPPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $HTTPSPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $IAXPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $ECHOPORT3 -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $MGRPORT -j ACCEPT
+-A INPUT -p tcp -m tcp --dport $RTCMPORT -j ACCEPT
+-A INPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+-A INPUT -j REJECT --reject-with icmp-port-unreachable
+-A FORWARD -j REJECT --reject-with icmp-port-unreachable
+COMMIT
+_EOF
+
+$IPTABLES_RESTORE < $FIREWALLFILE
+whiptail --msgbox "Firewall rules installed and loaded." 20 60 2
+#reload firewall rules and set active.
+fi
+else
+whiptail --msgbox "You may edit the firewall from the ASL Operationg Systems Menu" 20 60 2
+fi
+}
+
+do_edit_firewall() {
+echo "do_edit_firewall" >> $logfile
+if [ ! -f $FIREWALLFILE ]; then
+        whiptail --msgbox "Firewall config file $FIREWALLFILE not found, is firewall service installed?" 20 60 2
+else
+        nano $FIREWALLFILE
+        $IPTABLES_RESTORE< $FIREWALLFILE
+# loop while iptables fails to reload
+        while [ $? = 1 ]; do
+                whiptail --msgbox "Firewall failed to load edited configuration, we will reload the editor" 20 60 2
+                nano $FIREWALLFILE
+                $IPTABLES_RESTORE < $FIREWALLFILE
+        done
+
+fi
+whiptail --msgbox "Firewall rules reloaded" 20 60 2
+}
+
+do_set_precon_fail2ban() {
+echo "do_set_precon_fail2ban" >> $logfile
+do_is_f2b_installed
+if [ $F2B_YN = "YES" ]; then
+whiptail --msgbox "This will install basic fail2ban filter rules to help protect against invalid login attempts" 20 60 2
+get_node_info
+cat << _EOF > $FAIL2BANFILE
+; use a semi-colon to comment out a line item
+[ssh]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+bantime = 600
+banaction = iptables-allports
+findtime = 150
+maxretry = 3
+ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+[asterisk-tcp]
+enabled = true
+port = $MGRPORT
+filter = asterisk
+logpath = /var/log/asterisk/messages
+bantime = 600
+banaction = iptables-allports
+findtime = 300
+maxretry = 5
+ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+[asterisk]
+enabled  = true
+filter   = asterisk
+port     = iax,sip,sip-tls
+protocol = all
+logpath  = /var/log/asterisk/messages
+maxretry = 5
+ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+_EOF
+
+whiptail --msgbox "File $FAIL2BANFILE created.\nRestarting fail2ban service with the new rules" 20 60 2
+$SERVICE fail2ban restart
+else
+whiptail --msgbox "You may edit the fail2ban rules from the ASL Operating System Menu" 20 60 2
+fi
+}
+
+do_edit_fail2ban() {
+echo "do_edit_fail2ban" >> $logfile
+if [ ! -f $FAIL2BANFILE ]; then
+        whiptail --msgbox "Fail2ban jail.local not found, is fail2ban service installed?" 20 60 2
+        else
+        nano $FAIL2BANFILE
+        $SERVICE fail2ban restart > /dev/null
+# loop while fail2ban errors on reload
+        while [ $? = 1 ]; do
+                whiptail --msgbox "Fail2ban failed to load edited configuration, we will reload the editor." 20 60 2
+                nano $FAIL2BANFILE
+                $SERVICE fail2ban restart > /dev/null
+        done
+fi
+whiptail --msgbox "Service fail2ban restarted with new rules." 20 60 2
+}
+
+do_set_blacklist() {
+echo "do_set_blacklist" >> $logfile
+sed -i "s/context[ \t]*=[ \t]*radio-secure/context = blacklist/" $CONFIGS/iax.conf
+sed -i "s/context[ \t]*=[ \t]*whitelist/context = blacklist/" $CONFIGS/iax.conf
+do_set_black_white_extensions_conf
+AST_RESTART=1
+}
+
+do_set_whitelist() {
+echo "do_set_whitelist" >> $logfile
+sed -i "s/context[ \t]*=[ \t]*radio-secure/context = whitelist/" $CONFIGS/iax.conf
+sed -i "s/context[ \t]*=[ \t]*blacklist/context = whitelist/" $CONFIGS/iax.conf
+do_set_black_white_extensions_conf
+AST_RESTART=1
+}
+
+do_set_noblkwhi() {
+echo "do_set_noblkwhi" >> $logfile
+sed -i "s/context[ \t]*=[ \t]*blacklist/context = radio-secure/" $CONFIGS/iax.conf
+sed -i "s/context[ \t]*=[ \t]*whitelist/context = radio-secure/" $CONFIGS/iax.conf
+whiptail --msgbox "Blacklist or Whitelist turned off\n\nAll nodes can connect now\nASL Asterisk restart required" 20 60 2
+AST_RESTART=1
+}
+
+do_set_black_white_extensions_conf() {
+echo "do_set_black_white_extensions_conf" >> $logfile
+cat $CONFIGS/extensions.conf | grep blacklist > /dev/null
+if [ $? = 1 ]; then
+echo '' >> $CONFIGS/extensions.conf
+echo '# added by asl-menu' >> $CONFIGS/extensions.conf
+echo '[blacklist]' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,1,NoOp(${CALLERID(num)})' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,GotoIf($[${DB_EXISTS(blacklist/${CALLERID(num)})}]?blocked)' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,Goto(radio-secure,${EXTEN},1)' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n(blocked),Hangup' >> $CONFIGS/extensions.conf
+fi
+
+cat $CONFIGS/extensions.conf | grep whitelist > /dev/null
+if [ $? = 1 ]; then
+echo '' >> $CONFIGS/extensions.conf
+echo '# added by asl-menu' >> $CONFIGS/extensions.conf
+echo '[whitelist]' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,1,NoOp(${CALLERID(num)})' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,NoOp(${IAXPEER(CURRENTCHANNEL)})' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,GotoIf($["${IAXPEER(CURRENTCHANNEL)}" = "127.0.0.1"]?radio-secure,${EXTEN},1)  ;permit local IPs' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,GotoIf($[${DB_EXISTS(whitelist/${CALLERID(num)})}]?radio-secure,${EXTEN},1)' >> $CONFIGS/extensions.conf
+echo 'exten => _XXXX!,n,Hangup' >> $CONFIGS/extensions.conf
+fi
+whiptail --msgbox "Edit the blacklist or whitelist.\nASL Asterisk restart required." 20 60 2
+AST_RESTART=1
+}
+
+do_show_blacklist() {
+echo "do_show_blacklist" >> $logfile
+SHOWBLACKLIST=$($ASTERISK -rx "database show blacklist")
+whiptail --msgbox "Current nodes in banned blacklist:\n$SHOWBLACKLIST" 30 80 6
+}
+
+do_del_blacklist() {
+echo "do_del_blacklist" >> $logfile
+DELBLACKNODE=$(whiptail --inputbox "Enter node number to remove from banned blacklist." 8 28 --title "Remove from ban list" 3>&1 1>&2 2>&3)
+$ASTERISK -rx "database del blacklist $DELBLACKNODE" > /dev/null
+whiptail --msgbox "Node $DELBLACKNODE removed from banned blacklist" 20 60
+}
+
+do_add_blacklist() {
+echo "do_add_blacklist" >> $logfile
+ADDBLACKNODE=$(whiptail --inputbox "Enter node number to ADD to banned blacklist." 8 28 --title "Add to ban list" 3>&1 1>&2 2>&3)
+$ASTERISK -rx "database put blacklist $ADDBLACKNODE \"banned\"" > /dev/null
+whiptail --msgbox "Node $ADDBLACKNODE added to banned blacklist" 20 60
+}
+
+do_show_whitelist() {
+echo "do_show_whitelist" >> $logfile
+SHOWWHITELIST=$($ASTERISK -rx "database show whitelist")
+whiptail --msgbox "Current nodes in allowed whitelist:\n$SHOWWHITELIST" 30 80 6
+}
+
+do_del_whitelist() {
+echo "do_del_whitelist" >> $logfile
+DELWHITENODE=$(whiptail --inputbox "Enter node number to remove from allowed whitelist." 8 28 --title "Remove from allowed list" 3>&1 1>&2 2>&3)
+$ASTERISK -rx "database del whitelist $DELWHITENODE" > /dev/null
+whiptail --msgbox "Node $DELWHITENODE removed from allowed whitelist" 20 60
+}
+
+do_add_whitelist() {
+echo "do_add_whitelist" >> $logfile
+ADDWHITENODE=$(whiptail --inputbox "Enter node number to ADD to allowed whitelist" 8 28 --title "Add to allowed list" 3>&1 1>&2 2>&3)
+$ASTERISK -rx "database put whitelist $ADDWHITENODE \"allowed\"" > /dev/null
+whiptail --msgbox "Node $ADDWHITENODE added to allowed whitelist" 20 60
+}
+
+do_ssh_port() {
+echo "do_ssh_port" >> $logfile
+NEWSSHPORT=$(whiptail --inputbox "Current SSH port is $SSHPORT \nEnter new SSH port to use" 8 78 "$SSHPORT" --title "SSH Port" 3>&1 1>&2 2>&3)
+#sed -i "s/^Port $SSHPORT/Port $NEWSSHPORT/" /etc/ssh/sshd_config
+sed -i "/Port $SSHPORT/c\Port $NEWSSHPORT" /etc/ssh/sshd_config
+$SERVICE ssh restart
+whiptail --msgbox "SSH port set to $NEWSSHPORT\nUpdate firewall and fail2ban to prevent being locked out if installed" 20 60 2
+}
+
+
+do_add_login_name() {
+echo "do_add_login_name" >> $logfile
+NEWUSERNAME_PASSWD1="A"
+NEWUSERNAME_PASSWD2="B"
+
+USERSLIST=$(awk -F'[/:]' '{if ($3 >= 1000 && $3 != 65534) print $1}' /etc/passwd)
+if (whiptail --title "Add user login?" --yesno "Current user login names are:\n$USERSLIST" 20 60) then
+NEWUSERNAME=$(whiptail --inputbox "Enter new login name you would like to add." 8 78 --title "Login name add/change" 3>&1 1>&2 2>&3)
+# check if passwd1 = passwd2 if not re-enter
+        while [ "$NEWUSERNAME_PASSWD1" != "$NEWUSERNAME_PASSWD2" ]; do
+        whiptail --msgbox "Passwords must match" 8 78 3>&1 1>&2 2>&3
+        NEWUSERNAME_PASSWD1=$(whiptail --passwordbox "please enter a password for $NEWUSERNAME" 8 78 --title "password dialog" 3>&1 1>&2 2>&3)
+        NEWUSERNAME_PASSWD2=$(whiptail --passwordbox "please verify password for $NEWUSERNAME" 8 78 --title "password dialog" 3>&1 1>&2 2>&3)
+        done
+# add user
+        $USERADD $NEWUSERNAME -m -d /home/$NEWUSERNAME -s /bin/bash -G sudo
+        echo -e "$NEWUSERNAME_PASSWD1\n$NEWUSERNAME_PASSWD1\n" | passwd $NEWUSERNAME
+        # usermod -aG sudo $NEWUSERNAME
+        echo "$NEWUSERNAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/010_$NEWUSERNAME-nopasswd
+        if (whiptail --title "Copy Files" --yesno "Copy any files from user repeater you may have created to $NEWUSERNAME" 8 78) then
+                cp -r /home/repeater/* /home/$NEWUSERNAME
+                chown -R $NEWUSERNAME /home/$NEWUSERNAME
+        fi
+# okay new user created and any files copied over.
+whiptail --msgbox "Please log in with the new user account and \nensure it has SUDO rights before deleting any users" 8 78
+else
+whiptail --msgbox "Not adding any users at this time" 8 78
+fi
+}
+
+do_delete_login_name() {
+echo "do_delete_login_name" >> $logfile
+USERSLIST=$(awk -F'[/:]' '{if ($3 >= 1000 && $3 != 65534) print $1}' /etc/passwd)
+DELETEUSERNAME=$(whiptail --inputbox "User login names available to DELETE:\n$USERSLIST\n\nEnter login name you would like to DELETE" 20 78 --title "Login name DELETE" 3>&1 1>&2 2>&3)
+if (whiptail --title "DELETE USER" --yesno "This will DELETE the user: $DELETEUSERNAM and all of the files in the /home/$DELETEUSERNAME folder \nThis can not be undone!\n\nAre you sure?" 8 78) then
+# lets not delete a user who is logged in and maybe running this script.
+        if who -u | grep -q "^$DELETEUSERNAME"; then
+        whiptail --msgbox "User $DELETEUSERNAME must be logged out to delete" 8 78
+        else
+        whiptail --msgbox "User $DELETEUSERNAME is NOT logged in" 8 78
+        $USERDEL -f -r $DELETEUSERNAME
+        rm -r /etc/sudoers.d/010_$DELETEUSERNAME-nopasswd
+        whiptail --msgbox "User $DELETEUSERNAME and all of their files removed" 8 78
+        fi
+else
+whiptail --msgbox "Not deleting any users at this time, returning to menu" 8 78
+fi
+}
+
+####################  menu sections
+
+do_main_menu() {
+echo "do_main_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+    FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL Main Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Exit \
+      "1 " "Run first-time menu" \
+      "2 " "Run node-setup menu" \
+      "3 " "Run radio-tune-menu for USBradio configuration" \
+      "4 " "Run simpleusb-tune-menu for SimpleUSB configuration" \
+      "5 " "ASL Asterisk CLI" \
+      "6 " "ASL Configuration Edit Menu" \
+      "7 " "Operating System Menu" \
+      "8 " "System Security Menu" \
+      "9 " "System Diagnostics Menu" \
+      "0 " "Information" \
+      "S " "Start a bash shell" \
+      3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      do_exit
+    elif [ $RET -eq 0 ]; then
+      case "$FUN" in
+        1\ *) do_run_firsttime ;;
+        2\ *) do_node_setup ;;
+        3\ *) do_radio_tune_menu ;;
+        4\ *) do_simpleusb_tune_menu ;;
+        5\ *) do_asl_cli ;;
+        6\ *) do_conf_edit_menu ;;
+        7\ *) do_OS_menu ;;
+        8\ *) do_sys_security_menu ;;
+        9\ *) do_sys_diags_menu ;;
+        0\ *) info_main_menu ;;
+        S\ *) do_bash_shell ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    else
+      exit 1
+    fi
+  done
+}
+
+do_conf_edit_menu() {
+echo "do_conf_edit_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+    FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL Configuration Menu   Uses the NANO Editor" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+      "A " "Backup Restore Menu" \
+      "B " "Edit rpt.conf file" \
+      "C " "Edit extensions.conf file" \
+      "D " "Edit iax.conf file" \
+      "E " "Edit modules.conf file" \
+      "F " "Edit manager.conf file" \
+      "G " "Edit echolink.conf file" \
+      "H " "Edit usbradio.conf file" \
+      "I " "Edit simplusb.conf file" \
+      "J " "Edit voter.conf file, RTCM users" \
+      "K " "Edit savenode.conf" \
+      "L " "Edit allmon2 config file" \
+      "M " "Information" \
+      3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      return
+    elif [ $RET -eq 0 ]; then
+      case "$FUN" in
+        A\ *) do_backup_restore_menu ;;
+        B\ *) nano $CONFIGS/rpt.conf ;;
+        C\ *) nano $CONFIGS/extensions.conf ;;
+        D\ *) nano $CONFIGS/iax.conf ;;
+        E\ *) nano $CONFIGS/modules.conf ;;
+        F\ *) nano $CONFIGS/manager.conf ;;
+        G\ *) nano $CONFIGS/echolink.conf ;;
+        H\ *) nano $CONFIGS/usbradio.conf ;;
+        I\ *) nano $CONFIGS/simpleusb.conf ;;
+        J\ *) nano $CONFIGS/voter.conf ;;
+        K\ *) nano $CONFIGS/savenode.conf ;;
+        L\ *) do_edit_allmon_config ;;
+        M\ *) info_config_menu ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    else
+      exit 1
+    fi
+  done
+}
+
+do_OS_menu() {
+echo "do_OS_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+    FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL Operating System Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+      "A " "Run apt-get update" \
+      "B " "Run apt-get upgrade" \
+      "C " "Install/upgrade firewall" \
+      "D " "Install/upgrade fail2ban" \
+      "E " "Set hostname and domain name" \
+      "F " "Set DHCP or STATIC IP" \
+      "G " "Install ASL Addons Menu" \
+      "H " "Change CPU performance (overclocking)" \
+      "I " "Use asl-menu at login" \
+      "J " "Information" \
+      3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      return
+    elif [ $RET -eq 0 ]; then
+      case "$FUN" in
+        A\ *) do_apt_get_update ;;
+        B\ *) do_apt_get_upgrade ;;
+        C\ *) do_install_firewall ;;
+        D\ *) do_install_fail2ban ;;
+        E\ *) do_sethost ;;
+        F\ *) do_netsetup ;;
+        G\ *) do_addon_packages_menu ;;
+        H\ *) do_cpu_clocking_menu ;;
+        I\ *) do_use_aslmenu ;;
+        J\ *) info_OS_menu ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    else
+      exit 1
+    fi
+  done
+}
+
+do_sys_security_menu() {
+echo "do_sys_security_menu" >> $logfile
+whiptail --msgbox "System security is the node managers responsibility.\nThese tools may help protect your node." 20 60 2
+RET=0
+  while true; do
+   calc_wt_size
+    FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL System Security Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+      "A " "Re-install ASL preconfigured firewall rules (basic)" \
+      "B " "Edit firewall rules" \
+      "C " "Re-install ASL preconfigured fail2ban rules (basic)" \
+      "D " "Edit fail2ban rules" \
+      "E " "Enable node blacklist/whitelist option" \
+      "F " "Show node blacklist" \
+      "G " "Delete from node blacklist" \
+      "H " "Add to node blacklist" \
+      "I " "Show node whitelist" \
+      "J " "Delete from node whitelist" \
+      "K " "Add to node whitelist" \
+      "L " "Change SSH port number used" \
+      "M " "Add user login with SUDO rights" \
+      "N " "Delete user login" \
+      "O " "Information" \
+      3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      return
+    elif [ $RET -eq 0 ]; then
+      case "$FUN" in
+        A\ *) do_set_precon_firewall ;;
+        B\ *) do_edit_firewall ;;
+        C\ *) do_set_precon_fail2ban ;;
+        D\ *) do_edit_fail2ban ;;
+        E\ *) do_enable_blackwhite_list ;;
+        F\ *) do_show_blacklist ;;
+        G\ *) do_del_blacklist ;;
+        H\ *) do_add_blacklist ;;
+        I\ *) do_show_whitelist ;;
+        J\ *) do_del_whitelist ;;
+        K\ *) do_add_whitelist ;;
+        L\ *) do_ssh_port ;;
+        M\ *) do_add_login_name ;;
+        N\ *) do_delete_login_name ;;
+        O\ *) info_security_menu ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    else
+      exit 1
+    fi
+  done
+}
+
+do_sys_diags_menu() {
+echo "do_sys_diags_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+    FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL System Diagnostics Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+      "A " "Ping Google DNS 8.8.8.8" \
+      "B " "Ping register.allstarlink.org" \
+      "C " "Show IAX2 registry" \
+      "D " "Show ASL-Asterisk version" \
+      "E " "Validate updatenodelist service is running" \
+      "F " "Restart updatenodelist program" \
+      "G " "Restart ASL Asterisk (astres.sh)" \
+      "H " "Start ASL Asterisk (astup.sh)" \
+      "I " "Stop ASL Asterisk (astdn.sh)" \
+      "J " "Create Upload file for ASL Admin Team" \
+      "K " "Information" \
+      3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+      return
+    elif [ $RET -eq 0 ]; then
+      case "$FUN" in
+        A\ *) do_ping_google_dns ;;
+        B\ *) do_ping_reg_asl ;;
+        C\ *) do_iax_show_reg ;;
+        D\ *) do_asl_version_show ;;
+        E\ *) do_validate_updatenodelist_running ;;
+        F\ *) do_updatenodelist_restart ;;
+        G\ *) do_astres ;;
+        H\ *) do_astup ;;
+        I\ *) do_astdn ;;
+        J\ *) do_upload_diag ;;
+        K\ *) info_diagnostics_menu ;;
+        *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+      esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
+    else
+      exit 1
+    fi
+  done
+}
+
+do_enable_blackwhite_list() {
+echo "do_enable_blackwhite_list" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+  FUN=$(whiptail --menu "AllStarLink Asterisk" --title "Blacklist Whitelist Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+    "A " "Enable using Blacklist" \
+    "B " "Enable using Whitelist" \
+    "C " "Disable filters Open to all nodes" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A\ *) do_set_blacklist ;;
+      B\ *) do_set_whitelist ;;
+      C\ *) do_set_noblkwhi ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "Invalid option, please try again" 20 60 1
+  else
+  exit 1
+  fi
+done
+}
+
+do_cpu_clocking_menu() {
+echo "do_cpu_clocking_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+  FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL CPU Governor Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+    "A " "Install/upgrade CPU clocking packages" \
+    "B " "Set on-demand governor (default)" \
+    "C " "Set conservative governor" \
+    "D " "Set performance governor" \
+    "E " "Set powersave governor" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A\ *) do_install_cpu_clocking ;;
+      B\ *) do_set_cpu_ondemand ;;
+      C\ *) do_set_cpu_conservative ;;
+      D\ *) do_set_cpu_performance ;;
+      E\ *) do_set_cpu_powersave ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "Invalid option, please try again" 20 60 1
+  else
+  exit 1
+  fi
+done
+}
+
+do_addon_packages_menu() {
+echo "do_addon_packages_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+  FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL Add-on Packages Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+    "A " "Information" \
+    "B " "Install Allmon2" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A\ *) info_asl_addons_menu ;;
+      B\ *) do_install_allmon ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "Invalid option, please try again" 20 60 1
+  else
+  exit 1
+  fi
+done
+}
+
+do_backup_restore_menu() {
+echo "do_backup_restore_menu" >> $logfile
+RET=0
+  while true; do
+   calc_wt_size
+  FUN=$(whiptail --menu "AllStarLink Asterisk" --title "ASL Backup Restore Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+    "A " "Auto savenode, uploads to backup.AllStarLink.org" \
+    "B " "Restore node from backup.AllStarLink.org" \
+    "C " "Local backup of configuration files" \
+    "D " "Restore a local backup configuration files" \
+    "E " "Delete a local backup configuration files" \
+    "F " "Start webserver for backup/restore" \
+    "G " "Information" \
+    3>&1 1>&2 2>&3)
+  RET=$?
+  if [ $RET -eq 1 ]; then
+    return
+  elif [ $RET -eq 0 ]; then
+    case "$FUN" in
+      A\ *) do_savenode ;;
+      B\ *) do_restorenode ;;
+      C\ *) do_local_conf_backup ;;
+      D\ *) do_local_conf_restore ;;
+      E\ *) do_local_conf_delete ;;
+      F\ *) do_webserver_backup ;;
+      G\ *) info_backup_restore_menu ;;
+      *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+    esac || whiptail --msgbox "Invalid option, please try again." 20 60 1
+  else
+  exit 1
+  fi
+done
+}
+
+####################  Main body
+check_if_root
+get_node_info
+check_config_files
+do_main_menu
+clear
+exit 0

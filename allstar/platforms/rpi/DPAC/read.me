@@ -1,0 +1,43 @@
+5. Edit /lib/udev/hwclock-set. Change the following section from this:
+
+    if [ -e /run/systemd/system ] ; then
+        exit 0
+    fi
+
+    to this:
+
+    #if [ -e /run/systemd/system ] ; then
+    #    exit 0
+    #fi
+
+    If needed (when not using ntpd, usually), change the following from this:
+
+    if [ yes = "$BADYEAR" ] ; then
+        /sbin/hwclock --rtc=$dev --systz --badyear
+        /sbin/hwclock --rtc=$dev --hctosys --badyear
+    else
+        /sbin/hwclock --rtc=$dev --systz
+        /sbin/hwclock --rtc=$dev --hctosys
+    fi
+
+    to this:
+
+    if [ yes = "$BADYEAR" ] ; then
+        #/sbin/hwclock --rtc=$dev --systz --badyear
+        /sbin/hwclock --rtc=$dev --hctosys --badyear
+    else
+        #/sbin/hwclock --rtc=$dev --systz
+        /sbin/hwclock --rtc=$dev --hctosys
+    fi
+
+
+root@raspberrypi:/srv/dpac# systemctl stop fake-hwclock
+
+root@raspberrypi:/srv/dpac# systemctl disable fake-hwclock
+
+root@raspberrypi:/srv/dpac# cd /etc/init.d
+
+root@raspberrypi:/etc/init.d# update-rc.d fake-hwclock remove
+
+rm fake-hwclock
+

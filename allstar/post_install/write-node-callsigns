@@ -1,0 +1,173 @@
+#!/bin/bash
+#
+#  Created by Marshall Dias
+#  Modified by Doug, WA3DSP 8/18/2015
+#
+# using ULAW format
+#
+# Script to write Calls to /var/lib/asterisk/sounds/rpt/nodenames
+# which will then be used in place of node numbers. This script
+# will NOT overwrite exisitng files unless you use the -o option.
+# If you want to start clean and delete all nodename files do
+#    rm -rf /var/lib/asterisk/sounds/rpt/nodenames/*
+# or delete just the files you want to replace.
+#
+# A single node number can be specified on the command line with
+# the -n node -ex. -n 40000
+#
+# A -v option gives a little more info
+
+# See all comments below
+
+# Set the source directory to the Allstar database on your system.
+# 'locate astdb.php'  This file will exist if you are running any of the
+# images from hamvoip.org or you have installed allmon or lsnodes on
+# your system. For the BBB and RPi2 it will generally be /var/log/asterisk
+
+#SRCDIR=/var/log/asterisk
+SRCDIR=/var/www/html/allmon
+
+# Set the destination directory.
+# Use a tmp directory for testing
+# The final destination for Allstar would be
+# /var/lib/asterisk/sounds/rpt/nodenames
+# Use the -d path option to overide
+
+DESTDIR=/var/lib/asterisk/sounds/rpt/nodenames
+# Test destination directory - must exist
+#DESTDIR=/tmp/nodes
+
+# Definitions of sound file directories
+
+NODENAMES=/var/lib/asterisk/sounds/rpt/nodenames
+LETTERS=/var/lib/asterisk/sounds/letters
+NUMBERS=/var/lib/asterisk/sounds/digits
+STRING=""
+
+usage()
+{
+cat << EOF
+
+Usage: $0 options
+
+Writes voice files of call signs from node numbers
+
+OPTIONS:
+   -h        Show this message
+   -o        Overwrite existings file(s)
+   -n node   Specify node number - single write
+   -d path   Specify path to output files
+             Default: /var/lib/asterisk/sounds/rpt/nodenames
+   -v        Verbose
+
+Write callsign for node 40000, no overwrite -
+
+  $0 -n 40000
+
+Write callsign for node 40000, overwrite -
+
+  $0 -on 40000
+
+Write all callsigns, no overwrite -
+
+  $0
+
+Write all callsigns, overwrite
+
+  $0 -o
+
+Write single node to specific directory -
+
+  $0 -n 40000 -d /etc/asterisk/local
+
+
+EOF
+}
+
+OVERWRITE=""
+VERBOSE=""
+
+while getopts "hovn:d:" OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+         d)
+             DESTDIR=$OPTARG
+             ;;
+         o)
+             OVERWRITE=1
+             ;;
+         n)
+             node=$OPTARG
+             ;;
+         v)
+             VERBOSE=1
+             ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+# Form filenames from callsign
+make_call ()
+{
+ STRING=""
+ foo=${f2,,}
+ for (( i=0; i<${#foo}; i++ )); do
+  char=${foo:$i:1}
+
+                case ${foo:$i:1} in
+                [0-9]*) FILENAME=$NUMBERS/$char.ulaw ;;
+                "/") FILENAME=$LETTERS/slash.ulaw ;;
+                "-") FILENAME=$LETTERS/dash.ulaw ;;
+                [a-z]*|[A-Z]*) FILENAME=$LETTERS/$char.ulaw ;;
+                esac
+STRING="$STRING $FILENAME"
+done
+}
+
+# Concatenate filenames into final audio file
+write_call ()
+{
+if [ ! $OVERWRITE ]
+ then
+   if [ -f "$DESTDIR/$f1.ulaw" ]
+     then
+        echo "$DESTDIR/$f1.ulaw exists - not overwriting"
+        return
+   fi
+fi
+echo "Writing $DESTDIR/$f1.ulaw"
+cat $STRING > "$DESTDIR/$f1.ulaw"
+}
+
+# If no node given process all nodes
+if [ -z "$node" ]
+then
+  while IFS='|' read f1 f2 f3 f4
+  do
+    if [ $VERBOSE ]; then echo "Processing Node Number: $f1 - Callsign: $f2" ; fi
+    make_call
+    write_call
+  done < $SRCDIR/astdb.txt
+else
+# process just given node
+  CALL=`grep -m 1 $node $SRCDIR/astdb.txt`
+  if [ -z "$CALL" ]
+    then
+      echo "No Call found for node - $1"
+      exit
+    else
+      f2=`echo $CALL | awk -F"|" '{print $2}'`
+  fi
+  f1=$node
+  if [ $VERBOSE ]; then echo "Processing Node Number: $node - Callsign: $f2" ; fi
+  make_call
+  write_call
+fi
+

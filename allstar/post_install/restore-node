@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -o errexit
+
+# N4IRS 07/26/2017
+# mod4whip N8THN 2018
+#release date 20180323-1
+#################################################
+#                                               #
+#                                               #
+#                                               #
+#################################################
+
+SAVESITE=http://backup.allstarlink.org
+
+rm -f /tmp/availbackups.txt
+touch /tmp/availbackups.txt
+
+get_hrefs() {
+    wget -O - --http-user=${NODE} --http-password=${PASSWORD} backup.allstarlink.org |\
+    grep -o '<A .*HREF=.*>' |\
+    sed -e 's/<A /<A /g' |\
+    sed -e 's/<A .*HREF=['"'"'"]//' -e 's/["'"'"'].*$//' -e '/^$/ d'
+}
+
+strip_getfile() {
+    declare foo=`get_hrefs 2>/dev/null`
+    echo "${foo}" | sed -e 's/getfile.cgi?//g' >> /tmp/availbackups.txt
+}
+
+if [ -r /etc/asterisk/savenode.conf ]
+then
+        .  /etc/asterisk/savenode.conf
+else
+        whiptail --msgbox "Savenode.conf does not exist" 20 60 2
+        exit 0
+fi
+
+if [ .$ENABLE = "." ]
+then
+        whiptail --msgbox "Savenode.conf is not enabled" 20 60 2
+        exit 0
+fi
+
+if [ $ENABLE -eq 0 ]
+then
+        whiptail --msgbox "Savenode.conf is not enabled" 20 60 2
+        exit 0
+fi
+
+do_welcome() {
+whiptail --msgbox "Reading Asterisk node $NODE configuration backups from $SAVESITE" 20 60 2
+strip_getfile
+}
+
+get_backups_list() {
+BACKUP=$(whiptail --inputbox "Backups available to restore:\n $(cat /tmp/availbackups.txt)\n\nPlease enter the backup file you want to restore" 30 60 --title "Select backup" 3>&1 1>&2 2>&3)
+whiptail --msgbox "Saving $BACKUP from $SAVESITE to /tmp/astsave.tgz" 20 60 2
+cd /tmp
+wget -q --timeout=60 --tries=1 --http-user=${NODE} --http-password=${PASSWORD} -O /tmp/astsave.tgz http://backup.allstarlink.org/getfile.cgi?$BACKUP
+}
+
+do_restore_now() {
+        if (whiptail --yesno "Ready to restore the node configuration you downloaded" 8 78 --title "Restore now") then
+                        cd /
+                        tar xzf /tmp/astsave.tgz
+                        whiptail --msgbox "Configuration restored ASL restart required" 20 60 2
+        else
+                        whiptail --msgbox "Not restoring configuration now\nUse tar xzf $BACKUP\nat your convenience" 20 60 2
+        fi
+}
+
+do_welcome
+get_backups_list
+do_restore_now
+

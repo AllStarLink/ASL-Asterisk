@@ -1,0 +1,13 @@
+[Unit]
+Description=Check for internet connectivity
+# Description=Place this file in /lib/systemd/system
+# Description=N4IRS 6/09/2017 
+After=syslog.target
+
+[Service]
+Type=forking
+StandardOutput=null
+ExecStart=/usr/local/sbin/netcheck
+
+[Install]
+WantedBy=network-online.target

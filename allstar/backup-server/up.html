@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<title>Backup My AllStarLink Node</title>
+<link type="text/css" rel="stylesheet" href="allmon.css">
+</head>
+
+<body>
+<div id="header">
+<div id="headerTitle"><a href="/">Backup My Node</a></div>
+<div id="headerTag">
+Local backup for my Node 
+</div>
+<div id="headerImg"><img src="allstarLogo.png" alt="Allstar Logo"></div>
+</div>
+
+<div id="menu">
+<ul>
+<li><a href="up.html">Upload Backup to Node</a></li>
+<li><a href="down.php">Download Backup from Node</a></li>
+</ul>
+</div>
+
+<div class="clearer"></div>
+
+<h1>Upload Backup File to Node</h1>
+<form action="upload.php" method="post" enctype="multipart/form-data">
+<div>
+    <input type="file" name="fileToUpload" id="fileToUpload">
+</div>
+<div>
+    <input type="submit" value="Upload File" name="submit">
+</div>
+</form>
+</body>
+</html>
