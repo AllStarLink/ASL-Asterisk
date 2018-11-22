@@ -39,7 +39,7 @@ Install gcc 4.9 and g++ 4.9 on your system (4.8 will work too).
 _Refer to your Linux distribution's documentation for information on how to do this_
 
 ## Compiling
-_Make sure the Asterisk 1.4 prerequisites are installed on your system before attemmptiog to compile_
+_Make sure the Asterisk 1.4 prerequisites are installed on your system before attempting to compile_
 
 <pre>
 git clone https://github.com/AllStarLink/Asterisk.git
