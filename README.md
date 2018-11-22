@@ -35,7 +35,7 @@ Asterisk, app_rpt and all associated code/files are licensed, released, and dist
 
 ## Prerequisites
 
-Install gcc 4.9 and g++ 4.9 installed on your system (4.8 will work too).  
+Install gcc 4.9 and g++ 4.9 on your system (4.8 will work too).  
 _Refer to your Linux distribution's documentation for information on how to do this_
 
 ## Compiling
