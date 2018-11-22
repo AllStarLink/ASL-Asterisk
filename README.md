@@ -25,7 +25,7 @@ AllStarLink Network/System status:  https://grafana.allstarlink.org
 
 Asterisk 1.4.23pre is copyright Digium (https://www.digium.com)
 
-app_rpt and associated programs (app_rpt suite) is copyright Jim Dixon, WB6NIL and contributors
+app_rpt and associated programs (app_rpt suite) are copyright Jim Dixon, WB6NIL and contributors
 
 ## License
 
