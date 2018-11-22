@@ -63,3 +63,9 @@ If all goes well, you will have cloned, configured, compiled and installed the A
 ## Help
 
 Refer to the app_rpt-users mailing list and AllStarLink Wiki for information on the app_rpt suite of programs.
+
+---------------------------------------------------------------------------------------------------------------------------------
+
+## Contributing
+
+Please refer to the [Contributing](https://wiki.allstarlink.org/wiki/Contributing) page on the AllStarLink Wiki.
