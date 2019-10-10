@@ -8,6 +8,7 @@ This is the Asterisk source package for AllStarLink and the files to build the A
 
 Updates: 
 asl-menu has received a few minor updates since the ASL 1.01 distribution was released.  
+Time for a few changes... Stay tuned
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
