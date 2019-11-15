@@ -45,7 +45,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program
- *  version 0.330 01/12/2018
+ *  version 0.331 11/15/2019
  *
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -530,7 +530,7 @@ enum{DAQ_TYPE_UCHAMELEON};
  * use the simple format YYMMDD (better for sort)
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 191115 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 #include <signal.h>
@@ -21108,7 +21108,16 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			{
 				char buf[100];
 				int j;
-
+				/* Allow a USRP device to receive a text message N4IRR */
+                               /* if is a USRP device */
+                               if (strncasecmp(myrpt->rxchannel->name,"usrp/", 5) == 0)
+                               {
+                                       char *argv[4];
+                                       int argc = 4;
+                                       argv[2] = myrpt->name;
+                                       argv[3] = AST_FRAME_DATAP(f);
+                                       rpt_do_sendall(0,argc,argv);
+                               }
 				/* if is a USB device */
 				if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
 				    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))
