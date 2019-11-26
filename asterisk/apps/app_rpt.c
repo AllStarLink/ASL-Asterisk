@@ -885,6 +885,8 @@ struct rpt_link
 	int linkmode;
 	int newkeytimer;
 	char gott;
+	int		voterlink;      /*!< \brief set if node is defined as a voter rx */
+	int		votewinner;		/*!< \brief set if node won the rssi competition */
 	time_t	lastkeytime;
 	time_t	lastunkeytime;
 #ifdef OLD_ASTERISK
@@ -1201,6 +1203,9 @@ static struct rpt
 		int gpsfeet;
 		int default_split_2m;
 		int default_split_70cm;
+                int votertype;                                  /*!< \brief 0 none, 1 repeater, 2 voter rx      */
+                int votermode;                                  /*!< \brief 0 none, 1 one shot, 2 continuous    */
+                int votermargin;                                /*!< \brief rssi margin to win a vote           */
 		int dtmfkey;
 		char dias;
 		char dusbabek;
@@ -1343,6 +1348,13 @@ static struct rpt
 	char dtmfkeybuf[MAXDTMF];
 	char sleepreq;
 	char sleep;
+	struct rpt_link *voted_link; /*!< \brief last winning link or NULL */
+	int  rxrssi;				/*!< \brief rx rssi from the rxchannel */
+	int  voted_rssi;			/*!< \brief last winning rssi */
+	int  vote_counter;			/*!< \brief count to frame used to vote the winner */
+	int  voter_oneshot;
+	int  votewinner;
+	int  voteremrx;             /* 0 no voters are keyed, 1 at least one voter is keyed */
 	char lastdtmfuser[MAXNODESTR];
 	char curdtmfuser[MAXNODESTR];
 	int  sleeptimer;
@@ -4316,6 +4328,69 @@ static int linkcount(struct rpt *myrpt)
 //	ast_log(LOG_NOTICE, "numoflinks=%i\n",numoflinks);
 	return numoflinks;
 }
+/* Considers repeater received RSSI and all voter link RSSI information and
+   set values in myrpt structure.
+*/
+static int FindBestRssi(struct rpt *myrpt)
+{
+	struct	rpt_link *l;
+	struct	rpt_link *bl;
+	int maxrssi;
+ 	int numoflinks;
+    char newboss;
+
+	bl=NULL;
+	maxrssi=0;
+	numoflinks=0;
+    newboss=0;
+
+    myrpt->voted_rssi=0;
+    if(myrpt->votewinner&&myrpt->rxchankeyed)
+        myrpt->voted_rssi=myrpt->rxrssi;
+    else if(myrpt->voted_link!=NULL && myrpt->voted_link->lastrealrx)
+        myrpt->voted_rssi=myrpt->voted_link->rssi;
+
+	if(myrpt->rxchankeyed)
+		maxrssi=myrpt->rxrssi;
+
+	l = myrpt->links.next;
+	while(l && (l != &myrpt->links)){
+		if(numoflinks >= MAX_STAT_LINKS){
+			ast_log(LOG_WARNING,
+			"[%s] number of links exceeds limit of %d \n",myrpt->name,MAX_STAT_LINKS);
+			break;
+		}
+		if(l->lastrealrx && (l->rssi > maxrssi))
+		{
+			maxrssi=l->rssi;
+			bl=l;
+		}
+		l->votewinner=0;
+		numoflinks++;
+		l = l->next;
+	}
+
+	if( !myrpt->voted_rssi ||
+	    (myrpt->voted_link==NULL && !myrpt->votewinner) ||
+	    (maxrssi>(myrpt->voted_rssi+myrpt->p.votermargin))
+	  )
+	{
+        newboss=1;
+        myrpt->votewinner=0;
+		if(bl==NULL && myrpt->rxchankeyed)
+			myrpt->votewinner=1;
+		else if(bl!=NULL)
+			bl->votewinner=1;
+		myrpt->voted_link=bl;
+		myrpt->voted_rssi=maxrssi;
+    }
+
+	if(debug>4)
+	    ast_log(LOG_NOTICE,"[%s] links=%i best rssi=%i from %s%s\n",
+	        myrpt->name,numoflinks,maxrssi,bl==NULL?"rpt":bl->name,newboss?"*":"");
+
+	return numoflinks;
+}
 /*
  * Retrieve a memory channel
  * Return 0 if sucessful,
@@ -4754,6 +4829,39 @@ char	str[200];
 		l = l->next;
 	}
 	return;
+}
+
+/*
+	rssi_send() Send rx rssi out on all links.
+*/
+static void rssi_send(struct rpt *myrpt)
+{
+        struct rpt_link *l;
+        struct	ast_frame wf;
+        char	str[200];
+	sprintf(str,"R %i",myrpt->rxrssi);
+	wf.frametype = AST_FRAME_TEXT;
+	wf.subclass = 0;
+	wf.offset = 0;
+	wf.mallocd = 0;
+	wf.datalen = strlen(str) + 1;
+	wf.samples = 0;
+	wf.src = "rssi_send";
+
+	l = myrpt->links.next;
+	/* otherwise, send it to all of em */
+	while(l != &myrpt->links)
+	{
+		if (l->name[0] == '0')
+		{
+			l = l->next;
+			continue;
+		}
+		wf.data = str;
+		if(debug>5)ast_log(LOG_NOTICE, "[%s] rssi=%i to %s\n", myrpt->name,myrpt->rxrssi,l->name);
+		if (l->chan) rpt_qwrite(l,&wf);
+		l = l->next;
+	}
 }
 
 static void mdc1200_cmd(struct rpt *myrpt, char *data)
@@ -6352,6 +6460,17 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 
 	}
 #endif
+	val = (char *) ast_variable_retrieve(cfg,this,"votertype");
+	if (!val) val = "0";
+	rpt_vars[n].p.votertype=atoi(val);
+
+	val = (char *) ast_variable_retrieve(cfg,this,"votermode");
+	if (!val) val = "0";
+	rpt_vars[n].p.votermode=atoi(val);
+
+	val = (char *) ast_variable_retrieve(cfg,this,"votermargin");
+	if (!val) val = "10";
+	rpt_vars[n].p.votermargin=atoi(val);
 	val = (char *) ast_variable_retrieve(cfg,this,"telemdefault");
 	if (val) rpt_vars[n].p.telemdefault = atoi(val);
 	else rpt_vars[n].p.telemdefault = DEFAULT_RPT_TELEMDEFAULT;
@@ -9548,6 +9667,12 @@ treataslocal:
 		imdone = 1;
 		break;
 	    case LINKUNKEY:
+		/* if voting and a voter link unkeys but the main or another voter rx is still active */
+		if(myrpt->p.votertype==1 && (myrpt->rxchankeyed || myrpt->voteremrx ))
+		{
+			imdone = 1;
+			break;
+		}
 		if(myrpt->patchnoct && myrpt->callmode){ /* If no CT during patch configured, then don't send one */
 			imdone = 1;
 			break;
@@ -10765,6 +10890,11 @@ struct rpt_link *l;
 		break;
 	    case UNKEY:
 	    case LOCUNKEY:
+		/* if voting and the main rx unkeys but a voter link is still active */
+		if(myrpt->p.votertype==1 && (myrpt->rxchankeyed || myrpt->voteremrx ))
+		{
+			return;
+		}
 		if (myrpt->p.nounkeyct) return;
 		/* if any of the following are defined, go ahead and do it,
 		   otherwise, dont bother */
@@ -11508,6 +11638,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	struct rpt_link *l;
 	int reconnects = 0;
 	int i,n;
+	int voterlink=0;
 	struct dahdi_confinfo ci;  /* conference info */
 
 	if (strlen(node) < 1) return 1;
@@ -11566,6 +11697,11 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			s1 = sx;
 		}
 		s2 = strsep(&s,",");
+        }
+	if(s && strcmp(s,"VOTE")==0)
+	{
+		voterlink=1;
+		if(debug)ast_log(LOG_NOTICE,"NODE is a VOTER.\n");
 	}
 	rpt_mutex_lock(&myrpt->lock);
 	l = myrpt->links.next;
@@ -11639,6 +11775,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	l->newkeytimer = NEWKEYTIME;
 	l->iaxkey = 0;
 	l->newkey = 2;
+	l->voterlink=voterlink;
 	if (strncasecmp(s1,"echolink/",9) == 0) l->newkey = 0;
 #ifdef ALLOW_LOCAL_CHANNELS
 	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1, "local/", 6) == 0) ||
@@ -19568,6 +19705,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	myrpt->wasvox = 0;
 	myrpt->linkactivityflag = 0;	
 	myrpt->linkactivitytimer = 0;
+	myrpt->vote_counter=10;
 	myrpt->rptinactwaskeyedflag = 0;
 	myrpt->rptinacttimer = 0;
 	if (myrpt->p.rxburstfreq)
@@ -19726,6 +19864,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				myrpt->name,lat,lon,elev);
 			rpt_mutex_lock(&myrpt->lock);
 			l = myrpt->links.next;
+		myrpt->voteremrx = 0;		/* no voter remotes keyed */
 			while(l != &myrpt->links)
 			{
 				if (l->chan) ast_sendtext(l->chan,tmpstr);
@@ -19743,6 +19882,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		{
 			if (l->lastrx){
 				myrpt->remrx = 1;
+				if(l->voterlink)myrpt->voteremrx=1;
 				if ((l->name[0] > '0') && (l->name[0] <= '9')) /* Ignore '0' nodes */
 					strcpy(myrpt->lastnodewhichkeyedusup, l->name); /* Note the node which is doing the key up */
 			}
@@ -20699,6 +20839,35 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (debug) printf("@@@@ rpt:Hung Up\n");
 				break;
 			}
+
+			if(f->frametype == AST_FRAME_TEXT && myrpt->rxchankeyed)
+			{
+				char myrxrssi[32];
+
+				if(sscanf((char *)f->data, "R %s", myrxrssi) == 1)
+				{
+					myrpt->rxrssi=atoi(myrxrssi);
+					if(debug>7)ast_log(LOG_NOTICE,"[%s] rxchannel rssi=%i\n",
+						myrpt->name,myrpt->rxrssi);
+					if(myrpt->p.votertype==2)
+						rssi_send(myrpt);
+				}
+			}
+
+			/* if out voted drop DTMF frames */
+			if(  myrpt->p.votermode &&
+			    !myrpt->votewinner &&
+
+			    ( f->frametype == AST_FRAME_DTMF_BEGIN ||
+                  f->frametype == AST_FRAME_DTMF_END
+                )
+			  )
+			{
+				rpt_mutex_unlock(&myrpt->lock);
+				ast_frfree(f);
+				continue;
+			}
+
 			if (f->frametype == AST_FRAME_VOICE)
 			{
 #ifdef	_MDC_DECODE_H_
@@ -20860,6 +21029,40 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				}
 				if (dtmfed) ismuted = 1;
 				dtmfed = 0;
+
+				if(myrpt->p.votertype==1)
+				{
+                                        if(!myrpt->rxchankeyed)
+                                                myrpt->votewinner=0;
+
+                    if(!myrpt->voteremrx)
+                        myrpt->voted_link=NULL;
+
+                    if(!myrpt->rxchankeyed&&!myrpt->voteremrx)
+                    {
+					    myrpt->voter_oneshot=0;
+					    myrpt->voted_rssi=0;
+					}
+				}
+
+				if( myrpt->p.votertype==1 && myrpt->vote_counter && (myrpt->rxchankeyed||myrpt->voteremrx)
+				    && (myrpt->p.votermode==2||(myrpt->p.votermode==1&&!myrpt->voter_oneshot))
+				  )
+				{
+					if(--myrpt->vote_counter<=0)
+					{
+						myrpt->vote_counter=10;
+						if(debug>6)ast_log(LOG_NOTICE,"[%s] vote rxrssi=%i\n",
+							myrpt->name,myrpt->rxrssi);
+						FindBestRssi(myrpt);
+						myrpt->voter_oneshot=1;
+					}
+				}
+				/* if a voting rx and not the winner, mute audio */
+				if(myrpt->p.votertype==1 && myrpt->voted_link!=NULL)
+				{
+					ismuted=1;
+				}
 				if (ismuted)
 				{
 					memset(AST_FRAME_DATAP(f),0,f->datalen);
@@ -21068,6 +21271,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				/* if RX un-key */
 				if (f->subclass == AST_CONTROL_RADIO_UNKEY)
 				{
+					/* clear rx channel rssi	 */
+					myrpt->rxrssi=0;
 					char asleep = myrpt->p.s[myrpt->p.sysstate_cur].sleepena & myrpt->sleep;
 
 					if ((!lasttx) || (myrpt->p.duplex > 1) || (myrpt->p.linktolink))
@@ -21352,7 +21557,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (l->mode != 1) totx = 0;
 				if (l->phonemode == 0 && l->chan && (l->lasttx != totx))
 				{
-					if (totx)
+					if ( totx && !l->voterlink)
 					{
 						if (l->newkey < 2) ast_indicate(l->chan,AST_CONTROL_RADIO_KEY);
 					}
@@ -21575,6 +21780,13 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							    (!strncasecmp(l->chan->name,"echolink",8)) ||
 								(!strncasecmp(l->chan->name,"tlb",3)))) ismuted = 1;
 						l->dtmfed = 0;
+
+						/* if a voting rx link and not the winner, mute audio */
+						if(myrpt->p.votertype==1 && l->voterlink && myrpt->voted_link!=l)
+						{
+							ismuted=1;
+						}
+
 						if (ismuted)
 						{
 							memset(AST_FRAME_DATAP(f),0,f->datalen);
@@ -21603,7 +21815,13 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					}
 					else
 					{
-						if (!l->lastrx)
+						/* if a voting rx link and not the winner, mute audio */
+						if(myrpt->p.votertype==1 && l->voterlink && myrpt->voted_link!=l)
+							ismuted=1;
+						else
+							ismuted=0;
+
+						if ( !l->lastrx || ismuted )
 							memset(AST_FRAME_DATAP(f),0,f->datalen);
 						ast_write(l->pchan,f);
 					}
