@@ -493,8 +493,7 @@ enum{DAQ_PT_INADC = 1, DAQ_PT_INP, DAQ_PT_IN, DAQ_PT_OUT};
 enum{DAQ_TYPE_UCHAMELEON};
 
 
-
-
+#define DEFAULT_TELEMDUCKDB "-9"
 #define	DEFAULT_RPT_TELEMDEFAULT 1
 #define	DEFAULT_RPT_TELEMDYNAMIC 1
 #define	DEFAULT_GUI_LINK_MODE LINKMODE_ON
@@ -1177,6 +1176,8 @@ static struct rpt
 		char *locallist[16];
 		int nlocallist;
 		char ctgroup[16];
+		float telemnomgain;		/*!< \brief nominal gain adjust for telemetry */
+		float telemduckgain;	/*!< \brief duck on busy gain adjust for telemetry */
 		float erxgain;
 		float etxgain;
 		float linkmongain;
@@ -1254,6 +1255,8 @@ static struct rpt
 	int telemmode;
 	struct ast_channel *rxchannel,*txchannel, *monchannel, *parrotchannel;
 	struct ast_channel *pchannel,*txpchannel, *zaprxchannel, *zaptxchannel;
+	struct ast_channel *telechannel;  	/*!< \brief pseudo channel between telemetry conference and txconf */
+	struct ast_channel *btelechannel;  	/*!< \brief pseudo channel buffer between telemetry conference and txconf */
 	struct ast_channel *voxchannel;
 	struct ast_frame *lastf1,*lastf2;
 	struct rpt_tele tele;
@@ -1265,6 +1268,7 @@ static struct rpt
 	int mustid,tailid;
 	int rptinacttimer;
 	int tailevent;
+	int teleconf;								/*!< \brief telemetry conference id */
 	int telemrefcount;
 	int dtmfidx,rem_dtmfidx;
 	int dailytxtime,dailykerchunks,totalkerchunks,dailykeyups,totalkeyups,timeouts;
@@ -1341,6 +1345,8 @@ static struct rpt
 	char reallykeyed;
 	char dtmfkeyed;
 	char dtmfkeybuf[MAXDTMF];
+	char localteleminhibit;		/*!< \brief local telemetry inhibit */
+	char noduck;				/*!< \brief no ducking of telemetry  */
 	char sleepreq;
 	char sleep;
 	char lastdtmfuser[MAXNODESTR];
@@ -6352,6 +6358,12 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 
 	}
 #endif
+	val = (char *) ast_variable_retrieve(cfg,this,"telemnomdb");
+	if (!val) val = "0";
+	rpt_vars[n].p.telemnomgain = pow(10.0,atof(val) / 20.0);
+	val = (char *) ast_variable_retrieve(cfg,this,"telemduckdb");
+	if (!val) val = DEFAULT_TELEMDUCKDB;
+	rpt_vars[n].p.telemduckgain = pow(10.0,atof(val) / 20.0);
 	val = (char *) ast_variable_retrieve(cfg,this,"telemdefault");
 	if (val) rpt_vars[n].p.telemdefault = atoi(val);
 	else rpt_vars[n].p.telemdefault = DEFAULT_RPT_TELEMDEFAULT;
@@ -9241,6 +9253,7 @@ struct	mdcparams *mdcp;
 			res = -1;
 			if (mytele->submode.p)
 			{
+			myrpt->noduck=1;
 				res = ast_playtones_start(myrpt->txchannel,0,
 					(char *) mytele->submode.p,0);
 				while(myrpt->txchannel->generatordata)
@@ -9391,6 +9404,7 @@ treataslocal:
 			ct_copy = ast_strdup(ct);
 			if(ct_copy)
 			{
+			    myrpt->noduck=1;
 				res = telem_lookup(myrpt,mychannel, myrpt->name, ct_copy);
 				ast_free(ct_copy);
 			}
@@ -9448,7 +9462,7 @@ treataslocal:
 		}
 		if (haslink)
 		{
-
+			myrpt->noduck=1;
 			res = telem_lookup(myrpt,mychannel, myrpt->name, (!hastx) ? "remotemon" : "remotetx");
 			if(res)
 				ast_log(LOG_WARNING, "telem_lookup:remotexx failed on %s\n", mychannel->name);
@@ -9468,6 +9482,7 @@ treataslocal:
 			ct_copy = ast_strdup(ct);
 			if(ct_copy)
 			{
+				myrpt->noduck=1;
 				res = telem_lookup(myrpt,mychannel, myrpt->name, ct_copy);
 				ast_free(ct_copy);
 			}
@@ -9503,6 +9518,7 @@ treataslocal:
 				ct_copy = ast_strdup(ct);
 				if(ct_copy)
 				{
+					myrpt->noduck=1;
 					res = telem_lookup(myrpt,mychannel, myrpt->name, ct_copy);
 					ast_free(ct_copy);
 				}
@@ -10713,6 +10729,7 @@ treataslocal:
 		ast_mutex_unlock(&locklock);
 	}			
 #endif
+	myrpt->noduck=0;
 	pthread_exit(NULL);
 }
 
@@ -22019,7 +22036,79 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			ast_frfree(f);
 			continue;
 		}
+
+	    /* Handle telemetry conference output */
+		if (who == myrpt->telechannel) /* if is telemetry conference output */
+		{
+			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->rxchankeyed,myrpt->remrx,myrpt->noduck);
+			f = ast_read(myrpt->telechannel);
+			if (!f)
+			{
+				if (debug) ast_log(LOG_NOTICE,"node=%s telechannel Hung Up implied\n",myrpt->name);
+				break;
+			}
+			if (f->frametype == AST_FRAME_VOICE)
+			{
+				float gain;
+
+				if(!myrpt->noduck&&(myrpt->rxchankeyed||myrpt->remrx))
+					gain = myrpt->p.telemduckgain;
+				else
+					gain = myrpt->p.telemnomgain;
+
+				//ast_log(LOG_NOTICE,"node=%s %i %i telem gain set %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->rxchankeyed,myrpt->noduck);
+
+				if(gain!=0)
+				{
+					int n,k;
+					short *sp = (short *) f->data;
+					for(n=0; n<f->datalen/2; n++)
+					{
+						k=sp[n]*gain;
+						if (k > 32767) k = 32767;
+						else if (k < -32767) k = -32767;
+						sp[n]=k;
+					}
+				}
+				ast_write(myrpt->btelechannel,f);
+			}
+			if (f->frametype == AST_FRAME_CONTROL)
+			{
+				if (f->subclass == AST_CONTROL_HANGUP)
+				{
+					if ( debug>5 ) ast_log(LOG_NOTICE,"node=%s telechannel Hung Up\n",myrpt->name);
+					ast_frfree(f);
+					break;
+				}
+			}
+			ast_frfree(f);
+			continue;
+		}
+		/* if is btelemetry conference output */
+		if (who == myrpt->btelechannel)
+		{
+			f = ast_read(myrpt->btelechannel);
+			if (!f)
+			{
+				if (debug) ast_log(LOG_NOTICE,"node=%s btelechannel Hung Up implied\n",myrpt->name);
+				break;
+			}
+			if (f->frametype == AST_FRAME_CONTROL)
+			{
+				if (f->subclass == AST_CONTROL_HANGUP)
+				{
+					if ( debug>5 ) ast_log(LOG_NOTICE,"node=%s btelechannel Hung Up\n",myrpt->name);
+					ast_frfree(f);
+					break;
+				}
+			}
+			ast_frfree(f);
+			continue;
+		}
 	}
+	/*
+	terminate and cleanup app_rpt node instance
+	*/
 	myrpt->ready = 0;
 	usleep(100000);
 	/* wait for telem to be done */
@@ -24134,6 +24223,73 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			ast_frfree(f);
 			continue;
 		}
+
+	    /* Handle telemetry conference output */
+		if (who == myrpt->telechannel) /* if is telemetry conference output */
+		{
+			f = ast_read(myrpt->telechannel);
+			if (!f)
+			{
+				if (debug) ast_log(LOG_NOTICE,"node=%s telechannel Hung Up implied\n",myrpt->name);
+				break;
+			}
+			if (f->frametype == AST_FRAME_VOICE)
+			{
+				float gain;
+
+				if(myrpt->keyed)
+					gain = myrpt->p.telemduckgain;
+				else
+					gain = myrpt->p.telemnomgain;
+
+				if(gain)
+				{
+					int n,k;
+					short *sp = (short *) f->data;
+					for(n=0; n<f->datalen/2; n++)
+					{
+						k=sp[n]*gain;
+						if (k > 32767) k = 32767;
+						else if (k < -32767) k = -32767;
+						sp[n]=k;
+					}
+				}
+				ast_write(myrpt->btelechannel,f);
+			}
+			if (f->frametype == AST_FRAME_CONTROL)
+			{
+				if (f->subclass == AST_CONTROL_HANGUP)
+				{
+					if ( debug>5 ) ast_log(LOG_NOTICE,"node=%s telechannel Hung Up\n",myrpt->name);
+					ast_frfree(f);
+					break;
+				}
+			}
+			ast_frfree(f);
+			continue;
+		}
+		/* if is btelemetry conference output */
+		if (who == myrpt->btelechannel)
+		{
+			f = ast_read(myrpt->btelechannel);
+			if (!f)
+			{
+				if (debug) ast_log(LOG_NOTICE,"node=%s btelechannel Hung Up implied\n",myrpt->name);
+				break;
+			}
+			if (f->frametype == AST_FRAME_CONTROL)
+			{
+				if (f->subclass == AST_CONTROL_HANGUP)
+				{
+					if ( debug>5 ) ast_log(LOG_NOTICE,"node=%s btelechannel Hung Up\n",myrpt->name);
+					ast_frfree(f);
+					break;
+				}
+			}
+			ast_frfree(f);
+			continue;
+		}
+
 		if (who == myrpt->pchannel) /* if is remote mix output */
 		{
 			f = ast_read(myrpt->pchannel);
