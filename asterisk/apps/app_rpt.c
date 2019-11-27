@@ -22051,7 +22051,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			{
 				float gain;
 
-				if(!myrpt->noduck&&(myrpt->rxchankeyed||myrpt->remrx))
+				//if(!myrpt->noduck&&(myrpt->rxchankeyed||myrpt->remrx)) /* This is for when/if simple voter is implemented.  It replaces the line below it. */
+				if(!myrpt->noduck&&myrpt->remrx)
 					gain = myrpt->p.telemduckgain;
 				else
 					gain = myrpt->p.telemnomgain;
