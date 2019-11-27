@@ -862,6 +862,7 @@ struct rpt_link
 	long	retxtimer;
 	long	rerxtimer;
 	long	rxlingertimer;
+	int     rssi;
 	int	retries;
 	int	max_retries;
 	int	reconnects;
@@ -1229,6 +1230,7 @@ static struct rpt
 	time_t lasttxkeyedtime;
 	char keyed;
 	char txkeyed;
+	char rxchankeyed;					/*!< \brief Receiver RxChan Key State */
 	char exttx;
 	char localtx;
 	char remrx;	
