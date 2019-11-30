@@ -54,6 +54,10 @@
  * \note contributions by Mike Zingman, N4IRR
  * \note contributions by Steve Zingman, N4IRS
  *
+ * \note Allison ducking code by W9SH
+ * \ported by KE5GDB
+ * \ported by N4IRR
+ *
  * See http://www.zapatatelephony.org/app_rpt.html
  *
  *
