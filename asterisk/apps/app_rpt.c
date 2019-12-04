@@ -9149,7 +9149,7 @@ struct	mdcparams *mdcp;
 	/* linked systems can't hear it */
 	ci.confno = (((mytele->mode == ID1) || (mytele->mode == PLAYBACK) ||
 	    (mytele->mode == TEST_TONE) || (mytele->mode == STATS_GPS_LEGACY)) ? 
-		myrpt->conf : myrpt->txconf);
+		myrpt->conf : myrpt->teleconf);
 	ci.confmode = DAHDI_CONF_CONFANN;
 	/* first put the channel on the conference in announce mode */
 	if (ioctl(mychannel->fds[0],DAHDI_SETCONF,&ci) == -1)
@@ -19467,6 +19467,84 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		ast_set_flag(myrpt->parrotchannel->cdr,AST_CDR_FLAG_POST_DISABLED);
 #endif
 	ast_answer(myrpt->parrotchannel);
+
+
+	/* Telemetry Channel Resources */
+	/* allocate a pseudo-channel thru asterisk */
+	myrpt->telechannel = ast_request("dahdi",AST_FORMAT_SLINEAR,"pseudo",NULL);
+	if (!myrpt->telechannel)
+	{
+		fprintf(stderr,"rpt:Sorry unable to obtain pseudo channel\n");
+		rpt_mutex_unlock(&myrpt->lock);
+		if (myrpt->txchannel != myrpt->rxchannel)
+			ast_hangup(myrpt->txchannel);
+		ast_hangup(myrpt->rxchannel);
+		myrpt->rpt_thread = AST_PTHREADT_STOP;
+		pthread_exit(NULL);
+	}
+	ast_set_read_format(myrpt->telechannel,AST_FORMAT_SLINEAR);
+	ast_set_write_format(myrpt->telechannel,AST_FORMAT_SLINEAR);
+#ifdef	AST_CDR_FLAG_POST_DISABLED
+	if (myrpt->telechannel->cdr)
+		ast_set_flag(myrpt->telechannel->cdr,AST_CDR_FLAG_POST_DISABLED);
+#endif
+ 	/* make a conference for the voice/tone telemetry */
+	ci.chan = 0;
+	ci.confno = -1; // make a new conference
+	ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_TALKER | DAHDI_CONF_LISTENER;
+ 	/* put the channel on the conference in proper mode */
+	if (ioctl(myrpt->telechannel->fds[0],DAHDI_SETCONF,&ci) == -1)
+	{
+		ast_log(LOG_WARNING, "Unable to set conference mode to Announce\n");
+		rpt_mutex_unlock(&myrpt->lock);
+		ast_hangup(myrpt->txpchannel);
+		ast_hangup(myrpt->monchannel);
+		if (myrpt->txchannel != myrpt->rxchannel)
+			ast_hangup(myrpt->txchannel);
+		ast_hangup(myrpt->rxchannel);
+		myrpt->rpt_thread = AST_PTHREADT_STOP;
+		pthread_exit(NULL);
+	}
+	myrpt->teleconf=ci.confno;
+
+	/* make a channel to connect between the telemetry conference process
+	   and the main tx audio conference. */
+	myrpt->btelechannel = ast_request("dahdi",AST_FORMAT_SLINEAR,"pseudo",NULL);
+	if (!myrpt->btelechannel)
+	{
+		fprintf(stderr,"rtp:Failed to obtain pseudo channel for btelechannel\n");
+		rpt_mutex_unlock(&myrpt->lock);
+		if (myrpt->txchannel != myrpt->rxchannel)
+			ast_hangup(myrpt->txchannel);
+		ast_hangup(myrpt->rxchannel);
+		myrpt->rpt_thread = AST_PTHREADT_STOP;
+		pthread_exit(NULL);
+	}
+	ast_set_read_format(myrpt->btelechannel,AST_FORMAT_SLINEAR);
+	ast_set_write_format(myrpt->btelechannel,AST_FORMAT_SLINEAR);
+#ifdef	AST_CDR_FLAG_POST_DISABLED
+	if (myrpt->btelechannel->cdr)
+		ast_set_flag(myrpt->btelechannel->cdr,AST_CDR_FLAG_POST_DISABLED);
+#endif
+	/* make a conference linked to the main tx conference */
+	ci.chan = 0;
+	ci.confno = myrpt->txconf;
+	ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_LISTENER | DAHDI_CONF_TALKER;
+	/* first put the channel on the conference in proper mode */
+	if (ioctl(myrpt->btelechannel->fds[0], DAHDI_SETCONF, &ci) == -1)
+	{
+		ast_log(LOG_ERROR, "Failed to create btelechannel.\n");
+		ast_hangup(myrpt->btelechannel);
+		ast_hangup(myrpt->btelechannel);
+		myrpt->rpt_thread = AST_PTHREADT_STOP;
+		pthread_exit(NULL);
+	}
+
+
+
+
+
+
 	/* allocate a pseudo-channel thru asterisk */
 	myrpt->voxchannel = ast_request(DAHDI_CHANNEL_NAME,AST_FORMAT_SLINEAR,"pseudo",NULL);
 	if (!myrpt->voxchannel)
@@ -20195,6 +20273,9 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		cs[n++] = myrpt->rxchannel;
 		cs[n++] = myrpt->pchannel;
 		cs[n++] = myrpt->monchannel;
+		cs[n++] = myrpt->telechannel;
+		cs[n++] = myrpt->btelechannel;
+
 		if (myrpt->parrotchannel) cs[n++] = myrpt->parrotchannel;
 		if (myrpt->voxchannel) cs[n++] = myrpt->voxchannel;
 		cs[n++] = myrpt->txpchannel;
@@ -22119,6 +22200,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	if (myrpt->parrotchannel) ast_hangup(myrpt->parrotchannel);
 	myrpt->parrotstate = 0;
 	if (myrpt->voxchannel) ast_hangup(myrpt->voxchannel);
+	ast_hangup(myrpt->btelechannel);
+	ast_hangup(myrpt->telechannel);
 	ast_hangup(myrpt->txpchannel);
 	if (myrpt->txchannel != myrpt->rxchannel) ast_hangup(myrpt->txchannel);
 	if (myrpt->zaptxchannel != myrpt->txchannel) ast_hangup(myrpt->zaptxchannel);
@@ -23671,6 +23754,8 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 	cs[n++] = chan;
 	cs[n++] = myrpt->rxchannel;
 	cs[n++] = myrpt->pchannel;
+	cs[n++] = myrpt->telechannel;
+        cs[n++] = myrpt->btelechannel;
 	if (myrpt->rxchannel != myrpt->txchannel)
 		cs[n++] = myrpt->txchannel;
 	if (!phone_mode) send_newkey(chan);
