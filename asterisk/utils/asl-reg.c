@@ -219,6 +219,48 @@ static void registerNodes(char **response, int *rescode) {
 	
 }
 
+static int getMessages(char *response, char **messages) {
+	//{"data":["Node number is has non digits.","Node number is has non digits."]}
+	char *ptr;
+	char *ptr2;
+	// remove leading whitepace
+	ptr = response;
+	while(*ptr < 33) ptr++; 
+	ptr2 = strchr(ptr,':');
+	if(ptr2) *ptr2 = '\0';
+	if(strcasecmp(ptr, "{\"data\""))
+		return -1;
+	ptr2++;
+	// remove leading whitespace
+	while(*ptr2 < 33) ptr2++;
+	if(!*ptr2 == '[') return -1;
+	ptr2++;
+	int i = 0;
+	while(1) {
+		// remove leading whitespace
+		while(*ptr2 < 33) ptr2++;
+		if(!*ptr2 == '"') return -1;
+		ptr2++;
+		ptr = strchr(ptr2,'"');
+		if(ptr) {
+		       	*ptr = '\0';
+			//printf("ptr2: %s\n", ptr2);
+			//printf("i: %d\n", i);
+			messages[i] = malloc(ptr-ptr2);
+			strcpy(messages[i], ptr2);
+			//printf("ptr2: %s\n", ptr2);
+			//printf("messages[%d]: %s\n", i, ptr2);
+			i++;
+		}
+		ptr++;
+		ptr2 = strchr(ptr, ',');
+		if(!ptr2) break;
+		ptr2++;
+		if(i>50) return -1;
+	}
+	return i;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -270,9 +312,10 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Error: asterisk is not running\n");
 		exit(4);
 	}
-	char *response = (char*) malloc(2048);
+	char *response = (char*) malloc(4096);
 	int rescode = 0;
 	registerNodes(&response, &rescode);
+	//printf("fullresponse: %s\n", response);
 	if(usesyslog) syslog(LOG_INFO, "Registration sent\n");
 
 	if( rescode != 200 ) {
@@ -281,9 +324,24 @@ int main(int argc, char *argv[])
 		exit(5);
 	}
 
+	char *messages[50]; 
+
+	int m = getMessages(response, messages);
+
 	//printf("rescode: %d\n", rescode);
-	if(usesyslog) syslog(LOG_INFO,"response: %s\n", response);
-	printf("response: %s\n", response);
+	
+	if( m<0 )
+	{		
+		if(usesyslog) syslog(LOG_INFO,"Error retrieving messages from server.  Some or all messages may have been lost\n");
+		fprintf(stderr,"Error retrieving messages from server.  Some or all messages may have been lost\n");
+	} else {
+		int i = 0;
+		while( i<m ) {
+			if(usesyslog) syslog(LOG_INFO,"response: %s\n", messages[i]);
+			fprintf(stdout, "response: %s\n", messages[i]);
+			i++;
+		}
+	}
 
 	exit(0);
 }
