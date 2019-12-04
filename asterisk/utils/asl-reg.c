@@ -222,6 +222,15 @@ static void registerNodes(char **response, int *rescode) {
 
 int main(int argc, char *argv[])
 {
+	int delay = 240;
+	time_t t;
+	srand((unsigned) time(&t));
+	int i = 0;
+	while( i< argc ){
+		if (!strcasecmp(argv[i], "-d"))
+			delay = 0;
+		i++;
+	}
 	load_config("/etc/asterisk/iax.conf");
 	load_config("/etc/asterisk/asl-reg.conf");
 	/*
@@ -248,8 +257,12 @@ int main(int argc, char *argv[])
 		exit(2);
 	}
 
-	// sleep for a random period between 0 and 4 minutes
-	sleep(rand() % 240);
+	// sleep for a random period up to delay seconds
+	if( delay ) {
+		int d = rand() % delay;
+		fprintf(stdout, "Waiting for %d seconds...\n", d);
+		sleep(d);
+	}
 
 	//check if asterisk is running
 	if( access( "/var/run/asterisk.ctl", F_OK ) == -1 ) {
