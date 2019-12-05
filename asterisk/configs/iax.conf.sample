@@ -49,8 +49,6 @@ delayreject = yes
 ; iaxthreadcount = 30                                                              
 ; iaxmaxthreadcount = 150   
 
-; register = 1999:123456@register.allstarlink.org	; This must be changed to your node number, password 
-                                                	; remove the leading ";"
 
 ; Incoming radio connections
 
