@@ -12,6 +12,11 @@
  * at the top of the source tree.
  */
 
+#define MAX_RESPONSE_LENGTH 8192
+#define MAX_REQUEST_LENGTH 4096
+#define MAX_MESSAGES 50
+#define DEFAULT_BIND_PORT "4596"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -35,7 +40,7 @@ static char server[256] = "";
 static int usesyslog = 0;
 static struct node nodelist[10];
 static int nodecount = 0;
-static char bindport[6] = "4569";
+static char bindport[6] = DEFAULT_BIND_PORT;
 
 
 static int load_config(char* config)
@@ -145,22 +150,26 @@ static int load_config(char* config)
 }
 
 static void generatePost( char **post ) {
-	strcpy(*post, "data={\"nodes\":{");
+	strncpy(*post, "data={\"nodes\":{", MAX_REQUEST_LENGTH - 1);
 	int i = 0;
 	while( i<nodecount ) {
 		if( i>0 ) strcat(*post, ",");
-		strcat(*post, "\"");
-		strcat(*post, nodelist[i].num);
-		strcat(*post, "\": {\"node\":\"");
-		strcat(*post, nodelist[i].num);
-		strcat(*post, "\",\"passwd\":\"");
-		strcat(*post, nodelist[i].pass);
-		strcat(*post, "\",\"remote\":");
-		strcat(*post, nodelist[i].rbase ? "1" : "0");
-		strcat(*post, "}");
+		strncat(*post, "\"", MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, nodelist[i].num, MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, "\": {\"node\":\"", MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, nodelist[i].num, MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, "\",\"passwd\":\"", MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, nodelist[i].pass, MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, "\",\"remote\":", MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, nodelist[i].rbase ? "1" : "0", MAX_REQUEST_LENGTH - strlen(*post) - 1);
+		strncat(*post, "}", MAX_REQUEST_LENGTH - strlen(*post) - 1);
 		i++;
 	}
-	strcat(*post,"}}");
+	if( strlen(*post) > MAX_REQUEST_LENGTH - 2 ) {
+	       fprintf(stderr, "buffer overflow while generating request\n");
+       	       exit(6);
+	}
+	strncat(*post,"}}", - strlen(*post) - 1);
 }
 
 static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -184,9 +193,9 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, voi
 }
 
 static void registerNodes(char **response, int *rescode) {
-	char *request = (char*) malloc(2048);
+	char *request = (char*) malloc(MAX_REQUEST_LENGTH);
 	generatePost(&request);
-	//printf( "request: %s\n", request);
+	printf( "request: %s\n", request);
 	CURL *curl;
 	struct MemoryStruct chunk;
 	
@@ -205,11 +214,13 @@ static void registerNodes(char **response, int *rescode) {
 		//curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 		curl_easy_perform(curl);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, rescode);
-		/*
-		printf( "curl rescode: %d\n", rescode );
-		printf( "curl: %s\n", curl_easy_strerror(res));
-		printf( "curl: %s\n", chunk.memory);
-		*/
+		
+		//printf( "curl rescode: %d\n", *rescode );
+		//printf( "curl: %s\n", chunk.memory);
+		if(strlen(chunk.memory)>MAX_RESPONSE_LENGTH) {
+			fprintf(stderr, "buffer overflow while retrieving response from server\n");
+			exit(7);
+		}	
 		strcpy(*response,chunk.memory);
 		curl_easy_cleanup(curl);
 		curl_global_cleanup();
@@ -256,7 +267,7 @@ static int getMessages(char *response, char **messages) {
 		ptr2 = strchr(ptr, ',');
 		if(!ptr2) break;
 		ptr2++;
-		if(i>50) return -1;
+		if(i>MAX_MESSAGES) return -1;
 	}
 	return i;
 }
@@ -312,7 +323,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Error: asterisk is not running\n");
 		exit(4);
 	}
-	char *response = (char*) malloc(4096);
+	char *response = (char*) malloc(MAX_RESPONSE_LENGTH);
 	int rescode = 0;
 	registerNodes(&response, &rescode);
 	//printf("fullresponse: %s\n", response);
@@ -324,9 +335,11 @@ int main(int argc, char *argv[])
 		exit(5);
 	}
 
-	char *messages[50]; 
+	char *messages[MAX_MESSAGES]; 
 
 	int m = getMessages(response, messages);
+
+	free(response);
 
 	//printf("rescode: %d\n", rescode);
 	
@@ -342,6 +355,6 @@ int main(int argc, char *argv[])
 			i++;
 		}
 	}
-
+	
 	exit(0);
 }
