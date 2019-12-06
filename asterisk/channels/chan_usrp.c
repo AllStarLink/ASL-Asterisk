@@ -31,7 +31,7 @@
 /*** MODULEINFO
  ***/
 
-/* Version 0.1, 12/15/2010
+/* Version 0.1.1, 11/15/2019
 
 Channel connection for Asterisk to GNU Radio/USRP
 
@@ -49,7 +49,7 @@ MYPORT (optional) is the UDP socket that Asterisk listens on for this channel
  * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180112 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 191115 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 #include <stdio.h>
@@ -432,15 +432,32 @@ static struct ast_frame  *usrp_xread(struct ast_channel *ast)
 				fprintf(stderr, "repeater_chan_usrp: possible data loss, expected seq %lu received %lu\n", p->rxseq, seq);
 			}
 			p->rxseq = seq + 1;
-			// TODO: add DTMF, TEXT processing
+			// TODO: add DTMF. TEXT processing added N4IRR
 			if (datalen == USRP_VOICE_FRAME_SIZE) {
 				qp = ast_malloc(sizeof(struct usrp_rxq));
 				if (!qp)
 				{
 					ast_log(LOG_NOTICE,"Cannot malloc for qp\n");
 				} else {
-					memcpy(qp->buf,bufdata,USRP_VOICE_FRAME_SIZE);
-					insque((struct qelem *) qp,(struct qelem *) p->rxq.qe_back);
+                                       if (bufhdrp->type == USRP_TYPE_TEXT) {
+                                               char buf1[320];
+                                               strcpy(buf1, bufdata);
+                                               memset(&fr,0,sizeof(fr));
+                                               fr.data =  buf1;
+                                               fr.datalen = strlen(buf1) + 1;
+                                               fr.samples = 0;
+                                               fr.frametype = AST_FRAME_TEXT;
+                                               fr.subclass = 0;
+                                               fr.src = "chan_usrp";
+                                               fr.offset = 0;
+                                               fr.mallocd=0;
+                                               fr.delivery.tv_sec = 0;
+                                               fr.delivery.tv_usec = 0;
+                                               ast_queue_frame(ast,&fr);
+                                       } else {
+                                               memcpy(qp->buf,bufdata,USRP_VOICE_FRAME_SIZE);
+                                               insque((struct qelem *) qp,(struct qelem *) p->rxq.qe_back);
+                                       }
 				}
 			}
 		}
