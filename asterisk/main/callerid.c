@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 206867 $")
 
 #include <time.h>
 #include <string.h>
@@ -781,7 +781,7 @@ static int callerid_genmsg(char *msg, int size, const char *number, const char *
 	
 }
 
-int vmwi_generate(unsigned char *buf, int active, int mdmf, int codec)
+int ast_callerid_vmwi_generate(unsigned char *buf, int active, int mdmf, int codec)
 {
 	unsigned char msg[256];
 	int len=0;
@@ -964,7 +964,6 @@ int ast_is_shrinkable_phonenumber(const char *exten)
  * input                   location        name
  * " foo bar " <123>       123             ' foo bar ' (with spaces around)
  * " foo bar "             NULL            'foo bar' (without spaces around)
- * " foo bar  <123>"       123             '" foo bar'
  * The parsing of leading and trailing space/quotes should be more consistent.
  */
 int ast_callerid_parse(char *instr, char **name, char **location)
@@ -972,12 +971,21 @@ int ast_callerid_parse(char *instr, char **name, char **location)
 	char *ns, *ne, *ls, *le;
 
 	/* Try "name" <location> format or name <location> format */
-	if ((ls = strchr(instr, '<')) && (le = strchr(ls, '>'))) {
+	if ((ls = strrchr(instr, '<')) && (le = strrchr(ls, '>'))) {
 		*ls = *le = '\0';	/* location found, trim off the brackets */
 		*location = ls + 1;	/* and this is the result */
 		if ((ns = strchr(instr, '"')) && (ne = strchr(ns + 1, '"'))) {
 			*ns = *ne = '\0';	/* trim off the quotes */
 			*name = ns + 1;		/* and this is the name */
+		} else if (ns) {
+			/* An opening quote was found but no closing quote was. The closing
+			 * quote may actually be after the end of the bracketed number
+			 */
+			if (strchr(le + 1, '\"')) {
+				*ns = '\0';
+				*name = ns + 1;
+				ast_trim_blanks(*name);
+			}
 		} else { /* no quotes, trim off leading and trailing spaces */
 			*name = ast_skip_blanks(instr);
 			ast_trim_blanks(*name);
@@ -1083,6 +1091,10 @@ static struct {
 int ast_parse_caller_presentation(const char *data)
 {
 	int i;
+
+	if (!data) {
+		return -1;
+	}
 
 	for (i = 0; i < ((sizeof(pres_types) / sizeof(pres_types[0]))); i++) {
 		if (!strcasecmp(pres_types[i].name, data))

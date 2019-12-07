@@ -1,7 +1,5 @@
 #!/bin/sh -e
 
-# iLBC is now installed by default This is no longer needed.
-
 if [ -f codecs/ilbc/iLBC_define.h ]; then
     echo "***"
     echo "The iLBC source code appears to already be present and does not"
@@ -24,7 +22,7 @@ read tmp
 
 wget -P codecs/ilbc http://www.ietf.org/rfc/rfc3951.txt
 
-wget -q -O - http://www.ilbcfreeware.org/documentation/extract-cfile.awk | sed -e 's/\r//g' > codecs/ilbc/extract-cfile.awk
+wget -q -O - http://www.ilbcfreeware.org/documentation/extract-cfile.awk | tr -d '\r' > codecs/ilbc/extract-cfile.awk
 
 (cd codecs/ilbc && awk -f extract-cfile.awk rfc3951.txt)
 

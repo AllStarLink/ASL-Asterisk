@@ -28,7 +28,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 220288 $")
 
 #include <string.h>
 #include <stdlib.h>
@@ -98,7 +98,7 @@ static char *descrip =
 
 static void play_dialtone(struct ast_channel *chan, char *mailbox)
 {
-	const struct ind_tone_zone_sound *ts = NULL;
+	const struct tone_zone_sound *ts = NULL;
 	if(ast_app_has_voicemail(mailbox, NULL))
 		ts = ast_get_indication_tone(chan->zone, "dialrecall");
 	else
@@ -240,7 +240,7 @@ static int disa_exec(struct ast_channel *chan, void *data)
 			if (!(k&1)) { /* if in password state */
 				if (j == '#') { /* end of password */
 					  /* see if this is an integer */
-					if (sscanf(args.passcode,"%d",&j) < 1) { /* nope, it must be a filename */
+					if (sscanf(args.passcode,"%30d",&j) < 1) { /* nope, it must be a filename */
 						fp = fopen(args.passcode,"r");
 						if (!fp) {
 							ast_log(LOG_WARNING,"DISA password file %s not found on chan %s\n",args.passcode,chan->name);
@@ -266,7 +266,7 @@ static int disa_exec(struct ast_channel *chan, void *data)
 							ast_log(LOG_DEBUG, "Mailbox: %s\n",args.mailbox);
 
 							/* password must be in valid format (numeric) */
-							if (sscanf(args.passcode,"%d", &j) < 1)
+							if (sscanf(args.passcode,"%30d", &j) < 1)
 								continue;
 							 /* if we got it */
 							if (!strcmp(exten,args.passcode)) {
@@ -298,8 +298,14 @@ static int disa_exec(struct ast_channel *chan, void *data)
 					continue;
 				}
 			} else {
-				if (j == '#') { /* end of extension */
-					break;
+				if (j == '#') { /* end of extension .. maybe */
+					if (i == 0 && 
+							(ast_matchmore_extension(chan, args.context, "#", 1, chan->cid.cid_num) ||
+							 ast_exists_extension(chan, args.context, "#", 1, chan->cid.cid_num)) ) {
+						/* Let the # be the part of, or the entire extension */
+					} else {
+						break;
+					}
 				}
 			}
 

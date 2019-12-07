@@ -52,6 +52,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include "asterisk/autoconfig.h"
+
 static char *config = "/etc/asterisk/muted.conf";
 
 static char host[256] = "";
@@ -114,7 +116,9 @@ static int load_config(void)
 		return -1;
 	}
 	while(!feof(f)) {
-		fgets(buf, sizeof(buf), f);
+		if (!fgets(buf, sizeof(buf), f)) {
+			continue;
+		}
 		if (!feof(f)) {
 			lineno++;
 			val = strchr(buf, '#');
@@ -152,7 +156,7 @@ static int load_config(void)
 			} else if (!strcasecmp(buf, "smoothfade")) {
 				smoothfade = 1;
 			} else if (!strcasecmp(buf, "mutelevel")) {
-				if (val && (sscanf(val, "%d", &x) == 1) && (x > -1) && (x < 101)) {
+				if (val && (sscanf(val, "%3d", &x) == 1) && (x > -1) && (x < 101)) {
 					mutelevel = x;
 				} else 
 					fprintf(stderr, "mutelevel must be a number from 0 (most muted) to 100 (no mute) at line %d\n", lineno);
@@ -212,7 +216,7 @@ static int connect_asterisk(void)
 	if (ports) {
 		*ports = '\0';
 		ports++;
-		if ((sscanf(ports, "%d", &port) != 1) || (port < 1) || (port > 65535)) {
+		if ((sscanf(ports, "%5d", &port) != 1) || (port < 1) || (port > 65535)) {
 			fprintf(stderr, "'%s' is not a valid port number in the hostname\n", ports);
 			return -1;
 		}
@@ -680,14 +684,19 @@ int main(int argc, char *argv[])
 		fclose(astf);
 		exit(1);
 	}
+#if HAVE_WORKING_FORK
 	if (needfork) {
 #ifndef HAVE_SBIN_LAUNCHD
-		daemon(0,0);
+		if (daemon(0,0) < 0) {
+			fprintf(stderr, "daemon() failed: %s\n", strerror(errno));
+			exit(1);
+		}
 #else
 		fprintf(stderr, "Mac OS X detected.  Use 'launchd -d muted -f' to launch.\n");
 		exit(1);
 #endif
 	}
+#endif
 	for(;;) {
 		if (wait_event()) {
 			fclose(astf);

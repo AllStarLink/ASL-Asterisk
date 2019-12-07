@@ -17,6 +17,7 @@
 #define _COMPAT_H
 
 #include "asterisk/autoconfig.h"
+#include "asterisk/compiler.h"
 #include <inttypes.h>
 #include <sys/types.h>
 #include <stdarg.h>
@@ -62,11 +63,11 @@ int vasprintf(char **strp, const char *fmt, va_list ap);
 #endif
 
 #ifndef HAVE_STRLCAT
-size_t strlcat(char *dst, const char *src, size_t siz);
+size_t strlcat(char *dst, const char *src, size_t siz) attribute_deprecated;
 #endif
 
 #ifndef HAVE_STRLCPY
-size_t strlcpy(char *dst, const char *src, size_t siz);
+size_t strlcpy(char *dst, const char *src, size_t siz) attribute_deprecated;
 #endif
 
 #ifdef SOLARIS
@@ -126,6 +127,17 @@ typedef unsigned int	uint;
 
 #ifdef __CYGWIN__
 typedef unsigned long long uint64_t;
+#endif
+
+/* glob compat stuff */ 
+#if defined(__Darwin__) || defined(__CYGWIN__)
+#define GLOB_ABORTED GLOB_ABEND
+#endif
+
+#if !defined(HAVE_GLOB_NOMAGIC) || !defined(HAVE_GLOB_BRACE)
+#define MY_GLOB_FLAGS   GLOB_NOCHECK
+#else
+#define MY_GLOB_FLAGS   (GLOB_NOMAGIC | GLOB_BRACE)
 #endif
 
 #endif

@@ -59,14 +59,14 @@ int getremainingfilelength( FILE *anyin, long *result)
 {
     long i;
 
-    i = ftell (anyin);
+    i = ftell(anyin);
     if (i == -1) return FALSE;
-    if (fseek (anyin, 0, SEEK_END) == -1) return FALSE;
-    *result = ftell (anyin);
+    if (fseek(anyin, 0, SEEK_END) == -1) return FALSE;
+    *result = ftell(anyin);
     if (*result == -1) return FALSE;
     (*result) -= i;
     (*result) /= samplewidth;
-    if (fseek (anyin, i, SEEK_SET) == -1) return FALSE;
+    if (fseek(anyin, i, SEEK_SET) == -1) return FALSE;
     return TRUE;
 }
 
@@ -81,31 +81,39 @@ void readpkheader( FILE *anyin)
 
    for (i = 0; i < 11; i++)
    {
-      fread( &tempint, 4, 1, anyin);
-      printf( "%d: %d, ", i, tempint);
+	   if (!fread( &tempint, 4, 1, anyin)) {
+		   return;
+	   }
+	   printf( "%d: %d, ", i, tempint);
    }
    printf( "\n");
-   fread( blood, 1, 8, anyin);
+   if (!fread( blood, 1, 8, anyin)) {
+	   return;
+   }
    for (i = 0; i < 8; i++)
-      printf( "%d ", blood[i]);
+	   printf( "%d ", blood[i]);
    printf( "\n");
    for (i = 0; i < 8; i++)
-      {
-      for (x = 128; x > 0; x /= 2)
-         printf((blood[i] & x) == 0? "0 ":"1 ");
-      printf(i%4==3? "\n":"| ");
-      }
+   {
+	   for (x = 128; x > 0; x /= 2)
+		   printf((blood[i] & x) == 0? "0 ":"1 ");
+	   printf(i%4==3? "\n":"| ");
+   }
    printf( "\n");
    for (i = 0; i < 2; i++)
    {
-      fread( &tempint, 4, 1, anyin);
-      printf( "%d: %d, ", i, tempint);
+	   if (!fread( &tempint, 4, 1, anyin)) {
+		   return;
+	   }
+	   printf( "%d: %d, ", i, tempint);
    }
    printf( "\n");
    for (i = 0; i < 2; i++)
    {
-      fread( &tempushort, 2, 1, anyin);
-      printf( "%d: %d, ", i, tempushort);
+	   if (!fread( &tempushort, 2, 1, anyin)) {
+		   return;
+	   }
+	   printf( "%d: %d, ", i, tempushort);
    }
    printf( "\n");
 }
@@ -125,59 +133,81 @@ void readwavheader( FILE *anyin)
    iswav = FALSE;
 
    if (ftell(anyin) == -1) /* If we cannot seek this file */
-     {
-       nowav = TRUE;   /* -> Pretend this is no wav-file */
-       chat("File not seekable: not checking for WAV-header.\n");
-     }
+   {
+	   nowav = TRUE;   /* -> Pretend this is no wav-file */
+	   chat("File not seekable: not checking for WAV-header.\n");
+   }
    else
-     {
-       /* Expect four bytes "RIFF" and four bytes filelength */
-       fread (str, 1, 8, anyin);           /* 0 */
-       str[4] = '\0';
-       if (strcmp(str, "RIFF") != 0) nowav = TRUE;
-       /* Expect eight bytes "WAVEfmt " */
-       fread (str, 1, 8, anyin);           /* 8 */
-       str[8] = '\0';
-       if (strcmp(str, "WAVEfmt ") != 0) nowav = TRUE;
-       /* Expect length of fmt data, which should be 16 */
-       fread (&tempuint, 4, 1, anyin);   /* 16 */
-       if (tempuint != 16) nowav = TRUE;
-       /* Expect format tag, which should be 1 for pcm */
-       fread (&tempushort, 2, 1, anyin); /* 20 */
-       if (tempushort != 1)
-	 nowav = TRUE;
-       /* Expect number of channels */
-       fread (&cn, 2, 1, anyin); /* 20 */
-       if (cn != 1 && cn != 2) nowav = TRUE;
-       /* Read samplefrequency */
-       fread (&sf, 4, 1, anyin);  /* 24 */
-       /* Read bytes per second: Should be samplefreq * channels * 2 */
-       fread (&tempuint, 4, 1, anyin);         /* 28 */
-       if (tempuint != sf * cn * 2) nowav = TRUE;
-       /* read bytes per frame: Should be channels * 2 */
-       fread (&tempushort, 2, 1, anyin);       /* 32 */
-       if (tempushort != cn * 2) nowav = TRUE;
-       /* Read bits per sample: Should be 16 */
-       fread (&tempushort, 2, 1, anyin);       /* 34 */
-       if (tempushort != 16) nowav = TRUE;
-       fread (str, 4, 1, anyin);            /* 36 */
-       str[4] = '\0';
-       if (strcmp(str, "data") != 0) nowav = TRUE;
-       fread (&tempuint, 4, 1, anyin);   /* 40 */
-       if (nowav)
-	 {
-	   fseek (anyin, 0, SEEK_SET);   /* Back to beginning of file */
-	   chat("File has no WAV header.\n");
-	 }
-       else
-	 {
-	   samplefrequency = sf;
-	   channels = cn;
-	   chat ("Read WAV header: %d channels, samplefrequency %d.\n",
-		 channels, samplefrequency);
-	   iswav = TRUE;
-	 }
-     }
+   {
+	   /* Expect four bytes "RIFF" and four bytes filelength */
+	   if (!fread(str, 1, 8, anyin)) {           /* 0 */
+		   return;
+	   }
+	   str[4] = '\0';
+	   if (strcmp(str, "RIFF") != 0) nowav = TRUE;
+	   /* Expect eight bytes "WAVEfmt " */
+	   if (!fread(str, 1, 8, anyin)) {           /* 8 */
+		   return;
+	   }
+	   str[8] = '\0';
+	   if (strcmp(str, "WAVEfmt ") != 0) nowav = TRUE;
+	   /* Expect length of fmt data, which should be 16 */
+	   if (!fread(&tempuint, 4, 1, anyin)) {	/* 16 */
+		   return;
+	   }
+	   if (tempuint != 16) nowav = TRUE;
+	   /* Expect format tag, which should be 1 for pcm */
+	   if (!fread(&tempushort, 2, 1, anyin)) { /* 20 */
+		   return;
+	   }
+	   if (tempushort != 1)
+		   nowav = TRUE;
+	   /* Expect number of channels */
+	   if (!fread(&cn, 2, 1, anyin)) { /* 20 */
+		   return;
+	   }
+	   if (cn != 1 && cn != 2) nowav = TRUE;
+	   /* Read samplefrequency */
+	   if (!fread(&sf, 4, 1, anyin)) {  /* 24 */
+		   return;
+	   }
+	   /* Read bytes per second: Should be samplefreq * channels * 2 */
+	   if (!fread(&tempuint, 4, 1, anyin)) {         /* 28 */
+		   return;
+	   }
+	   if (tempuint != sf * cn * 2) nowav = TRUE;
+	   /* read bytes per frame: Should be channels * 2 */
+	   if (!fread(&tempushort, 2, 1, anyin)) {       /* 32 */
+		   return;
+	   }
+	   if (tempushort != cn * 2) nowav = TRUE;
+	   /* Read bits per sample: Should be 16 */
+	   if (!fread(&tempushort, 2, 1, anyin)) {       /* 34 */
+		   return;
+	   }
+	   if (tempushort != 16) nowav = TRUE;
+	   if (!fread(str, 4, 1, anyin)) {            /* 36 */
+		   return;
+	   }
+	   str[4] = '\0';
+	   if (strcmp(str, "data") != 0) nowav = TRUE;
+	   if (!fread(&tempuint, 4, 1, anyin)) {   /* 40 */
+		   return;
+	   }
+	   if (nowav)
+	   {
+		   fseek(anyin, 0, SEEK_SET);   /* Back to beginning of file */
+		   chat("File has no WAV header.\n");
+	   }
+	   else
+	   {
+		   samplefrequency = sf;
+		   channels = cn;
+		   chat("Read WAV header: %d channels, samplefrequency %d.\n",
+			 channels, samplefrequency);
+		   iswav = TRUE;
+	   }
+   }
    return;
 }
 
@@ -192,36 +222,62 @@ void makewavheader( void)
    unsigned short tempushort;
 
    /* If fseek fails, don't create the header. */
-   if (fseek (out, 0, SEEK_END) != -1)
-     {
-       filelength = ftell (out);
-       chat ("filelength %d, ", filelength);
-       fseek (out, 0, SEEK_SET);
-       fwrite ("RIFF", 1, 4, out);   /* 0 */
-       tempuint = filelength - 8; fwrite (&tempuint, 4, 1, out);   /* 4 */
-       fwrite ("WAVEfmt ", 1, 8, out);   /* 8 */
-       /* length of fmt data 16 bytes */
-       tempuint = 16;
-       fwrite (&tempuint, 4, 1, out);   /* 16 */
-       /* Format tag: 1 for pcm */
-       tempushort = 1;
-       fwrite (&tempushort, 2, 1, out); /* 20 */
-       chat ("%d channels\n", channels);
-       fwrite (&channels, 2, 1, out);
-       chat ("samplefrequency %d\n", samplefrequency);
-       fwrite (&samplefrequency, 4, 1, out);  /* 24 */
-       /* Bytes per second */
-       tempuint = channels * samplefrequency * 2;
-       fwrite (&tempuint, 4, 1, out);         /* 28 */
-       /* Block align */
-       tempushort = 2 * channels;
-       fwrite (&tempushort, 2, 1, out);       /* 32 */
-       /* Bits per sample */
-       tempushort = 16;
-       fwrite (&tempushort, 2, 1, out);       /* 34 */
-       fwrite ("data", 4, 1, out);            /* 36 */
-       tempuint = filelength - 44; fwrite (&tempuint, 4, 1, out);   /* 40 */
-     }
+   if (fseek(out, 0, SEEK_END) != -1)
+   {
+	   filelength = ftell(out);
+	   chat("filelength %d, ", filelength);
+	   fseek(out, 0, SEEK_SET);
+	   if (!fwrite("RIFF", 1, 4, out)) { /* 0 */
+		   return;
+	   }
+	   tempuint = filelength - 8;
+	   if (!fwrite(&tempuint, 4, 1, out)) {    /* 4 */
+		   return;
+	   }
+	   if (!fwrite("WAVEfmt ", 1, 8, out)) {   /* 8 */
+		   return;
+	   }
+	   /* length of fmt data 16 bytes */
+	   tempuint = 16;
+	   if (!fwrite(&tempuint, 4, 1, out)) {   /* 16 */
+		   return;
+	   }
+	   /* Format tag: 1 for pcm */
+	   tempushort = 1;
+	   if (!fwrite(&tempushort, 2, 1, out)) { /* 20 */
+		   return;
+	   }
+	   chat("%d channels\n", channels);
+	   if (!fwrite(&channels, 2, 1, out)) {
+		   return;
+	   }
+	   chat("samplefrequency %d\n", samplefrequency);
+	   if (!fwrite(&samplefrequency, 4, 1, out)) {   /* 24 */
+		   return;
+	   }
+	   /* Bytes per second */
+	   tempuint = channels * samplefrequency * 2;
+	   if (!fwrite(&tempuint, 4, 1, out)) {         /* 28 */
+		   return;
+	   }
+	   /* Block align */
+	   tempushort = 2 * channels;
+	   if (!fwrite(&tempushort, 2, 1, out)) {       /* 32 */
+		   return;
+	   }
+	   /* Bits per sample */
+	   tempushort = 16;
+	   if (!fwrite(&tempushort, 2, 1, out)) {       /* 34 */
+		   return;
+	   }
+	   if (!fwrite("data", 4, 1, out)) {            /* 36 */
+		   return;
+	   }
+	   tempuint = filelength - 44;
+	   if (!fwrite(&tempuint, 4, 1, out)) {   /* 40 */
+		   return;
+	   }
+   }
    return;
 }
 
@@ -299,7 +355,7 @@ int parsetime(char *string, int *result)
     double temp;
     char m, s, end;
 
-    k = sscanf(string, "%lf%c%c%c", &temp, &m, &s, &end);
+    k = sscanf(string, "%30lf%1c%1c%1c", &temp, &m, &s, &end);
     switch (k)
       {
       case 0: case EOF: case 4:
@@ -340,7 +396,7 @@ int parsefreq(char *string, double *result)
     double temp;
     char m, s, end;
 
-    k = sscanf(string, "%lf%c%c%c", &temp, &m, &s, &end);
+    k = sscanf(string, "%30lf%1c%1c%1c", &temp, &m, &s, &end);
     switch (k)
       {
       case 0: case EOF: case 2: case 4:
@@ -420,7 +476,7 @@ int parseintarg( int argcount, char *args[], char *string, int *result)
   if ((i = findoption( argcount, args, string)) > 0)
    {
       switch (sscanf(args[i] + 1 + strlen( string),
-		     "%d%c", &temp, &c))
+		     "%30d%1c", &temp, &c))
       {
 	case 0: case EOF: case 2:
             argerrornum(args[i]+1, ME_NOINT);
@@ -454,7 +510,7 @@ int parsedoublearg( int argcount, char *args[], char *string, double *result)
 
   if ((i = findoption( argcount, args, string)) > 0)
     {
-      switch (sscanf(args[i] + 1 + strlen( string), "%lf%c", &temp, &end))
+      switch (sscanf(args[i] + 1 + strlen( string), "%30lf%1c", &temp, &end))
 	{
 	case 0: case EOF: case 2:
 	  argerrornum(args[i]+1, ME_NODOUBLE);
@@ -489,7 +545,7 @@ int parsevolarg( int argcount, char *args[], char *string, double *result)
   if ((i = findoption( argcount, args, string)) > 0)
     {
       switch (sscanf(args[i] + 1 + strlen( string),
-		     "%lf%c%c%c", &vol, &sbd, &sbb, &end))
+		     "%30lf%1c%1c%1c", &vol, &sbd, &sbb, &end))
 	{
 	  case 0: case EOF: case 4:
 	  weird = TRUE;
@@ -537,7 +593,7 @@ int parsevolume(char *s, double *result)
     char sbd, sbb, end;
 
     *result = 1.0;
-    k = sscanf(s, "%lf%c%c%c", result, &sbd, &sbb, &end);
+    k = sscanf(s, "%30lf%1c%1c%1c", result, &sbd, &sbb, &end);
     switch (k)
     {
       case 0:
@@ -688,7 +744,7 @@ void checknoargs( int argcount, char *args[])
 void parseargs( int argcount, char *args[], int fileswitch)
 {
    char *filename;
-   int tempint;
+   int tempint = 0;
 
    if ((fileswitch & 1) != 0)     /* If getting infile  */
      in = NULL;
@@ -870,10 +926,10 @@ int myexit (int value)
     case 0:
       if (wavout)
 	makewavheader();  /* Writes a fully informed .WAV header */
-      chat ("Success!\n");
+      chat("Success!\n");
       break;
     default:
-      chat ("Failure.\n");
+      chat("Failure.\n");
       break;
     }
   exit (value);
@@ -903,14 +959,16 @@ int workloop( FILE *theinfile, FILE *theoutfile,
       /* Call the routine that does the work */
       if (!work (buffer, nowlength))         /* On error, stop. */
 	return FALSE;
-      fwrite(buffer, sizeof(short), nowlength, theoutfile);
+      if (!fwrite(buffer, sizeof(short), nowlength, theoutfile)) {
+	      return FALSE;
+      }
       if (ferror( theoutfile) != 0)
 	fatalperror("Error writing to output file");
     }
   return TRUE;      /* Input file done with, no errors. */
 }
 
-int chat( const char *format, ...)
+int __attribute__((format(printf, 1, 2))) chat( const char *format, ...)
 {
     va_list ap;
     int result = 0;
@@ -925,7 +983,7 @@ int chat( const char *format, ...)
 }
 
 
-int inform( const char *format, ...)
+int __attribute__((format(printf, 1, 2))) inform( const char *format, ...)
 {
     va_list ap;
     int result = 0;
@@ -939,7 +997,7 @@ int inform( const char *format, ...)
     return result;
 }
 
-int error( const char *format, ...)
+int __attribute__((format(printf, 1, 2))) error( const char *format, ...)
 {
     va_list ap;
     int result;
@@ -950,7 +1008,7 @@ int error( const char *format, ...)
     return result;
 }
 
-void fatalerror( const char *format, ...)
+void __attribute__((format(printf, 1, 2))) fatalerror( const char *format, ...)
 {
     va_list ap;
 
@@ -966,7 +1024,7 @@ void fatalperror( const char *string)
   myexit( 1);
 }
 
-int say( const char *format, ...)
+int __attribute__((format(printf, 1, 2))) say( const char *format, ...)
 {
     va_list ap;
     int result;

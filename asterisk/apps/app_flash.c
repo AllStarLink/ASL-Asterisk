@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 182652 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -126,7 +126,7 @@ static int unload_module(void)
 
 static int load_module(void)
 {
-	if (dahdi_chan_mode == CHAN_ZAP_MODE) {
+	if (*dahdi_chan_mode == CHAN_ZAP_MODE) {
 		return ast_register_application(app, flash_exec, zap_synopsis, zap_descrip);
 	} else {
 		return ast_register_application(app, flash_exec, dahdi_synopsis, dahdi_descrip);

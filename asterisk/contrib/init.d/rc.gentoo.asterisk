@@ -1,5 +1,5 @@
 #!/sbin/runscript
-# $Id: rc.gentoo.asterisk 119318 2008-05-30 18:19:26Z root $
+# $Id: rc.gentoo.asterisk 119301 2008-05-30 16:44:39Z mvanbaak $
 
 depend() {
 	need net logger

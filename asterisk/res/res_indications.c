@@ -26,7 +26,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 182808 $")
 
 #include <unistd.h>
 #include <string.h>
@@ -85,7 +85,7 @@ char *playtones_desc=
  */
 static int handle_add_indication(int fd, int argc, char *argv[])
 {
-	struct ind_tone_zone *tz;
+	struct tone_zone *tz;
 	int created_country = 0;
 	if (argc != 5) return RESULT_SHOWUSAGE;
 
@@ -119,7 +119,7 @@ static int handle_add_indication(int fd, int argc, char *argv[])
  */
 static int handle_remove_indication(int fd, int argc, char *argv[])
 {
-	struct ind_tone_zone *tz;
+	struct tone_zone *tz;
 	if (argc != 3 && argc != 4) return RESULT_SHOWUSAGE;
 
 	if (argc == 3) {
@@ -148,7 +148,7 @@ static int handle_remove_indication(int fd, int argc, char *argv[])
  */
 static int handle_show_indications(int fd, int argc, char *argv[])
 {
-	struct ind_tone_zone *tz = NULL;
+	struct tone_zone *tz = NULL;
 	char buf[256];
 	int found_country = 0;
 
@@ -166,7 +166,7 @@ static int handle_show_indications(int fd, int argc, char *argv[])
 		for (i=2; i<argc; i++) {
 			if (strcasecmp(tz->country,argv[i])==0 &&
 			    !tz->alias[0]) {
-				struct ind_tone_zone_sound* ts;
+				struct tone_zone_sound* ts;
 				if (!found_country) {
 					found_country = 1;
 					ast_cli(fd,"Country Indication      PlayList\n"
@@ -179,7 +179,7 @@ static int handle_show_indications(int fd, int argc, char *argv[])
 				if (tz->nrringcadence)
 					j--;
 				ast_copy_string(buf+j,"\n",sizeof(buf)-j);
-				ast_cli(fd,buf);
+				ast_cli(fd, "%s", buf);
 				for (ts=tz->tones; ts; ts=ts->next)
 					ast_cli(fd,"%-7.7s %-15.15s %s\n",tz->country,ts->name,ts->data);
 				break;
@@ -196,7 +196,7 @@ static int handle_show_indications(int fd, int argc, char *argv[])
  */
 static int handle_playtones(struct ast_channel *chan, void *data)
 {
-	struct ind_tone_zone_sound *ts;
+	struct tone_zone_sound *ts;
 	int res;
 
 	if (!data || !((char*)data)[0]) {
@@ -231,7 +231,7 @@ static int ind_load_module(void)
 	struct ast_variable *v;
 	char *cxt;
 	char *c;
-	struct ind_tone_zone *tones;
+	struct tone_zone *tones;
 	const char *country = NULL;
 
 	/* that the following cast is needed, is yuk! */
@@ -284,7 +284,7 @@ static int ind_load_module(void)
 				c = countries;
 				country = strsep(&c,",");
 				while (country) {
-					struct ind_tone_zone* azone;
+					struct tone_zone* azone;
 					if (!(azone = ast_calloc(1, sizeof(*azone)))) {
 						ast_config_destroy(cfg);
 						return -1;
@@ -300,7 +300,7 @@ static int ind_load_module(void)
 				}
 			} else {
 				/* add tone to country */
-				struct ind_tone_zone_sound *ps,*ts;
+				struct tone_zone_sound *ps,*ts;
 				for (ps=NULL,ts=tones->tones; ts; ps=ts, ts=ts->next) {
 					if (strcasecmp(v->name,ts->name)==0) {
 						/* already there */
@@ -399,7 +399,7 @@ static int reload(void)
 	return ind_load_module();
 }
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Indications Resource",
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Indications Resource",
 		.load = load_module,
 		.unload = unload_module,
 		.reload = reload,

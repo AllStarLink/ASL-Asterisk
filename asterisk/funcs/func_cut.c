@@ -26,7 +26,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 87355 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,14 +89,14 @@ static int sort_internal(struct ast_channel *chan, char *data, char *buffer, siz
 	/* Parse each into a struct */
 	count2 = 0;
 	while ((ptrkey = strsep(&strings, "|"))) {
-		ptrvalue = index(ptrkey, ':');
+		ptrvalue = strchr(ptrkey, ':');
 		if (!ptrvalue) {
 			count--;
 			continue;
 		}
 		*ptrvalue++ = '\0';
 		sortable_keys[count2].key = ptrkey;
-		sscanf(ptrvalue, "%f", &sortable_keys[count2].value);
+		sscanf(ptrvalue, "%30f", &sortable_keys[count2].value);
 		count2++;
 	}
 
@@ -167,21 +167,21 @@ static int cut_internal(struct ast_channel *chan, char *data, char *buffer, size
 		pbx_substitute_variables_helper(chan, tmp, tmp2, MAXRESULT - 1);
 
 		if (tmp2) {
-			int curfieldnum = 1;
+			int curfieldnum = 1, firstfield = 1;
 			while (tmp2 != NULL && args.field != NULL) {
 				char *nextgroup = strsep(&(args.field), "&");
 				int num1 = 0, num2 = MAXRESULT;
 				char trashchar;
 
-				if (sscanf(nextgroup, "%d-%d", &num1, &num2) == 2) {
+				if (sscanf(nextgroup, "%30d-%30d", &num1, &num2) == 2) {
 					/* range with both start and end */
-				} else if (sscanf(nextgroup, "-%d", &num2) == 1) {
+				} else if (sscanf(nextgroup, "-%30d", &num2) == 1) {
 					/* range with end */
 					num1 = 0;
-				} else if ((sscanf(nextgroup, "%d%c", &num1, &trashchar) == 2) && (trashchar == '-')) {
+				} else if ((sscanf(nextgroup, "%30d%1c", &num1, &trashchar) == 2) && (trashchar == '-')) {
 					/* range with start */
 					num2 = MAXRESULT;
-				} else if (sscanf(nextgroup, "%d", &num1) == 1) {
+				} else if (sscanf(nextgroup, "%30d", &num1) == 1) {
 					/* single number */
 					num2 = num1;
 				} else {
@@ -191,7 +191,7 @@ static int cut_internal(struct ast_channel *chan, char *data, char *buffer, size
 				/* Get to start, if any */
 				if (num1 > 0) {
 					while (tmp2 != (char *)NULL + 1 && curfieldnum < num1) {
-						tmp2 = index(tmp2, d) + 1;
+						tmp2 = strchr(tmp2, d) + 1;
 						curfieldnum++;
 					}
 				}
@@ -209,11 +209,12 @@ static int cut_internal(struct ast_channel *chan, char *data, char *buffer, size
 					char *tmp3 = strsep(&tmp2, ds);
 					int curlen = strlen(buffer);
 
-					if (curlen)
-						snprintf(buffer + curlen, buflen - curlen, "%c%s", d, tmp3);
-					else
+					if (firstfield) {
 						snprintf(buffer, buflen, "%s", tmp3);
-
+						firstfield = 0;
+					} else {
+						snprintf(buffer + curlen, buflen - curlen, "%c%s", d, tmp3);
+					}
 					curfieldnum++;
 				}
 			}
@@ -254,7 +255,6 @@ static int acf_cut_exec(struct ast_channel *chan, char *cmd, char *data, char *b
 	struct ast_module_user *u = NULL;
 
 	if (chan) {
-		ast_autoservice_start(chan);
 		u = ast_module_user_add(chan);
 	}
 
@@ -277,7 +277,6 @@ static int acf_cut_exec(struct ast_channel *chan, char *cmd, char *data, char *b
 
 	if (chan) {
 		ast_module_user_remove(u);
-		ast_autoservice_stop(chan);
 	}
 
 	return ret;

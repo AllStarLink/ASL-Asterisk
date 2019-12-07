@@ -28,7 +28,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 222797 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -132,10 +132,11 @@ static const struct misdn_cfg_spec port_spec[] = {
 	{ "callerid", MISDN_CFG_CALLERID, MISDN_CTYPE_STR, "", NONE,
 		"Sets the caller ID." },
 	{ "method", MISDN_CFG_METHOD, MISDN_CTYPE_STR, "standard", NONE,
-		"Sets the method to use for channel selection:\n"
-		"\t  standard    - always choose the first free channel with the lowest number\n"
-		"\t  round_robin - use the round robin algorithm to select a channel. use this\n"
-		"\t                if you want to balance your load." },
+		"Set the method to use for channel selection:\n"
+		"\t  standard     - Use the first free channel starting from the lowest number.\n"
+		"\t  standard_dec - Use the first free channel starting from the highest number.\n"
+		"\t  round_robin  - Use the round robin algorithm to select a channel. Use this\n"
+		"\t                 if you want to balance your load." },
 	{ "dialplan", MISDN_CFG_DIALPLAN, MISDN_CTYPE_INT, "0", NONE,
 		"Dialplan means Type Of Number in ISDN Terms (for outgoing calls)\n"
 		"\n"
@@ -794,9 +795,12 @@ void misdn_cfg_get_config_string (int port, enum misdn_cfg_elements elem, char* 
 			else
 				iter = port_cfg[0][place].ml;
 			if (iter) {
-				for (; iter; iter = iter->next)
-					sprintf(tempbuf, "%s%s, ", tempbuf, iter->msn);
-				tempbuf[strlen(tempbuf)-2] = 0;
+				for (; iter; iter = iter->next) {
+					strncat(tempbuf, iter->msn, sizeof(tempbuf) - strlen(tempbuf) - 1);
+				}
+				if (strlen(tempbuf) > 1) {
+					tempbuf[strlen(tempbuf)-2] = 0;
+				}
 			}
 			snprintf(buf, bufsize, " -> msns: %s", *tempbuf ? tempbuf : "none");
 			break;
@@ -874,6 +878,9 @@ static int _parse (union misdn_cfg_pt *dest, char *value, enum misdn_cfg_type ty
 
 	switch (type) {
 	case MISDN_CTYPE_STR:
+		if (dest->str) {
+			free(dest->str);
+		}
 		if ((len = strlen(value))) {
 			dest->str = (char *)malloc((len + 1) * sizeof(char));
 			strncpy(dest->str, value, len);
@@ -887,23 +894,29 @@ static int _parse (union misdn_cfg_pt *dest, char *value, enum misdn_cfg_type ty
 	{
 		char *pat;
 		if (strchr(value,'x')) 
-			pat="%x";
+			pat="%30x";
 		else
-			pat="%d";
+			pat="%30d";
 		if (sscanf(value, pat, &tmp)) {
-			dest->num = (int *)malloc(sizeof(int));
+			if (!dest->num) {
+				dest->num = (int *)malloc(sizeof(int));
+			}
 			memcpy(dest->num, &tmp, sizeof(int));
 		} else
 			re = -1;
 	}
 		break;
 	case MISDN_CTYPE_BOOL:
-		dest->num = (int *)malloc(sizeof(int));
+		if (!dest->num) {
+			dest->num = (int *)malloc(sizeof(int));
+		}
 		*(dest->num) = (ast_true(value) ? 1 : 0);
 		break;
 	case MISDN_CTYPE_BOOLINT:
-		dest->num = (int *)malloc(sizeof(int));
-		if (sscanf(value, "%d", &tmp)) {
+		if (!dest->num) {
+			dest->num = (int *)malloc(sizeof(int));
+		}
+		if (sscanf(value, "%30d", &tmp)) {
 			memcpy(dest->num, &tmp, sizeof(int));
 		} else {
 			*(dest->num) = (ast_true(value) ? boolint_def : 0);
@@ -921,7 +934,9 @@ static int _parse (union misdn_cfg_pt *dest, char *value, enum misdn_cfg_type ty
 		}
 		break;
 	case MISDN_CTYPE_ASTGROUP:
-		dest->grp = (ast_group_t *)malloc(sizeof(ast_group_t));
+		if (!dest->grp) {
+			dest->grp = (ast_group_t *)malloc(sizeof(ast_group_t));
+		}
 		*(dest->grp) = ast_get_group(value);
 		break;
 	}
@@ -970,7 +985,7 @@ static void _build_port_config (struct ast_variable *v, char *cat)
 			for (token = strsep(&v->value, ","); token; token = strsep(&v->value, ","), *ptpbuf = 0) { 
 				if (!*token)
 					continue;
-				if (sscanf(token, "%d-%d%s", &start, &end, ptpbuf) >= 2) {
+				if (sscanf(token, "%30d-%30d%s", &start, &end, ptpbuf) >= 2) {
 					for (; start <= end; start++) {
 						if (start <= max_ports && start > 0) {
 							cfg_for_ports[start] = 1;
@@ -979,7 +994,7 @@ static void _build_port_config (struct ast_variable *v, char *cat)
 							CLI_ERROR(v->name, v->value, cat);
 					}
 				} else {
-					if (sscanf(token, "%d%s", &start, ptpbuf)) {
+					if (sscanf(token, "%30d%s", &start, ptpbuf)) {
 						if (start <= max_ports && start > 0) {
 							cfg_for_ports[start] = 1;
 							ptp[start] = (strstr(ptpbuf, "ptp")) ? 1 : 0;
@@ -997,6 +1012,11 @@ static void _build_port_config (struct ast_variable *v, char *cat)
 	}
 
 	for (i = 0; i < (max_ports + 1); ++i) {
+		if (i > 0 && cfg_for_ports[0]) {
+			/* default category, will populate the port_cfg with additional port
+			categories in subsequent calls to this function */
+			memset(cfg_tmp, 0, sizeof(cfg_tmp));
+		}
 		if (cfg_for_ports[i]) {
 			memcpy(port_cfg[i], cfg_tmp, sizeof(cfg_tmp));
 		}

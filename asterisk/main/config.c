@@ -28,7 +28,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 219023 $")
 
 #include <stdio.h>
 #include <unistd.h>
@@ -39,9 +39,6 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include <sys/stat.h>
 #define AST_INCLUDE_GLOB 1
 #ifdef AST_INCLUDE_GLOB
-#if defined(__Darwin__) || defined(__CYGWIN__)
-#define GLOB_ABORTED GLOB_ABEND
-#endif
 # include <glob.h>
 #endif
 
@@ -628,7 +625,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 	char *cur = buf;
 	struct ast_variable *v;
 	char cmd[512], exec_file[512];
-	int object, do_exec, do_include, did_include;
+	int object, do_exec, do_include;
 
 	/* Actually parse the entry */
 	if (cur[0] == '[') {
@@ -709,9 +706,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 				c = NULL;
 		} else 
 			c = NULL;
-		do_include = 0;
-		if (!strcasecmp(cur, "include")) do_include = 1;
-		else if (!strcasecmp(cur, "includeifexists")) do_include = 2;
+		do_include = !strcasecmp(cur, "include");
 		if(!do_include)
 			do_exec = !strcasecmp(cur, "exec");
 		else
@@ -722,16 +717,25 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 		}
 		if (do_include || do_exec) {
 			if (c) {
-				/* Strip off leading and trailing "'s and <>'s */
-				while((*c == '<') || (*c == '>') || (*c == '\"')) c++;
-				/* Get rid of leading mess */
 				cur = c;
-				while (!ast_strlen_zero(cur)) {
-					c = cur + strlen(cur) - 1;
-					if ((*c == '>') || (*c == '<') || (*c == '\"'))
-						*c = '\0';
-					else
-						break;
+				/* Strip off leading and trailing "'s and <>'s */
+				if (*c == '"') {
+					/* Dequote */
+					while (*c) {
+						if (*c == '"') {
+							strcpy(c, c + 1); /* SAFE */
+							c--;
+						} else if (*c == '\\') {
+							strcpy(c, c + 1); /* SAFE */
+						}
+						c++;
+					}
+				} else if (*c == '<') {
+					/* C-style include */
+					if (*(c + strlen(c) - 1) == '>') {
+						cur++;
+						*(c + strlen(c) - 1) = '\0';
+					}
 				}
 				/* #exec </path/to/executable>
 				   We create a tmp file, then we #include it, then we delete it. */
@@ -743,10 +747,10 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 				} else
 					exec_file[0] = '\0';
 				/* A #include */
-				did_include = ast_config_internal_load(cur, cfg, withcomments) ? 1 : 0;
+				do_include = ast_config_internal_load(cur, cfg, withcomments) ? 1 : 0;
 				if(!ast_strlen_zero(exec_file))
 					unlink(exec_file);
-				if ((!did_include) && (do_include < 2)) {
+				if (!do_include) {
 					ast_log(LOG_ERROR, "*********************************************************\n");
 					ast_log(LOG_ERROR, "*********** YOU SHOULD REALLY READ THIS ERROR ***********\n");
 					ast_log(LOG_ERROR, "Future versions of Asterisk will treat a #include of a "
@@ -854,11 +858,7 @@ static struct ast_config *config_text_file_load(const char *database, const char
 		int glob_ret;
 		glob_t globbuf;
 		globbuf.gl_offs = 0;	/* initialize it to silence gcc */
-#ifdef SOLARIS
-		glob_ret = glob(fn, GLOB_NOCHECK, NULL, &globbuf);
-#else
-		glob_ret = glob(fn, GLOB_NOMAGIC|GLOB_BRACE, NULL, &globbuf);
-#endif
+		glob_ret = glob(fn, MY_GLOB_FLAGS, NULL, &globbuf);
 		if (glob_ret == GLOB_NOSPACE)
 			ast_log(LOG_WARNING,
 				"Glob Expansion of pattern '%s' failed: Not enough memory\n", fn);
@@ -879,21 +879,21 @@ static struct ast_config *config_text_file_load(const char *database, const char
 			ast_log(LOG_WARNING, "'%s' is not a regular file, ignoring\n", fn);
 			continue;
 		}
-		if (option_verbose > 4) {
+		if (option_verbose > 1) {
 			ast_verbose(VERBOSE_PREFIX_2 "Parsing '%s': ", fn);
 			fflush(stdout);
 		}
 		if (!(f = fopen(fn, "r"))) {
 			if (option_debug)
 				ast_log(LOG_DEBUG, "No file to parse: %s\n", fn);
-			if (option_verbose > 4)
+			if (option_verbose > 1)
 				ast_verbose( "Not found (%s)\n", strerror(errno));
 			continue;
 		}
 		count++;
 		if (option_debug)
 			ast_log(LOG_DEBUG, "Parsing %s\n", fn);
-		if (option_verbose > 4)
+		if (option_verbose > 1)
 			ast_verbose("Found\n");
 		while(!feof(f)) {
 			lineno++;

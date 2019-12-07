@@ -95,6 +95,10 @@ maxlogins=3
 ; Change the from, body and/or subject, variables:
 ;     VM_NAME, VM_DUR, VM_MSGNUM, VM_MAILBOX, VM_CALLERID, VM_CIDNUM,
 ;     VM_CIDNAME, VM_DATE
+; Additionally, on forwarded messages, you have the variables:
+;     ORIG_VM_CALLERID, ORIG_VM_CIDNUM, ORIG_VM_CIDNAME, ORIG_VM_DATE
+; You can select between two variables by using dialplan functions, e.g.
+;     ${IF(${ISNULL(${ORIG_VM_DATE})}?${VM_DATE}:${ORIG_VM_DATE})}
 ;
 ; Note: The emailbody config row can only be up to 512 characters due to a
 ;       limitation in the Asterisk configuration subsystem.
@@ -103,6 +107,11 @@ maxlogins=3
 ; just the CIDNAME, if it is not null, otherwise just the CIDNUM, or "an unknown
 ; caller", if they are both null.
 ;emailbody=Dear ${VM_NAME}:\n\n\tjust wanted to let you know you were just left a ${VM_DUR} long message (number ${VM_MSGNUM})\nin mailbox ${VM_MAILBOX} from ${VM_CALLERID}, on ${VM_DATE}, so you might\nwant to check it when you get a chance.  Thanks!\n\n\t\t\t\t--Asterisk\n
+;
+; Note: ${IF()} strips spacing at the beginning and end of its true and false
+; values, so a newline cannot be placed at either location.  The word 'so' is
+; therefore duplicated, in order for the newline to be interpreted correctly.
+;emailbody=Dear ${VM_NAME}:\n\n\tjust wanted to let you know you were just ${IF($["${VM_CIDNUM}" = "${ORIG_VM_CIDNUM}"]?left:forwarded)} a ${VM_DUR} long message (number ${VM_MSGNUM})\nin mailbox ${VM_MAILBOX} from ${VM_CALLERID}, on ${VM_DATE},\n${IF($["${VM_CIDNUM}" = "${ORIG_VM_CIDNUM}"]?so:(originally sent by ${ORIG_VM_CALLERID} on ${ORIG_VM_DATE})\nso)} you might want to check it when you get a chance.  Thanks!\n\n\t\t\t\t--Asterisk\n
 ;
 ; You can also change the Pager From: string, the pager body and/or subject.
 ; The above defined variables also can be used here
@@ -188,13 +197,18 @@ sendvoicemail=yes ; Allow the user to compose and send a voicemail while inside
 ; searchcontexts=yes	; Current default behavior is to search only the default context
 			; if one is not specified.  The older behavior was to search all contexts.
 			; This option restores the old behavior [DEFAULT=no]
+			; Note: If you have this option enabled, then you will be required to have
+			; unique mailbox names across all contexts. Otherwise, an ambiguity is created
+			; since it is impossible to know which mailbox to retrieve when one is requested.
 ; callback=fromvm 	; Context to call back from  
 			;     if not listed, calling the sender back will not be permitted
 ; exitcontext=fromvm    ; Context to go to on user exit such as * or 0
                         ;     The default is the current context.
 ; review=yes 		; Allow sender to review/rerecord their message before saving it [OFF by default
-; operator=yes 		; Allow sender to hit 0 before/after/during  leaving a voicemail to 
-			;     reach an operator  [OFF by default]
+; operator=yes      ; Allow sender to hit 0 before/after/during leaving a voicemail to
+                    ; reach an operator.  This option REQUIRES an 'o' extension in the
+                    ; same context (or in exitcontext, if set), as that is where the
+                    ; 0 key will send you.  [OFF by default]
 ; envelope=no 		; Turn on/off envelope playback before message playback. [ON by default] 
 			;     This does NOT affect option 3,3 from the advanced options menu
 ; delete=yes		; After notification, the voicemail is deleted from the server. [per-mailbox only]
@@ -226,8 +240,6 @@ european=Europe/Copenhagen|'vm-received' a d b 'digits/at' HM
 
 
 [default]
-; Define maximum number of messages per folder for a particular context.
-;maxmsg=50
 
 1234 => 4242,Example Mailbox,root@localhost
 ;4200 => 9855,Mark Spencer,markster@linux-support.net,mypager@digium.com,attach=no|serveremail=myaddy@digium.com|tz=central|maxmsg=10

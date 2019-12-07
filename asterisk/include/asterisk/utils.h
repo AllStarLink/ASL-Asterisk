@@ -219,8 +219,6 @@ static force_inline void ast_slinear_saturated_divide(short *input, short *value
 	*input /= *value;
 }
 
-int test_for_thread_safety(void);
-
 /*!
  * \brief thread-safe replacement for inet_ntoa().
  *
@@ -264,12 +262,12 @@ static force_inline int inaddrcmp(const struct sockaddr_in *sin1, const struct s
 		|| (sin1->sin_port != sin2->sin_port));
 }
 
-#define AST_STACKSIZE 240 * 1024
+#define AST_STACKSIZE (((sizeof(void *) * 8 * 8) - 16) * 1024)
 
 #if defined(LOW_MEMORY)
-#define AST_BACKGROUND_STACKSIZE 48 * 1024
+#define AST_BACKGROUND_STACKSIZE (((sizeof(void *) * 8 * 2) - 16) * 1024)
 #else
-#define AST_BACKGROUND_STACKSIZE 240 * 1024
+#define AST_BACKGROUND_STACKSIZE AST_STACKSIZE
 #endif
 
 void ast_register_thread(char *name);
@@ -306,17 +304,18 @@ long int ast_random(void);
 /*! 
  * \brief free() wrapper
  *
- * ast_free should be used when a function pointer for free() needs to be passed
+ * ast_free_ptr should be used when a function pointer for free() needs to be passed
  * as the argument to a function. Otherwise, astmm will cause seg faults.
  */
 #ifdef __AST_DEBUG_MALLOC
-static void ast_free(void *ptr) attribute_unused;
-static void ast_free(void *ptr)
+static void ast_free_ptr(void *ptr) attribute_unused;
+static void ast_free_ptr(void *ptr)
 {
 	free(ptr);
 }
 #else
 #define ast_free free
+#define ast_free_ptr ast_free
 #endif
 
 #ifndef __AST_DEBUG_MALLOC
@@ -474,7 +473,7 @@ char * attribute_malloc _ast_strndup(const char *str, size_t len, const char *fi
 #define ast_asprintf(ret, fmt, ...) \
 	_ast_asprintf((ret), __FILE__, __LINE__, __PRETTY_FUNCTION__, fmt, __VA_ARGS__)
 
-int _ast_asprintf(char **ret, const char *file, int lineno, const char *func, const char *fmt, ...) __attribute__ ((format (printf, 5, 6)));
+int _ast_asprintf(char **ret, const char *file, int lineno, const char *func, const char *fmt, ...) __attribute__((format(printf, 5, 6)));
 
 /*!
  * \brief A wrapper for vasprintf()
@@ -488,7 +487,7 @@ int _ast_asprintf(char **ret, const char *file, int lineno, const char *func, co
 	_ast_vasprintf((ret), __FILE__, __LINE__, __PRETTY_FUNCTION__, (fmt), (ap))
 
 AST_INLINE_API(
-int _ast_vasprintf(char **ret, const char *file, int lineno, const char *func, const char *fmt, va_list ap),
+int __attribute__((format(printf, 5, 0))) _ast_vasprintf(char **ret, const char *file, int lineno, const char *func, const char *fmt, va_list ap),
 {
 	int res;
 
@@ -498,19 +497,6 @@ int _ast_vasprintf(char **ret, const char *file, int lineno, const char *func, c
 	return res;
 }
 )
-
-#else
-
-/* If astmm is in use, let it handle these.  Otherwise, it will report that
-   all allocations are coming from this header file */
-
-#define ast_malloc(a)		malloc(a)
-#define ast_calloc(a,b)		calloc(a,b)
-#define ast_realloc(a,b)	realloc(a,b)
-#define ast_strdup(a)		strdup(a)
-#define ast_strndup(a,b)	strndup(a,b)
-#define ast_asprintf(a,b,...)	asprintf(a,b,__VA_ARGS__)
-#define ast_vasprintf(a,b,c)	vasprintf(a,b,c)
 
 #endif /* AST_DEBUG_MALLOC */
 

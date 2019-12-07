@@ -33,7 +33,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 118974 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 182810 $")
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -62,9 +62,10 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 118974 $")
 #include "asterisk/stringfields.h"
 #include "asterisk/abstract_jb.h"
 #include "asterisk/musiconhold.h"
+#include "asterisk/poll-compat.h"
 
-#include "busy.h"
-#include "ringtone.h"
+#include "busy_tone.h"
+#include "ring_tone.h"
 #include "ring10.h"
 #include "answer.h"
 
@@ -266,7 +267,9 @@ static int send_sound(void)
 	state = snd_pcm_state(alsa.ocard);
 	if (state == SND_PCM_STATE_XRUN)
 		snd_pcm_prepare(alsa.ocard);
-	res = snd_pcm_writei(alsa.ocard, frame, res);
+	while ((res = snd_pcm_writei(alsa.ocard, frame, res)) == -EAGAIN) {
+		usleep(1);
+	}
 	if (res > 0)
 		return 0;
 	return 0;
@@ -327,7 +330,9 @@ static void *sound_thread(void *unused)
 		}
 #endif
 		if (FD_ISSET(sndcmd[0], &rfds)) {
-			read(sndcmd[0], &cursound, sizeof(cursound));
+			if (read(sndcmd[0], &cursound, sizeof(cursound)) < 0) {
+				ast_log(LOG_WARNING, "read() failed: %s\n", strerror(errno));
+			}
 			silencelen = 0;
 			offset = 0;
 			sampsent = 0;
@@ -532,7 +537,9 @@ static int alsa_call(struct ast_channel *c, char *dest, int timeout)
 			ast_queue_frame(alsa.owner, &f);
 			ast_mutex_unlock(&alsa.owner->lock);
 		}
-		write(sndcmd[1], &res, sizeof(res));
+		if (write(sndcmd[1], &res, sizeof(res)) < 0) {
+			ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+		}
 	}
 	snd_pcm_prepare(alsa.icard);
 	snd_pcm_start(alsa.icard);
@@ -543,10 +550,12 @@ static int alsa_call(struct ast_channel *c, char *dest, int timeout)
 static void answer_sound(void)
 {
 	int res;
+
 	nosound = 1;
 	res = 4;
-	write(sndcmd[1], &res, sizeof(res));
-
+	if (write(sndcmd[1], &res, sizeof(res)) < 0) {
+		ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+	}
 }
 
 static int alsa_answer(struct ast_channel *c)
@@ -576,7 +585,9 @@ static int alsa_hangup(struct ast_channel *c)
 		if (!autoanswer) {
 			/* Congestion noise */
 			res = 2;
-			write(sndcmd[1], &res, sizeof(res));
+			if (write(sndcmd[1], &res, sizeof(res)) < 0) {
+				ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+			}
 		}
 	}
 	snd_pcm_drop(alsa.icard);
@@ -621,13 +632,17 @@ static int alsa_write(struct ast_channel *chan, struct ast_frame *f)
 		state = snd_pcm_state(alsa.ocard);
 		if (state == SND_PCM_STATE_XRUN)
 			snd_pcm_prepare(alsa.ocard);
-		res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2);
+		while ((res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2)) == -EAGAIN) {
+			usleep(1);
+		}
 		if (res == -EPIPE) {
 #if DEBUG
 			ast_log(LOG_DEBUG, "XRUN write\n");
 #endif
 			snd_pcm_prepare(alsa.ocard);
-			res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2);
+			while ((res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2)) == -EAGAIN) {
+				usleep(1);
+			}
 			if (res != len / 2) {
 				ast_log(LOG_ERROR, "Write error: %s\n", snd_strerror(res));
 				res = -1;
@@ -770,8 +785,11 @@ static int alsa_indicate(struct ast_channel *chan, int cond, const void *data, s
 		res = -1;
 	}
 
-	if (res > -1)
-		write(sndcmd[1], &res, sizeof(res));
+	if (res > -1) {
+		if (write(sndcmd[1], &res, sizeof(res)) < 0) {
+			ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+		}
+	}
 
 	ast_mutex_unlock(&alsalock);
 

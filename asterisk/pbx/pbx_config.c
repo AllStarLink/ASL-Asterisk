@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233091 $")
 
 #include <sys/types.h>
 #include <stdlib.h>
@@ -620,71 +620,11 @@ static int handle_context_remove_extension(int fd, int argc, char *argv[])
 	return ret;
 }
 
-#define BROKEN_READLINE 1
-
-#ifdef BROKEN_READLINE
-/*
- * There is one funny thing, when you have word like 300@ and you hit
- * <tab>, you arguments will like as your word is '300 ', so it '@'
- * characters acts sometimes as word delimiter and sometimes as a part
- * of word
- *
- * This fix function, allocates new word variable and store here every
- * time xxx@yyy always as one word and correct pos is set too
- *
- * It's ugly, I know, but I'm waiting for Mark suggestion if upper is
- * bug or feature ...
- */
-static int fix_complete_args(const char *line, char **word, int *pos)
-{
-	char *_line, *_strsep_line, *_previous_word = NULL, *_word = NULL;
-	int words = 0;
-
-	_line = strdup(line);
-
-	_strsep_line = _line;
-	while (_strsep_line) {
-		_previous_word = _word;
-		_word = strsep(&_strsep_line, " ");
-
-		if (_word && strlen(_word)) words++;
-	}
-
-
-	if (_word || _previous_word) {
-		if (_word) {
-			if (!strlen(_word)) words++;
-			*word = strdup(_word);
-		} else
-			*word = strdup(_previous_word);
-		*pos = words - 1;
-		free(_line);
-		return 0;
-	}
-
-	free(_line);
-	return -1;
-}
-#endif /* BROKEN_READLINE */
-
 static char *complete_context_remove_extension_deprecated(const char *line, const char *word, int pos,
 	int state)
 {
 	char *ret = NULL;
 	int which = 0;
-
-#ifdef BROKEN_READLINE
-	char *word2;
-	/*
-	 * Fix arguments, *word is a new allocated structure, REMEMBER to
-	 * free *word when you want to return from this function ...
-	 */
-	if (fix_complete_args(line, &word2, &pos)) {
-		ast_log(LOG_ERROR, "Out of free memory\n");
-		return NULL;
-	}
-	word = word2;
-#endif
 
 	if (pos == 2) { /* 'remove extension _X_' (exten/cid@context ... */
 		struct ast_context *c = NULL;
@@ -694,9 +634,6 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 		int lcid = 0; /* length of cid */
 
 		lc = split_ec(word, &exten, &context, &cid);
-#ifdef BROKEN_READLINE
-		free(word2);
-#endif
 		if (lc)	/* error */
 			return NULL;
 		le = strlen(exten);
@@ -723,10 +660,16 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 						if (++which > state) {
 							/* If there is an extension then return exten@context. */
 							if (ast_get_extension_matchcid(e) && (!strchr(word, '@') || strchr(word, '/'))) {
-								asprintf(&ret, "%s/%s@%s", ast_get_extension_name(e), ast_get_extension_cidmatch(e), ast_get_context_name(c));
+								if (asprintf(&ret, "%s/%s@%s", ast_get_extension_name(e), ast_get_extension_cidmatch(e), ast_get_context_name(c)) < 0) {
+									ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+									ret = NULL;
+								}
 								break;
 							} else if (!ast_get_extension_matchcid(e) && !strchr(word, '/')) {
-								asprintf(&ret, "%s@%s", ast_get_extension_name(e), ast_get_context_name(c));
+								if (asprintf(&ret, "%s@%s", ast_get_extension_name(e), ast_get_context_name(c)) < 0) {
+									ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+									ret = NULL;
+								}
 								break;
 							}
 						}
@@ -756,7 +699,11 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 			*p = '\0';
 		le = strlen(exten);
 		lc = strlen(context);
-		lcid = strlen(cid);
+		if (cid == NULL) {
+			lcid = 0;
+		} else {
+			lcid = strlen(cid);
+		}
 		len = strlen(word);
 		if (le == 0 || lc == 0)
 			goto error3;
@@ -800,9 +747,6 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 		if (exten)
 			free(exten);
 	}
-#ifdef BROKEN_READLINE
-	free(word2);
-#endif
 	return ret; 
 }
 
@@ -811,19 +755,6 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 {
 	char *ret = NULL;
 	int which = 0;
-
-#ifdef BROKEN_READLINE
-	char *word2;
-	/*
-	 * Fix arguments, *word is a new allocated structure, REMEMBER to
-	 * free *word when you want to return from this function ...
-	 */
-	if (fix_complete_args(line, &word2, &pos)) {
-		ast_log(LOG_ERROR, "Out of free memory\n");
-		return NULL;
-	}
-	word = word2;
-#endif
 
 	if (pos == 3) { /* 'dialplan remove extension _X_' (exten@context ... */
 		struct ast_context *c = NULL;
@@ -834,9 +765,6 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 
 		lc = split_ec(word, &exten, &context, &cid);
 		if (lc)	{ /* error */
-#ifdef BROKEN_READLINE
-			free(word2);
-#endif
 			return NULL;
 		}
 		le = strlen(exten);
@@ -863,10 +791,16 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 						if (++which > state) {
 							/* If there is an extension then return exten@context. */
 							if (ast_get_extension_matchcid(e) && (!strchr(word, '@') || strchr(word, '/'))) {
-								asprintf(&ret, "%s/%s@%s", ast_get_extension_name(e), ast_get_extension_cidmatch(e), ast_get_context_name(c));
+								if (asprintf(&ret, "%s/%s@%s", ast_get_extension_name(e), ast_get_extension_cidmatch(e), ast_get_context_name(c)) < 0) {
+									ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+									ret = NULL;
+								}
 								break;
 							} else if (!ast_get_extension_matchcid(e) && !strchr(word, '/')) {
-								asprintf(&ret, "%s@%s", ast_get_extension_name(e), ast_get_context_name(c));
+								if (asprintf(&ret, "%s@%s", ast_get_extension_name(e), ast_get_context_name(c)) < 0) {
+									ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+									ret = NULL;
+								}
 								break;
 							}
 						}
@@ -876,10 +810,6 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 			if (e)	/* got a match */
 				break;
 		}
-#ifdef BROKEN_READLINE
-		free(word2);
-#endif
-
 		ast_unlock_contexts();
 	error2:
 		if (exten)
@@ -942,9 +872,6 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 	error3:
 		if (exten)
 			free(exten);
-#ifdef BROKEN_READLINE
-		free(word2);
-#endif
 	}
 	return ret; 
 }
@@ -1496,7 +1423,7 @@ static int handle_context_add_extension_deprecated(int fd, int argc, char *argv[
 		if (!strcmp(prior, "hint")) {
 			iprior = PRIORITY_HINT;
 		} else {
-			if (sscanf(prior, "%d", &iprior) != 1) {
+			if (sscanf(prior, "%30d", &iprior) != 1) {
 				ast_cli(fd, "'%s' is not a valid priority\n", prior);
 				prior = NULL;
 			}
@@ -1524,7 +1451,7 @@ static int handle_context_add_extension_deprecated(int fd, int argc, char *argv[
 	if (!app_data)
 		app_data="";
 	if (ast_add_extension(argv[4], argc == 6 ? 1 : 0, exten, iprior, NULL, cidmatch, app,
-		(void *)strdup(app_data), ast_free, registrar)) {
+		(void *)strdup(app_data), ast_free_ptr, registrar)) {
 		switch (errno) {
 		case ENOMEM:
 			ast_cli(fd, "Out of free memory\n");
@@ -1589,7 +1516,7 @@ static int handle_context_add_extension(int fd, int argc, char *argv[])
 		if (!strcmp(prior, "hint")) {
 			iprior = PRIORITY_HINT;
 		} else {
-			if (sscanf(prior, "%d", &iprior) != 1) {
+			if (sscanf(prior, "%30d", &iprior) != 1) {
 				ast_cli(fd, "'%s' is not a valid priority\n", prior);
 				prior = NULL;
 			}
@@ -1617,7 +1544,7 @@ static int handle_context_add_extension(int fd, int argc, char *argv[])
 	if (!app_data)
 		app_data="";
 	if (ast_add_extension(argv[5], argc == 7 ? 1 : 0, exten, iprior, NULL, cidmatch, app,
-		(void *)strdup(app_data), ast_free, registrar)) {
+		(void *)strdup(app_data), ast_free_ptr, registrar)) {
 		switch (errno) {
 		case ENOMEM:
 			ast_cli(fd, "Out of free memory\n");
@@ -2233,7 +2160,11 @@ static int pbx_load_config(const char *config_file)
 	struct ast_config *cfg;
 	char *end;
 	char *label;
+#ifdef LOW_MEMORY
 	char realvalue[256];
+#else
+	char realvalue[8192];
+#endif
 	int lastpri = -2;
 	struct ast_context *con;
 	struct ast_variable *v;
@@ -2317,7 +2248,7 @@ static int pbx_load_config(const char *config_file)
 							ipri = lastpri;
 						else
 							ast_log(LOG_WARNING, "Can't use 'same' priority on the first entry!\n");
-					} else if (sscanf(pri, "%d", &ipri) != 1 &&
+					} else if (sscanf(pri, "%30d", &ipri) != 1 &&
 					    (ipri = ast_findlabel_extension2(NULL, con, realext, pri, cidmatch)) < 1) {
 						ast_log(LOG_WARNING, "Invalid priority/label '%s' at line %d\n", pri, v->lineno);
 						ipri = 0;
@@ -2335,16 +2266,30 @@ static int pbx_load_config(const char *config_file)
 						/* Neither found */
 						data = "";
 					} else {
+						char *orig_appl = strdup(appl);
+
+						if (!orig_appl)
+							return -1;
+
 						/* Final remaining case is parenthesis found first */
 						appl = strsep(&stringp, "(");
-						data = stringp;
-						end = strrchr(data, ')');
-						if ((end = strrchr(data, ')'))) {
-							*end = '\0';
+
+						/* check if there are variables or expressions without an application, like: exten => 100,hint,DAHDI/g0/${GLOBAL(var)} */
+						if (strstr(appl, "${") || strstr(appl, "$[")){
+							/* set appl to original one */
+							strcpy(appl, orig_appl);
+							data = "";
 						} else {
-							ast_log(LOG_WARNING, "No closing parenthesis found? '%s(%s'\n", appl, data);
+							data = stringp;
+							end = strrchr(data, ')');
+							if ((end = strrchr(data, ')'))) {
+								*end = '\0';
+							} else {
+								ast_log(LOG_WARNING, "No closing parenthesis found? '%s(%s'\n", appl, data);
+							}
+							ast_process_quotes_and_slashes(data, ',', '|');
 						}
-						ast_process_quotes_and_slashes(data, ',', '|');
+						ast_free(orig_appl);
 					}
 
 					if (!data)
@@ -2356,7 +2301,7 @@ static int pbx_load_config(const char *config_file)
 						lastpri = ipri;
 						if (!ast_opt_dont_warn && !strcmp(realext, "_."))
 							ast_log(LOG_WARNING, "The use of '_.' for an extension is strongly discouraged and can have unexpected behavior.  Please use '_X.' instead at line %d\n", v->lineno);
-						if (ast_add_extension2(con, 0, realext, ipri, label, cidmatch, appl, strdup(data), ast_free, registrar)) {
+						if (ast_add_extension2(con, 0, realext, ipri, label, cidmatch, appl, strdup(data), ast_free_ptr, registrar)) {
 							ast_log(LOG_WARNING, "Unable to register extension at line %d\n", v->lineno);
 						}
 					}
@@ -2464,9 +2409,9 @@ static void pbx_load_users(void)
 			c = zapcopy;
 			chan = strsep(&c, ",");
 			while (chan) {
-				if (sscanf(chan, "%d-%d", &start, &finish) == 2) {
+				if (sscanf(chan, "%30d-%30d", &start, &finish) == 2) {
 					/* Range */
-				} else if (sscanf(chan, "%d", &start)) {
+				} else if (sscanf(chan, "%30d", &start)) {
 					/* Just one */
 					finish = start;
 				} else {
@@ -2500,9 +2445,9 @@ static void pbx_load_users(void)
 			/* If voicemail, use "stdexten" else use plain old dial */
 			if (hasvoicemail) {
 				snprintf(tmp, sizeof(tmp), "stdexten|%s|${HINT}", cat);
-				ast_add_extension2(con, 0, cat, 1, NULL, NULL, "Macro", strdup(tmp), ast_free, registrar);
+				ast_add_extension2(con, 0, cat, 1, NULL, NULL, "Macro", strdup(tmp), ast_free_ptr, registrar);
 			} else {
-				ast_add_extension2(con, 0, cat, 1, NULL, NULL, "Dial", strdup("${HINT}"), ast_free, registrar);
+				ast_add_extension2(con, 0, cat, 1, NULL, NULL, "Dial", strdup("${HINT}"), ast_free_ptr, registrar);
 			}
 		}
 	}

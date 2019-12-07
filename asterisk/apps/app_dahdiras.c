@@ -27,11 +27,12 @@
 
 /*** MODULEINFO
 	<depend>dahdi</depend>
+	<depend>working_fork</depend>
  ***/
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 178266 $")
 
 #include <sys/ioctl.h>
 #include <sys/wait.h>
@@ -49,6 +50,12 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include <stdio.h>
 #include <fcntl.h>
 
+#include "asterisk/dahdi_compat.h"
+
+#ifdef HAVE_CAP
+#include <sys/capability.h>
+#endif /* HAVE_CAP */
+
 #include "asterisk/lock.h"
 #include "asterisk/file.h"
 #include "asterisk/logger.h"
@@ -56,8 +63,6 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include "asterisk/pbx.h"
 #include "asterisk/module.h"
 #include "asterisk/options.h"
-
-#include "asterisk/dahdi_compat.h"
 
 static char *dahdi_app = "DAHDIRAS";
 static char *zap_app = "ZapRAS";
@@ -92,6 +97,9 @@ static pid_t spawn_ras(struct ast_channel *chan, char *args)
 	int argc = 0;
 	char *stringp=NULL;
 	sigset_t fullset, oldset;
+#ifdef HAVE_CAP
+	cap_t cap;
+#endif
 
 	sigfillset(&fullset);
 	pthread_sigmask(SIG_BLOCK, &fullset, &oldset);
@@ -102,6 +110,16 @@ static pid_t spawn_ras(struct ast_channel *chan, char *args)
 		pthread_sigmask(SIG_SETMASK, &oldset, NULL);
 		return pid;
 	}
+
+#ifdef HAVE_CAP
+	cap = cap_from_text("cap_net_admin-eip");
+
+	if (cap_set_proc(cap)) {
+		/* Careful with order! Logging cannot happen after we close FDs */
+		ast_log(LOG_WARNING, "Unable to remove capabilities.\n");
+	}
+	cap_free(cap);
+#endif
 
 	/* Restore original signal handlers */
 	for (x=0;x<NSIG;x++)

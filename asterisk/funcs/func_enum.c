@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 106568 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 153337 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -70,14 +70,14 @@ static int function_enum(struct ast_channel *chan, char *cmd, char *data,
 	buf[0] = '\0';
 
 	if (ast_strlen_zero(data)) {
-		ast_log(LOG_WARNING, synopsis);
+		ast_log(LOG_WARNING, "%s", synopsis);
 		return -1;
 	}
 
 	AST_STANDARD_APP_ARGS(args, data);
 
 	if (args.argc < 1) {
-		ast_log(LOG_WARNING, synopsis);
+		ast_log(LOG_WARNING, "%s", synopsis);
 		return -1;
 	}
 

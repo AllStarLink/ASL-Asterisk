@@ -15,8 +15,18 @@
 
 .PHONY: clean all uninstall
 
-# to get check_expr, add it to the ALL_UTILS list
-ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted radio-tune-menu simpleusb-tune-menu pi-tune-menu
+# to get check_expr, add it to the ALL_UTILS list -- this is a somewhat old checking
+#     program that wants an ael file for input, and will check each $[] expr for
+#     possible (old) problems, like spacing around operators, which dates back to
+#     the 1.2 days. The neat part is that it will actually evaluate the expressions.
+#     Users could use this to quickly check expressions in their .ael file.
+# to get check_expr2, add it to the ALL_UTILS list -- this is a program that will
+#     read in a file containing expressions (as if they were in $[ ]), one per line. 
+#     It will, of course signal any syntax errors. Devs (like murf) should use this whenever
+#     changes are made to ast_expr2.y or ast_expr2.fl (or the corresponding .c files),
+#     as a regression test. Others (mere mortals?) need not bother, but they are
+#     more than welcome to play! The regression test itself is in expr2.testinput.
+ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted
 UTILS:=$(ALL_UTILS)
 
 include $(ASTTOPDIR)/Makefile.rules
@@ -56,7 +66,7 @@ uninstall:
 
 clean:
 	rm -f *.o $(ALL_UTILS) check_expr *.s *.i
-	rm -f .*.o.d .*.oo.d
+	rm -f .*.d
 	rm -f md5.c strcompat.c ast_expr2.c ast_expr2f.c pbx_ael.c
 	rm -f aelparse.c aelbison.c
 
@@ -65,7 +75,7 @@ md5.c: ../main/md5.c
 
 astman: astman.o md5.o
 astman: LIBS+=$(NEWT_LIB)
-astman.o: ASTCFLAGS+=-DNO_MALLOC_DEBUG
+astman.o: _ASTCFLAGS+=-DNO_MALLOC_DEBUG -DSTANDALONE
 
 stereorize: stereorize.o frame.o
 stereorize: LIBS+=-lm
@@ -84,40 +94,37 @@ strcompat.c: ../main/strcompat.c
 ast_expr2.c: ../main/ast_expr2.c
 	@cp $< $@
 
-ast_expr2.o: ASTCFLAGS+=-DSTANDALONE_AEL
+ast_expr2.o: _ASTCFLAGS+=-DSTANDALONE_AEL
 
 ast_expr2f.c: ../main/ast_expr2f.c
 	@cp $< $@
 
-ast_expr2f.o: ASTCFLAGS+=-DSTANDALONE_AEL -I../main -Wno-unused
+ast_expr2f.o: _ASTCFLAGS+=-DSTANDALONE_AEL -I../main -Wno-unused
 
 check_expr: check_expr.o ast_expr2.o ast_expr2f.o
+
+check_expr2: ast_expr2.c ast_expr2f.o
+	gcc -DSTANDALONE ast_expr2.c ast_expr2f.o -o check_expr2
+	check_expr2 expr2.testinput
 
 aelbison.c: ../pbx/ael/ael.tab.c
 	@cp $< $@
 aelbison.o: aelbison.c ../pbx/ael/ael.tab.h ../include/asterisk/ael_structs.h
-aelbison.o: ASTCFLAGS+=-I../pbx -DSTANDALONE_AEL
+aelbison.o: _ASTCFLAGS+=-I../pbx -DSTANDALONE_AEL
 
 pbx_ael.c: ../pbx/pbx_ael.c
 	@cp $< $@
-pbx_ael.o: ASTCFLAGS+=-DSTANDALONE_AEL
+pbx_ael.o: _ASTCFLAGS+=-DSTANDALONE_AEL
 
 ael_main.o: ael_main.c ../include/asterisk/ael_structs.h
-ael_main.o: ASTCFLAGS+=-DSTANDALONE_AEL
+ael_main.o: _ASTCFLAGS+=-DSTANDALONE_AEL
 
 aelparse.c: ../pbx/ael/ael_lex.c
 	@cp $< $@
 aelparse.o: aelparse.c ../include/asterisk/ael_structs.h ../pbx/ael/ael.tab.h
-aelparse.o: ASTCFLAGS+=-I../pbx -DSTANDALONE_AEL -Wno-unused
+aelparse.o: _ASTCFLAGS+=-I../pbx -DSTANDALONE_AEL -Wno-unused
 
 aelparse: aelparse.o aelbison.o pbx_ael.o ael_main.o ast_expr2f.o ast_expr2.o strcompat.o
-
-testexpr2s: ../main/ast_expr2f.c ../main/ast_expr2.c ../main/ast_expr2.h
-	$(CC) -g -c -I../include -DSTANDALONE_AEL ../main/ast_expr2f.c -o ast_expr2f.o
-	$(CC) -g -c -I../include -DSTANDALONE_AEL ../main/ast_expr2.c -o ast_expr2.o
-	$(CC) -g -o testexpr2s ast_expr2f.o ast_expr2.o
-	rm ast_expr2.o ast_expr2f.o 
-	./testexpr2s expr2.testinput
 
 smsq: smsq.o strcompat.o
 smsq: LIBS+=$(POPT_LIB)

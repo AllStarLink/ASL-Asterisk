@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 89654 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 159808 $")
 
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -77,7 +77,7 @@ static int parse_srv(unsigned char *answer, int len, unsigned char *msg, struct 
 		unsigned short priority;
 		unsigned short weight;
 		unsigned short port;
-	} __attribute__ ((__packed__)) *srv = (struct srv *) answer;
+	} __attribute__((__packed__)) *srv = (struct srv *) answer;
 
 	int res = 0;
 	char repl[256] = "";

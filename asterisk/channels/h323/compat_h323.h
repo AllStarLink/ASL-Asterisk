@@ -1,6 +1,8 @@
 #ifndef COMPAT_H323_H
 #define COMPAT_H323_H
 
+#include "ast_ptlib.h"
+
 #if VERSION(OPENH323_MAJOR,OPENH323_MINOR,OPENH323_BUILD) < VERSION(1,17,3)
 /**
  *  Workaround for broken (less than 1.17.3) OpenH323 stack to be able to
@@ -14,11 +16,11 @@ public:
 	MyH323TransportTCP(
 		H323EndPoint & endpoint,    ///<  H323 End Point object
 		PIPSocket::Address binding = PIPSocket::GetDefaultIpAny(), ///<  Local interface to use
-		BOOL listen = FALSE         ///<  Flag for need to wait for remote to connect
+		PBoolean listen = FALSE         ///<  Flag for need to wait for remote to connect
 	);
 	/**Connect to the remote party.
 	 */
-	virtual BOOL Connect();
+	virtual PBoolean Connect();
 };
 #else
 #define MyH323TransportTCP H323TransportTCP
@@ -35,7 +37,7 @@ public:
 		WORD remotePort = 0): H323TransportUDP(endpoint, binding, localPort, remotePort)
 	{
 	}
-	virtual BOOL DiscoverGatekeeper(H323Gatekeeper &,
+	virtual PBoolean DiscoverGatekeeper(H323Gatekeeper &,
 		H323RasPDU &,
 		const H323TransportAddress &);
 protected:
@@ -43,8 +45,8 @@ protected:
 	H323Gatekeeper *discoverGatekeeper;
 	H323RasPDU *discoverPDU;
 	const H323TransportAddress *discoverAddress;
-	BOOL discoverResult;
-	BOOL discoverReady;
+	PBoolean discoverResult;
+	PBoolean discoverReady;
 	PMutex discoverMutex;
 };
 

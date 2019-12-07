@@ -28,7 +28,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 107600 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 107582 $")
 
 #include <stdio.h>
 #include <stdlib.h>

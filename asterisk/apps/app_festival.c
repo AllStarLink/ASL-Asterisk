@@ -25,9 +25,13 @@
  * \ingroup applications
  */
 
+/*** MODULEINFO
+	<depend>working_fork</depend>
+ ***/
+
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 65853 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 172438 $")
 
 #include <sys/types.h>
 #include <stdlib.h>
@@ -45,6 +49,10 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 65853 $")
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h>
+#include <errno.h>
+#ifdef HAVE_CAP
+#include <sys/capability.h>
+#endif /* HAVE_CAP */
 
 #include "asterisk/file.h"
 #include "asterisk/logger.h"
@@ -131,21 +139,33 @@ static int send_waveform_to_fd(char *waveform, int length, int fd) {
 	char c;
 #endif
 	sigset_t fullset, oldset;
+#ifdef HAVE_CAP
+	cap_t cap;
+#endif
 
 	sigfillset(&fullset);
 	pthread_sigmask(SIG_BLOCK, &fullset, &oldset);
 
-        res = fork();
-        if (res < 0)
-                ast_log(LOG_WARNING, "Fork failed\n");
-        if (res) {
+	res = fork();
+	if (res < 0)
+		ast_log(LOG_WARNING, "Fork failed\n");
+	if (res) {
 		pthread_sigmask(SIG_SETMASK, &oldset, NULL);
-                return res;
+		return res;
 	}
-        for (x=0;x<256;x++) {
-                if (x != fd)
-                        close(x);
-        }
+#ifdef HAVE_CAP
+	cap = cap_from_text("cap_net_admin-eip");
+
+	if (cap_set_proc(cap)) {
+		/* Careful with order! Logging cannot happen after we close FDs */
+		ast_log(LOG_WARNING, "Unable to remove capabilities.\n");
+	}
+	cap_free(cap);
+#endif
+	for (x=0;x<256;x++) {
+		if (x != fd)
+			close(x);
+	}
 	if (ast_opt_high_priority)
 		ast_set_priority(0);
 	signal(SIGPIPE, SIG_DFL);
@@ -160,7 +180,9 @@ static int send_waveform_to_fd(char *waveform, int length, int fd) {
 	}
 #endif
 	
-	write(fd,waveform,length);
+	if (write(fd,waveform,length) < 0) {
+		ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+	}
 	close(fd);
 	exit(0);
 }
@@ -431,17 +453,25 @@ static int festival_exec(struct ast_channel *chan, void *vdata)
     				writecache=1;
     				strln=strlen((char *)data);
     				ast_log(LOG_DEBUG,"line length : %d\n",strln);
-    				write(fdesc,&strln,sizeof(int));
-    				write(fdesc,data,strln);
+    				if (write(fdesc,&strln,sizeof(int)) < 0) {
+					ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+				}
+    				if (write(fdesc,data,strln) < 0) {
+					ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+				}
 				seekpos=lseek(fdesc,0,SEEK_CUR);
 				ast_log(LOG_DEBUG,"Seek position : %d\n",seekpos);
     			}
     		} else {
-    			read(fdesc,&strln,sizeof(int));
+    			if (read(fdesc,&strln,sizeof(int)) != sizeof(int)) {
+				ast_log(LOG_WARNING, "read() failed: %s\n", strerror(errno));
+			}
     			ast_log(LOG_DEBUG,"Cache file exists, strln=%d, strlen=%d\n",strln,(int)strlen((char *)data));
     			if (strlen((char *)data)==strln) {
     				ast_log(LOG_DEBUG,"Size OK\n");
-    				read(fdesc,&bigstring,strln);
+    				if (read(fdesc,&bigstring,strln) != strln) {
+					ast_log(LOG_WARNING, "read() failed: %s\n", strerror(errno));
+				}
 	    			bigstring[strln] = 0;
 				if (strcmp(bigstring,data)==0) { 
 	    				readcache=1;
@@ -470,7 +500,9 @@ static int festival_exec(struct ast_channel *chan, void *vdata)
 	if (writecache==1) {
 		ast_log(LOG_DEBUG,"Writing result to cache...\n");
 		while ((strln=read(fd,buffer,16384))!=0) {
-			write(fdesc,buffer,strln);
+			if (write(fdesc,buffer,strln) < 0) {
+				ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+			}
 		}
 		close(fd);
 		close(fdesc);

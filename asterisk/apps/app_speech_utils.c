@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $");
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 177383 $");
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -377,6 +377,8 @@ static int speech_create(struct ast_channel *chan, void *data)
 	}
 	datastore->data = speech;
 	ast_channel_datastore_add(chan, datastore);
+
+	pbx_builtin_setvar_helper(chan, "ERROR", NULL);
 
 	ast_module_user_remove(u);
 
@@ -774,6 +776,7 @@ static int speech_background(struct ast_channel *chan, void *data)
 			speech->results->text = strdup(dtmf);
 			speech->results->grammar = strdup("dtmf");
 		}
+		ast_speech_change_state(speech, AST_SPEECH_STATE_NOT_READY);
 	}
 
         /* See if it was because they hung up */

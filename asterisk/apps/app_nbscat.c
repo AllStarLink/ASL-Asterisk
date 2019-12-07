@@ -25,9 +25,13 @@
  * \ingroup applications
  */
  
+/*** MODULEINFO
+	<depend>working_fork</depend>
+ ***/
+
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 48375 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 182810 $")
 
 #include <string.h>
 #include <stdio.h>
@@ -37,6 +41,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 48375 $")
 #include <fcntl.h>
 #include <sys/time.h>
 #include <sys/socket.h>
+#ifdef HAVE_CAP
+#include <sys/capability.h>
+#endif /* HAVE_CAP */
 
 #include "asterisk/lock.h"
 #include "asterisk/file.h"
@@ -69,6 +76,9 @@ static int NBScatplay(int fd)
 	int res;
 	int x;
 	sigset_t fullset, oldset;
+#ifdef HAVE_CAP
+	cap_t cap;
+#endif
 
 	sigfillset(&fullset);
 	pthread_sigmask(SIG_BLOCK, &fullset, &oldset);
@@ -83,6 +93,15 @@ static int NBScatplay(int fd)
 	signal(SIGPIPE, SIG_DFL);
 	pthread_sigmask(SIG_UNBLOCK, &fullset, NULL);
 
+#ifdef HAVE_CAP
+	cap = cap_from_text("cap_net_admin-eip");
+
+	if (cap_set_proc(cap)) {
+		/* Careful with order! Logging cannot happen after we close FDs */
+		ast_log(LOG_WARNING, "Unable to remove capabilities.\n");
+	}
+	cap_free(cap);
+#endif
 	if (ast_opt_high_priority)
 		ast_set_priority(0);
 
@@ -104,7 +123,7 @@ static int timed_read(int fd, void *data, int datalen)
 	struct pollfd fds[1];
 	fds[0].fd = fd;
 	fds[0].events = POLLIN;
-	res = poll(fds, 1, 2000);
+	res = ast_poll(fds, 1, 2000);
 	if (res < 1) {
 		ast_log(LOG_NOTICE, "Selected timed out/errored out with %d\n", res);
 		return -1;

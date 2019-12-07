@@ -127,14 +127,6 @@ enum ast_frame_type {
 enum {
 	/*! This frame contains valid timing information */
 	AST_FRFLAG_HAS_TIMING_INFO = (1 << 0),
-	/*! This frame came from a translator and is still the original frame.
-	 *  The translator can not be free'd if the frame inside of it still has
-	 *  this flag set. */
-	AST_FRFLAG_FROM_TRANSLATOR = (1 << 1),
-	/*! This frame came from a dsp and is still the original frame.
-	 *  The dsp cannot be free'd if the frame inside of it still has
-	 *  this flag set. */
-	AST_FRFLAG_FROM_DSP = (1 << 2),
 };
 
 /*! \brief Data structure associated with a single frame of data
@@ -146,7 +138,7 @@ struct ast_frame {
 	int subclass;				
 	/*! Length of data */
 	int datalen;				
-	/*! Number of 8khz samples in this frame */
+	/*! Number of samples in this frame */
 	int samples;				
 	/*! Was the data malloc'd?  i.e. should we free it when we discard the frame? */
 	int mallocd;				
@@ -256,6 +248,8 @@ extern struct ast_frame ast_null_frame;
 #define AST_FORMAT_G726		(1 << 11)
 /*! G.722 */
 #define AST_FORMAT_G722		(1 << 12)
+/*! Unsupported audio bits */
+#define AST_FORMAT_AUDIO_UNDEFINED	((1 << 13) | (1 << 14) | (1 << 15))
 /*! Maximum audio format */
 #define AST_FORMAT_MAX_AUDIO	(1 << 15)
 /*! Maximum audio mask */
@@ -393,9 +387,9 @@ struct ast_frame *ast_fralloc(char *source, int len);
 #endif
 
 /*!  
- * \brief Frees a frame 
+ * \brief Frees a frame or list of frames
  * 
- * \param fr Frame to free
+ * \param fr Frame to free, or head of list to free
  * \param cache Whether to consider this frame for frame caching
  */
 void ast_frame_free(struct ast_frame *fr, int cache);
@@ -409,6 +403,11 @@ void ast_frame_free(struct ast_frame *fr, int cache);
  * data malloc'd.  If you need to store frames, say for queueing, then
  * you should call this function.
  * \return Returns a frame on success, NULL on error
+ * \note This function may modify the frame passed to it, so you must
+ * not assume the frame will be intact after the isolated frame has
+ * been produced. In other words, calling this function on a frame
+ * should be the last operation you do with that frame before freeing
+ * it (or exiting the block, if the frame is on the stack.)
  */
 struct ast_frame *ast_frisolate(struct ast_frame *fr);
 
@@ -472,6 +471,16 @@ int ast_smoother_get_flags(struct ast_smoother *smoother);
 int ast_smoother_test_flag(struct ast_smoother *s, int flag);
 void ast_smoother_free(struct ast_smoother *s);
 void ast_smoother_reset(struct ast_smoother *s, int bytes);
+
+/*!
+ * \brief Reconfigure an existing smoother to output a different number of bytes per frame
+ * \param s the smoother to reconfigure
+ * \param bytes the desired number of bytes per output frame
+ * \return nothing
+ *
+ */
+void ast_smoother_reconfigure(struct ast_smoother *s, int bytes);
+
 int __ast_smoother_feed(struct ast_smoother *s, struct ast_frame *f, int swap);
 struct ast_frame *ast_smoother_read(struct ast_smoother *s);
 #define ast_smoother_feed(s,f) __ast_smoother_feed(s, f, 0)
@@ -553,7 +562,7 @@ struct ast_frame *ast_frame_enqueue(struct ast_frame *head, struct ast_frame *f,
 /*! \brief Gets duration in ms of interpolation frame for a format */
 static inline int ast_codec_interp_len(int format) 
 { 
-	return 20;
+	return (format == AST_FORMAT_ILBC) ? 30 : 20;
 }
 
 /*!

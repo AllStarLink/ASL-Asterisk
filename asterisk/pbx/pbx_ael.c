@@ -25,7 +25,7 @@
 #include "asterisk.h"
 
 #if !defined(STANDALONE_AEL)
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 #endif
 
 #include <sys/types.h>
@@ -712,7 +712,7 @@ static int extension_matches(pval *here, const char *exten, const char *pattern)
 	regex_t preg;
 	
 	/* simple case, they match exactly, the pattern and exten name */
-	if( !strcmp(pattern,exten) == 0 )
+	if( strcmp(pattern,exten) == 0 )
 		return 1;
 	
 	if ( pattern[0] == '_' ) {
@@ -762,6 +762,7 @@ static int extension_matches(pval *here, const char *exten, const char *pattern)
 				while ( *p && *p != ']' ) {
 					*r++ = *p++;
 				}
+				*r++ = ']';
 				if ( *p != ']') {
 					ast_log(LOG_WARNING, "Warning: file %s, line %d-%d: The extension pattern '%s' is missing a closing bracket \n",
 							here->filename, here->startline, here->endline, pattern);
@@ -876,12 +877,12 @@ static void check_timerange(pval *p)
 				p->filename, p->startline, p->endline, p->u1.str);
 		warns++;
 	}
-	if (sscanf(times, "%d:%d", &s1, &s2) != 2) {
+	if (sscanf(times, "%2d:%2d", &s1, &s2) != 2) {
 		ast_log(LOG_WARNING, "Warning: file %s, line %d-%d: The start time (%s) isn't quite right!\n",
 				p->filename, p->startline, p->endline, times);
 		warns++;
 	}
-	if (sscanf(e, "%d:%d", &e1, &e2) != 2) {
+	if (sscanf(e, "%2d:%2d", &e1, &e2) != 2) {
 		ast_log(LOG_WARNING, "Warning: file %s, line %d-%d: The end time (%s) isn't quite right!\n",
 				p->filename, p->startline, p->endline, times);
 		warns++;
@@ -973,7 +974,7 @@ static void check_day(pval *DAY)
 		c++;
 	}
 	/* Find the start */
-	if (sscanf(day, "%d", &s) != 1) {
+	if (sscanf(day, "%2d", &s) != 1) {
 		ast_log(LOG_WARNING, "Warning: file %s, line %d-%d: The start day of month (%s) must be a number!\n",
 				DAY->filename, DAY->startline, DAY->endline, day);
 		warns++;
@@ -985,7 +986,7 @@ static void check_day(pval *DAY)
 	}
 	s--;
 	if (c) {
-		if (sscanf(c, "%d", &e) != 1) {
+		if (sscanf(c, "%2d", &e) != 1) {
 			ast_log(LOG_WARNING, "Warning: file %s, line %d-%d: The end day of month (%s) must be a number!\n",
 					DAY->filename, DAY->startline, DAY->endline, c);
 			warns++;
@@ -3267,7 +3268,7 @@ static void gen_prios(struct ael_extension *exten, char *label, pval *statement,
 			pr->type = AEL_APPCALL;
 			p->u2.goto_target = get_goto_target(p);
 			if( p->u2.goto_target ) {
-				p->u3.goto_target_in_case = p->u2.goto_target->u2.label_in_case = label_inside_case(p->u2.goto_target);
+				p->u3.goto_target_in_case = label_inside_case(p->u2.goto_target);
 			}
 			
 			if (!p->u1.list->next) /* just one */ {
@@ -4078,7 +4079,7 @@ void add_extensions(struct ael_extension *exten)
 		pbx_substitute_variables_helper(NULL, exten->name, realext, sizeof(realext) - 1);
 		if (exten->hints) {
 			if (ast_add_extension2(exten->context, 0 /*no replace*/, realext, PRIORITY_HINT, NULL, exten->cidmatch, 
-								  exten->hints, NULL, ast_free, registrar)) {
+								  exten->hints, NULL, ast_free_ptr, registrar)) {
 				ast_log(LOG_WARNING, "Unable to add step at priority 'hint' of extension '%s'\n",
 						exten->name);
 			}
@@ -4158,7 +4159,7 @@ void add_extensions(struct ael_extension *exten)
 				label = 0;
 			
 			if (ast_add_extension2(exten->context, 0 /*no replace*/, realext, pr->priority_num, (label?label:NULL), exten->cidmatch, 
-								  app, strdup(appargs), ast_free, registrar)) {
+								  app, strdup(appargs), ast_free_ptr, registrar)) {
 				ast_log(LOG_WARNING, "Unable to add step at priority '%d' of extension '%s'\n", pr->priority_num, 
 						exten->name);
 			}

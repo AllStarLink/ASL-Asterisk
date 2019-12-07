@@ -90,11 +90,8 @@
 #include "asterisk/abstract_jb.h"
 
 #include <unistd.h>
-#ifdef POLLCOMPAT 
+
 #include "asterisk/poll-compat.h"
-#else
-#include <sys/poll.h>
-#endif
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
@@ -398,7 +395,7 @@ struct ast_channel {
 	enum ast_channel_state _state;			/*!< State of line -- Don't write directly, use ast_setstate */
 	int rings;					/*!< Number of rings so far */
 	struct ast_callerid cid;			/*!< Caller ID, name, presentation etc */
-	char dtmfq[AST_MAX_EXTENSION];			/*!< Any/all queued DTMF characters */
+	char unused_old_dtmfq[AST_MAX_EXTENSION];	/*!< The DTMFQ is deprecated.  All frames should go to the readq. */
 	struct ast_frame dtmff;				/*!< DTMF frame */
 
 	char context[AST_MAX_CONTEXT];			/*!< Dialplan: Current extension context */
@@ -414,7 +411,7 @@ struct ast_channel {
 	struct ast_cdr *cdr;				/*!< Call Detail Record */
 	enum ast_channel_adsicpe adsicpe;		/*!< Whether or not ADSI is detected on CPE */
 
-	struct ind_tone_zone *zone;				/*!< Tone zone as set in indications.conf or
+	struct tone_zone *zone;				/*!< Tone zone as set in indications.conf or
 								in the CHANNEL dialplan function */
 
 	struct ast_channel_monitor *monitor;		/*!< Channel monitoring */
@@ -514,6 +511,12 @@ enum {
 	 *  a message aimed at preventing a subsequent hangup exten being run at the pbx_run
 	 *  level */
 	AST_FLAG_BRIDGE_HANGUP_RUN = (1 << 16),
+	/*! This flag indicates that the hangup exten should NOT be run when the 
+	 *  bridge terminates, this will allow the hangup in the pbx loop to be run instead.
+	 *  */
+	AST_FLAG_BRIDGE_HANGUP_DONT = (1 << 17),
+	/*! This flag indicates whether the channel is in the channel list or not. */
+	AST_FLAG_IN_CHANNEL_LIST = (1 << 19),
 };
 
 /*! \brief ast_bridge_config flags */
@@ -525,12 +528,15 @@ enum {
 	AST_FEATURE_AUTOMON =      (1 << 4),
 	AST_FEATURE_PARKCALL =     (1 << 5),
 	AST_FEATURE_NO_H_EXTEN =   (1 << 6),
+	AST_FEATURE_WARNING_ACTIVE = (1 << 7),
 };
 
 struct ast_bridge_config {
 	struct ast_flags features_caller;
 	struct ast_flags features_callee;
 	struct timeval start_time;
+	struct timeval nexteventts;
+	struct timeval partialfeature_timer;
 	long feature_timer;
 	long timelimit;
 	long play_warning;
@@ -540,6 +546,12 @@ struct ast_bridge_config {
 	const char *start_sound;
 	int firstpass;
 	unsigned int flags;
+	void (* end_bridge_callback)(void *);   /*!< A callback that is called after a bridge attempt */
+	void *end_bridge_callback_data;         /*!< Data passed to the callback */
+	/*! If the end_bridge_callback_data refers to a channel which no longer is going to
+	 * exist when the end_bridge_callback is called, then it needs to be fixed up properly
+	 */
+	void (*end_bridge_callback_data_fixup)(struct ast_bridge_config *bconfig, struct ast_channel *originator, struct ast_channel *terminator);
 };
 
 struct chanmon;
@@ -621,10 +633,35 @@ int ast_setstate(struct ast_channel *chan, enum ast_channel_state);
 	by default set to the "default" context and
 	extension "s"
  */
-struct ast_channel *ast_channel_alloc(int needqueue, int state, const char *cid_num, const char *cid_name, const char *acctcode, const char *exten, const char *context, const int amaflag, const char *name_fmt, ...);
+struct ast_channel *ast_channel_alloc(int needqueue, int state, const char *cid_num, const char *cid_name, const char *acctcode, const char *exten, const char *context, const int amaflag, const char *name_fmt, ...) __attribute__((format(printf, 9, 10)));
 
-/*! \brief Queue an outgoing frame */
+/*!
+ * \brief Queue one or more frames to a channel's frame queue
+ *
+ * \param chan the channel to queue the frame(s) on
+ * \param f the frame(s) to queue.  Note that the frame(s) will be duplicated
+ *        by this function.  It is the responsibility of the caller to handle
+ *        freeing the memory associated with the frame(s) being passed if
+ *        necessary.
+ *
+ * \retval 0 success
+ * \retval non-zero failure
+ */
 int ast_queue_frame(struct ast_channel *chan, struct ast_frame *f);
+
+/*!
+ * \brief Queue one or more frames to the head of a channel's frame queue
+ *
+ * \param chan the channel to queue the frame(s) on
+ * \param f the frame(s) to queue.  Note that the frame(s) will be duplicated
+ *        by this function.  It is the responsibility of the caller to handle
+ *        freeing the memory associated with the frame(s) being passed if
+ *        necessary.
+ *
+ * \retval 0 success
+ * \retval non-zero failure
+ */
+int ast_queue_frame_head(struct ast_channel *chan, struct ast_frame *f);
 
 /*! \brief Queue a hangup frame */
 int ast_queue_hangup(struct ast_channel *chan);
@@ -693,6 +730,18 @@ struct ast_channel *ast_request_and_dial(const char *type, int format, void *dat
 
 struct ast_channel *__ast_request_and_dial(const char *type, int format, void *data, int timeout, int *reason, const char *cidnum, const char *cidname, struct outgoing_helper *oh);
 
+/*!
+* \brief Forwards a call to a new channel specified by the original channel's call_forward str.  If possible, the new forwarded channel is created and returned while the original one is terminated.
+* \param caller in channel that requested orig
+* \param orig channel being replaced by the call forward channel
+* \param timeout maximum amount of time to wait for setup of new forward channel
+* \param format requested channel format
+* \param oh outgoing helper used with original channel
+* \param outstate reason why unsuccessful (if uncuccessful)
+* \return Returns the forwarded call's ast_channel on success or NULL on failure
+*/
+struct ast_channel *ast_call_forward(struct ast_channel *caller, struct ast_channel *orig, int *timeout, int format, struct outgoing_helper *oh, int *outstate);
+
 /*!\brief Register a channel technology (a new channel driver)
  * Called by a channel module to register the kind of channels it supports.
  * \param tech Structure defining channel technology or "type"
@@ -725,14 +774,14 @@ int ast_hangup(struct ast_channel *chan);
  * \param chan channel to be soft-hung-up
  * Call the protocol layer, but don't destroy the channel structure (use this if you are trying to
  * safely hangup a channel managed by another thread.
- * \param cause	Ast hangupcause for hangup
+ * \param reason an AST_SOFTHANGUP_* reason code
  * \return Returns 0 regardless
  */
 int ast_softhangup(struct ast_channel *chan, int cause);
 
 /*! \brief Softly hangup up a channel (no channel lock) 
  * \param chan channel to be soft-hung-up
- * \param cause	Ast hangupcause for hangup (see cause.h) */
+ * \param reason an AST_SOFTHANGUP_* reason code */
 int ast_softhangup_nolock(struct ast_channel *chan, int cause);
 
 /*! \brief Check to see if a channel is needing hang up 
@@ -1146,8 +1195,7 @@ void ast_set_callerid(struct ast_channel *chan, const char *cidnum, const char *
 
 
 /*! return a mallocd string with the result of sprintf of the fmt and following args */
-char *ast_safe_string_alloc(const char *fmt, ...);
-
+char __attribute__((format(printf, 1, 2))) *ast_safe_string_alloc(const char *fmt, ...);
 
 
 /*! Start a tone going */
@@ -1167,6 +1215,11 @@ int ast_autoservice_start(struct ast_channel *chan);
 
 /*! 
  * \brief Stop servicing a channel for us...  
+ *
+ * \note if chan is locked prior to calling ast_autoservice_stop, it
+ * is likely that there will be a deadlock between the thread that calls
+ * ast_autoservice_stop and the autoservice thread. It is important
+ * that chan is not locked prior to this call
  *
  * \retval 0 success
  * \retval -1 error, or the channel has been hungup 
@@ -1296,7 +1349,7 @@ static inline int ast_fdisset(struct pollfd *pfds, int fd, int max, int *start)
 	return 0;
 }
 
-#ifdef SOLARIS
+#ifndef HAVE_TIMERSUB
 static inline void timersub(struct timeval *tvend, struct timeval *tvstart, struct timeval *tvdiff)
 {
 	tvdiff->tv_sec = tvend->tv_sec - tvstart->tv_sec;

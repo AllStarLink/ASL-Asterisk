@@ -29,7 +29,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 47051 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 208990 $")
 
 #include <sys/types.h>
 #include <openssl/ssl.h>
@@ -102,6 +102,30 @@ struct ast_key {
 
 static struct ast_key *keys = NULL;
 
+static ast_mutex_t *ssl_locks;
+
+static int ssl_num_locks;
+
+static unsigned long ssl_threadid(void)
+{
+	return (unsigned long)pthread_self();
+}
+
+static void ssl_lock(int mode, int n, const char *file, int line)
+{
+	if (n < 0 || n >= ssl_num_locks) {
+		ast_log(LOG_ERROR, "OpenSSL is full of LIES!!! - "
+				"ssl_num_locks '%d' - n '%d'\n",
+				ssl_num_locks, n);
+		return;
+	}
+
+	if (mode & CRYPTO_LOCK) {
+		ast_mutex_lock(&ssl_locks[n]);
+	} else {
+		ast_mutex_unlock(&ssl_locks[n]);
+	}
+}
 
 #if 0
 static int fdprint(int fd, char *s)
@@ -118,7 +142,11 @@ static int pw_cb(char *buf, int size, int rwflag, void *userdata)
 	if (key->infd > -1) {
 		snprintf(prompt, sizeof(prompt), ">>>> passcode for %s key '%s': ",
 			 key->ktype == AST_KEY_PRIVATE ? "PRIVATE" : "PUBLIC", key->name);
-		write(key->outfd, prompt, strlen(prompt));
+		if (write(key->outfd, prompt, strlen(prompt)) < 0) {
+			/* Note that we were at least called */
+			key->infd = -2;
+			return -1;
+		}
 		memset(buf, 0, sizeof(buf));
 		tmp = ast_hide_password(key->infd);
 		memset(buf, 0, size);
@@ -194,8 +222,7 @@ static struct ast_key *try_load_key (char *dir, char *fname, int ifd, int ofd, i
 		/* Calculate a "whatever" quality md5sum of the key */
 		char buf[256];
 		memset(buf, 0, 256);
-		fgets(buf, sizeof(buf), f);
-		if (!feof(f)) {
+		if (fgets(buf, sizeof(buf), f)) {
 			MD5Update(&md5, (unsigned char *) buf, strlen(buf));
 		}
 	}
@@ -583,8 +610,27 @@ static struct ast_cli_entry cli_crypto[] = {
 
 static int crypto_init(void)
 {
+	unsigned int i;
+
 	SSL_library_init();
+	SSL_load_error_strings();
 	ERR_load_crypto_strings();
+	ERR_load_BIO_strings();
+	OpenSSL_add_all_algorithms();
+
+	/* Make OpenSSL thread-safe. */
+
+	CRYPTO_set_id_callback(ssl_threadid);
+
+	ssl_num_locks = CRYPTO_num_locks();
+	if (!(ssl_locks = ast_calloc(ssl_num_locks, sizeof(ssl_locks[0])))) {
+		return AST_MODULE_LOAD_DECLINE;
+	}
+	for (i = 0; i < ssl_num_locks; i++) {
+		ast_mutex_init(&ssl_locks[i]);
+	}
+	CRYPTO_set_locking_callback(ssl_lock);
+
 	ast_cli_register_multiple(cli_crypto, sizeof(cli_crypto) / sizeof(struct ast_cli_entry));
 
 	/* Install ourselves into stubs */
@@ -595,7 +641,8 @@ static int crypto_init(void)
 	ast_sign_bin = __ast_sign_bin;
 	ast_encrypt_bin = __ast_encrypt_bin;
 	ast_decrypt_bin = __ast_decrypt_bin;
-	return 0;
+
+	return AST_MODULE_LOAD_SUCCESS;
 }
 
 static int reload(void)
@@ -621,7 +668,7 @@ static int unload_module(void)
 }
 
 /* needs usecount semantics defined */
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Cryptographic Digital Signatures",
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Cryptographic Digital Signatures",
 		.load = load_module,
 		.unload = unload_module,
 		.reload = reload

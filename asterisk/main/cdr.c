@@ -33,7 +33,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -766,6 +766,9 @@ int ast_cdr_disposition(struct ast_cdr *cdr, int cause)
 		case AST_CAUSE_BUSY:
 			ast_cdr_busy(cdr);
 			break;
+		case AST_CAUSE_NO_ANSWER:
+			ast_cdr_noanswer(cdr);
+			break;
 		case AST_CAUSE_NORMAL:
 			break;
 		default:
@@ -793,6 +796,30 @@ void ast_cdr_setapp(struct ast_cdr *cdr, char *app, char *data)
 			ast_copy_string(cdr->lastapp, S_OR(app, ""), sizeof(cdr->lastapp));
 			ast_copy_string(cdr->lastdata, S_OR(data, ""), sizeof(cdr->lastdata));
 		}
+	}
+}
+
+void ast_cdr_setanswer(struct ast_cdr *cdr, struct timeval t)
+{
+
+	for (; cdr; cdr = cdr->next) {
+		if (ast_test_flag(cdr, AST_CDR_FLAG_ANSLOCKED))
+			continue;
+		if (ast_test_flag(cdr, AST_CDR_FLAG_DONT_TOUCH) && ast_test_flag(cdr, AST_CDR_FLAG_LOCKED))
+			continue;
+		check_post(cdr);
+		cdr->answer = t;
+	}
+}
+
+void ast_cdr_setdisposition(struct ast_cdr *cdr, long int disposition)
+{
+
+	for (; cdr; cdr = cdr->next) {
+		if (ast_test_flag(cdr, AST_CDR_FLAG_LOCKED))
+			continue;
+		check_post(cdr);
+		cdr->disposition = disposition;
 	}
 }
 
@@ -835,7 +862,7 @@ int ast_cdr_init(struct ast_cdr *cdr, struct ast_channel *c)
 			ast_copy_string(cdr->channel, c->name, sizeof(cdr->channel));
 			set_one_cid(cdr, c);
 
-			cdr->disposition = (c->_state == AST_STATE_UP) ?  AST_CDR_ANSWERED : AST_CDR_NULL;
+			cdr->disposition = (c->_state == AST_STATE_UP) ?  AST_CDR_ANSWERED : AST_CDR_NOANSWER;
 			cdr->amaflags = c->amaflags ? c->amaflags :  ast_default_amaflags;
 			ast_copy_string(cdr->accountcode, c->accountcode, sizeof(cdr->accountcode));
 			/* Destination information */
@@ -1013,6 +1040,14 @@ static void post_cdr(struct ast_cdr *cdr)
 			continue;
 		}
 
+		/* don't post CDRs that are for dialed channels unless those
+		 * channels were originated from asterisk (pbx_spool, manager,
+		 * cli) */
+		if (ast_test_flag(cdr, AST_CDR_FLAG_DIALED) && !ast_test_flag(cdr, AST_CDR_FLAG_ORIGINATED)) {
+			ast_set_flag(cdr, AST_CDR_FLAG_POST_DISABLED);
+			continue;
+		}
+
 		chan = S_OR(cdr->channel, "<unknown>");
 		check_post(cdr);
 		if (option_verbose > 1 && ast_tvzero(cdr->end))
@@ -1062,7 +1097,7 @@ void ast_cdr_reset(struct ast_cdr *cdr, struct ast_flags *_flags)
 			cdr->billsec = 0;
 			cdr->duration = 0;
 			ast_cdr_start(cdr);
-			cdr->disposition = AST_CDR_NULL;
+			cdr->disposition = AST_CDR_NOANSWER;
 		}
 	}
 }
@@ -1393,17 +1428,17 @@ static int do_reload(void)
 			batchsafeshutdown = ast_true(batchsafeshutdown_value);
 		}
 		if ((size_value = ast_variable_retrieve(config, "general", "size"))) {
-			if (sscanf(size_value, "%d", &cfg_size) < 1)
+			if (sscanf(size_value, "%30d", &cfg_size) < 1)
 				ast_log(LOG_WARNING, "Unable to convert '%s' to a numeric value.\n", size_value);
-			else if (size_value < 0)
+			else if (cfg_size < 0)
 				ast_log(LOG_WARNING, "Invalid maximum batch size '%d' specified, using default\n", cfg_size);
 			else
 				batchsize = cfg_size;
 		}
 		if ((time_value = ast_variable_retrieve(config, "general", "time"))) {
-			if (sscanf(time_value, "%d", &cfg_time) < 1)
+			if (sscanf(time_value, "%30d", &cfg_time) < 1)
 				ast_log(LOG_WARNING, "Unable to convert '%s' to a numeric value.\n", time_value);
-			else if (time_value < 0)
+			else if (cfg_time < 0)
 				ast_log(LOG_WARNING, "Invalid maximum batch time '%d' specified, using default\n", cfg_time);
 			else
 				batchtime = cfg_time;

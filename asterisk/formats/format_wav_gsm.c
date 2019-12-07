@@ -29,7 +29,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233782 $")
 
 #include <unistd.h>
 #include <netinet/in.h>
@@ -163,7 +163,7 @@ static int check_header(FILE *f)
 		return -1;
 	}
 	if (ltohl(freq) != DEFAULT_SAMPLE_RATE) {
-		ast_log(LOG_WARNING, "Unexpected freqency %d\n", ltohl(freq));
+		ast_log(LOG_WARNING, "Unexpected frequency %d\n", ltohl(freq));
 		return -1;
 	}
 	/* Ignore the byte frequency */
@@ -509,7 +509,9 @@ static int wav_seek(struct ast_filestream *fs, off_t sample_offset, int whence)
 		int i;
 		fseek(fs->f, 0, SEEK_END);
 		for (i=0; i< (offset - max) / MSGSM_FRAME_SIZE; i++) {
-			fwrite(msgsm_silence, 1, MSGSM_FRAME_SIZE, fs->f);
+			if (!fwrite(msgsm_silence, 1, MSGSM_FRAME_SIZE, fs->f)) {
+				ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+			}
 		}
 	}
 	s->secondhalf = 0;
@@ -557,4 +559,7 @@ static int unload_module(void)
 	return ast_format_unregister(wav49_f.name);
 }	
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Microsoft WAV format (Proprietary GSM)");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_FIRST, "Microsoft WAV format (Proprietary GSM)",
+	.load = load_module,
+	.unload = unload_module,
+);

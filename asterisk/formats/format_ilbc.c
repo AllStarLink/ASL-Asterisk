@@ -24,10 +24,10 @@
  * \arg File name extension: ilbc
  * \ingroup formats
  */
- 
+
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233782 $")
 
 #include <unistd.h>
 #include <netinet/in.h>
@@ -50,8 +50,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
 
 /* Portions of the conversion code are by guido@sienanet.it */
 
-#define	ILBC_BUF_SIZE	38	/* One Real iLBC Frame */
-#define	ILBC_SAMPLES	160
+#define	ILBC_BUF_SIZE	50	/* One Real iLBC Frame */
+#define	ILBC_SAMPLES	240
 
 static struct ast_frame *ilbc_read(struct ast_filestream *s, int *whennext)
 {
@@ -81,12 +81,12 @@ static int ilbc_write(struct ast_filestream *fs, struct ast_frame *f)
 		ast_log(LOG_WARNING, "Asked to write non-iLBC frame (%d)!\n", f->subclass);
 		return -1;
 	}
-	if (f->datalen % 38) {
-		ast_log(LOG_WARNING, "Invalid data length, %d, should be multiple of 38\n", f->datalen);
+	if (f->datalen % 50) {
+		ast_log(LOG_WARNING, "Invalid data length, %d, should be multiple of 50\n", f->datalen);
 		return -1;
 	}
 	if ((res = fwrite(f->data, 1, f->datalen, fs->f)) != f->datalen) {
-			ast_log(LOG_WARNING, "Bad write (%d/38): %s\n", res, strerror(errno));
+			ast_log(LOG_WARNING, "Bad write (%d/50): %s\n", res, strerror(errno));
 			return -1;
 	}
 	return 0;
@@ -154,4 +154,7 @@ static int unload_module(void)
 	return ast_format_unregister(ilbc_f.name);
 }	
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Raw iLBC data");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_FIRST, "Raw iLBC data",
+	.load = load_module,
+	.unload = unload_module,
+);

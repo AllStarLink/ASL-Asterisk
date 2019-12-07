@@ -27,7 +27,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -89,15 +89,15 @@ static int background_detect_exec(struct ast_channel *chan, void *data)
 	strsep(&stringp, "|");
 	options = strsep(&stringp, "|");
 	if (options) {
-		if ((sscanf(options, "%d", &x) == 1) && (x > 0))
+		if ((sscanf(options, "%30d", &x) == 1) && (x > 0))
 			sil = x;
 		options = strsep(&stringp, "|");
 		if (options) {
-			if ((sscanf(options, "%d", &x) == 1) && (x > 0))
+			if ((sscanf(options, "%30d", &x) == 1) && (x > 0))
 				min = x;
 			options = strsep(&stringp, "|");
 			if (options) {
-				if ((sscanf(options, "%d", &x) == 1) && (x > 0))
+				if ((sscanf(options, "%30d", &x) == 1) && (x > 0))
 					max = x;
 			}
 		}

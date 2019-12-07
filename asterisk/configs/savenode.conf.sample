@@ -1,5 +1,0 @@
-# config file for /usr/local/bin/savenode
-NODE=1999
-PASSWORD=123456
-ENABLE=1
-

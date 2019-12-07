@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -319,7 +319,7 @@ static int handle_set_debug(int fd, int argc, char *argv[])
 		if (argc > 5)
 			return RESULT_SHOWUSAGE;
 
-		if (sscanf(argv[3], "%d", &newlevel) != 1)
+		if (sscanf(argv[3], "%30d", &newlevel) != 1)
 			return RESULT_SHOWUSAGE;
 
 		if (argc == 4) {
@@ -334,7 +334,7 @@ static int handle_set_debug(int fd, int argc, char *argv[])
 		if (argc < 5 || argc > 6)
 			return RESULT_SHOWUSAGE;
 
-		if (sscanf(argv[4], "%d", &newlevel) != 1)
+		if (sscanf(argv[4], "%30d", &newlevel) != 1)
 			return RESULT_SHOWUSAGE;
 
 		if (argc == 5) {
@@ -387,7 +387,7 @@ static int handle_debuglevel_deprecated(int fd, int argc, char *argv[])
 	char *filename = "<any>";
 	if ((argc < 3) || (argc > 4))
 		return RESULT_SHOWUSAGE;
-	if (sscanf(argv[2], "%d", &newlevel) != 1)
+	if (sscanf(argv[2], "%30d", &newlevel) != 1)
 		return RESULT_SHOWUSAGE;
 	option_debug = newlevel;
 	if (argc == 4) {
@@ -873,7 +873,7 @@ static int handle_commandcomplete(int fd, int argc, char *argv[])
 		return RESULT_SHOWUSAGE;
 	buf = __ast_cli_generator(argv[2], argv[3], atoi(argv[4]), 0);
 	if (buf) {
-		ast_cli(fd, buf);
+		ast_cli(fd, "%s", buf);
 		free(buf);
 	} else
 		ast_cli(fd, "NULL\n");
@@ -1289,6 +1289,7 @@ static char *complete_fn_3(const char *line, const char *word, int pos, int stat
 		c += (strlen(ast_config_AST_MODULE_DIR) + 1);
 	if (c)
 		c = strdup(c);
+
 	free(d);
 	
 	return c;

@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -131,7 +131,7 @@ int ast_dnsmgr_lookup(const char *name, struct in_addr *result, struct ast_dnsmg
 	if (*dnsmgr && !strcasecmp((*dnsmgr)->name, name))
 		return 0;
 
-	if (option_verbose > 4)
+	if (option_verbose > 3)
 		ast_verbose(VERBOSE_PREFIX_4 "doing dnsmgr_lookup for '%s'\n", name);
 
 	/* if it's actually an IP address and not a name,
@@ -380,7 +380,7 @@ static int do_reload(int loading)
 			enabled = ast_true(enabled_value);
 		}
 		if ((interval_value = ast_variable_retrieve(config, "general", "refreshinterval"))) {
-			if (sscanf(interval_value, "%d", &interval) < 1)
+			if (sscanf(interval_value, "%30d", &interval) < 1)
 				ast_log(LOG_WARNING, "Unable to convert '%s' to a numeric value.\n", interval_value);
 			else if (interval < 0)
 				ast_log(LOG_WARNING, "Invalid refresh interval '%d' specified, using default\n", interval);

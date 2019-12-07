@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 223486 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +61,9 @@ struct asent {
 	 *  it gets stopped for the last time. */
 	unsigned int use_count;
 	unsigned int orig_end_dtmf_flag:1;
+	/*! Frames go on at the head of deferred_frames, so we have the frames
+	 *  from newest to oldest.  As we put them at the head of the readq, we'll
+	 *  end up with them in the right order for the channel's readq. */
 	AST_LIST_HEAD_NOLOCK(, ast_frame) deferred_frames;
 	AST_LIST_ENTRY(asent) list;
 };
@@ -74,6 +77,11 @@ static int as_chan_list_state;
 
 static void *autoservice_run(void *ign)
 {
+	struct ast_frame hangup_frame = {
+		.frametype = AST_FRAME_CONTROL,
+		.subclass = AST_CONTROL_HANGUP,
+	};
+
 	for (;;) {
 		struct ast_channel *mons[MAX_AUTOMONS];
 		struct asent *ents[MAX_AUTOMONS];
@@ -116,17 +124,13 @@ static void *autoservice_run(void *ign)
 		}
 
 		f = ast_read(chan);
-	
+
 		if (!f) {
-			struct ast_frame hangup_frame = { 0, };
 			/* No frame means the channel has been hung up.
 			 * A hangup frame needs to be queued here as ast_waitfor() may
 			 * never return again for the condition to be detected outside
 			 * of autoservice.  So, we'll leave a HANGUP queued up so the
 			 * thread in charge of this channel will know. */
-
-			hangup_frame.frametype = AST_FRAME_CONTROL;
-			hangup_frame.subclass = AST_CONTROL_HANGUP;
 
 			defer_frame = &hangup_frame;
 		} else {
@@ -165,15 +169,22 @@ static void *autoservice_run(void *ign)
 					continue;
 				}
 				
-				if ((dup_f = ast_frdup(defer_frame))) {
-					AST_LIST_INSERT_TAIL(&ents[i]->deferred_frames, dup_f, frame_list);
+				if (defer_frame != f) {
+					if ((dup_f = ast_frdup(defer_frame))) {
+						AST_LIST_INSERT_HEAD(&ents[i]->deferred_frames, dup_f, frame_list);
+					}
+				} else {
+					if ((dup_f = ast_frisolate(defer_frame))) {
+						if (dup_f != defer_frame) {
+							ast_frfree(defer_frame);
+						}
+						AST_LIST_INSERT_HEAD(&ents[i]->deferred_frames, dup_f, frame_list);
+					}
 				}
 				
 				break;
 			}
-		}
-
-		if (f) {
+		} else if (f) {
 			ast_frfree(f);
 		}
 	}
@@ -298,10 +309,12 @@ int ast_autoservice_stop(struct ast_channel *chan)
 		ast_clear_flag(chan, AST_FLAG_END_DTMF_ONLY);
 	}
 
+	ast_channel_lock(chan);
 	while ((f = AST_LIST_REMOVE_HEAD(&as->deferred_frames, frame_list))) {
-		ast_queue_frame(chan, f);
+		ast_queue_frame_head(chan, f);
 		ast_frfree(f);
 	}
+	ast_channel_unlock(chan);
 
 	free(as);
 

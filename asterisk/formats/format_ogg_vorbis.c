@@ -32,7 +32,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 90198 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233782 $")
 
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -239,8 +239,12 @@ static int ogg_vorbis_rewrite(struct ast_filestream *s,
 	while (!tmp->eos) {
 		if (ogg_stream_flush(&tmp->os, &tmp->og) == 0)
 			break;
-		fwrite(tmp->og.header, 1, tmp->og.header_len, s->f);
-		fwrite(tmp->og.body, 1, tmp->og.body_len, s->f);
+		if (!fwrite(tmp->og.header, 1, tmp->og.header_len, s->f)) {
+			ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+		}
+		if (!fwrite(tmp->og.body, 1, tmp->og.body_len, s->f)) {
+			ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+		}
 		if (ogg_page_eos(&tmp->og))
 			tmp->eos = 1;
 	}
@@ -265,8 +269,12 @@ static void write_stream(struct vorbis_desc *s, FILE *f)
 				if (ogg_stream_pageout(&s->os, &s->og) == 0) {
 					break;
 				}
-				fwrite(s->og.header, 1, s->og.header_len, f);
-				fwrite(s->og.body, 1, s->og.body_len, f);
+				if (!fwrite(s->og.header, 1, s->og.header_len, f)) {
+				ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+				}
+				if (!fwrite(s->og.body, 1, s->og.body_len, f)) {
+					ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+				}
 				if (ogg_page_eos(&s->og)) {
 					s->eos = 1;
 				}
@@ -560,5 +568,8 @@ static int unload_module(void)
 	return ast_format_unregister(vorbis_f.name);
 }
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "OGG/Vorbis audio");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_FIRST, "OGG/Vorbis audio",
+	.load = load_module,
+	.unload = unload_module,
+);
 

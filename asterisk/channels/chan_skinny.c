@@ -28,7 +28,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -3587,8 +3587,8 @@ static int handle_speed_dial_stat_req_message(struct skinny_req *req, struct ski
 		return -1;
 
 	req->data.speeddialreq.speedDialNumber = htolel(instance);
-	snprintf(req->data.speeddial.speedDialDirNumber, sizeof(req->data.speeddial.speedDialDirNumber), sd->exten);
-	snprintf(req->data.speeddial.speedDialDisplayName, sizeof(req->data.speeddial.speedDialDisplayName), sd->label);
+	ast_copy_string(req->data.speeddial.speedDialDirNumber, sd->exten, sizeof(req->data.speeddial.speedDialDirNumber));
+	ast_copy_string(req->data.speeddial.speedDialDisplayName, sd->label, sizeof(req->data.speeddial.speedDialDisplayName));
 
 	transmit_response(s, req);
 	return 1;
@@ -3764,7 +3764,7 @@ static int handle_version_req_message(struct skinny_req *req, struct skinnysessi
 	if (!(req = req_alloc(sizeof(struct version_res_message), VERSION_RES_MESSAGE)))
 		return -1;
 
-	snprintf(req->data.version.version, sizeof(req->data.version.version), d->version_id);
+	ast_copy_string(req->data.version.version, d->version_id, sizeof(req->data.version.version));
 	transmit_response(s, req);
 	return 1;
 }
@@ -4436,12 +4436,13 @@ static int get_input(struct skinnysession *s)
 {
 	int res;
 	int dlen = 0;
+	int *bufaddr;
 	struct pollfd fds[1];
 
  	fds[0].fd = s->fd;
 	fds[0].events = POLLIN;
 	fds[0].revents = 0;
-	res = poll(fds, 1, (keep_alive * 1100)); /* If nothing has happen, client is dead */
+	res = ast_poll(fds, 1, (keep_alive * 1100)); /* If nothing has happen, client is dead */
 						 /* we add 10% to the keep_alive to deal */
 						 /* with network delays, etc */
 	if (res < 0) {
@@ -4482,7 +4483,8 @@ static int get_input(struct skinnysession *s)
 			return -1;
 		}
 		
-		dlen = letohl(*(int *)s->inbuf);
+		bufaddr = (int *)s->inbuf;
+		dlen = letohl(*bufaddr);
 		if (dlen < 4) {
 			ast_log(LOG_WARNING, "Skinny Client sent invalid data.\n");
 			ast_mutex_unlock(&s->lock);
@@ -4491,7 +4493,7 @@ static int get_input(struct skinnysession *s)
 		if (dlen+8 > sizeof(s->inbuf)) {
 			dlen = sizeof(s->inbuf) - 8;
 		}
-		*(int *)s->inbuf = htolel(dlen);
+		*bufaddr = htolel(dlen);
 
 		res = read(s->fd, s->inbuf+4, dlen+4);
 		ast_mutex_unlock(&s->lock);
@@ -4510,13 +4512,15 @@ static int get_input(struct skinnysession *s)
 static struct skinny_req *skinny_req_parse(struct skinnysession *s)
 {
 	struct skinny_req *req;
+	int *bufaddr;
 
 	if (!(req = ast_calloc(1, SKINNY_MAX_PACKET)))
 		return NULL;
 
 	ast_mutex_lock(&s->lock);
 	memcpy(req, s->inbuf, skinny_header_size);
-	memcpy(&req->data, s->inbuf+skinny_header_size, letohl(*(int*)(s->inbuf))-4);
+	bufaddr = (int *)(s->inbuf);
+	memcpy(&req->data, s->inbuf+skinny_header_size, letohl(*bufaddr)-4);
 
 	ast_mutex_unlock(&s->lock);
 
@@ -4756,7 +4760,7 @@ static int reload_config(void)
 		} else if (!strcasecmp(v->name, "disallow")) {
 			ast_parse_allow_disallow(&default_prefs, &default_capability, v->value, 0);
 		} else if (!strcasecmp(v->name, "bindport") || !strcasecmp(v->name, "port")) {
-			if (sscanf(v->value, "%d", &ourport) == 1) {
+			if (sscanf(v->value, "%5d", &ourport) == 1) {
 				bindaddr.sin_port = htons(ourport);
 			} else {
 				ast_log(LOG_WARNING, "Invalid bindport '%s' at line %d of %s\n", v->value, v->lineno, config);

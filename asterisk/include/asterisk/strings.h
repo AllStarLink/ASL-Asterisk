@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 #include "asterisk/inline_api.h"
 #include "asterisk/compiler.h"
@@ -190,7 +191,7 @@ void ast_copy_string(char *dst, const char *src, size_t size),
   \param fmt printf-style format string
   \return 0 on success, non-zero on failure.
 */
-int ast_build_string(char **buffer, size_t *space, const char *fmt, ...) __attribute__ ((format (printf, 3, 4)));
+int ast_build_string(char **buffer, size_t *space, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 
 /*!
   \brief Build a string in a buffer, designed to be called repeatedly
@@ -204,7 +205,7 @@ int ast_build_string(char **buffer, size_t *space, const char *fmt, ...) __attri
   \param fmt printf-style format string
   \param ap varargs list of arguments for format
 */
-int ast_build_string_va(char **buffer, size_t *space, const char *fmt, va_list ap);
+int ast_build_string_va(char **buffer, size_t *space, const char *fmt, va_list ap) __attribute__((format(printf, 3, 0)));
 
 /*! Make sure something is true */
 /*!
@@ -278,6 +279,24 @@ static force_inline int ast_str_hash(const char *str)
 
 	while (*str)
 		hash = hash * 33 ^ *str++;
+
+	return abs(hash);
+}
+
+/*!
+ * \brief Compute a hash value on a case-insensitive string
+ *
+ * Uses the same hash algorithm as ast_str_hash, but converts
+ * all characters to lowercase prior to computing a hash. This
+ * allows for easy case-insensitive lookups in a hash table.
+ */
+static force_inline int ast_str_case_hash(const char *str)
+{
+	int hash = 5381;
+
+	while (*str) {
+		hash = hash * 33 ^ tolower(*str++);
+	}
 
 	return abs(hash);
 }

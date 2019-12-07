@@ -26,7 +26,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 90198 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233782 $")
 
 #include <unistd.h>
 #include <netinet/in.h>
@@ -153,7 +153,7 @@ static int check_header(FILE *f)
 		return -1;
 	}
 	if (ltohl(freq) != DEFAULT_SAMPLE_RATE) {
-		ast_log(LOG_WARNING, "Unexpected freqency %d\n", ltohl(freq));
+		ast_log(LOG_WARNING, "Unexpected frequency %d\n", ltohl(freq));
 		return -1;
 	}
 	/* Ignore the byte frequency */
@@ -346,8 +346,11 @@ static void wav_close(struct ast_filestream *s)
 	char zero = 0;
 	struct wav_desc *fs = (struct wav_desc *)s->_private;
 	/* Pad to even length */
-	if (fs->bytes & 0x1)
-		fwrite(&zero, 1, 1, s->f);
+	if (fs->bytes & 0x1) {
+		if (!fwrite(&zero, 1, 1, s->f)) {
+			ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+		}
+	}
 }
 
 static struct ast_frame *wav_read(struct ast_filestream *s, int *whennext)
@@ -525,4 +528,7 @@ static int unload_module(void)
 	return ast_format_unregister(wav_f.name);
 }	
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Microsoft WAV format (8000Hz Signed Linear)");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_FIRST, "Microsoft WAV format (8000Hz Signed Linear)",
+	.load = load_module,
+	.unload = unload_module,
+);

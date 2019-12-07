@@ -34,7 +34,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 146799 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,8 +110,6 @@ static int curl_internal(struct MemoryStruct *chunk, char *url, char *post)
 		curl_easy_setopt(*curl, CURLOPT_TIMEOUT, 180);
 		curl_easy_setopt(*curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(*curl, CURLOPT_USERAGENT, global_useragent);
-		curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 0);
-		curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 0);
 	}
 
 	curl_easy_setopt(*curl, CURLOPT_URL, url);

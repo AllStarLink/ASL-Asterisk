@@ -24,6 +24,8 @@
 #ifndef _AST_FEATURES_H
 #define _AST_FEATURES_H
 
+#include "asterisk/linkedlists.h"
+
 #define FEATURE_MAX_LEN		11
 #define FEATURE_APP_LEN		64
 #define FEATURE_APP_ARGS_LEN	256
@@ -32,6 +34,21 @@
 #define FEATURE_MOH_LEN		80  /* same as MAX_MUSICCLASS from channel.h */
 
 #define PARK_APP_NAME "Park"
+
+#define FEATURE_RETURN_HANGUP           -1
+#define FEATURE_RETURN_SUCCESSBREAK     0
+#define FEATURE_RETURN_PBX_KEEPALIVE    AST_PBX_KEEPALIVE
+#define FEATURE_RETURN_NO_HANGUP_PEER   AST_PBX_NO_HANGUP_PEER
+#define FEATURE_RETURN_PASSDIGITS       21
+#define FEATURE_RETURN_STOREDIGITS      22
+#define FEATURE_RETURN_SUCCESS          23
+#define FEATURE_RETURN_KEEPTRYING       24
+#define FEATURE_RETURN_PARKFAILED       25
+
+#define FEATURE_SENSE_CHAN	(1 << 0)
+#define FEATURE_SENSE_PEER	(1 << 1)
+
+typedef int (*ast_feature_operation)(struct ast_channel *chan, struct ast_channel *peer, struct ast_bridge_config *config, char *code, int sense, void *data);
 
 /*! \brief main call feature structure */
 struct ast_call_feature {
@@ -82,6 +99,14 @@ char *ast_pickup_ext(void);
 
 /*! \brief Bridge a call, optionally allowing redirection */
 int ast_bridge_call(struct ast_channel *chan, struct ast_channel *peer,struct ast_bridge_config *config);
+
+/*! \brief detect a feature before bridging 
+    \param chan
+    \param ast_flags ptr
+    \param char ptr of input code
+    \retval ast_call_feature ptr to be set if found 
+    \return result, was feature found or not */
+int ast_feature_detect(struct ast_channel *chan, struct ast_flags *features, char *code, struct ast_call_feature *feature);
 
 /*! \brief Pickup a call */
 int ast_pickup_call(struct ast_channel *chan);

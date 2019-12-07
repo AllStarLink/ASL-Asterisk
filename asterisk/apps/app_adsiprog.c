@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 53780 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -195,7 +195,7 @@ static int process_token(void *out, char *src, int maxlen, int argtype)
 		if (!(argtype & ARG_NUMBER))
 			return -1;
 		/* Octal value */
-		if (sscanf(src, "%o", (int *)out) != 1)
+		if (sscanf(src, "%30o", (int *)out) != 1)
 			return -1;
 		if (argtype & ARG_STRING) {
 			/* Convert */
@@ -205,7 +205,7 @@ static int process_token(void *out, char *src, int maxlen, int argtype)
 		if (!(argtype & ARG_NUMBER))
 			return -1;
 		/* Hex value */
-		if (sscanf(src + 2, "%x", (unsigned int *)out) != 1)
+		if (sscanf(src + 2, "%30x", (unsigned int *)out) != 1)
 			return -1;
 		if (argtype & ARG_STRING) {
 			/* Convert */
@@ -215,7 +215,7 @@ static int process_token(void *out, char *src, int maxlen, int argtype)
 		if (!(argtype & ARG_NUMBER))
 			return -1;
 		/* Hex value */
-		if (sscanf(src, "%d", (int *)out) != 1)
+		if (sscanf(src, "%30d", (int *)out) != 1)
 			return -1;
 		if (argtype & ARG_STRING) {
 			/* Convert */
@@ -1364,7 +1364,9 @@ static struct adsi_script *compile_script(char *script)
 	/* Create "main" as first subroutine */
 	getsubbyname(scr, "main", NULL, 0);
 	while(!feof(f)) {
-		fgets(buf, sizeof(buf), f);
+		if (!fgets(buf, sizeof(buf), f)) {
+			continue;
+		}
 		if (!feof(f)) {
 			lineno++;
 			/* Trim off trailing return */

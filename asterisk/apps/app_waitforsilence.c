@@ -34,7 +34,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 41915 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -107,13 +107,13 @@ static int do_waiting(struct ast_channel *chan, int silencereqd, time_t waitstar
 		res = ast_waitfor(chan, silencereqd);
 
 		/* Must have gotten a hangup; let's exit */
-		if (res <= 0) {
+		if (res < 0) {
 			f = NULL;
 			break;
 		}
 		
 		/* We waited and got no frame; sounds like digital silence or a muted digital channel */
-		if (!res) {
+		if (res == 0) {
 			dspsilence = silencereqd;
 		} else {
 			/* Looks like we did get a frame, so let's check it out */
@@ -122,6 +122,8 @@ static int do_waiting(struct ast_channel *chan, int silencereqd, time_t waitstar
 				break;
 			if (f && f->frametype == AST_FRAME_VOICE) {
 				ast_dsp_silence(sildet, f, &dspsilence);
+			}
+			if (f) {
 				ast_frfree(f);
 			}
 		}
@@ -165,9 +167,9 @@ static int waitforsilence_exec(struct ast_channel *chan, void *data)
 
 	res = ast_answer(chan); /* Answer the channel */
 
-	if (!data || ( (sscanf(data, "%d|%d|%d", &silencereqd, &iterations, &timeout) != 3) &&
-		(sscanf(data, "%d|%d", &silencereqd, &iterations) != 2) &&
-		(sscanf(data, "%d", &silencereqd) != 1) ) ) {
+	if (!data || ( (sscanf(data, "%30d|%30d|%30d", &silencereqd, &iterations, &timeout) != 3) &&
+		(sscanf(data, "%30d|%30d", &silencereqd, &iterations) != 2) &&
+		(sscanf(data, "%30d", &silencereqd) != 1) ) ) {
 		ast_log(LOG_WARNING, "Using default value of 1000ms, 1 iteration, no timeout\n");
 	}
 

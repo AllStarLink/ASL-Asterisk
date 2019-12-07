@@ -25,7 +25,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233782 $")
 
 #include <unistd.h>
 #include <netinet/in.h>
@@ -139,7 +139,9 @@ static int gsm_seek(struct ast_filestream *fs, off_t sample_offset, int whence)
 		int i;
 		fseeko(fs->f, 0, SEEK_END);
 		for (i=0; i< (offset - max) / GSM_FRAME_SIZE; i++) {
-			fwrite(gsm_silence, 1, GSM_FRAME_SIZE, fs->f);
+			if (!fwrite(gsm_silence, 1, GSM_FRAME_SIZE, fs->f)) {
+				ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
+			}
 		}
 	}
 	return fseeko(fs->f, offset, SEEK_SET);
@@ -178,4 +180,7 @@ static int unload_module(void)
 	return ast_format_unregister(gsm_f.name);
 }	
 
-AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Raw GSM data");
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_FIRST, "Raw GSM data",
+	.load = load_module,
+	.unload = unload_module,
+);

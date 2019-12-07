@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 232007 $")
 
 #include <sys/types.h>
 #include <errno.h>
@@ -52,6 +52,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include "asterisk/pbx.h"
 #include "asterisk/linkedlists.h"
 #include "asterisk/module.h"
+#include "asterisk/astobj2.h"
 
 /*
  * The following variable controls the layout of localized sound files.
@@ -202,14 +203,20 @@ int ast_writestream(struct ast_filestream *fs, struct ast_frame *f)
 			struct ast_frame *trf;
 			fs->lastwriteformat = f->subclass;
 			/* Get the translated frame but don't consume the original in case they're using it on another stream */
-			trf = ast_translate(fs->trans, f, 0);
-			if (trf) {
-				res = fs->fmt->write(fs, trf);
+			if ((trf = ast_translate(fs->trans, f, 0))) {
+				struct ast_frame *cur;
+
+				/* the translator may have returned multiple frames, so process them */
+				for (cur = trf; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
+					if ((res = fs->fmt->write(fs, trf))) {
+						ast_log(LOG_WARNING, "Translated frame write failed\n");
+						break;
+					}
+				}
 				ast_frfree(trf);
-				if (res) 
-					ast_log(LOG_WARNING, "Translated frame write failed\n");
-			} else
+			} else {
 				res = 0;
+			}
 		}
 	}
 	return res;
@@ -265,11 +272,18 @@ static char *build_filename(const char *filename, const char *ext)
 	if (!strcmp(ext, "wav49"))
 		ext = "WAV";
 
-	if (filename[0] == '/')
-		asprintf(&fn, "%s.%s", filename, ext);
-	else
-		asprintf(&fn, "%s/sounds/%s.%s",
-			ast_config_AST_DATA_DIR, filename, ext);
+	if (filename[0] == '/') {
+		if (asprintf(&fn, "%s.%s", filename, ext) < 0) {
+			ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+			fn = NULL;
+		}
+	} else {
+		if (asprintf(&fn, "%s/sounds/%s.%s",
+			     ast_config_AST_DATA_DIR, filename, ext) < 0) {
+			ast_log(LOG_WARNING, "asprintf() failed: %s\n", strerror(errno));
+			fn = NULL;
+		}
+	}
 	return fn;
 }
 
@@ -289,12 +303,60 @@ static int exts_compare(const char *exts, const char *type)
 	return 0;
 }
 
+static void filestream_destructor(void *arg)
+{
+	char *cmd = NULL;
+	size_t size = 0;
+	struct ast_filestream *f = arg;
+
+	/* Stop a running stream if there is one */
+	if (f->owner) {
+		if (f->fmt->format < AST_FORMAT_MAX_AUDIO) {
+			f->owner->stream = NULL;
+			AST_SCHED_DEL(f->owner->sched, f->owner->streamid);
+#ifdef HAVE_DAHDI
+			ast_settimeout(f->owner, 0, NULL, NULL);
+#endif			
+		} else {
+			f->owner->vstream = NULL;
+			AST_SCHED_DEL(f->owner->sched, f->owner->vstreamid);
+		}
+	}
+	/* destroy the translator on exit */
+	if (f->trans)
+		ast_translator_free_path(f->trans);
+
+	if (f->realfilename && f->filename) {
+			size = strlen(f->filename) + strlen(f->realfilename) + 15;
+			cmd = alloca(size);
+			memset(cmd,0,size);
+			snprintf(cmd,size,"/bin/mv -f %s %s",f->filename,f->realfilename);
+			ast_safe_system(cmd);
+	}
+
+	if (f->filename)
+		free(f->filename);
+	if (f->realfilename)
+		free(f->realfilename);
+	if (f->fmt->close) {
+		void (*closefn)(struct ast_filestream *) = f->fmt->close;
+		closefn(f);
+	}
+	if (f->f)
+		fclose(f->f);
+	if (f->vfs)
+		ast_closestream(f->vfs);
+	if (f->orig_chan_name)
+		free((void *) f->orig_chan_name);
+	ast_module_unref(f->fmt->module);
+}
+
 static struct ast_filestream *get_filestream(struct ast_format *fmt, FILE *bfile)
 {
 	struct ast_filestream *s;
 
 	int l = sizeof(*s) + fmt->buf_size + fmt->desc_size;	/* total allocation size */
-	if ( (s = ast_calloc(1, l)) == NULL)
+	if ( (s = ao2_alloc(l, filestream_destructor)) == NULL)
 		return NULL;
 	s->fmt = fmt;
 	s->f = bfile;
@@ -317,8 +379,9 @@ static int fn_wrapper(struct ast_filestream *s, const char *comment, enum wrap_f
 {
 	struct ast_format *f = s->fmt;
 	int ret = -1;
+	int (*openfn)(struct ast_filestream *s);
 
-	if (mode == WRAP_OPEN && f->open && f->open(s))
+	if (mode == WRAP_OPEN && (openfn = f->open) && openfn(s))
                 ast_log(LOG_WARNING, "Unable to open format %s\n", f->name);
 	else if (mode == WRAP_REWRITE && f->rewrite && f->rewrite(s, comment))
                 ast_log(LOG_WARNING, "Unable to rewrite format %s\n", f->name);
@@ -413,9 +476,8 @@ static int ast_filehelper(const char *filename, const void *arg2, const char *fm
 					continue;
 				}
 				if (open_wrapper(s)) {
-					fclose(bfile);
 					free(fn);
-					free(s);
+					ast_closestream(s);
 					continue;	/* cannot run open on file */
 				}
 				/* ok this is good for OPEN */
@@ -644,13 +706,36 @@ struct ast_filestream *ast_openvstream(struct ast_channel *chan, const char *fil
 	return NULL;
 }
 
+static struct ast_frame *read_frame(struct ast_filestream *s, int *whennext)
+{
+	struct ast_frame *fr, *new_fr;
+
+	if (!s || !s->fmt) {
+		return NULL;
+	}
+
+	if (!(fr = s->fmt->read(s, whennext))) {
+		return NULL;
+	}
+
+	if (!(new_fr = ast_frisolate(fr))) {
+		ast_frfree(fr);
+		return NULL;
+	}
+
+	if (new_fr != fr) {
+		ast_frfree(fr);
+		fr = new_fr;
+	}
+
+	return fr;
+}
+
 struct ast_frame *ast_readframe(struct ast_filestream *s)
 {
-	struct ast_frame *f = NULL;
-	int whennext = 0;	
-	if (s && s->fmt)
-		f = s->fmt->read(s, &whennext);
-	return f;
+	int whennext = 0;
+
+	return read_frame(s, &whennext);
 }
 
 enum fsread_res {
@@ -667,17 +752,26 @@ static enum fsread_res ast_readaudio_callback(struct ast_filestream *s)
 
 	while (!whennext) {
 		struct ast_frame *fr;
-		
-		if (s->orig_chan_name && strcasecmp(s->owner->name, s->orig_chan_name))
-			goto return_failure;
-		
-		fr = s->fmt->read(s, &whennext);
-		if (!fr /* stream complete */ || ast_write(s->owner, fr) /* error writing */) {
-			if (fr)
-				ast_log(LOG_WARNING, "Failed to write frame\n");
+
+		if (s->orig_chan_name && strcasecmp(s->owner->name, s->orig_chan_name)) {
 			goto return_failure;
 		}
+
+		fr = read_frame(s, &whennext);
+
+		if (!fr /* stream complete */ || ast_write(s->owner, fr) /* error writing */) {
+			if (fr) {
+				ast_log(LOG_WARNING, "Failed to write frame\n");
+				ast_frfree(fr);
+			}
+			goto return_failure;
+		}
+
+		if (fr) {
+			ast_frfree(fr);
+		}
 	}
+
 	if (whennext != s->lasttimeout) {
 #ifdef HAVE_DAHDI
 		if (s->owner->timingfd > -1) {
@@ -728,12 +822,19 @@ static enum fsread_res ast_readvideo_callback(struct ast_filestream *s)
 	int whennext = 0;
 
 	while (!whennext) {
-		struct ast_frame *fr = s->fmt->read(s, &whennext);
-		if (!fr || ast_write(s->owner, fr)) { /* no stream or error, as above */
-			if (fr)
+		struct ast_frame *fr = read_frame(s, &whennext);
+
+		if (!fr /* stream complete */ || ast_write(s->owner, fr) /* error writing */) {
+			if (fr) {
 				ast_log(LOG_WARNING, "Failed to write frame\n");
+				ast_frfree(fr);
+			}
 			s->owner->vstreamid = -1;
 			return FSREAD_FAILURE;
+		}
+
+		if (fr) {
+			ast_frfree(fr);
 		}
 	}
 
@@ -806,46 +907,24 @@ int ast_stream_rewind(struct ast_filestream *fs, off_t ms)
 
 int ast_closestream(struct ast_filestream *f)
 {
-	char *cmd = NULL;
-	size_t size = 0;
+	/* This used to destroy the filestream, but it now just decrements a refcount.
+	 * We need to force the stream to quit queuing frames now, because we might
+	 * change the writeformat, which could result in a subsequent write error, if
+	 * the format is different. */
+
 	/* Stop a running stream if there is one */
 	if (f->owner) {
-		if (f->fmt->format < AST_FORMAT_MAX_AUDIO) {
+		if (f->fmt->format < AST_FORMAT_AUDIO_MASK) {
 			f->owner->stream = NULL;
 			AST_SCHED_DEL(f->owner->sched, f->owner->streamid);
-#ifdef HAVE_DAHDI
 			ast_settimeout(f->owner, 0, NULL, NULL);
-#endif			
 		} else {
 			f->owner->vstream = NULL;
 			AST_SCHED_DEL(f->owner->sched, f->owner->vstreamid);
 		}
 	}
-	/* destroy the translator on exit */
-	if (f->trans)
-		ast_translator_free_path(f->trans);
 
-	if (f->realfilename && f->filename) {
-			size = strlen(f->filename) + strlen(f->realfilename) + 15;
-			cmd = alloca(size);
-			memset(cmd,0,size);
-			snprintf(cmd,size,"/bin/mv -f %s %s",f->filename,f->realfilename);
-			ast_safe_system(cmd);
-	}
-
-	if (f->filename)
-		free(f->filename);
-	if (f->realfilename)
-		free(f->realfilename);
-	if (f->fmt->close)
-		f->fmt->close(f);
-	fclose(f->f);
-	if (f->vfs)
-		ast_closestream(f->vfs);
-	if (f->orig_chan_name)
-		free((void *) f->orig_chan_name);
-	ast_module_unref(f->fmt->module);
-	free(f);
+	ao2_ref(f, -1);
 	return 0;
 }
 
@@ -936,11 +1015,11 @@ struct ast_filestream *ast_readfile(const char *filename, const char *type, cons
 		if (!bfile || (fs = get_filestream(f, bfile)) == NULL ||
 		    open_wrapper(fs) ) {
 			ast_log(LOG_WARNING, "Unable to open %s\n", fn);
-			if (fs)
-				ast_free(fs);
+			if (fs) {
+				ast_closestream(fs);
+			}
 			fs = NULL;
-			if (bfile)
-				fclose(bfile);
+			bfile = NULL;
 			free(fn);
 			continue;
 		}
@@ -1053,9 +1132,10 @@ struct ast_filestream *ast_writefile(const char *filename, const char *type, con
 					unlink(fn);
 					unlink(orig_fn);
 				}
-				if (fs)
-					ast_free(fs);
-				fs = NULL;
+				if (fs) {
+					ast_closestream(fs);
+					fs = NULL;
+				}
 				continue;
 			}
 			fs->trans = NULL;
@@ -1175,7 +1255,14 @@ static int waitstream_core(struct ast_channel *c, const char *breakon,
 				} else {
 					res = fr->subclass;
 					if (strchr(forward,res)) {
+						int eoftest;
 						ast_stream_fastforward(c->stream, skip_ms);
+						eoftest = fgetc(c->stream->f);
+						if (feof(c->stream->f)) {
+							ast_stream_rewind(c->stream, skip_ms);
+						} else {
+							ungetc(eoftest, c->stream->f);
+						}
 					} else if (strchr(rewind,res)) {
 						ast_stream_rewind(c->stream, skip_ms);
 					} else if (strchr(breakon, res)) {
@@ -1199,8 +1286,6 @@ static int waitstream_core(struct ast_channel *c, const char *breakon,
 				case AST_CONTROL_SRCUPDATE:
 				case AST_CONTROL_HOLD:
 				case AST_CONTROL_UNHOLD:
-				case AST_CONTROL_RADIO_KEY:
-				case AST_CONTROL_RADIO_UNKEY:
 					/* Unimportant */
 					break;
 				default:
@@ -1209,8 +1294,11 @@ static int waitstream_core(struct ast_channel *c, const char *breakon,
 				break;
 			case AST_FRAME_VOICE:
 				/* Write audio if appropriate */
-				if (audiofd > -1)
-					write(audiofd, fr->data, fr->datalen);
+				if (audiofd > -1) {
+					if (write(audiofd, fr->data, fr->datalen) < 0) {
+						ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+					}
+				}
 			default:
 				/* Ignore all others */
 				break;
@@ -1269,6 +1357,79 @@ int ast_stream_and_wait(struct ast_channel *chan, const char *file,
         }
         return res;
 } 
+
+char *ast_format_str_reduce(char *fmts)
+{
+	struct ast_format *f;
+	struct ast_format *fmts_ptr[AST_MAX_FORMATS];
+	char *fmts_str[AST_MAX_FORMATS];
+	char *stringp, *type;
+	char *orig = fmts;
+	int i, j, x, first, found = 0;
+	int len = strlen(fmts) + 1;
+
+	if (AST_LIST_LOCK(&formats)) {
+		ast_log(LOG_WARNING, "Unable to lock format list\n");
+		return NULL;
+	}
+
+	stringp = ast_strdupa(fmts);
+
+	for (x = 0; (type = strsep(&stringp, "|")) && x < AST_MAX_FORMATS; x++) {
+		AST_LIST_TRAVERSE(&formats, f, list) {
+			if (exts_compare(f->exts, type)) {
+				found = 1;
+				break;
+			}
+		}
+
+		fmts_str[x] = type;
+		if (found) {
+			fmts_ptr[x] = f;
+		} else {
+			fmts_ptr[x] = NULL;
+		}
+	}
+	AST_LIST_UNLOCK(&formats);
+
+	first = 1;
+	for (i = 0; i < x; i++) {
+		/* ignore invalid entries */
+		if (!fmts_ptr[i]) {
+			ast_log(LOG_WARNING, "ignoring unknown format '%s'\n", fmts_str[i]);
+			continue;
+		}
+
+		/* special handling for the first entry */
+		if (first) {
+			fmts += snprintf(fmts, len, "%s", fmts_str[i]);
+			len -= (fmts - orig);
+			first = 0;
+			continue;
+		}
+
+		found = 0;
+		for (j = 0; j < i; j++) {
+			/* this is a duplicate */
+			if (fmts_ptr[j] == fmts_ptr[i]) {
+				found = 1;
+				break;
+			}
+		}
+
+		if (!found) {
+			fmts += snprintf(fmts, len, "|%s", fmts_str[i]);
+			len -= (fmts - orig);
+		}
+	}
+
+	if (first) {
+		ast_log(LOG_WARNING, "no known formats found in format list (%s)\n", orig);
+		return NULL;
+	}
+
+	return orig;
+}
 
 static int show_file_formats(int fd, int argc, char *argv[])
 {

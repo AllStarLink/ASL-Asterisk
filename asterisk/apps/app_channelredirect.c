@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 172030 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,6 +108,11 @@ static int asyncgoto_exec(struct ast_channel *chan, void *data)
 	if (option_debug > 1)
 		ast_log(LOG_DEBUG, "Attempting async goto (%s) to %s|%s|%d\n", args.channel, S_OR(context, chan2->context), S_OR(exten, chan2->exten), prio);
 
+	if (chan2->pbx) {
+		ast_channel_lock(chan2);
+		ast_set_flag(chan2, AST_FLAG_BRIDGE_HANGUP_DONT); /* don't let the after-bridge code run the h-exten */
+		ast_channel_unlock(chan2);
+	}
 	if (ast_async_goto_if_exists(chan2, S_OR(context, chan2->context), S_OR(exten, chan2->exten), prio))
 		ast_log(LOG_WARNING, "%s failed for %s\n", app, args.channel);
 	else

@@ -24,7 +24,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <sys/stat.h>
 #include <errno.h>
@@ -47,6 +47,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include "asterisk/module.h"
 #include "asterisk/options.h"
 #include "asterisk/utils.h"
+#include "asterisk/options.h"
 
 /*
  * pbx_spool is similar in spirit to qcall, but with substantially enhanced functionality...
@@ -189,7 +190,7 @@ static int apply_outgoing(struct outgoing *o, char *fn, FILE *f)
 				} else if (!strcasecmp(buf, "data")) {
 					ast_copy_string(o->data, c, sizeof(o->data));
 				} else if (!strcasecmp(buf, "maxretries")) {
-					if (sscanf(c, "%d", &o->maxretries) != 1) {
+					if (sscanf(c, "%30d", &o->maxretries) != 1) {
 						ast_log(LOG_WARNING, "Invalid max retries at line %d of %s\n", lineno, fn);
 						o->maxretries = 0;
 					}
@@ -200,24 +201,24 @@ static int apply_outgoing(struct outgoing *o, char *fn, FILE *f)
 				} else if (!strcasecmp(buf, "extension")) {
 					ast_copy_string(o->exten, c, sizeof(o->exten));
 				} else if (!strcasecmp(buf, "priority")) {
-					if ((sscanf(c, "%d", &o->priority) != 1) || (o->priority < 1)) {
+					if ((sscanf(c, "%30d", &o->priority) != 1) || (o->priority < 1)) {
 						ast_log(LOG_WARNING, "Invalid priority at line %d of %s\n", lineno, fn);
 						o->priority = 1;
 					}
 				} else if (!strcasecmp(buf, "retrytime")) {
-					if ((sscanf(c, "%d", &o->retrytime) != 1) || (o->retrytime < 1)) {
+					if ((sscanf(c, "%30d", &o->retrytime) != 1) || (o->retrytime < 1)) {
 						ast_log(LOG_WARNING, "Invalid retrytime at line %d of %s\n", lineno, fn);
 						o->retrytime = 300;
 					}
 				} else if (!strcasecmp(buf, "waittime")) {
-					if ((sscanf(c, "%d", &o->waittime) != 1) || (o->waittime < 1)) {
+					if ((sscanf(c, "%30d", &o->waittime) != 1) || (o->waittime < 1)) {
 						ast_log(LOG_WARNING, "Invalid waittime at line %d of %s\n", lineno, fn);
 						o->waittime = 45;
 					}
 				} else if (!strcasecmp(buf, "retry")) {
 					o->retries++;
 				} else if (!strcasecmp(buf, "startretry")) {
-					if (sscanf(c, "%ld", &o->callingpid) != 1) {
+					if (sscanf(c, "%30ld", &o->callingpid) != 1) {
 						ast_log(LOG_WARNING, "Unable to retrieve calling PID!\n");
 						o->callingpid = 0;
 					}
@@ -418,20 +419,20 @@ static int scan_service(char *fn, time_t now, time_t atime)
 					return now;
 				} else {
 					ast_log(LOG_EVENT, "Queued call to %s/%s expired without completion after %d attempt%s\n", o->tech, o->dest, o->retries - 1, ((o->retries - 1) != 1) ? "s" : "");
-					free_outgoing(o);
 					remove_from_queue(o, "Expired");
+					free_outgoing(o);
 					return 0;
 				}
 			} else {
-				free_outgoing(o);
 				ast_log(LOG_WARNING, "Invalid file contents in %s, deleting\n", fn);
 				fclose(f);
 				remove_from_queue(o, "Failed");
+				free_outgoing(o);
 			}
 		} else {
-			free_outgoing(o);
 			ast_log(LOG_WARNING, "Unable to open %s: %s, deleting\n", fn, strerror(errno));
 			remove_from_queue(o, "Failed");
+			free_outgoing(o);
 		}
 	} else
 		ast_log(LOG_WARNING, "Out of memory :(\n");
@@ -446,16 +447,22 @@ static void *scan_thread(void *unused)
 	char fn[256];
 	int res;
 	time_t last = 0, next = 0, now;
+	struct timespec ts = { .tv_sec = 1 };
+  
+	while (!ast_fully_booted) {
+		nanosleep(&ts, NULL);
+	}
+
 	for(;;) {
 		/* Wait a sec */
-		sleep(1);
+		nanosleep(&ts, NULL);
 		time(&now);
 		if (!stat(qdir, &st)) {
 			if ((st.st_mtime != last) || (next && (now > next))) {
 #if 0
 				printf("atime: %ld, mtime: %ld, ctime: %ld\n", st.st_atime, st.st_mtime, st.st_ctime);
 				printf("Ooh, something changed / timeout\n");
-#endif				
+#endif
 				next = 0;
 				last = st.st_mtime;
 				dir = opendir(qdir);
@@ -471,8 +478,12 @@ static void *scan_thread(void *unused)
 										if (!next || (res < next)) {
 											next = res;
 										}
-									} else if (res)
+									} else if (res) {
 										ast_log(LOG_WARNING, "Failed to scan service '%s'\n", fn);
+									} else if (!next) {
+										/* Expired entry: must recheck on the next go-around */
+										next = st.st_mtime;
+									}
 								} else {
 									/* Update "next" update if necessary */
 									if (!next || (st.st_mtime < next))

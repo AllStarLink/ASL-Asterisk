@@ -43,12 +43,6 @@ struct ast_threadstorage {
 	void (*key_init)(void);
 };
 
-#ifdef SOLARIS
-#define THREADSTORAGE_ONCE_INIT {PTHREAD_ONCE_INIT}
-#else
-#define THREADSTORAGE_ONCE_INIT PTHREAD_ONCE_INIT
-#endif
-
 #if defined(DEBUG_THREADLOCALS)
 void __ast_threadstorage_object_add(void *key, size_t len, const char *file, const char *function, unsigned int line);
 void __ast_threadstorage_object_remove(void *key);
@@ -71,34 +65,34 @@ void __ast_threadstorage_object_replace(void *key_old, void *key_new, size_t len
  * \endcode
  */
 #define AST_THREADSTORAGE(name, name_init) \
-	AST_THREADSTORAGE_CUSTOM(name, name_init, ast_free) 
+	AST_THREADSTORAGE_CUSTOM(name, name_init, ast_free_ptr) 
 
 #if !defined(DEBUG_THREADLOCALS)
 #define AST_THREADSTORAGE_CUSTOM(name, name_init, cleanup)  \
 static void name_init(void);                                \
 static struct ast_threadstorage name = {                    \
-	.once = THREADSTORAGE_ONCE_INIT,                    \
-	.key_init = name_init,                              \
+	.once = PTHREAD_ONCE_INIT,                              \
+	.key_init = name_init,                                  \
 };                                                          \
 static void name_init(void)                                 \
 {                                                           \
-	pthread_key_create(&(name).key, cleanup);           \
+	pthread_key_create(&(name).key, cleanup);               \
 }
 #else /* defined(DEBUG_THREADLOCALS) */
 #define AST_THREADSTORAGE_CUSTOM(name, name_init, cleanup)  \
 static void name_init(void);                                \
 static struct ast_threadstorage name = {                    \
-	.once = THREADSTORAGE_ONCE_INIT,                    \
-	.key_init = name_init,                              \
+	.once = PTHREAD_ONCE_INIT,                              \
+	.key_init = name_init,                                  \
 };                                                          \
-static void __cleanup_##name(void *data)		    \
-{							    \
-	__ast_threadstorage_object_remove(data);	    \
-	cleanup(data);					    \
-}							    \
+static void __cleanup_##name(void *data)                    \
+{                                                           \
+	__ast_threadstorage_object_remove(data);                \
+	cleanup(data);                                          \
+}                                                           \
 static void name_init(void)                                 \
 {                                                           \
-	pthread_key_create(&(name).key, __cleanup_##name);  \
+	pthread_key_create(&(name).key, __cleanup_##name);      \
 }
 #endif /* defined(DEBUG_THREADLOCALS) */
 
@@ -159,7 +153,7 @@ void *__ast_threadstorage_get(struct ast_threadstorage *ts, size_t init_size, co
 		if (!(buf = ast_calloc(1, init_size)))
 			return NULL;
 		pthread_setspecific(ts->key, buf);
-		__ast_threadstorage_object_add(&ts->key, init_size, file, function, line);
+		__ast_threadstorage_object_add(buf, init_size, file, function, line);
 	}
 
 	return buf;
@@ -364,7 +358,7 @@ enum {
  * writing over it.
  */
 int ast_dynamic_str_thread_build_va(struct ast_dynamic_str **buf, size_t max_len,
-	struct ast_threadstorage *ts, int append, const char *fmt, va_list ap);
+				    struct ast_threadstorage *ts, int append, const char *fmt, va_list ap)  __attribute__((format(printf, 5, 0)));
 
 /*!
  * \brief Set a thread locally stored dynamic string using variable arguments
@@ -406,7 +400,7 @@ int ast_dynamic_str_thread_build_va(struct ast_dynamic_str **buf, size_t max_len
  * \endcode
  */
 AST_INLINE_API(
-int __attribute__ ((format (printf, 4, 5))) ast_dynamic_str_thread_set(
+int __attribute__((format(printf, 4, 5))) ast_dynamic_str_thread_set(
 	struct ast_dynamic_str **buf, size_t max_len, 
 	struct ast_threadstorage *ts, const char *fmt, ...),
 {
@@ -429,7 +423,7 @@ int __attribute__ ((format (printf, 4, 5))) ast_dynamic_str_thread_set(
  * the string, this function appends to the current value.
  */
 AST_INLINE_API(
-int __attribute__ ((format (printf, 4, 5))) ast_dynamic_str_thread_append(
+int __attribute__((format(printf, 4, 5))) ast_dynamic_str_thread_append(
 	struct ast_dynamic_str **buf, size_t max_len, 
 	struct ast_threadstorage *ts, const char *fmt, ...),
 {
@@ -457,7 +451,7 @@ int __attribute__ ((format (printf, 4, 5))) ast_dynamic_str_thread_append(
  *         family of functions.
  */
 AST_INLINE_API(
-int __attribute__ ((format (printf, 3, 4))) ast_dynamic_str_set(
+int __attribute__((format(printf, 3, 4))) ast_dynamic_str_set(
 	struct ast_dynamic_str **buf, size_t max_len,
 	const char *fmt, ...),
 {
@@ -480,7 +474,7 @@ int __attribute__ ((format (printf, 3, 4))) ast_dynamic_str_set(
  * of setting a new value.
  */
 AST_INLINE_API(
-int __attribute__ ((format (printf, 3, 4))) ast_dynamic_str_append(
+int __attribute__((format(printf, 3, 4))) ast_dynamic_str_append(
 	struct ast_dynamic_str **buf, size_t max_len,
 	const char *fmt, ...),
 {

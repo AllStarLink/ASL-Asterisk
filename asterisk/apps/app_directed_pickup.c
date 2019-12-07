@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 67626 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 218223 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -83,7 +83,7 @@ static int pickup_do(struct ast_channel *chan, struct ast_channel *target)
 /* Helper function that determines whether a channel is capable of being picked up */
 static int can_pickup(struct ast_channel *chan)
 {
-	if (!chan->pbx && (chan->_state == AST_STATE_RINGING || chan->_state == AST_STATE_RING))
+	if (!chan->pbx && (chan->_state == AST_STATE_RINGING || chan->_state == AST_STATE_RING || chan->_state == AST_STATE_DOWN))
 		return 1;
 	else
 		return 0;
@@ -98,7 +98,7 @@ static int pickup_by_exten(struct ast_channel *chan, char *exten, char *context)
 	while ((target = ast_channel_walk_locked(target))) {
 		if ((!strcasecmp(target->macroexten, exten) || !strcasecmp(target->exten, exten)) &&
 		    !strcasecmp(target->dialcontext, context) &&
-		    can_pickup(target)) {
+		    (chan != target) && can_pickup(target)) {
 			res = pickup_do(chan, target);
 			ast_channel_unlock(target);
 			break;

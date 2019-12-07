@@ -27,24 +27,18 @@
 extern "C" {
 #endif
 
-/*! Device is valid but channel didn't know state */
-#define AST_DEVICE_UNKNOWN	0
-/*! Device is not used */
-#define AST_DEVICE_NOT_INUSE	1
-/*! Device is in use */
-#define AST_DEVICE_INUSE	2
-/*! Device is busy */
-#define AST_DEVICE_BUSY		3
-/*! Device is invalid */
-#define AST_DEVICE_INVALID	4
-/*! Device is unavailable */
-#define AST_DEVICE_UNAVAILABLE	5
-/*! Device is ringing */
-#define AST_DEVICE_RINGING	6
-/*! Device is ringing *and* in use */
-#define AST_DEVICE_RINGINUSE	7
-/*! Device is on hold */
-#define AST_DEVICE_ONHOLD	8
+enum ast_device_state {
+	AST_DEVICE_UNKNOWN,      /*!< Device is valid but channel didn't know state */
+	AST_DEVICE_NOT_INUSE,    /*!< Device is not used */
+	AST_DEVICE_INUSE,        /*!< Device is in use */
+	AST_DEVICE_BUSY,         /*!< Device is busy */
+	AST_DEVICE_INVALID,      /*!< Device is invalid */
+	AST_DEVICE_UNAVAILABLE,  /*!< Device is unavailable */
+	AST_DEVICE_RINGING,      /*!< Device is ringing */
+	AST_DEVICE_RINGINUSE,    /*!< Device is ringing *and* in use */
+	AST_DEVICE_ONHOLD,       /*!< Device is on hold */
+	AST_DEVICE_TOTAL,        /*!< Total num of device states, used for testing */
+};
 
 /*! \brief Devicestate watcher call back */
 typedef int (*ast_devstate_cb_type)(const char *dev, int state, void *data);
@@ -55,7 +49,7 @@ typedef int (*ast_devstate_prov_cb_type)(const char *data);
 /*! \brief Convert device state to text string for output 
  * \param devstate Current device state 
  */
-const char *devstate2str(int devstate);
+const char *devstate2str(enum ast_device_state devstate);
 
 /*! \brief Search the Channels by Name
  * \param device like a dialstring
@@ -83,7 +77,7 @@ int ast_device_state(const char *device);
  * Returns 0 on success, -1 on failure
  */
 int ast_device_state_changed(const char *fmt, ...)
-	__attribute__ ((format (printf, 1, 2)));
+	__attribute__((format(printf, 1, 2)));
 
 
 /*! \brief Tells Asterisk the State for Device is changed 
@@ -123,6 +117,55 @@ int ast_devstate_prov_add(const char *label, ast_devstate_prov_cb_type callback)
  * \return nothing
  */ 
 void ast_devstate_prov_del(const char *label);
+
+/*!
+ * \brief An object to hold state when calculating aggregate device state
+ */
+struct ast_devstate_aggregate;
+
+/*!
+ * \brief Initialize aggregate device state
+ *
+ * \param[in] agg the state object
+ *
+ * \return nothing
+ */
+void ast_devstate_aggregate_init(struct ast_devstate_aggregate *agg);
+
+/*!
+ * \brief Add a device state to the aggregate device state
+ *
+ * \param[in] agg the state object
+ * \param[in] state the state to add
+ *
+ * \return nothing
+ */
+void ast_devstate_aggregate_add(struct ast_devstate_aggregate *agg, enum ast_device_state state);
+
+/*!
+ * \brief Get the aggregate device state result
+ *
+ * \param[in] agg the state object
+ *
+ * \return the aggregate device state after adding some number of device states.
+ */
+enum ast_device_state ast_devstate_aggregate_result(struct ast_devstate_aggregate *agg);
+
+/*!
+ * \brief You shouldn't care about the contents of this struct
+ *
+ * This struct is only here so that it can be easily declared on the stack.
+ */
+struct ast_devstate_aggregate {
+	unsigned int all_unavail:1;
+	unsigned int all_busy:1;
+	unsigned int all_free:1;
+	unsigned int all_unknown:1;
+	unsigned int on_hold:1;
+	unsigned int busy:1;
+	unsigned int in_use:1;
+	unsigned int ring:1;
+};
 
 int ast_device_state_engine_init(void);
 

@@ -15,9 +15,8 @@ AC_CONFIG_SRCDIR([main/asterisk.c])
 AC_CONFIG_HEADER(include/asterisk/autoconfig.h)
 
 AC_COPYRIGHT("Asterisk")
-AC_REVISION($Revision: 147386 $)
+AC_REVISION($Revision: 225957 $)
 
-AC_GNU_SOURCE
 AC_USE_SYSTEM_EXTENSIONS	# note- does not work on FreeBSD
 
 case "${host_os}" in
@@ -25,6 +24,9 @@ case "${host_os}" in
      ac_default_prefix=/usr/local
      CPPFLAGS=-I/usr/local/include
      LDFLAGS=-L/usr/local/lib
+     ;;
+     darwin*)
+     AC_DEFINE([AST_POLL_COMPAT], 1, [Define to 1 if internal poll should be used.])
      ;;
      *)
      ac_default_prefix=/usr
@@ -39,8 +41,10 @@ case "${host_os}" in
      ;;
 esac
 
-if test ${localstatedir} = '${prefix}/var'; then
-     localstatedir=/var
+if test ${prefix} = ${ac_default_prefix} || test ${prefix} = 'NONE'; then
+     if test ${localstatedir} = '${prefix}/var'; then
+        localstatedir=/var
+     fi
 fi
 
 BUILD_PLATFORM=${build}
@@ -75,6 +79,9 @@ case "${host_os}" in
      ;;
      solaris*)
      OSARCH=SunOS
+     ;;
+     linux-gnueabi)
+     OSARCH=linux-gnu
      ;;
      *)
      OSARCH=${HOST_OS}
@@ -198,11 +205,14 @@ AST_EXT_LIB_SETUP([OSS], [Open Sound System], [oss])
 AST_EXT_LIB_SETUP([POPT], [popt], [popt])
 AST_EXT_LIB_SETUP([PGSQL], [PostgreSQL], [postgres])
 AST_EXT_LIB_SETUP([PRI], [ISDN PRI], [pri])
+AST_EXT_LIB_SETUP_DEPENDENT([PRI_VERSION], [ISDN PRI get_version], [PRI], [pri])
+AST_EXT_LIB_SETUP_DEPENDENT([PRI_INBANDDISCONNECT], [ISDN PRI set_inbanddisconnect], [PRI], [pri])
 AST_EXT_LIB_SETUP([PWLIB], [PWlib], [pwlib])
 AST_EXT_LIB_SETUP([OPENH323], [OpenH323], [h323])
 AST_EXT_LIB_SETUP([RADIUS], [Radius Client], [radius])
 AST_EXT_LIB_SETUP([SPEEX], [Speex], [speex])
 AST_EXT_LIB_SETUP([SPEEXDSP], [Speexdsp], [speexdsp])
+AST_EXT_LIB_SETUP_DEPENDENT([SPEEX_PREPROCESS], [speex_preprocess_ctl], [], [speex])
 AST_EXT_LIB_SETUP([SQLITE], [SQLite], [sqlite])
 AST_EXT_LIB_SETUP([SUPPSERV], [mISDN Supplemental Services], [suppserv])
 AST_EXT_LIB_SETUP([OPENSSL], [OpenSSL], [ssl])
@@ -223,7 +233,11 @@ AC_FUNC_ALLOCA
 AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_HEADER_SYS_WAIT
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h libintl.h limits.h locale.h malloc.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h strings.h sys/file.h sys/ioctl.h sys/param.h sys/socket.h sys/time.h syslog.h termios.h unistd.h utime.h arpa/nameser.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h libintl.h limits.h locale.h malloc.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h strings.h sys/file.h sys/ioctl.h sys/param.h sys/socket.h sys/time.h syslog.h termios.h unistd.h utime.h arpa/nameser.h sys/io.h])
+
+AC_CHECK_HEADER([sys/poll.h],
+	 [],
+     AC_DEFINE([AST_POLL_COMPAT], 1, [Define to 1 if internal poll should be used.]))
 
 AC_SYS_LARGEFILE
 
@@ -265,7 +279,16 @@ AC_FUNC_STRNLEN
 AC_FUNC_STRTOD
 AC_FUNC_UTIME_NULL
 AC_FUNC_VPRINTF
-AC_CHECK_FUNCS([asprintf atexit bzero dup2 endpwent floor ftruncate getcwd gethostbyname gethostname getloadavg gettimeofday inet_ntoa isascii localtime_r memchr memmove memset mkdir munmap pow putenv re_comp regcomp rint select setenv socket sqrt strcasecmp strcasestr strchr strcspn strdup strerror strlcat strlcpy strncasecmp strndup strnlen strrchr strsep strspn strstr strtol strtoq unsetenv utime vasprintf])
+AC_CHECK_FUNCS([asprintf atexit bzero dup2 endpwent floor ftruncate getcwd gethostbyname gethostname getloadavg gettimeofday inet_ntoa isascii localtime_r memchr memmove memset mkdir munmap pow putenv re_comp regcomp rint select setenv socket sqrt strcasecmp strcasestr strchr strcspn strdup strerror strlcat strlcpy strncasecmp strndup strnlen strrchr strsep strspn strstr strtol strtoq unsetenv utime vasprintf ioperm])
+
+AC_MSG_CHECKING(for timersub in time.h)
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#include <sys/time.h>],
+			[struct timeval *zombies; timersub(zombies, zombies, zombies);]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([HAVE_TIMERSUB], 1, [Define to 1 if your system has timersub in time.h]),
+	AC_MSG_RESULT(no)
+)
 
 # some systems already have gethostbyname_r so we don't need to build ours in main/utils.c
 AC_SEARCH_LIBS(gethostbyname_r, [socket nsl])
@@ -307,6 +330,27 @@ AC_LINK_IFELSE(
         AC_DEFINE([HAVE_PTHREAD_RWLOCK_PREFER_WRITER_NP], 1, [Define to 1 if your system has PTHREAD_RWLOCK_PREFER_WRITER_NP.]),
         AC_MSG_RESULT(no)
 )
+
+AC_MSG_CHECKING(for pthread_rwlock_timedwrlock() in pthread.h)
+saved_LDFLAGS="${LDFLAGS}"
+LDFLAGS="${LDFLAGS} -lpthread"
+AC_LINK_IFELSE(
+  [AC_LANG_PROGRAM(
+    [#include <pthread.h>
+     #include <time.h>],
+    [pthread_rwlock_t foo; struct timespec bar; pthread_rwlock_timedwrlock(&foo, &bar)])
+  ],[
+    AC_MSG_RESULT(yes)
+    ac_cv_pthread_rwlock_timedwrlock="yes"
+  ],[
+    AC_MSG_RESULT(no)
+    ac_cv_pthread_rwlock_timedwrlock="no"
+  ]
+)
+LDFLAGS="${saved_LDFLAGS}"
+if test "${ac_cv_pthread_rwlock_timedwrlock}" = "yes"; then
+  AC_DEFINE([HAVE_PTHREAD_RWLOCK_TIMEDWRLOCK], 1, [Define if your system has pthread_rwlock_timedwrlock()])
+fi
 
 AC_MSG_CHECKING(for compiler atomic operations)
 AC_LINK_IFELSE(
@@ -351,18 +395,28 @@ if $(${CC} -Wdeclaration-after-statement -S -o /dev/null -xc /dev/null > /dev/nu
    AC_MSG_RESULT(yes)
    AST_DECLARATION_AFTER_STATEMENT=-Wdeclaration-after-statement
 else
-	AC_MSG_RESULT(no)
-	AST_DECLARATION_AFTER_STATEMENT=
+   AC_MSG_RESULT(no)
+   AST_DECLARATION_AFTER_STATEMENT=
 fi
 AC_SUBST(AST_DECLARATION_AFTER_STATEMENT)
+
+AC_MSG_CHECKING(for _FORTIFY_SOURCE support)
+if $(${CC} -D_FORTIFY_SOURCE=2 -S -o /dev/null -xc /dev/null > /dev/null 2>&1); then
+   AC_MSG_RESULT(yes)
+   AST_FORTIFY_SOURCE=-D_FORTIFY_SOURCE=2
+else
+   AC_MSG_RESULT(no)
+   AST_FORTIFY_SOURCE=
+fi
+AC_SUBST(AST_FORTIFY_SOURCE)
 
 AC_MSG_CHECKING(for -fno-strict-overflow)
 if $(${CC} -O2 -fno-strict-overflow -S -o /dev/null -xc /dev/null > /dev/null 2>&1); then
    AC_MSG_RESULT(yes)
    AST_NO_STRICT_OVERFLOW=-fno-strict-overflow
 else
-	AC_MSG_RESULT(no)
-	AST_NO_STRICT_OVERFLOW=
+   AC_MSG_RESULT(no)
+   AST_NO_STRICT_OVERFLOW=
 fi
 AC_SUBST(AST_NO_STRICT_OVERFLOW)
 
@@ -405,12 +459,21 @@ AC_LINK_IFELSE(
 	AC_MSG_RESULT(no)
 )
 
-AC_MSG_CHECKING(for RTLD_NOLOAD)
+AC_MSG_CHECKING(for GLOB_NOMAGIC)
 AC_LINK_IFELSE(
-	AC_LANG_PROGRAM([#include <dlfcn.h>],
-			[int foo = RTLD_NOLOAD;]),
+	AC_LANG_PROGRAM([#include <glob.h>],
+			[int foo = GLOB_NOMAGIC;]),
 	AC_MSG_RESULT(yes)
-	AC_DEFINE([HAVE_RTLD_NOLOAD], 1, [Define to 1 if your system has a dynamic linker that supports RTLD_NOLOAD.]),
+	AC_DEFINE([HAVE_GLOB_NOMAGIC], 1, [Define to 1 if your glob function supports GLOB_NOMAGIC option.]),
+	AC_MSG_RESULT(no)
+)
+
+AC_MSG_CHECKING(for GLOB_BRACE)
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#include <glob.h>],
+			[int foo = GLOB_BRACE;]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([HAVE_GLOB_BRACE], 1, [Define to 1 if your glob function supports GLOB_BRACE option.]),
 	AC_MSG_RESULT(no)
 )
 
@@ -434,7 +497,7 @@ AST_EXT_LIB_CHECK([ALSA], [asound], [snd_spcm_init], [alsa/asoundlib.h], [-lm -l
 
 AST_EXT_LIB_CHECK([CURSES], [curses], [initscr], [curses.h])
 
-if test "x${host_os}" = "xlinux-gnu" ; then
+if test "x${OSARCH}" = "xlinux-gnu" ; then
   AST_EXT_LIB_CHECK([CAP], [cap], [cap_from_text], [sys/capability.h])
 fi
 
@@ -1254,17 +1317,17 @@ if test "${USE_PWLIB}" != "no"; then
 		PWLIBDIR="${PWLIB_DIR}"
 	fi
 	AST_CHECK_PWLIB()
-	AST_CHECK_PWLIB_VERSION([PWLib], [PWLIB], [ptbuildopts.h], [1], [9], [2])
+	AST_CHECK_PWLIB_VERSION([PWLib], [PWLIB], [ptbuildopts.h], [1], [9], [2], [P[[WT]]LIB_VERSION])
 		
 	if test "${HAS_PWLIB:-unset}" != "unset"; then
-		AST_CHECK_OPENH323_PLATFORM()
+		AST_CHECK_PWLIB_PLATFORM()
 
 		PLATFORM_PWLIB="pt_${PWLIB_PLATFORM}_r"
 
 		AST_CHECK_PWLIB_BUILD([PWLib], [PWLIB],
 			[Define if your system has the PWLib libraries.],
 			[#include "ptlib.h"],
-			[BOOL q = PTime::IsDaylightSavings();])
+			[int q = (int) PTime::IsDaylightSavings();])
 	fi
 fi
 
@@ -1319,7 +1382,7 @@ AC_SUBST(PBX_SPEEX_PREPROCESS)
 
 AST_EXT_LIB_CHECK([SQLITE], [sqlite], [sqlite_exec], [sqlite.h])
 
-AST_EXT_LIB_CHECK([OPENSSL], [ssl], [SSL_connect], [openssl/ssl.h], [-lcrypto])
+AST_EXT_LIB_CHECK([OPENSSL], [ssl], [ssl2_connect], [openssl/ssl.h], [-lcrypto])
 if test "$PBX_OPENSSL" = "1";
 then
     AST_EXT_LIB_CHECK([OSPTK], [osptk], [OSPPCryptoDecrypt], [osp/osp.h], [-lcrypto -lssl])
@@ -1464,8 +1527,6 @@ if test "${USE_ZAPTEL}" != "no" && test "x${PBX_DAHDI}" != "x1"; then
 	CPPFLAGS="${saved_cppflags}"
 	if test "${ac_cv_member_ZT_PARAMS_chan_alarms}" = "yes"; then
 	     AC_DEFINE([HAVE_ZAPTEL_CHANALARMS], 1, [Define if your Zaptel drivers have chan_alarms.])
-	else
-	     AC_DEFINE([HAVE_ZAPTEL_CHANALARMS], 0, [Define if your Zaptel drivers have chan_alarms.])
 	fi
    elif test -n "${ZAPTEL_MANDATORY}"; 
    then
@@ -1592,37 +1653,7 @@ AC_SUBST(PBX_GTK2)
 AC_SUBST(GTK2_INCLUDE)
 AC_SUBST(GTK2_LIB)
 
-if test "${USE_CURL}" != "no"; then
-   AC_PATH_TOOL([CURL_CONFIG], [curl-config], No)
-   if test ! x"${CURL_CONFIG}" = xNo; then
-   # check for version
-      if test $(printf "%d" 0x$(${CURL_CONFIG} --vernum)) -ge $(printf "%d" 0x070907); then
-         CURL_INCLUDE=$(${CURL_CONFIG} --cflags)
-         CURL_LIB=$(${CURL_CONFIG} --libs)
-
-         AC_MSG_CHECKING(for curl_version() in curl/curl.h)
-         saved_cppflags="${CPPFLAGS}"
-         CPPFLAGS="${CPPFLAGS} ${CURL_INCLUDE}"
-         AC_COMPILE_IFELSE(
-            [AC_LANG_PROGRAM(
-                [#include <curl/curl.h>],
-                    [curl_version();])
-            ],[
-                AC_MSG_RESULT(yes)
-                ac_cv_curl_h="yes"
-            ],[
-                AC_MSG_RESULT(no)
-                ac_cv_curl_h="no"
-            ]
-	 )
-	 CPPFLAGS="${saved_cppflags}"
-         if test "${ac_cv_curl_h}" = "yes"; then
-             PBX_CURL=1
-             AC_DEFINE([HAVE_CURL], 1, [Define if your system has the curl libraries.])
-         fi
-      fi
-   fi
-fi
+AST_LIBCURL_CHECK_CONFIG([], [7.10.1])
 
 AC_CONFIG_FILES([build_tools/menuselect-deps makeopts channels/h323/Makefile])
 AC_OUTPUT

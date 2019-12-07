@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Rev: 69392 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Rev: 186229 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -219,12 +219,18 @@ static int radius_log(struct ast_cdr *cdr)
 	if (build_radius_record(&send, cdr)) {
 		if (option_debug)
 			ast_log(LOG_DEBUG, "Unable to create RADIUS record. CDR not recorded!\n");
-		return result;
+		goto return_cleanup;
 	}
-	
+
 	result = rc_acct(rh, 0, send);
-	if (result != OK_RC)
+	if (result != OK_RC) {
 		ast_log(LOG_ERROR, "Failed to record Radius CDR record!\n");
+	}
+
+return_cleanup:
+	if (send) {
+		rc_avpair_free(send);
+	}
 
 	return result;
 }

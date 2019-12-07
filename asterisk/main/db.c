@@ -29,7 +29,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 85574 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 182449 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -187,10 +187,8 @@ int ast_db_get(const char *family, const char *keys, char *value, int valuelen)
 	memset(value, 0, valuelen);
 	key.data = fullkey;
 	key.size = fullkeylen + 1;
-	
+
 	res = astdb->get(astdb, &key, &data, 0);
-	
-	ast_mutex_unlock(&dblock);
 
 	/* Be sure to NULL terminate our data either way */
 	if (res) {
@@ -208,6 +206,11 @@ int ast_db_get(const char *family, const char *keys, char *value, int valuelen)
 			ast_log(LOG_NOTICE, "Strange, empty value for /%s/%s\n", family, keys);
 		}
 	}
+
+	/* Data is not fully isolated for concurrency, so the lock must be extended
+	 * to after the copy to the output buffer. */
+	ast_mutex_unlock(&dblock);
+
 	return res;
 }
 
@@ -407,7 +410,7 @@ struct ast_db_entry *ast_db_gettree(const char *family, const char *keytree)
 	if (!ast_strlen_zero(family)) {
 		if (!ast_strlen_zero(keytree)) {
 			/* Family and key tree */
-			snprintf(prefix, sizeof(prefix), "/%s/%s", family, prefix);
+			snprintf(prefix, sizeof(prefix), "/%s/%s", family, keytree);
 		} else {
 			/* Family only */
 			snprintf(prefix, sizeof(prefix), "/%s", family);

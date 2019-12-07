@@ -23,8 +23,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * Version Info: $Id: chan_h323.h 44684 2006-10-07 14:39:34Z pcadach $
+ * Version Info: $Id: chan_h323.h 189991 2009-04-22 19:20:53Z jpeeler $
  */
+
+#ifndef CHAN_H323_H
+#define CHAN_H323_H
 
 #include <arpa/inet.h>
 
@@ -61,6 +64,7 @@ typedef struct call_options {
 	int				bridge;
 	int				nat;
 	int				tunnelOptions;
+	int				autoframing; /*!< turn on to override local settings with remote framing length */
 	struct ast_codec_pref	prefs;
 } call_options_t;
 
@@ -194,10 +198,6 @@ extern int h323debug;
 #define H323_DTMF_RFC2833	(1 << 0)
 #define H323_DTMF_INBAND	(1 << 1)
 
-#ifndef BOOL
-#define BOOL int
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -229,6 +229,7 @@ extern "C" {
 	int h323_set_gk(int, char *, char *);
 	void h323_set_id(char *);
 	void h323_show_tokens(void);
+	void h323_show_version(void);
 
 	/* H323 listener related funcions */
 	int h323_start_listener(int, struct sockaddr_in);
@@ -251,4 +252,6 @@ extern "C" {
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

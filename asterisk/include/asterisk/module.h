@@ -180,6 +180,14 @@ enum ast_module_flags {
 	AST_MODFLAG_DEFAULT = 0,
 	AST_MODFLAG_GLOBAL_SYMBOLS = (1 << 0),
 	AST_MODFLAG_BUILDSUM = (1 << 1),
+	/*!
+	 * \brief Load this module in the first pass on auto loading
+	 *
+	 * When module auto loading is used, modules with this flag set will
+	 * be loaded after preloaded modules, but before all modules being
+	 * automatically loaded without this flag set on them.
+	 */
+	AST_MODFLAG_LOAD_FIRST = (1 << 2),
 };
 
 struct ast_module_info {
@@ -237,11 +245,11 @@ void ast_module_unref(struct ast_module *);
 		flags_to_set | AST_MODFLAG_BUILDSUM,	\
 		AST_BUILDOPT_SUM,			\
 	};						\
-	static void  __attribute__ ((constructor)) __reg_module(void) \
+	static void  __attribute__((constructor)) __reg_module(void) \
 	{ \
 		ast_module_register(&__mod_info); \
 	} \
-	static void  __attribute__ ((destructor)) __unreg_module(void) \
+	static void  __attribute__((destructor)) __unreg_module(void) \
 	{ \
 		ast_module_unregister(&__mod_info); \
 	} \
@@ -268,11 +276,11 @@ const static __attribute__((unused)) struct ast_module_info *ast_module_info;
 		.buildopt_sum = AST_BUILDOPT_SUM,		\
 		fields						\
 	};							\
-	static void  __attribute__ ((constructor)) __reg_module(void) \
+	static void  __attribute__((constructor)) __reg_module(void) \
 	{ \
 		ast_module_register(&__mod_info); \
 	} \
-	static void  __attribute__ ((destructor)) __unreg_module(void) \
+	static void  __attribute__((destructor)) __unreg_module(void) \
 	{ \
 		ast_module_unregister(&__mod_info); \
 	} \

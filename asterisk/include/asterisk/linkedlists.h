@@ -242,11 +242,11 @@ struct name {								\
 	struct type *last;						\
 	ast_mutex_t lock;						\
 } name;									\
-static void  __attribute__ ((constructor)) init_##name(void)		\
+static void  __attribute__((constructor)) init_##name(void)		\
 {									\
         AST_LIST_HEAD_INIT(&name);					\
 }									\
-static void  __attribute__ ((destructor)) fini_##name(void)		\
+static void  __attribute__((destructor)) fini_##name(void)		\
 {									\
         AST_LIST_HEAD_DESTROY(&name);					\
 }									\
@@ -277,18 +277,18 @@ struct name {								\
   This would define \c struct \c entry_list, intended to hold a list of
   type \c struct \c entry.
 */
-#ifndef AST_RWLOCK_INIT_VALUE
+#ifndef HAVE_PTHREAD_RWLOCK_INITIALIZER
 #define AST_RWLIST_HEAD_STATIC(name, type)                              \
 struct name {                                                           \
         struct type *first;                                             \
         struct type *last;                                              \
         ast_rwlock_t lock;                                              \
 } name;                                                                 \
-static void  __attribute__ ((constructor)) init_##name(void)            \
+static void  __attribute__((constructor)) init_##name(void)            \
 {                                                                       \
         AST_RWLIST_HEAD_INIT(&name);                                    \
 }                                                                       \
-static void  __attribute__ ((destructor)) fini_##name(void)             \
+static void  __attribute__((destructor)) fini_##name(void)             \
 {                                                                       \
         AST_RWLIST_HEAD_DESTROY(&name);                                 \
 }                                                                       \
@@ -408,7 +408,7 @@ struct {								\
   \brief Checks whether the specified list contains any entries.
   \param head This is a pointer to the list head structure
 
-  Returns non-zero if the list has entries, zero if not.
+  Returns zero if the list has entries, non-zero if not.
  */
 #define	AST_LIST_EMPTY(head)	(AST_LIST_FIRST(head) == NULL)
 
@@ -685,24 +685,51 @@ struct {								\
   \param head This is a pointer to the list head structure
   \param list This is a pointer to the list to be appended.
   \param field This is the name of the field (declared using AST_LIST_ENTRY())
-  used to link entries of this list together.
+  used to link entries of the list together.
 
   Note: The source list (the \a list parameter) will be empty after
   calling this macro (the list entries are \b moved to the target list).
  */
 #define AST_LIST_APPEND_LIST(head, list, field) do {			\
-      if (!(head)->first) {						\
+	if (!(list)->first) {						\
+		break;							\
+	}								\
+	if (!(head)->first) {						\
 		(head)->first = (list)->first;				\
 		(head)->last = (list)->last;				\
-      } else {								\
+	} else {							\
 		(head)->last->field.next = (list)->first;		\
 		(head)->last = (list)->last;				\
-      }									\
-      (list)->first = NULL;						\
-      (list)->last = NULL;						\
+	}								\
+	(list)->first = NULL;						\
+	(list)->last = NULL;						\
 } while (0)
 
 #define AST_RWLIST_APPEND_LIST AST_LIST_APPEND_LIST
+
+/*!
+  \brief Inserts a whole list after a specific entry in a list
+  \param head This is a pointer to the list head structure
+  \param list This is a pointer to the list to be inserted.
+  \param elm This is a pointer to the entry after which the new list should
+  be inserted.
+  \param field This is the name of the field (declared using AST_LIST_ENTRY())
+  used to link entries of the lists together.
+
+  Note: The source list (the \a list parameter) will be empty after
+  calling this macro (the list entries are \b moved to the target list).
+ */
+#define AST_LIST_INSERT_LIST_AFTER(head, list, elm, field) do {		\
+	(list)->last->field.next = (elm)->field.next;			\
+	(elm)->field.next = (list)->first;				\
+	if ((head)->last == elm) {					\
+		(head)->last = (list)->last;				\
+	}								\
+	(list)->first = NULL;						\
+	(list)->last = NULL;						\
+} while(0)
+
+#define AST_RWLIST_INSERT_LIST_AFTER AST_LIST_INSERT_LIST_AFTER
 
 /*!
   \brief Removes and returns the head entry from a list.

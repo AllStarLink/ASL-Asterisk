@@ -37,6 +37,7 @@
 #define AST_CDR_FLAG_ANSLOCKED      (1 << 8)
 #define AST_CDR_FLAG_DONT_TOUCH     (1 << 9)
 #define AST_CDR_FLAG_DIALED         (1 << 10)
+#define AST_CDR_FLAG_ORIGINATED		(1 << 11)
 
 /*! Disposition */
 #define AST_CDR_NULL                0
@@ -111,6 +112,11 @@ int ast_cdr_serialize_variables(struct ast_cdr *cdr, char *buf, size_t size, cha
 void ast_cdr_free_vars(struct ast_cdr *cdr, int recur);
 int ast_cdr_copy_vars(struct ast_cdr *to_cdr, struct ast_cdr *from_cdr);
 
+/*!\brief CDR backend callback
+ * \warning CDR backends should NOT attempt to access the channel associated
+ * with a CDR record.  This channel is not guaranteed to exist when the CDR
+ * backend is invoked.
+ */
 typedef int (*ast_cdrbe)(struct ast_cdr *cdr);
 
 /*! \brief Allocate a CDR record 
@@ -265,6 +271,24 @@ void ast_cdr_setdestchan(struct ast_cdr *cdr, const char *chan);
  * Returns nothing
  */
 void ast_cdr_setapp(struct ast_cdr *cdr, char *app, char *data);
+
+/*! Set the answer time for a call */
+/*!
+ * \param cdr the cdr you wish to associate with the call
+ * \param t the answer time
+ * Starts all CDR stuff necessary for doing CDR when answering a call
+ * NULL argument is just fine.
+ */
+void ast_cdr_setanswer(struct ast_cdr *cdr, struct timeval t);
+
+/*! Set the disposition for a call */
+/*!
+ * \param cdr the cdr you wish to associate with the call
+ * \param disposition the new disposition
+ * Set the disposition on a call.
+ * NULL argument is just fine.
+ */
+void ast_cdr_setdisposition(struct ast_cdr *cdr, long int disposition);
 
 /*! Convert a string to a detail record AMA flag */
 /*!

@@ -22,7 +22,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 232268 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -148,6 +148,10 @@ static int group_function_write(struct ast_channel *chan, char *cmd,
 				char *data, const char *value)
 {
 	char grpcat[256];
+
+	if (!value) {
+		return -1;
+	}
 
 	if (!ast_strlen_zero(data)) {
 		snprintf(grpcat, sizeof(grpcat), "%s@%s", value, data);

@@ -156,6 +156,13 @@ monitor-type = MixMonitor
 ; Use these sound files in making position/holdtime announcements.  The
 ; defaults are as listed below -- change only if you need to.
 ;
+; Keep in mind that you may also prevent a sound from being played if you
+; explicitly set a sound to be an empty string. For example, if you want to
+; prevent the queue from playing queue-thankyou, you may set the sound using
+; the following line:
+;
+; queue-thankyou=
+;
 			;	("You are now first in line.")
 ;queue-youarenext = queue-youarenext		
 			;	("There are")
@@ -207,13 +214,13 @@ monitor-type = MixMonitor
 ; ----------------------- TYPE MIXMONITOR OPTIONS -----------------------------
 ;
 ;
-; You can specify the options supplied to MixMonitor by calling
+; You can specify the options supplied to MixMonitor by calling (from the dialplan)
 ;   Set(MONITOR_OPTIONS=av(<x>)V(<x>)W(<x>))
 ; The 'b' option for MixMonitor (only save audio to the file while bridged) is 
 ; implied.
 ;
 ; You can specify a post recording command to be executed after the end of
-; recording by calling
+; recording by calling (from the dialplan)
 ;   Set(MONITOR_EXEC=mv /var/spool/asterisk/monitor/^{MONITOR_FILENAME} /tmp/^{MONITOR_FILENAME})
 ;
 ; The command specified within the contents of MONITOR_EXEC will be executed when
@@ -284,7 +291,10 @@ monitor-type = MixMonitor
 ; entries with higher penalties are considered last.  An optional member
 ; name may also be specified after a second comma, which is used in log
 ; messages as a "friendly name".  Multiple interfaces may share a single
-; member name.
+; member name. An optional state interface may be specified after a third
+; comma. This interface will be the one for which app_queue receives device
+; state notifications, even though the first interface specified is the one
+; that is actually called.
 ;
 ; It is important to ensure that channel drivers used for members are loaded
 ; before app_queue.so itself or they may be marked invalid until reload. This
@@ -298,6 +308,7 @@ monitor-type = MixMonitor
 ;member => Zap/3,10,Bob Johnson
 ;member => Agent/1001
 ;member => Agent/1002
+;member => Local/1000@default,0,John Smith,SIP/1000
 
 ;
 ; Note that using agent groups is probably not what you want.  Strategies do

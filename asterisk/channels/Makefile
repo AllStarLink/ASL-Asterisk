@@ -66,7 +66,7 @@ all: _all
 include $(ASTTOPDIR)/Makefile.moddir_rules
 
 clean::
-	rm -f busy.h ringtone.h gentone
+	rm -f gentone
 	$(MAKE) -C misdn clean
 
 ifneq ($(wildcard h323/Makefile.ast),)
@@ -94,47 +94,38 @@ gentone: gentone.c
 	$(CMD_PREFIX) $(HOST_CC) $(STATIC_BUILD) -o $@ $(HOST_CFLAGS) $(HOST_LDFLAGS) $^ $(LIBS)
 gentone: LIBS+=-lm
 
-busy.h: gentone
-	./gentone busy 480 620
+busy_tone.h:
+	./gentone busy_tone 480 620
 
-ringtone.h: gentone
-	./gentone ringtone 440 480
+ring_tone.h:
+	./gentone ring_tone 440 480
 
-chan_oss.o: busy.h ringtone.h
+#chan_usbradio.o: busy_tone.h ring_tone.h ./xpmr/xpmr.c ./xpmr/xpmr.h ./xpmr/xpmr_coef.h
+#chan_usbradio.so: LIBS+=-lusb -lasound
+
+chan_urd.o: busy_tone.h ring_tone.h ./xpmr/xpmr.c ./xpmr/xpmr.h ./xpmr/xpmr_coef.h
+chan_urd.so: LIBS+=-lusb -lasound
 
 $(if $(filter chan_iax2,$(EMBEDDED_MODS)),modules.link,chan_iax2.so): iax2-parser.o iax2-provision.o
 
-chan_alsa.o: busy.h ringtone.h
+$(if $(filter chan_h323,$(EMBEDDED_MODS)),modules.link,chan_h323.so): h323/libchanh323.a
 
 ifeq ($(OSARCH),linux-gnu)
 chan_h323.so: chan_h323.o h323/libchanh323.a h323/Makefile.ast
 	$(ECHO_PREFIX) echo "   [LD] $^ -> $@"
-	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(ASTLDFLAGS) $(SOLINK) $(H323LDFLAGS) -o $@ $< h323/libchanh323.a $(H323LDLIBS)
+	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(_ASTLDFLAGS) $(SOLINK) $(H323LDFLAGS) -o $@ $< h323/libchanh323.a $(H323LDLIBS) $(ASTLDFLAGS)
 else
 chan_h323.so: chan_h323.o h323/libchanh323.a
 	$(ECHO_PREFIX) echo "   [LD] $^ -> $@"
-	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(ASTLDFLAGS) $(SOLINK) -o $@ $< h323/libchanh323.a $(CHANH323LIB) -L$(PWLIBDIR)/lib $(PTLIB) -L$(OPENH323DIR)/lib $(H323LIB) -L/usr/lib -lcrypto -lssl -lexpat
+	$(CMD_PREFIX) $(CXX) $(PTHREAD_CFLAGS) $(_ASTLDFLAGS) $(SOLINK) -o $@ $< h323/libchanh323.a $(CHANH323LIB) -L$(PWLIBDIR)/lib $(PTLIB) -L$(OPENH323DIR)/lib $(H323LIB) -L/usr/lib -lcrypto -lssl -lexpat $(ASTLDFLAGS)
 endif
 
-chan_misdn.o: ASTCFLAGS+=-Imisdn
+chan_misdn.o: _ASTCFLAGS+=-Imisdn
 
-misdn_config.o: ASTCFLAGS+=-Imisdn
+misdn_config.o: _ASTCFLAGS+=-Imisdn
 
-misdn/isdn_lib.o: ASTCFLAGS+=-Wno-strict-aliasing
+misdn/isdn_lib.o: _ASTCFLAGS+=-Wno-strict-aliasing
 
-misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o: ASTCFLAGS+=$(MENUSELECT_OPTS_chan_misdn:%=-D%) $(foreach dep,$(MENUSELECT_DEPENDS_chan_misdn),$(value $(dep)_INCLUDE))
+misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o: _ASTCFLAGS+=$(MENUSELECT_OPTS_chan_misdn:%=-D%) $(foreach dep,$(MENUSELECT_DEPENDS_chan_misdn),$(value $(dep)_INCLUDE))
 
 $(if $(filter chan_misdn,$(EMBEDDED_MODS)),modules.link,chan_misdn.so): chan_misdn.o misdn_config.o misdn/isdn_lib.o misdn/isdn_msg_parser.o
-
-chan_usbradio.o: chan_usbradio.c xpmr/xpmr.c xpmr/xpmr.h xpmr/xpmr_coef.h xpmr/sinetabx.h busy.h ringtone.h
-
-chan_usbradio.so: LIBS+=-lusb -lasound
-
-chan_simpleusb.o: chan_simpleusb.c busy.h ringtone.h
-
-chan_simpleusb.so: LIBS+=-lusb -lasound
-
-chan_beagle.so: LIBS+=-lasound
-
-chan_pi.so: LIBS+=-lasound
-

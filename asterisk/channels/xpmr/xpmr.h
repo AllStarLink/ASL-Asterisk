@@ -1,30 +1,29 @@
 /*
  * xpmr.h - for Xelatec Private Mobile Radio Processes
- * 
- * All Rights Reserved. Copyright (C)2007, Xelatec, LLC
- * 
+ *
+ * All Rights Reserved. Copyright (C)2007-2011, Xelatec, LLC
+ *
  * 20070808 1235 Steven Henke, W9SH, sph@xelatec.com
- * 
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- * 		 
+ *
  * This version may be optionally licenced under the GNU LGPL licence.
- *													
+ *
  * A license has been granted to Digium (via disclaimer) for the use of
  * this code.
  *
- * 20160829      inad            added rxlpf rxhpf txlpf txhpf
  */
 
 /*! \file
@@ -44,22 +43,29 @@
 
 #define  XPMR_TRACE_LEVEL		0
 
+#define  XPMR_COMM_FIX			0
+
 #ifdef	 RADIO_RTX
 #define	 DTX_PROG				1			// rf transceiver module
 #define  XPMR_PPTP				0 			// parallel port test probe
 #else
 #define	 DTX_PROG				0
-#define  XPMR_PPTP				0 			
+#define  XPMR_PPTP				0
 #endif
 
 #if (DTX_PROG == 1) || 	XPMR_PPTP == 1
 #include <parapindriver.h>
 #endif
 
-#ifdef	CHAN_USBRADIO
+#if CHAN_USBRADIO==1
+#define usbradio_debug 	urd_debug
+#endif
+
+
+#if	CHAN_URD!=1 && CHAN_USBRADIO!=1
 #define XPMR_DEBUG0		1
 #define XPMR_TRACE		1
-#define TRACEO(level,a) { if ( o && (o->tracelevel >= level) ) {printf a;} }
+#define TRACEO(level,a) { if ( o && o->tracelevel >= level ) {printf a;} }
 #else
 #define XPMR_DEBUG0		1
 #define XPMR_TRACE		1
@@ -76,7 +82,7 @@
 #else
 #define XPMR_DEBUG_CHANS	0
 #define TSCOPE(a)
-#endif  
+#endif
 
 #define	XPMR_TRACE_AMP		8192
 
@@ -93,7 +99,7 @@
 #define TRACET(level,a) {if(pChan->tracelevel>=level){printf("%08i %02i",pChan->frameCountRx,pChan->rptnum);printf a;} }
 #define TRACEXR(a) {printf a;}
 #define TRACEM(level,sys,a) {if(pChan->tracelevel>=level || (pChan->tracesys[sys])){printf a;} }
-#else						  
+#else
 #define TRACEX(a)
 #define TRACEXL(a)
 #define TRACEXT(a)
@@ -121,13 +127,13 @@
 #define M_Q28			0x10000000		//
 #define M_Q27			0x08000000		//
 #define M_Q26			0x04000000		//
-#define M_Q25			0x02000000		//			
+#define M_Q25			0x02000000		//
 #define M_Q24			0x01000000		//
 #define M_Q23			0x00800000		//
-#define M_Q22			0x00400000		//					
-#define M_Q21			0x00200000		// undsoweiter  		
+#define M_Q22			0x00400000		//
+#define M_Q21			0x00200000		// undsoweiter
 #define M_Q20			0x00100000		// 1048576
-#define M_Q19			0x00080000		// 524288		   
+#define M_Q19			0x00080000		// 524288
 #define M_Q18			0x00040000		// 262144
 #define M_Q17           0x00020000		// 131072
 #define M_Q16           0x00010000		// 65536
@@ -209,11 +215,11 @@
 #define SPS_STAT_RUNNING		2
 #define SPS_STAT_HALTING		3
 
- 
+
 #define PP_BIT_TEST		6
 #define PP_REG_LEN		32
 #define PP_BIT_TIME		100000
-					  	
+
 #define DTX_CLK 	LP_PIN02
 #define DTX_DATA 	LP_PIN03
 #define DTX_ENABLE 	LP_PIN04
@@ -225,9 +231,17 @@
 #define BIN_PROG_0 	LP_PIN06
 #define BIN_PROG_1 	LP_PIN07
 #define BIN_PROG_2 	LP_PIN08
-#define BIN_PROG_3 	LP_PIN09 
-		 
-#ifndef CHAN_USBRADIO  
+#define BIN_PROG_3 	LP_PIN09
+
+#define SKT_FRAME_SAMPLES 	160
+#define SKT_MAX_LEAD		4			/* maximum lead input over output */ 
+#define SKT_NOM_LEAD		2			/* nominal lead input over output */ 
+#define SKT_MIN_LEAD		1			/* minimum lead input over output */ 
+#define SKT_BUF_FRAMES		8			 
+#define SKT_CHECK_TIME		500000
+#define SKT_TIME_FRAME		20
+
+#if	CHAN_URD!=1 && CHAN_USBRADIO!=1
 enum {RX_AUDIO_NONE,RX_AUDIO_SPEAKER,RX_AUDIO_FLAT};
 enum {TX_AUDIO_NONE,TX_AUDIO_FLAT,TX_AUDIO_FILTERED,TX_AUDIO_PROC};
 enum {CD_IGNORE,CD_XPMR_NOISE,CD_XPMR_VOX,CD_HID,CD_HID_INVERT};
@@ -238,16 +252,16 @@ enum {TOC_NONE,TOC_PHASE,TOC_NOTONE};
 #endif
 
 enum dbg_pts {
- 
-RX_INPUT,	
-RX_NOISE_AMP, 
+
+RX_INPUT,
+RX_NOISE_AMP,
 RX_NOISE_TRIG,
 
 RX_CTCSS_LPF,
 RX_CTCSS_CENTER,
 RX_CTCSS_NRZ,
 RX_CTCSS_CLK,
-RX_CTCSS_P0,  
+RX_CTCSS_P0,
 RX_CTCSS_P1,
 RX_CTCSS_ACCUM,
 RX_CTCSS_DVDT,
@@ -265,7 +279,7 @@ RX_LSD_DAT,
 RX_LSD_DEC,
 
 RX_LSD_CENTER,
-RX_LSD_SYNC,  
+RX_LSD_SYNC,
 RX_LSD_STATE,
 RX_LSD_ERR,
 RX_LSD_INTE,
@@ -291,7 +305,7 @@ TX_DCS_LPF,
 
 TX_LSD_CLK,
 TX_LSD_DAT,
-TX_LSD_GEN,  	
+TX_LSD_GEN,
 TX_LSD_LPF,
 
 TX_NET_INT,
@@ -303,7 +317,7 @@ TX_VOX_LPF,
 TX_OUT_A,
 TX_OUT_B,
 
-NUM_DEBUG_PTS  
+NUM_DEBUG_PTS
 };
 
 typedef struct
@@ -316,6 +330,29 @@ typedef struct
 	i16 buffer[16 * SAMPLES_PER_BLOCK];  // allocate for rx and tx
 	i16 *source[16];
 } t_sdbg;
+
+typedef struct
+{
+	pthread_mutex_t skt_lock;
+
+    int incount;
+    int outcount;
+
+	int in_dex; 
+	int	out_dex;
+
+	int	minlead;	
+	int maxlead;    
+
+	int checktime;
+	int checktimer;
+	int	clerr;
+
+	short int skewbuf[SKT_BUF_FRAMES*SKT_FRAME_SAMPLES];
+    char inpace;
+	char mode;
+	
+} t_skewer;
 
 typedef struct
 {
@@ -333,7 +370,7 @@ typedef struct
 	i16 buffersize;
 
 	i32 timer;
-	
+
 	i32 x0,x1,y0,y1;
 
 	i16 inputindex;
@@ -344,7 +381,7 @@ typedef struct
 
 	i16 *ptr;					// source or destination
 	i16	*buff;
-	
+
 	i16 inputcnt;
 	i16 initcnt;
 
@@ -362,7 +399,7 @@ typedef struct
 t_dedrift;
 
 /*
-	one structure for each ctcss tone to decode 
+	one structure for each ctcss tone to decode
 */
 typedef struct
 {
@@ -372,9 +409,9 @@ typedef struct
 	i16 fudgeFactor;
 	i16 peak;				// peak amplitude now	maw sph now
 	i16 enabled;
-	i16 state;				// dead, running, error				 
+	i16 state;				// dead, running, error
 	i16 zIndex;				// z bucket index
-	i16 z[4];	  			 
+	i16 z[4];
 	i16 zi;
 	i16 dvu;
 	i16 dvd;
@@ -383,7 +420,7 @@ typedef struct
 	i16 hyst;
 	i16 decode;
 	i16 diffpeak;
-	i16 debug;				 
+	i16 debug;
 
 	#if XPMR_DEBUG0 == 1
 	i16 lasttv0;
@@ -436,8 +473,8 @@ typedef struct
 /*
 	Low Speed Data
 */
-/* 
-	general purpose pmr signal processing element 
+/*
+	general purpose pmr signal processing element
 */
 
 struct t_pmr_chan;
@@ -448,7 +485,7 @@ typedef struct t_pmr_sps
 
 	i16  enabled;		// enabled/disabled
 
-	struct t_pmr_chan *parentChan;	
+	struct t_pmr_chan *parentChan;
 	i16  *source;		// source buffer
 	i16  *sourceB;		// source buffer B
 	i16  *sink;			// sink buffer
@@ -456,7 +493,7 @@ typedef struct t_pmr_sps
 	i16  numChanOut;	// allows output direct to interleaved buffer
 	i16  selChanOut;
 
-	i32  ticks;			
+	i32  ticks;
 	i32  timer;
 	i32  count;
 
@@ -485,6 +522,7 @@ typedef struct t_pmr_sps
 	i16  amax;			// buffer amplitude maximum
 	i16  amin;			// buffer amplitude minimum
 	i16  apeak;			// buffer amplitude peak value (peak to peak)/2
+	i16  bpeak;			// buffer amplitude peak value (peak to peak)/2 b channel
 	i16  setpt;			// amplitude set point for amplitude comparator
 	i16  hyst;			// hysterysis for amplitude comparator
 	i16  compOut;		// amplitude comparator output
@@ -497,7 +535,7 @@ typedef struct t_pmr_sps
 	i16  err;			// error condition
 	i16  option;		// option / request zero
 	i16  state;         // stopped, start, stopped assumes zero'd
-	
+
 	i16  pending;
 
 	struct {
@@ -520,7 +558,8 @@ typedef struct t_pmr_sps
 		unsigned settling:1;
 		unsigned syncing:1;
 		unsigned dirty:1;
-		unsigned mute:1;
+		unsigned lockinput:1;
+		unsigned lockoutput:1;
 	}b;
 
 	i16  cleared;		// output buffer cleared
@@ -544,12 +583,14 @@ typedef struct t_pmr_sps
 	i16  size_x;		// size of each x history element
 	i16  size_coef;		// size of each coefficient
 	void  *x;			// history registers
-	void  *x2;			// history registers, 2nd bank 
-	void  *coef;
+	void  *x2;			// history registers, 2nd bank
+	void  *coef;		// FIR coefficients
 
-	void  *y;			// history registers, y bank 
- 	void  *coefa;
-	void  *coefb;
+#if 0
+	void  *y;			// history registers, y bank, not used
+ 	void  *coefa;		// coeficients, y bank, not used 
+	void  *coefb;		// not used
+#endif
 
 	void  *nextSps;		// next Sps function
 
@@ -558,7 +599,7 @@ typedef struct t_pmr_sps
 
 struct t_dec_dcs;
 struct t_lsd_control;
-struct t_decLsd;;	
+struct t_decLsd;;
 struct t_encLsd;
 
 /*
@@ -573,16 +614,29 @@ typedef struct	t_pmr_chan
 
 	i16 enabled;			// enabled/disabled
 	i16 status;				// ok, error, busy, idle, initializing
-	
+
 	i16  tracelevel;
 	i16  tracetype;
 	u32  tracemask;
+	i16  parentDebugLevel;
+
+	i16  bufblocks;			//
+	i16  bufcount;			//
+
+	u32 framesRead;			// frames requested by network
+	u32 framesWrite;		// frames delivered by network
+
+	u32 framesRx;			// frames from radio receiver (at baseband 8KS)
+	u32 framesTx;			// frames to radio transmitter (at baseband 8KS)
+
+	u32 framesReadIndex;	// for the network interface buffer
+	u32 framesWriteIndex;
 
 	i16 nSamplesRx;			// max frame size
 	i16 nSamplesTx;
 
 	i32 inputSampleRate;	// in S/s  48000
-	i32 baseSampleRate;		// in S/s   8000 
+	i32 baseSampleRate;		// in S/s   8000
 
 	i16 inputGain;
 	i16 inputOffset;
@@ -606,8 +660,8 @@ typedef struct	t_pmr_chan
 	i32 txsettletimer;
 
     i16 txrxblankingtime;		// in milli-seconds
-	i16 txrxblankingtimer;	
-	
+	i16 txrxblankingtimer;
+
 	i16	rxDC;			    // average DC value of input
 	i16 rxSqSet;			// carrier squelch threshold
 	i16 rxSqHyst;			// carrier squelch hysterysis
@@ -616,7 +670,10 @@ typedef struct	t_pmr_chan
 	i16 rxCarrierDetect;    // carrier detect
 	i16 rxCdType;
 	i16 rxSqVoxAdj;
-	i16 rxExtCarrierDetect; 
+	i16 rxSqVoxDis;
+	i16 rxSqVoxHyst;
+	i16 rxSqVoxHtim;
+	i16 rxExtCarrierDetect;
 	i32 inputBlanking;  	// Tx pulse eliminator
 
 	i16 rxDemod;   		// see enum
@@ -637,10 +694,11 @@ typedef struct	t_pmr_chan
 
 	char radioDuplex;
 	char rxNoiseFilType;
-    int	 rxlpf;
-    int	 rxhpf;
-    int	 txlpf;
-    int	 txhpf;
+	int  txboostset;
+	int	 rxlpf;
+	int	 rxhpf;
+	int	 txlpf;
+	int	 txhpf;
 
 	char    *pStr;
 
@@ -655,14 +713,14 @@ typedef struct	t_pmr_chan
 	i16  	numtxcodes;
 	char 	*pRxCodeStr;					// copied and cut up
 	char 	**pRxCode;						// pointers to subs
-	char 	*pTxCodeStr;					 
+	char 	*pTxCodeStr;
 	char 	**pTxCode;
 
 	char 	txctcssdefault[16];				// codes from higher level
 
-	char	*rxctcssfreqs; 					// rest are derived from this 
+	char	*rxctcssfreqs; 					// rest are derived from this
 	char    *txctcssfreqs;
-	
+
 	char    numrxctcssfreqs;
 	char    numtxctcssfreqs;
 
@@ -691,6 +749,14 @@ typedef struct	t_pmr_chan
 
 	t_dedrift	dd;
 
+	t_skewer	skewer;
+
+	int clock_adj;
+
+	i16 buffin[160*4];		  	  // maw maw maw
+	i16 buffout[160*6*2*4];		  // maw maw maw
+
+
 	i16 dummy;
 
 	i32 txScramFreq;
@@ -701,7 +767,7 @@ typedef struct	t_pmr_chan
 
 	i16 txMixA;				// Off, Ctcss, Voice, Composite
 	i16 txMixB;				// Off, Ctcss, Voice, Composite
-	
+
 	i16 rxMuting;
 
 	i16 rxCpuSaver;
@@ -715,7 +781,7 @@ typedef struct	t_pmr_chan
 
 	i16 rxCarrierPoint;
 	i16 rxCarrierHyst;
-	
+
 	i16 txCtcssTocShift;
 	i16 txCtcssTocTime;
 	i8	txTocType;
@@ -728,7 +794,7 @@ typedef struct	t_pmr_chan
 
 	t_dec_ctcss			*rxCtcss;
 	struct t_dec_dcs	*decDcs;
-	struct t_decLsd 	*decLsd;		 				
+	struct t_decLsd 	*decLsd;
 	struct t_encLsd		*pLsdEnc;
 
 	i16 clamplitudeDcs;
@@ -742,19 +808,20 @@ typedef struct	t_pmr_chan
 
 	i16 txPttIn;	 		// from external request
 	i16 txPttOut;			// to radio hardware
+	i16 oldpttout;			// maw maw cleanup
 	i16 txPttHid;
 
 	i16 bandwidth;			// wide/narrow
 	i16 txCompand;			// type
-	i16 rxCompand;			// 
-	
+	i16 rxCompand;			//
+
 	i16 txEqRight;			// muted, flat, pre-emp limited filtered
 	i16 txEqLeft;
 
-	i16 txPotRight;			// 
+	i16 txPotRight;			//
 	i16 txPotLeft;			//
 
-	i16 rxPotRight;			// 
+	i16 rxPotRight;			//
 	i16 rxPotLeft;			//
 
 	i16 function;
@@ -762,8 +829,6 @@ typedef struct	t_pmr_chan
 	i16 txState;				// off,settling,on,hangtime,turnoff
 
 	i16 spsIndex;
-
-	i16 lastrxdecode;
 
 	t_pmr_sps *spsMeasure;		// measurement block
 
@@ -778,7 +843,9 @@ typedef struct	t_pmr_chan
 	t_pmr_sps *spsRxOut;		// Last signal processing struct
 
 	t_pmr_sps *spsTx;			// 1st  signal processing struct
-	
+
+	t_pmr_sps *spsTxRpt;	    // repeat mixer
+
 	t_pmr_sps *spsTxOutA;		// Last signal processing struct
 	t_pmr_sps *spsTxOutB;		// Last signal processing struct
 
@@ -797,11 +864,11 @@ typedef struct	t_pmr_chan
 	// i32	*prxNoiseAdjust;
 
 	i16	*prxVoiceMeasure;
-	i32	*prxVoiceAdjust;	
-	
+	i32	*prxVoiceAdjust;
+
 	i16	*prxCtcssMeasure;
-	i32	*prxCtcssAdjust;		 
-	
+	i32	*prxCtcssAdjust;
+
 	i16	*ptxVoiceAdjust;		// from calling application
 	i32	*ptxCtcssAdjust;		// from calling application
 
@@ -827,6 +894,7 @@ typedef struct	t_pmr_chan
 		unsigned loopback:1;
 		unsigned rxpolarity:1;
 		unsigned txpolarity:1;
+		unsigned minsigproc:1;
 		unsigned dcsrxpolarity:1;
 		unsigned dcstxpolarity:1;
 		unsigned lsdrxpolarity:1;
@@ -859,34 +927,55 @@ typedef struct	t_pmr_chan
 		unsigned pptp_p2:1;
 		unsigned tuning:1;
 		unsigned pttwas:1;
-		unsigned txboost:1;
+
+		unsigned repeat:1;
+		unsigned gotwrite:1;
 	}b;
+
+	pthread_mutex_t mutexRead;
+	pthread_mutex_t mutexWrite;
+
+	i16 prescalerW;
+	i16 prescalerR;
+
+	i16 prescalerSync;
+
+	i16 *pRead;					// buffer between network and receiver
+	i16 *pWrite;				// buffer between network and transmitter
+
+	i16 *pRxIn;					// stream from receiver
+	i16 *pRxOut;				// buffer to network
+
+	i16 *pTxIn;				    // from network
+	i16 *pTxOut;				// to transmitter
 
 	i16 *pRxDemod;				// buffers
 	i16 *pRxBase;	 			// decimated lpf input
-	i16 *pRxNoise;   
-	i16 *pRxLsd;				// subaudible only 
+	i16 *pRxNoise;
+	i16 *pRxLsd;				// subaudible only
 	i16 *pRxHpf;				// subaudible removed
 	i16 *pRxDeEmp;        		// EIA Audio
 	i16 *pRxSpeaker;        	// EIA Audio
+	i16 *pRxRpt;                // Repeat Audio Point / may or may not be pre-emp.
 	i16 *pRxDcTrack;			// DC Restored LSD
 	i16 *pRxLsdLimit;         	// LSD Limited
 	i16 *pRxCtcss;				//
 	i16 *pRxSquelch;
-	i16 *prxVoxMeas;				
+	i16 *prxVoxMeas;
 	i16 *prxMeasure;
 
 	i16 *pTxInput;				// input data
 	i16 *pTxBase;				// input data
 	i16 *pTxHpf;
+	i16 *pTxRpt;				// Rx and local mixed as repeat audio
 	i16 *pTxPreEmp;
+	i16 *pTxVoice;				// Voice Data
 	i16 *pTxLimiter;
 	i16 *pTxLsd;
 	i16 *pTxLsdLpf;
+
 	i16 *pTxComposite;
-	i16 *pTxMod;			// upsampled, low pass filtered
-	
-	i16 *pTxOut;			// 
+	i16 *pTxMod;				// upsampled, low pass filtered
 
 	i16	*pSigGen0;
 	i16	*pSigGen1;
@@ -921,8 +1010,6 @@ typedef struct	t_pmr_chan
 
 	t_sdbg	*sdbg;
 
-	i16 fever;
-
 } t_pmr_chan;
 
 /*
@@ -931,11 +1018,14 @@ typedef struct	t_pmr_chan
 void 		strace(i16 point, t_sdbg *sdbg, i16 index, i16 value);
 void 		strace2(t_sdbg *sdbg);
 
+static i16	TxTestTone(t_pmr_chan *pChan, i16 function);
 t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples);
 t_pmr_sps 	*createPmrSps(t_pmr_chan *pChan);
 i16			destroyPmrChannel(t_pmr_chan *pChan);
 i16			destroyPmrSps(t_pmr_sps  *pSps);
 i16 		pmr_rx_frontend(t_pmr_sps *mySps);
+i16 		min_rx_frontend(t_pmr_sps *mySps);
+i16 		min_tx_fil(t_pmr_sps *mySps);
 i16 		pmr_gp_fir(t_pmr_sps *mySps);
 i16 		pmr_gp_iir(t_pmr_sps *mySps);
 i16 		gp_inte_00(t_pmr_sps *mySps);
@@ -946,9 +1036,6 @@ i16 		SoftLimiter(t_pmr_sps *mySps);
 i16			SigGen(t_pmr_sps *mySps);
 i16 		pmrMixer(t_pmr_sps *mySps);
 i16 		DelayLine(t_pmr_sps *mySps);
-
-i16			PmrRx(t_pmr_chan *PmrChan, i16 *input, i16 *outputrx, i16 *outputtx );
-i16			PmrTx(t_pmr_chan *PmrChan, i16 *input);
 
 i16 		string_parse(char *src, char **dest, char ***ptrs);
 i16 		code_string_parse(t_pmr_chan *pChan);
@@ -963,8 +1050,8 @@ void		ppspiout	(u32 spidata);
 void		progdtx		(t_pmr_chan *pChan);
 void		ppbinout	(u8 chan);
 
-i16		TxTestTone(t_pmr_chan *pChan, i16 function);
-
+static int  PmrProc	(t_pmr_chan *pChan);		/*	radio stream */
+static int  PmrWrite	(t_pmr_chan *pChan, i16 *input, i16 option);	/*  from network writes */
 
 #if XPMR_PPTP == 1
 void		pptp_init 		(void);
@@ -974,6 +1061,3 @@ void		pptp_write		(i16 bit, i16 state);
 #endif /* ! XPMR_H */
 
 /* end of file */
-
-
-

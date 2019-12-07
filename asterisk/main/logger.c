@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 115376 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 193193 $")
 
 #include <signal.h>
 #include <stdarg.h>
@@ -257,18 +257,12 @@ static struct logchannel *make_logchannel(char *channel, char *components, int l
 		snprintf(chan->filename, sizeof(chan->filename), "%s", channel);
 		openlog("asterisk", LOG_PID, chan->facility);
 	} else {
-		if (channel[0] == '/') {
-			if(!ast_strlen_zero(hostname)) { 
-				snprintf(chan->filename, sizeof(chan->filename) - 1,"%s.%s", channel, hostname);
-			} else {
-				ast_copy_string(chan->filename, channel, sizeof(chan->filename));
-			}
-		}		  
-		
-		if(!ast_strlen_zero(hostname)) {
-			snprintf(chan->filename, sizeof(chan->filename), "%s/%s.%s",(char *)ast_config_AST_LOG_DIR, channel, hostname);
+		if (!ast_strlen_zero(hostname)) {
+			snprintf(chan->filename, sizeof(chan->filename), "%s/%s.%s",
+				 channel[0] != '/' ? ast_config_AST_LOG_DIR : "", channel, hostname);
 		} else {
-			snprintf(chan->filename, sizeof(chan->filename), "%s/%s", (char *)ast_config_AST_LOG_DIR, channel);
+			snprintf(chan->filename, sizeof(chan->filename), "%s/%s",
+				 channel[0] != '/' ? ast_config_AST_LOG_DIR : "", channel);
 		}
 		chan->fileptr = fopen(chan->filename, "a");
 		if (!chan->fileptr) {
@@ -655,7 +649,7 @@ void close_logger(void)
 	return;
 }
 
-static void ast_log_vsyslog(int level, const char *file, int line, const char *function, const char *fmt, va_list args) 
+static void __attribute__((format(printf, 5, 0))) ast_log_vsyslog(int level, const char *file, int line, const char *function, const char *fmt, va_list args) 
 {
 	char buf[BUFSIZ];
 	char *s;

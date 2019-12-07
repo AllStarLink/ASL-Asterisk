@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 106255 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdio.h>
 #include <string.h>
@@ -791,7 +791,7 @@ static int phone_write(struct ast_channel *ast, struct ast_frame *frame)
 		   we have to pad it to 24 bytes still.  */
 		if (frame->datalen == 4) {
 			if (p->silencesupression) {
-				memset(tmpbuf + 4, 0, sizeof(tmpbuf) - 4);
+				memset(tmpbuf, 0, sizeof(tmpbuf));
 				memcpy(tmpbuf, frame->data, 4);
 				expected = 24;
 				res = phone_write_buf(p, tmpbuf, expected, maxfr, 0);
@@ -1243,7 +1243,7 @@ static int parse_gain_value(char *gain_type, char *value)
 	float gain;
 
 	/* try to scan number */
-	if (sscanf(value, "%f", &gain) != 1)
+	if (sscanf(value, "%30f", &gain) != 1)
 	{
 		ast_log(LOG_ERROR, "Invalid %s value '%s' in '%s' config\n",
 			value, gain_type, config);

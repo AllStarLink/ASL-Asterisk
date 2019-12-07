@@ -16,7 +16,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 174148 $")
 
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
@@ -573,9 +573,9 @@ static u_char *ast_var_channel_types_table(struct variable *vp, oid *name, size_
 	case ASTCHANTYPECHANNELS:
 		long_ret = 0;
 		for (chan = ast_channel_walk_locked(NULL); chan; chan = ast_channel_walk_locked(chan)) {
-			ast_channel_unlock(chan);
 			if (chan->tech == tech)
 				long_ret++;
+			ast_channel_unlock(chan);
 		}
 		return (u_char *)&long_ret;
 	default:
@@ -621,7 +621,7 @@ static u_char *ast_var_indications(struct variable *vp, oid *name, size_t *lengt
 								  int exact, size_t *var_len, WriteMethod **write_method)
 {
     static unsigned long long_ret;
-    struct ind_tone_zone *tz = NULL;
+    struct tone_zone *tz = NULL;
 
     if (header_generic(vp, name, length, exact, var_len, write_method))
 		return NULL;
@@ -651,7 +651,7 @@ static u_char *ast_var_indications_table(struct variable *vp, oid *name, size_t 
 									   int exact, size_t *var_len, WriteMethod **write_method)
 {
     static unsigned long long_ret;
-    struct ind_tone_zone *tz = NULL;
+    struct tone_zone *tz = NULL;
     int i;
 
     if (header_simple_table(vp, name, length, exact, var_len, write_method, -1))
@@ -721,7 +721,7 @@ static u_char *ast_var_Version(struct variable *vp, oid *name, size_t *length,
 		*var_len = strlen(ASTERISK_VERSION);
 		return (u_char *)ASTERISK_VERSION;
 	case ASTVERTAG:
-		long_ret = 0;
+		long_ret = ASTERISK_VERSION_NUM;
 		return (u_char *)&long_ret;
 	default:
 		break;

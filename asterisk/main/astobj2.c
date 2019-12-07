@@ -19,7 +19,7 @@
  */
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 222152 $")
 
 #include "asterisk/astobj2.h"
 #include "asterisk/utils.h"
@@ -125,28 +125,11 @@ static inline struct astobj2 *INTERNAL_OBJ(void *user_data)
  */
 #define EXTERNAL_OBJ(_p)	((_p) == NULL ? NULL : (_p)->user_data)
 
-#ifdef DEBUG_THREADS
-/* Need to override the macros defined in astobj2.h */
-#undef ao2_lock
-#undef ao2_trylock
-#undef ao2_unlock
-#endif
-
+#ifndef DEBUG_THREADS
 int ao2_lock(void *user_data)
-{
-	struct astobj2 *p = INTERNAL_OBJ(user_data);
-
-	if (p == NULL)
-		return -1;
-
-#ifdef AO2_DEBUG
-	ast_atomic_fetchadd_int(&ao2.total_locked, 1);
-#endif
-
-	return ast_mutex_lock(&p->priv_data.lock);
-}
-
+#else
 int __ao2_lock(void *user_data, const char *file, const char *func, int line, const char *var)
+#endif
 {
 	struct astobj2 *p = INTERNAL_OBJ(user_data);
 
@@ -164,26 +147,11 @@ int __ao2_lock(void *user_data, const char *file, const char *func, int line, co
 #endif
 }
 
+#ifndef DEBUG_THREADS
 int ao2_trylock(void *user_data)
-{
-	struct astobj2 *p = INTERNAL_OBJ(user_data);
-	int res;
-
-	if (p == NULL)
-		return -1;
-
-	res = ast_mutex_trylock(&p->priv_data.lock);
-
-#ifdef AO2_DEBUG
-	if (!res) {
-		ast_atomic_fetchadd_int(&ao2.total_locked, 1);
-	}
-#endif
-
-	return res;
-}
-
+#else
 int __ao2_trylock(void *user_data, const char *file, const char *func, int line, const char *var)
+#endif
 {
 	struct astobj2 *p = INTERNAL_OBJ(user_data);
 	int res;
@@ -206,21 +174,11 @@ int __ao2_trylock(void *user_data, const char *file, const char *func, int line,
 	return res;
 }
 
+#ifndef DEBUG_THREADS
 int ao2_unlock(void *user_data)
-{
-	struct astobj2 *p = INTERNAL_OBJ(user_data);
-
-	if (p == NULL)
-		return -1;
-
-#ifdef AO2_DEBUG
-	ast_atomic_fetchadd_int(&ao2.total_locked, -1);
-#endif
-
-	return ast_mutex_unlock(&p->priv_data.lock);
-}
-
+#else
 int __ao2_unlock(void *user_data, const char *file, const char *func, int line, const char *var)
+#endif
 {
 	struct astobj2 *p = INTERNAL_OBJ(user_data);
 

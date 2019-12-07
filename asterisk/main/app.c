@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 231614 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +51,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 #include "asterisk/indications.h"
 #include "asterisk/linkedlists.h"
 
-#define MAX_OTHER_FORMATS 10
+#define AST_MAX_FORMATS 10
 
 static AST_LIST_HEAD_STATIC(groups, ast_group_info);
 
@@ -64,7 +64,7 @@ of 'maxlen' or 'size' minus the original strlen() of collect digits.
 */
 int ast_app_dtget(struct ast_channel *chan, const char *context, char *collect, size_t size, int maxlen, int timeout) 
 {
-	struct ind_tone_zone_sound *ts;
+	struct tone_zone_sound *ts;
 	int res=0, x=0;
 
 	if (maxlen > size)
@@ -507,8 +507,8 @@ static int __ast_play_and_record(struct ast_channel *chan, const char *playfile,
 	char *fmts;
 	char comment[256];
 	int x, fmtcnt = 1, res = -1, outmsg = 0;
-	struct ast_filestream *others[MAX_OTHER_FORMATS];
-	char *sfmt[MAX_OTHER_FORMATS];
+	struct ast_filestream *others[AST_MAX_FORMATS];
+	char *sfmt[AST_MAX_FORMATS];
 	char *stringp = NULL;
 	time_t start, end;
 	struct ast_dsp *sildet = NULL;   /* silence detector dsp */
@@ -556,8 +556,8 @@ static int __ast_play_and_record(struct ast_channel *chan, const char *playfile,
 	sfmt[0] = ast_strdupa(fmts);
 
 	while ((fmt = strsep(&stringp, "|"))) {
-		if (fmtcnt > MAX_OTHER_FORMATS - 1) {
-			ast_log(LOG_WARNING, "Please increase MAX_OTHER_FORMATS in app.c\n");
+		if (fmtcnt > AST_MAX_FORMATS - 1) {
+			ast_log(LOG_WARNING, "Please increase AST_MAX_FORMATS in file.h\n");
 			break;
 		}
 		sfmt[fmtcnt++] = ast_strdupa(fmt);
@@ -731,15 +731,23 @@ static int __ast_play_and_record(struct ast_channel *chan, const char *playfile,
 			 * off the recording.  However, if we ended with '#', we don't want
 			 * to trim ANY part of the recording.
 			 */
-			if (res > 0 && totalsilence)
+			if (res > 0 && totalsilence) {
 				ast_stream_rewind(others[x], totalsilence - 200);
+				/* Reduce duration by a corresponding amount */
+				if (x == 0 && *duration) {
+					*duration -= (totalsilence - 200) / 1000;
+					if (*duration < 0) {
+						*duration = 0;
+					}
+				}
+			}
 			ast_truncstream(others[x]);
 			ast_closestream(others[x]);
 		}
 	}
 
 	if (prepend && outmsg) {
-		struct ast_filestream *realfiles[MAX_OTHER_FORMATS];
+		struct ast_filestream *realfiles[AST_MAX_FORMATS];
 		struct ast_frame *fr;
 
 		for (x = 0; x < fmtcnt; x++) {
@@ -915,10 +923,15 @@ int ast_app_group_update(struct ast_channel *old, struct ast_channel *new)
 	struct ast_group_info *gi = NULL;
 
 	AST_LIST_LOCK(&groups);
-	AST_LIST_TRAVERSE(&groups, gi, list) {
-		if (gi->chan == old)
+	AST_LIST_TRAVERSE_SAFE_BEGIN(&groups, gi, list) {
+		if (gi->chan == old) {
 			gi->chan = new;
+		} else if (gi->chan == new) {
+			AST_LIST_REMOVE_CURRENT(&groups, list);
+			free(gi);
+		}
 	}
+	AST_LIST_TRAVERSE_SAFE_END
 	AST_LIST_UNLOCK(&groups);
 
 	return 0;

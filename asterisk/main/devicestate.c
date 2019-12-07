@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 205409 $")
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -45,15 +45,15 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
 
 /*! \brief Device state strings for printing */
 static const char *devstatestring[] = {
-	/* 0 AST_DEVICE_UNKNOWN */	"Unknown",	/*!< Valid, but unknown state */
-	/* 1 AST_DEVICE_NOT_INUSE */	"Not in use",	/*!< Not used */
-	/* 2 AST_DEVICE IN USE */	"In use",	/*!< In use */
-	/* 3 AST_DEVICE_BUSY */		"Busy",		/*!< Busy */
-	/* 4 AST_DEVICE_INVALID */	"Invalid",	/*!< Invalid - not known to Asterisk */
-	/* 5 AST_DEVICE_UNAVAILABLE */	"Unavailable",	/*!< Unavailable (not registred) */
-	/* 6 AST_DEVICE_RINGING */	"Ringing",	/*!< Ring, ring, ring */
-	/* 7 AST_DEVICE_RINGINUSE */	"Ring+Inuse",	/*!< Ring and in use */
-	/* 8 AST_DEVICE_ONHOLD */	"On Hold"	/*!< On Hold */
+	/* 0 AST_DEVICE_UNKNOWN */    "Unknown",    /*!< Valid, but unknown state */
+	/* 1 AST_DEVICE_NOT_INUSE */  "Not in use", /*!< Not used */
+	/* 2 AST_DEVICE IN USE */     "In use",     /*!< In use */
+	/* 3 AST_DEVICE_BUSY */	      "Busy",       /*!< Busy */
+	/* 4 AST_DEVICE_INVALID */    "Invalid",    /*!< Invalid - not known to Asterisk */
+	/* 5 AST_DEVICE_UNAVAILABLE */"Unavailable",/*!< Unavailable (not registered) */
+	/* 6 AST_DEVICE_RINGING */    "Ringing",    /*!< Ring, ring, ring */
+	/* 7 AST_DEVICE_RINGINUSE */  "Ring+Inuse", /*!< Ring and in use */
+	/* 8 AST_DEVICE_ONHOLD */     "On Hold"     /*!< On Hold */
 };
 
 /*! \brief  A device state provider (not a channel) */
@@ -95,7 +95,7 @@ static ast_cond_t change_pending;
 static int getproviderstate(const char *provider, const char *address);
 
 /*! \brief Find devicestate as text message for output */
-const char *devstate2str(int devstate) 
+const char *devstate2str(enum ast_device_state devstate) 
 {
 	return devstatestring[devstate];
 }
@@ -366,4 +366,92 @@ int ast_device_state_engine_init(void)
 	}
 
 	return 0;
+}
+
+void ast_devstate_aggregate_init(struct ast_devstate_aggregate *agg)
+{
+	memset(agg, 0, sizeof(*agg));
+	agg->all_unknown = 1;
+	agg->all_unavail = 1;
+	agg->all_busy = 1;
+	agg->all_free = 1;
+}
+
+void ast_devstate_aggregate_add(struct ast_devstate_aggregate *agg, enum ast_device_state state)
+{
+	switch (state) {
+	case AST_DEVICE_NOT_INUSE:
+		agg->all_unknown = 0;
+		agg->all_unavail = 0;
+		agg->all_busy = 0;
+		break;
+	case AST_DEVICE_INUSE:
+		agg->in_use = 1;
+		agg->all_unavail = 0;
+		agg->all_free = 0;
+		agg->all_unknown = 0;
+		break;
+	case AST_DEVICE_RINGING:
+		agg->ring = 1;
+		agg->all_unavail = 0;
+		agg->all_free = 0;
+		agg->all_unknown = 0;
+		break;
+	case AST_DEVICE_RINGINUSE:
+		agg->in_use = 1;
+		agg->ring = 1;
+		agg->all_unavail = 0;
+		agg->all_free = 0;
+		agg->all_unknown = 0;
+		break;
+	case AST_DEVICE_ONHOLD:
+		agg->all_unknown = 0;
+		agg->all_unavail = 0;
+		agg->all_free = 0;
+		agg->on_hold = 1;
+		break;
+	case AST_DEVICE_BUSY:
+		agg->all_unknown = 0;
+		agg->all_unavail = 0;
+		agg->all_free = 0;
+		agg->busy = 1;
+		agg->in_use = 1;
+		break;
+	case AST_DEVICE_UNAVAILABLE:
+		agg->all_unknown = 0;
+	case AST_DEVICE_INVALID:
+		agg->all_busy = 0;
+		agg->all_free = 0;
+		break;
+	case AST_DEVICE_UNKNOWN:
+		agg->all_busy = 0;
+		agg->all_free = 0;
+		break;
+	case AST_DEVICE_TOTAL: /* not a device state, included for completeness. */
+		break;
+	}
+}
+
+enum ast_device_state ast_devstate_aggregate_result(struct ast_devstate_aggregate *agg)
+{
+	if (agg->all_free)
+		return AST_DEVICE_NOT_INUSE;
+	if ((agg->in_use || agg->on_hold) && agg->ring)
+		return AST_DEVICE_RINGINUSE;
+	if (agg->ring)
+		return AST_DEVICE_RINGING;
+	if (agg->busy)
+		return AST_DEVICE_BUSY;
+	if (agg->in_use)
+		return AST_DEVICE_INUSE;
+	if (agg->on_hold)
+		return AST_DEVICE_ONHOLD;
+	if (agg->all_busy)
+		return AST_DEVICE_BUSY;
+	if (agg->all_unknown)
+		return AST_DEVICE_UNKNOWN;
+	if (agg->all_unavail)
+		return AST_DEVICE_UNAVAILABLE;
+
+	return AST_DEVICE_NOT_INUSE;
 }

@@ -31,7 +31,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 159808 $")
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -148,7 +148,7 @@ struct dn_answer {
 	unsigned short class;
 	unsigned int ttl;
 	unsigned short size;
-} __attribute__ ((__packed__));
+} __attribute__((__packed__));
 
 static int skip_name(unsigned char *s, int len)
 {

@@ -26,7 +26,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 221303 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -53,9 +53,6 @@ static int function_fieldqty(struct ast_channel *chan, char *cmd,
 			     AST_APP_ARG(delim);
 		);
 
-	if (chan)
-		ast_autoservice_start(chan);
-
 	AST_STANDARD_APP_ARGS(args, parse);
 	if (args.delim) {
 		varsubst = alloca(strlen(args.varname) + 4);
@@ -72,9 +69,6 @@ static int function_fieldqty(struct ast_channel *chan, char *cmd,
 		fieldcount = 1;
 	}
 	snprintf(buf, len, "%d", fieldcount);
-
-	if (chan)
-		ast_autoservice_stop(chan);
 
 	return 0;
 }
@@ -184,9 +178,6 @@ static int array(struct ast_channel *chan, char *cmd, char *var,
 	if (!var || !value2)
 		return -1;
 
-	if (chan)
-		ast_autoservice_start(chan);
-
 	/* The functions this will generally be used with are SORT and ODBC_*, which
 	 * both return comma-delimited lists.  However, if somebody uses literal lists,
 	 * their commas will be translated to vertical bars by the load, and I don't
@@ -217,9 +208,6 @@ static int array(struct ast_channel *chan, char *cmd, char *var,
 			pbx_builtin_setvar_helper(chan, arg1.var[i], "");
 		}
 	}
-
-	if (chan)
-		ast_autoservice_stop(chan);
 
 	return 0;
 }
@@ -301,7 +289,7 @@ static int acf_sprintf(struct ast_channel *chan, char *cmd, char *data, char *bu
 
 				/* Convert the argument into the required type */
 				if (arg.var[argcount]) {
-					if (sscanf(arg.var[argcount++], "%d", &tmpi) != 1) {
+					if (sscanf(arg.var[argcount++], "%30d", &tmpi) != 1) {
 						ast_log(LOG_ERROR, "Argument '%s' is not an integer number for format '%s'\n", arg.var[argcount - 1], formatbuf);
 						goto sprintf_fail;
 					}
@@ -324,7 +312,7 @@ static int acf_sprintf(struct ast_channel *chan, char *cmd, char *data, char *bu
 
 				/* Convert the argument into the required type */
 				if (arg.var[argcount]) {
-					if (sscanf(arg.var[argcount++], "%lf", &tmpd) != 1) {
+					if (sscanf(arg.var[argcount++], "%30lf", &tmpd) != 1) {
 						ast_log(LOG_ERROR, "Argument '%s' is not a floating point number for format '%s'\n", arg.var[argcount - 1], formatbuf);
 						goto sprintf_fail;
 					}
@@ -396,8 +384,20 @@ static struct ast_custom_function sprintf_function = {
 static int quote(struct ast_channel *chan, char *cmd, char *data, char *buf, size_t len)
 {
 	char *bufptr = buf, *dataptr = data;
+
+	if (len < 3){ /* at least two for quotes and one for binary zero */
+		ast_log(LOG_ERROR, "Not enough buffer");
+		return -1;
+	}
+
+	if (ast_strlen_zero(data)) {
+		ast_log(LOG_WARNING, "No argument specified!\n");
+		ast_copy_string(buf, "\"\"", len);
+		return 0;
+	}
+
 	*bufptr++ = '"';
-	for (; bufptr < buf + len - 1; dataptr++) {
+	for (; bufptr < buf + len - 3; dataptr++) {
 		if (*dataptr == '\\') {
 			*bufptr++ = '\\';
 			*bufptr++ = '\\';
@@ -422,6 +422,43 @@ static struct ast_custom_function quote_function = {
 	.read = quote,
 };
 
+static int csv_quote(struct ast_channel *chan, char *cmd, char *data, char *buf, size_t len)
+{
+	char *bufptr = buf, *dataptr = data;
+
+	if (len < 3){ /* at least two for quotes and one for binary zero */
+		ast_log(LOG_ERROR, "Not enough buffer");
+		return -1;
+	}
+
+	if (ast_strlen_zero(data)) {
+		ast_log(LOG_WARNING, "No argument specified!\n");
+		ast_copy_string(buf,"\"\"",len);
+		return 0;
+	}
+
+	*bufptr++ = '"';
+	for (; bufptr < buf + len - 3; dataptr++){
+		if (*dataptr == '"') {
+			*bufptr++ = '"';
+			*bufptr++ = '"';
+		} else if (*dataptr == '\0') {
+			break;
+		} else {
+			*bufptr++ = *dataptr;
+		}
+	}
+	*bufptr++ = '"';
+	*bufptr='\0';
+	return 0;
+}
+
+static struct ast_custom_function csv_quote_function = {
+	.name = "CSV_QUOTE",
+	.synopsis = "Quotes a given string for use in a CSV file, escaping embedded quotes as necessary",
+	.syntax = "CSV_QUOTE(<string>)",
+	.read = csv_quote,
+};
 
 static int len(struct ast_channel *chan, char *cmd, char *data, char *buf,
 	       size_t len)
@@ -543,11 +580,7 @@ static int function_eval(struct ast_channel *chan, char *cmd, char *data,
 		return -1;
 	}
 
-	if (chan)
-		ast_autoservice_start(chan);
 	pbx_substitute_variables_helper(chan, data, buf, len - 1);
-	if (chan)
-		ast_autoservice_stop(chan);
 
 	return 0;
 }
@@ -573,7 +606,10 @@ static int keypadhash(struct ast_channel *chan, char *cmd, char *data, char *buf
 	char *bufptr, *dataptr;
 
 	for (bufptr = buf, dataptr = data; bufptr < buf + len - 1; dataptr++) {
-		if (*dataptr == '1') {
+		if (*dataptr == '\0') {
+			*bufptr++ = '\0';
+			break;
+		} else if (*dataptr == '1') {
 			*bufptr++ = '1';
 		} else if (strchr("AaBbCc2", *dataptr)) {
 			*bufptr++ = '2';
@@ -593,9 +629,6 @@ static int keypadhash(struct ast_channel *chan, char *cmd, char *data, char *buf
 			*bufptr++ = '9';
 		} else if (*dataptr == '0') {
 			*bufptr++ = '0';
-		} else if (*dataptr == '\0') {
-			*bufptr++ = '\0';
-			break;
 		}
 	}
 	buf[len - 1] = '\0';
@@ -620,6 +653,7 @@ static int unload_module(void)
 	res |= ast_custom_function_unregister(&regex_function);
 	res |= ast_custom_function_unregister(&array_function);
 	res |= ast_custom_function_unregister(&quote_function);
+	res |= ast_custom_function_unregister(&csv_quote_function);
 	res |= ast_custom_function_unregister(&len_function);
 	res |= ast_custom_function_unregister(&strftime_function);
 	res |= ast_custom_function_unregister(&strptime_function);
@@ -639,6 +673,7 @@ static int load_module(void)
 	res |= ast_custom_function_register(&regex_function);
 	res |= ast_custom_function_register(&array_function);
 	res |= ast_custom_function_register(&quote_function);
+	res |= ast_custom_function_register(&csv_quote_function);
 	res |= ast_custom_function_register(&len_function);
 	res |= ast_custom_function_register(&strftime_function);
 	res |= ast_custom_function_register(&strptime_function);

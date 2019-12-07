@@ -19,7 +19,6 @@
 /*! \file
  *
  * \brief Implementation of Inter-Asterisk eXchange Version 2
- *        as specified in RFC 5456
  *
  * \author Mark Spencer <markster@digium.com>
  *
@@ -36,7 +35,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 230246 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -102,26 +101,6 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "iax2-parser.h"
 #include "iax2-provision.h"
 #include "jitterbuf.h"
-
-/* WB6NIL backport stuff */
-
-#define	DAHDI_FILE_TIMER "/dev/zap/timer"
-#define	DAHDI_FILE_PSEUDO "/dev/zap/pseudo"
-#define	AST_FORMAT_AUDIO_UNDEFINED 0
-#define	BAD_RADIO_HACK
-#define	ast_free_ptr ast_free
-#define ast_copy_ha(from_p, to_p) memcpy(to_p,from_p,sizeof(struct ast_ha));
-
-struct ast_ha {
-        /* Host access rule */
-        struct in_addr netaddr;
-        struct in_addr netmask;
-        int sense;
-        struct ast_ha *next;
-};
-
-
-
 
 /* Define SCHED_MULTITHREADED to run the scheduler in a special
    multithreaded mode. */
@@ -734,9 +713,9 @@ static struct ao2_container *callno_limits;
 /*! Table containing ip addresses not requiring calltoken validation */
 static struct ao2_container *calltoken_ignores;
 
-static uint16_t DEFAULT_MAXCALLNO_LIMIT = /* WB6NIL-START 2048 */ 65535 /* WB6NIL-END */;
+static uint16_t DEFAULT_MAXCALLNO_LIMIT = 2048;
 
-static uint16_t DEFAULT_MAXCALLNO_LIMIT_NONVAL = /* WB6NIL-START 8192 */ 65535 /* WB6NIL-END */;
+static uint16_t DEFAULT_MAXCALLNO_LIMIT_NONVAL = 8192;
 
 static uint16_t global_maxcallno;
 
@@ -933,8 +912,8 @@ static void __attribute__((format(printf, 1, 2))) jb_debug_output(const char *fm
 	ast_verbose("%s", buf);
 }
 
-/* IAX_MAX_CALLS + 1 to avoid the off by one error case when accessing the max call number */
-static struct chan_iax2_pvt *iaxs[IAX_MAX_CALLS + 1];
+/* XXX We probably should use a mutex when working with this XXX */
+static struct chan_iax2_pvt *iaxs[IAX_MAX_CALLS];
 static ast_mutex_t iaxsl[ARRAY_LEN(iaxs)];
 
 /*!
@@ -957,7 +936,7 @@ static struct ao2_container *iax_transfercallno_pvts;
 
 /* Flag to use with trunk calls, keeping these calls high up.  It halves our effective use
    but keeps the division between trunked and non-trunked better. */
-#define TRUNK_CALL_START	IAX_MAX_CALLS / 2
+#define TRUNK_CALL_START	ARRAY_LEN(iaxs) / 2
 
 static int maxtrunkcall = TRUNK_CALL_START;
 static int maxnontrunkcall = 1;
@@ -1528,7 +1507,7 @@ retry:
 
 static int scheduled_destroy(const void *vid)
 {
-	unsigned short callno = PTR_TO_CALLNO(vid);
+	short callno = PTR_TO_CALLNO(vid);
 	ast_mutex_lock(&iaxsl[callno]);
 	if (iaxs[callno]) {
 		if (option_debug) {
@@ -1890,7 +1869,7 @@ static int calltoken_required(struct sockaddr_in *sin, const char *name, int sub
 		(optional && (calltoken_required == CALLTOKEN_DEFAULT))) {
 		res = 0;
 	}
-	/* WB6NIL-START */ res = 0; /* WB6NIL-END */
+
 	return res;
 }
 
@@ -2165,7 +2144,7 @@ static int add_calltoken_ignore(const char *addr)
 		return -1;
 	}
 
-	ha = ast_append_ha("permit", /* WB6NIL-START */ (char *) /* WB6NIL-END */ addr, NULL);
+	ha = ast_append_ha("permit", addr, NULL);
 
 	/* check for valid config information */
 	if (!ha) {
@@ -6167,7 +6146,7 @@ static int ast_cli_netstats(struct mansession *s, int fd, int limit_fmt)
 			iax_frame_subclass2str(iaxs[x]->first_iax_message & ~MARK_IAX_SUBCLASS_TX, first_message, sizeof(first_message));
 			iax_frame_subclass2str(iaxs[x]->last_iax_message & ~MARK_IAX_SUBCLASS_TX, last_message, sizeof(last_message));
 			if (limit_fmt)
-				fmt = "%-25.25s %4d %4d %4d %5d %3d %5d %4d %6d %4d %4d %5d %3d %5d %4d %6d %s%s %4s%s\n";
+				fmt = "%-20.25s %4d %4d %4d %5d %3d %5d %4d %6d %4d %4d %5d %3d %5d %4d %6d %s%s %4s%s\n";
 			else
 				fmt = "%s %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %s%s %s%s\n";
 			if (s)
@@ -6227,8 +6206,8 @@ static int iax2_show_netstats(int fd, int argc, char *argv[])
 	int numchans = 0;
 	if (argc != 3)
 		return RESULT_SHOWUSAGE;
-	ast_cli(fd, "                                ------------- LOCAL ----------------  ------------- REMOTE ---------------\n");
-	ast_cli(fd, "Channel                    RTT  Jit  Del  Lost   %%  Drop  OOO  Kpkts  Jit  Del  Lost   %%  Drop  OOO  Kpkts FirstMsg    LastMsg\n");
+	ast_cli(fd, "                           -------- LOCAL ---------------------  -------- REMOTE --------------------\n");
+	ast_cli(fd, "Channel               RTT  Jit  Del  Lost   %%  Drop  OOO  Kpkts  Jit  Del  Lost   %%  Drop  OOO  Kpkts FirstMsg    LastMsg\n");
 	numchans = ast_cli_netstats(NULL, fd, 1);
 	ast_cli(fd, "%d active IAX channel%s\n", numchans, (numchans != 1) ? "s" : "");
 	return RESULT_SUCCESS;
@@ -7108,14 +7087,9 @@ static int try_transfer(struct chan_iax2_pvt *pvt, struct iax_ies *ies)
 	memcpy(&pvt->transfer, &new, sizeof(pvt->transfer));
 	inet_aton(newip, &pvt->transfer.sin_addr);
 	pvt->transfer.sin_family = AF_INET;
-	pvt->transferid = ies->transferid;
-	/* only store by transfercallno if this is a new transfer,
-	 * just in case we get a duplicate TXREQ */
-	if (pvt->transferring == TRANSFER_NONE) {
-		store_by_transfercallno(pvt);
-	}
 	pvt->transferring = TRANSFER_BEGIN;
-
+	pvt->transferid = ies->transferid;
+	store_by_transfercallno(pvt);
 	if (ies->transferid)
 		iax_ie_append_int(&ied, IAX_IE_TRANSFERID, ies->transferid);
 	send_command_transfer(pvt, AST_FRAME_IAX, IAX_COMMAND_TXCNT, 0, ied.buf, ied.pos);
@@ -7222,7 +7196,7 @@ static int complete_transfer(int callno, struct iax_ies *ies)
 	pvt->voiceformat = 0;
 	pvt->svideoformat = -1;
 	pvt->videoformat = 0;
-	pvt->transfercallno = 0;
+	pvt->transfercallno = -1;
 	memset(&pvt->rxcore, 0, sizeof(pvt->rxcore));
 	memset(&pvt->offset, 0, sizeof(pvt->offset));
 	/* reset jitterbuffer */
@@ -7316,8 +7290,6 @@ static int iax2_register(char *value, int lineno)
 	char *porta;
 	char *stringp=NULL;
 	
-	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG:IAX2 register called with %s\n",value);
-
 	if (!value)
 		return -1;
 	ast_copy_string(copy, value, sizeof(copy));
@@ -7687,7 +7659,6 @@ static int registry_rerequest(struct iax_ies *ies, int callno, struct sockaddr_i
 	char challenge[256] = "";
 	int res;
 	int authmethods = 0;
-	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG: registry rereqquest\n");
 	if (ies->authmethods)
 		authmethods = ies->authmethods;
 	if (ies->username)
@@ -8322,7 +8293,6 @@ static int socket_read(int *id, int fd, short events, void *cbdata)
 			memcpy(&thread->ffinfo.sin, &thread->iosin, sizeof(thread->ffinfo.sin));
 			thread->ffinfo.type = fh->type;
 			thread->ffinfo.csub = fh->csub;
-			AST_LIST_INSERT_HEAD(&active_list, thread, list);
 		}
 		AST_LIST_UNLOCK(&active_list);
 	}
@@ -8616,15 +8586,7 @@ static int socket_process(struct iax2_thread *thread)
 		if ((ntohs(mh->callno) & IAX_FLAG_FULL) && ((f.frametype == AST_FRAME_IAX) && (f.subclass == IAX_COMMAND_ACK))) {
 			check_dcallno = 1;
 		}
-/* WB6NIL-START */
-/* The following hack is horrible, awful, and something quite temporary done
-to allow older versions of app_rpt and chan_iax2 not to cause systems to
-blow up, and will be removed as soon as possible */
-#ifdef  BAD_RADIO_HACK
-                if ((f.frametype == AST_FRAME_TEXT) ||
-                        (f.frametype == AST_FRAME_CONTROL)) check_dcallno = 0;
-#endif
-/* WB6NIL-END */
+
 		if (!(fr->callno = find_callno(ntohs(mh->callno) & ~IAX_FLAG_FULL, dcallno, &sin, new, fd, check_dcallno))) {
 			if (f.frametype == AST_FRAME_IAX && f.subclass == IAX_COMMAND_NEW) {
 				send_apathetic_reply(1, ntohs(fh->scallno), &sin, IAX_COMMAND_REJECT, ntohl(fh->ts), fh->iseqno + 1, fd, NULL);
@@ -10066,6 +10028,11 @@ static void *iax2_process_thread(void *data)
 		if (thread->iostate == IAX_IOSTATE_IDLE)
 			continue;
 
+		/* Add ourselves to the active list now */
+		AST_LIST_LOCK(&active_list);
+		AST_LIST_INSERT_HEAD(&active_list, thread, list);
+		AST_LIST_UNLOCK(&active_list);
+
 		/* See what we need to do */
 		switch(thread->iostate) {
 		case IAX_IOSTATE_READY:
@@ -10088,9 +10055,7 @@ static void *iax2_process_thread(void *data)
 		thread->curfunc[0]='\0';
 #endif		
 
-		/* The network thread added us to the active_thread list when we were given
-		 * frames to process, Now that we are done, we must remove ourselves from
-		 * the active list, and return to the idle list */
+		/* Now... remove ourselves from the active list, and return to the idle list */
 		AST_LIST_LOCK(&active_list);
 		AST_LIST_REMOVE(&active_list, thread, list);
 		AST_LIST_UNLOCK(&active_list);
@@ -10124,7 +10089,6 @@ static int iax2_do_register(struct iax2_registry *reg)
 	struct iax_ie_data ied;
 	if (option_debug && iaxdebug)
 		ast_log(LOG_DEBUG, "Sending registration request for '%s'\n", reg->username);
-	if (option_verbose > 4) ast_log(LOG_WARNING, "REGISTER-LOG: Sending registration request for '%s'\n", reg->username);
 
 	if (reg->dnsmgr && 
 	    ((reg->regstate == REG_STATE_TIMEOUT) || !reg->addr.sin_addr.s_addr)) {

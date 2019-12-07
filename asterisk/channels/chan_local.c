@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 147386 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 230038 $")
 
 #include <stdio.h>
 #include <string.h>
@@ -120,6 +120,7 @@ struct local_pvt {
 #define LOCAL_ALREADY_MASQED  (1 << 2) /*!< Already masqueraded */
 #define LOCAL_LAUNCHED_PBX    (1 << 3) /*!< PBX was launched */
 #define LOCAL_NO_OPTIMIZATION (1 << 4) /*!< Do not optimize using masquerading */
+#define LOCAL_MOH_PASSTHRU    (1 << 5) /*!< Pass through music on hold start/stop frames */
 
 static AST_LIST_HEAD_STATIC(locals, local_pvt);
 
@@ -168,23 +169,17 @@ static int local_queue_frame(struct local_pvt *p, int isoutbound, struct ast_fra
 	/* Recalculate outbound channel */
 	other = isoutbound ? p->owner : p->chan;
 
-	/* do not queue frame if generator is on both local channels */
-	if (us && us->generator && other->generator)
+	if (!other) {
 		return 0;
+	}
+
+	/* do not queue frame if generator is on both local channels */
+	if (us && us->generator && other->generator) {
+		return 0;
+	}
 
 	/* Set glare detection */
 	ast_set_flag(p, LOCAL_GLARE_DETECT);
-	if (ast_test_flag(p, LOCAL_CANCEL_QUEUE)) {
-		/* We had a glare on the hangup.  Forget all this business,
-		return and destroy p.  */
-		ast_mutex_unlock(&p->lock);
-		p = local_pvt_destroy(p);
-		return -1;
-	}
-	if (!other) {
-		ast_clear_flag(p, LOCAL_GLARE_DETECT);
-		return 0;
-	}
 
 	/* Ensure that we have both channels locked */
 	while (other && ast_channel_trylock(other)) {
@@ -200,6 +195,20 @@ static int local_queue_frame(struct local_pvt *p, int isoutbound, struct ast_fra
 			ast_mutex_lock(&p->lock);
 		}
 		other = isoutbound ? p->owner : p->chan;
+	}
+
+	/* Since glare detection only occurs within this function, and because
+	 * a pvt flag cannot be set without having the pvt lock, this is the only
+	 * location where we could detect a cancelling of the queue. */
+	if (ast_test_flag(p, LOCAL_CANCEL_QUEUE)) {
+		/* We had a glare on the hangup.  Forget all this business,
+		return and destroy p.  */
+		ast_mutex_unlock(&p->lock);
+		p = local_pvt_destroy(p);
+		if (other) {
+			ast_channel_unlock(other);
+		}
+		return -1;
 	}
 
 	if (other) {
@@ -254,7 +263,7 @@ static void check_bridge(struct local_pvt *p, int isoutbound)
 			if (!p->chan->_bridge->_softhangup) {
 				if (!ast_mutex_trylock(&p->owner->lock)) {
 					if (!p->owner->_softhangup) {
-						if(p->owner->monitor && !p->chan->_bridge->monitor) {
+						if (p->owner->monitor && !p->chan->_bridge->monitor) {
 							/* If a local channel is being monitored, we don't want a masquerade
 							 * to cause the monitor to go away. Since the masquerade swaps the monitors,
 							 * pre-swapping the monitors before the masquerade will ensure that the monitor
@@ -264,6 +273,13 @@ static void check_bridge(struct local_pvt *p, int isoutbound)
 							p->owner->monitor = p->chan->_bridge->monitor;
 							p->chan->_bridge->monitor = tmp;
 						}
+						if (p->chan->audiohooks) {
+							struct ast_audiohook_list *audiohooks_swapper;
+							audiohooks_swapper = p->chan->audiohooks;
+							p->chan->audiohooks = p->owner->audiohooks;
+							p->owner->audiohooks = audiohooks_swapper;
+						}
+						ast_app_group_update(p->chan, p->owner);
 						ast_channel_masquerade(p->owner, p->chan->_bridge);
 						ast_set_flag(p, LOCAL_ALREADY_MASQED);
 					}
@@ -359,9 +375,9 @@ static int local_indicate(struct ast_channel *ast, int condition, const void *da
 		return -1;
 
 	/* If this is an MOH hold or unhold, do it on the Local channel versus real channel */
-	if (condition == AST_CONTROL_HOLD) {
+	if (!ast_test_flag(p, LOCAL_MOH_PASSTHRU) && condition == AST_CONTROL_HOLD) {
 		ast_moh_start(ast, data, NULL);
-	} else if (condition == AST_CONTROL_UNHOLD) {
+	} else if (!ast_test_flag(p, LOCAL_MOH_PASSTHRU) && condition == AST_CONTROL_UNHOLD) {
 		ast_moh_stop(ast);
 	} else {
 		/* Queue up a frame representing the indication as a control frame */
@@ -473,18 +489,24 @@ static int local_call(struct ast_channel *ast, char *dest, int timeout)
 	 * Note that cid_num and cid_name aren't passed in the ast_channel_alloc
 	 * call, so it's done here instead.
 	 */
+	p->chan->cid.cid_dnid = ast_strdup(p->owner->cid.cid_dnid);
 	p->chan->cid.cid_num = ast_strdup(p->owner->cid.cid_num);
 	p->chan->cid.cid_name = ast_strdup(p->owner->cid.cid_name);
 	p->chan->cid.cid_rdnis = ast_strdup(p->owner->cid.cid_rdnis);
 	p->chan->cid.cid_ani = ast_strdup(p->owner->cid.cid_ani);
 	p->chan->cid.cid_pres = p->owner->cid.cid_pres;
+	p->chan->cid.cid_ani2 = p->owner->cid.cid_ani2;
+	p->chan->cid.cid_ton = p->owner->cid.cid_ton;
+	p->chan->cid.cid_tns = p->owner->cid.cid_tns;
 	ast_string_field_set(p->chan, language, p->owner->language);
 	ast_string_field_set(p->chan, accountcode, p->owner->accountcode);
+	ast_string_field_set(p->chan, musicclass, p->owner->musicclass);
 	ast_cdr_update(p->chan);
 	p->chan->cdrflags = p->owner->cdrflags;
 
 	if (!ast_exists_extension(NULL, p->chan->context, p->chan->exten, 1, p->owner->cid.cid_num)) {
 		ast_log(LOG_NOTICE, "No such extension/context %s@%s while calling Local channel\n", p->chan->exten, p->chan->context);
+		ast_mutex_unlock(&p->lock);
 		return -1;
 	}
 
@@ -552,10 +574,14 @@ static int local_hangup(struct ast_channel *ast)
 		ast_clear_flag(p, LOCAL_LAUNCHED_PBX);
 		ast_module_user_remove(p->u_chan);
 	} else {
-		p->owner = NULL;
 		ast_module_user_remove(p->u_owner);
+		while (p->chan && ast_channel_trylock(p->chan)) {
+			DEADLOCK_AVOIDANCE(&p->lock);
+		}
+		p->owner = NULL;
 		if (p->chan) {
 			ast_queue_hangup(p->chan);
+			ast_channel_unlock(p->chan);
 		}
 	}
 	
@@ -568,13 +594,10 @@ static int local_hangup(struct ast_channel *ast)
 		   let local_queue do it. */
 		if (glaredetect)
 			ast_set_flag(p, LOCAL_CANCEL_QUEUE);
-		ast_mutex_unlock(&p->lock);
 		/* Remove from list */
 		AST_LIST_LOCK(&locals);
 		AST_LIST_REMOVE(&locals, p, list);
 		AST_LIST_UNLOCK(&locals);
-		/* Grab / release lock just in case */
-		ast_mutex_lock(&p->lock);
 		ast_mutex_unlock(&p->lock);
 		/* And destroy */
 		if (!glaredetect) {
@@ -612,6 +635,8 @@ static struct local_pvt *local_alloc(const char *data, int format)
 		*opts++ = '\0';
 		if (strchr(opts, 'n'))
 			ast_set_flag(tmp, LOCAL_NO_OPTIMIZATION);
+		if (strchr(opts, 'm'))
+			ast_set_flag(tmp, LOCAL_MOH_PASSTHRU);
 	}
 
 	/* Look for a context */

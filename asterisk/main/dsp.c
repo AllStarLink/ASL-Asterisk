@@ -42,7 +42,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 233014 $")
 
 #include <sys/types.h>
 #include <stdlib.h>
@@ -353,8 +353,8 @@ struct ast_dsp {
 	int tcount;
 	int digitmode;
 	int thinkdigit;
+	int display_inband_dtmf_warning;
 	float genergy;
-	int began;
 	union {
 		dtmf_detect_state_t dtmf;
 		mf_detect_state_t mf;
@@ -1479,7 +1479,10 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 			shortdata[x] = AST_ALAW(odata[x]);
 		break;
 	default:
-		ast_log(LOG_WARNING, "Inband DTMF is not supported on codec %s. Use RFC2833\n", ast_getformatname(af->subclass));
+		/*Display warning only once. Otherwise you would get hundreds of warnings every second */
+		if (dsp->display_inband_dtmf_warning)
+			ast_log(LOG_WARNING, "Inband DTMF is not supported on codec %s. Use RFC2833\n", ast_getformatname(af->subclass));
+		dsp->display_inband_dtmf_warning = 0;
 		return af;
 	}
 	silence = __ast_dsp_silence(dsp, shortdata, len, NULL);
@@ -1487,8 +1490,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 		memset(&dsp->f, 0, sizeof(dsp->f));
 		dsp->f.frametype = AST_FRAME_NULL;
 		ast_frfree(af);
-		ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-		return &dsp->f;
+		return ast_frisolate(&dsp->f);
 	}
 	if ((dsp->features & DSP_FEATURE_BUSY_DETECT) && ast_dsp_busydetect(dsp)) {
 		chan->_softhangup |= AST_SOFTHANGUP_DEV;
@@ -1496,11 +1498,9 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 		dsp->f.frametype = AST_FRAME_CONTROL;
 		dsp->f.subclass = AST_CONTROL_BUSY;
 		ast_frfree(af);
-		ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-		return &dsp->f;
+		return ast_frisolate(&dsp->f);
 	}
 	if ((dsp->features & DSP_FEATURE_DTMF_DETECT)) {
-
 		digit = __ast_dsp_digitdetect(dsp, shortdata, len, &writeback);
 #if 0
 		if (digit)
@@ -1519,8 +1519,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					if (chan)
 						ast_queue_frame(chan, af);
 					ast_frfree(af);
-					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-					return &dsp->f;
+					return ast_frisolate(&dsp->f);
 				}
 			} else {
 				if (digit) {
@@ -1532,7 +1531,6 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 						memset(&dsp->f, 0, sizeof(dsp->f));
 						dsp->f.frametype = AST_FRAME_DTMF_END;
 						dsp->f.subclass = dsp->thinkdigit;
-						dsp->began = 0;
 						FIX_INF(af);
 						if (chan)
 							ast_queue_frame(chan, af);
@@ -1540,20 +1538,14 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					} else {
 						dsp->thinkdigit = digit;
 						memset(&dsp->f, 0, sizeof(dsp->f));
-						if (!dsp->began)
-						{
-							dsp->f.frametype = AST_FRAME_DTMF_BEGIN;
-							dsp->f.subclass = dsp->thinkdigit;
-						} 
-						dsp->began = 1;
+						dsp->f.frametype = AST_FRAME_DTMF_BEGIN;
+						dsp->f.subclass = dsp->thinkdigit;
 						FIX_INF(af);
 						if (chan)
 							ast_queue_frame(chan, af);
-
 						ast_frfree(af);
 					}
-					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-					return &dsp->f;
+					return ast_frisolate(&dsp->f);
 				} else {
 					memset(&dsp->f, 0, sizeof(dsp->f));
 					if (dsp->thinkdigit != 'x') {
@@ -1561,7 +1553,6 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 						dsp->f.frametype = AST_FRAME_DTMF_END;
 						dsp->f.subclass = dsp->thinkdigit;
 						dsp->thinkdigit = 0;
-						dsp->began = 0;
 					} else {
 						dsp->f.frametype = AST_FRAME_DTMF;
 						dsp->f.subclass = 'u';
@@ -1571,15 +1562,13 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					if (chan)
 						ast_queue_frame(chan, af);
 					ast_frfree(af);
-					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-					return &dsp->f;
+					return ast_frisolate(&dsp->f);
 				}
 			}
 		} else if (!digit) {
 			/* Only check when there is *not* a hit... */
 			if (dsp->digitmode & DSP_DIGITMODE_MF) {
 				if (dsp->td.mf.current_digits) {
-					dsp->began = 0;
 					memset(&dsp->f, 0, sizeof(dsp->f));
 					dsp->f.frametype = AST_FRAME_DTMF;
 					dsp->f.subclass = dsp->td.mf.digits[0];
@@ -1589,12 +1578,10 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					if (chan)
 						ast_queue_frame(chan, af);
 					ast_frfree(af);
-					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-					return &dsp->f;
+					return ast_frisolate(&dsp->f);
 				}
 			} else {
 				if (dsp->td.dtmf.current_digits) {
-					dsp->began = 0;
 					memset(&dsp->f, 0, sizeof(dsp->f));
 					dsp->f.frametype = AST_FRAME_DTMF_END;
 					dsp->f.subclass = dsp->td.dtmf.digits[0];
@@ -1604,8 +1591,7 @@ struct ast_frame *ast_dsp_process(struct ast_channel *chan, struct ast_dsp *dsp,
 					if (chan)
 						ast_queue_frame(chan, af);
 					ast_frfree(af);
-					ast_set_flag(&dsp->f, AST_FRFLAG_FROM_DSP);
-					return &dsp->f;
+					return ast_frisolate(&dsp->f);
 				}
 			}
 		}
@@ -1660,6 +1646,7 @@ struct ast_dsp *ast_dsp_new(void)
 		dsp->threshold = DEFAULT_THRESHOLD;
 		dsp->features = DSP_FEATURE_SILENCE_SUPPRESS;
 		dsp->busycount = DSP_HISTORY;
+		dsp->display_inband_dtmf_warning = 1;
 		/* Initialize DTMF detector */
 		ast_dtmf_detect_init(&dsp->td.dtmf);
 		/* Initialize initial DSP progress detect parameters */
@@ -1675,17 +1662,6 @@ void ast_dsp_set_features(struct ast_dsp *dsp, int features)
 
 void ast_dsp_free(struct ast_dsp *dsp)
 {
-	if (ast_test_flag(&dsp->f, AST_FRFLAG_FROM_DSP)) {
-		/* If this flag is still set, that means that the dsp's destruction 
-		 * been torn down, while we still have a frame out there being used.
-		 * When ast_frfree() gets called on that frame, this ast_trans_pvt
-		 * will get destroyed, too. */
-
-		/* Set the magic hint that this has been requested to be destroyed. */
-		dsp->freqcount = -1;
-
-		return;
-	}
 	free(dsp);
 }
 
@@ -1813,18 +1789,4 @@ int ast_dsp_get_tstate(struct ast_dsp *dsp)
 int ast_dsp_get_tcount(struct ast_dsp *dsp) 
 {
 	return dsp->tcount;
-}
-
-void ast_dsp_frame_freed(struct ast_frame *fr)
-{
-	struct ast_dsp *dsp;
-
-	ast_clear_flag(fr, AST_FRFLAG_FROM_DSP);
-
-	dsp = (struct ast_dsp *) (((char *) fr) - offsetof(struct ast_dsp, f));
-
-	if (dsp->freqcount != -1)
-		return;
-	
-	ast_dsp_free(dsp);
 }

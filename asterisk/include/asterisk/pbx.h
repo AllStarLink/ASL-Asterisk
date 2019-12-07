@@ -26,6 +26,7 @@
 #include "asterisk/sched.h"
 #include "asterisk/channel.h"
 #include "asterisk/linkedlists.h"
+#include "asterisk/devicestate.h"
 
 #if defined(__cplusplus) || defined(c_plusplus)
 extern "C" {
@@ -37,8 +38,7 @@ extern "C" {
 #define AST_PBX_REPLACE 1
 
 /*! \brief Special return values from applications to the PBX { */
-#define AST_PBX_KEEPALIVE	10	/*!< Destroy the thread, but don't hang up the channel */
-#define AST_PBX_NO_HANGUP_PEER	11
+#define AST_PBX_KEEPALIVE               10	/*!< Destroy the thread, but don't hang up the channel */
 /*! } */
 
 #define PRIORITY_HINT	-1	/*!< Special Priority for a hint */
@@ -273,6 +273,14 @@ int ast_add_extension2(struct ast_context *con, int replace, const char *extensi
 	int priority, const char *label, const char *callerid, 
 	const char *application, void *data, void (*datad)(void *), const char *registrar);
 
+/*!
+ * \brief Map devstate to an extension state.
+ *
+ * \param[in] device state
+ *
+ * \return the extension state mapping.
+ */
+enum ast_extension_states ast_devstate_to_extenstate(enum ast_device_state devstate);
 
 /*! 
  * \brief Register an application.
@@ -382,6 +390,10 @@ int ast_get_hint(char *hint, int maxlen, char *name, int maxnamelen,
  * \param priority priority of the action within the extension
  * \param callerid callerid to search for
  *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
+ *
  * \return If an extension within the given context(or callerid) with the given priority 
  *         is found a non zero value will be returned. Otherwise, 0 is returned.
  */
@@ -397,6 +409,10 @@ int ast_exists_extension(struct ast_channel *c, const char *context, const char 
  * \param label label of the action within the extension to match to priority
  * \param callerid callerid to search for
  *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
+ *
  * \return the priority which matches the given label in the extension or -1 if not found.
  */
 int ast_findlabel_extension(struct ast_channel *c, const char *context, 
@@ -404,6 +420,10 @@ int ast_findlabel_extension(struct ast_channel *c, const char *context,
 
 /*!
  * \brief Find the priority of an extension that has the specified label
+ *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
  *
  * \note This function is the same as ast_findlabel_extension, except that it accepts
  * a pointer to an ast_context structure to specify the context instead of the
@@ -421,6 +441,10 @@ int ast_findlabel_extension2(struct ast_channel *c, struct ast_context *con,
  * \param priority priority of extension path
  * \param callerid callerid of extension being searched for
  *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
+ *
  * \return If "exten" *could be* a valid extension in this context with or without
  * some more digits, return non-zero.  Basically, when this returns 0, no matter
  * what you add to exten, it's not going to be a valid extension anymore
@@ -436,6 +460,10 @@ int ast_canmatch_extension(struct ast_channel *c, const char *context,
  * \param exten extension to check
  * \param priority priority of extension path
  * \param callerid callerid of extension being searched for
+ *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
  *
  * \return If "exten" *could match* a valid extension in this context with
  * some more digits, return non-zero.  Does NOT return non-zero if this is
@@ -470,6 +498,10 @@ int ast_extension_close(const char *pattern, const char *data, int needmore);
  * \param callerid callerid of extension
  *
  * This adds a new extension to the asterisk extension list.
+ *
+ * \note It is possible for autoservice to be started and stopped on c during this
+ * function call, it is important that c is not locked prior to calling this. Otherwise
+ * a deadlock may occur
  *
  * \retval 0 on success 
  * \retval -1 on failure.

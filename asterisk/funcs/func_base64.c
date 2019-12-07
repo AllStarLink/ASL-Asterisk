@@ -23,7 +23,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 228378 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,12 +53,19 @@ static int base64_encode(struct ast_channel *chan, char *cmd, char *data,
 static int base64_decode(struct ast_channel *chan, char *cmd, char *data,
 			 char *buf, size_t len)
 {
+	int decoded_len;
+
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "Syntax: BASE64_DECODE(<base_64 string>) - missing argument!\n");
 		return -1;
 	}
 
-	ast_base64decode((unsigned char *) buf, data, len);
+	decoded_len = ast_base64decode((unsigned char *) buf, data, len);
+	if (decoded_len <= (len - 1)) {		/* if not truncated, */
+		buf[decoded_len] = '\0';
+	} else {
+		buf[len - 1] = '\0';
+	}
 
 	return 0;
 }

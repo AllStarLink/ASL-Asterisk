@@ -34,7 +34,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 114611 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 218577 $")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -152,7 +152,6 @@ AST_APP_OPTIONS(followme_opts, {
 });
 
 static int ynlongest = 0;
-static time_t start_time, answer_time, end_time;
 
 static const char *featuredigittostr;
 static int featuredigittimeout = 5000;		/*!< Feature Digit Timeout */
@@ -316,7 +315,7 @@ static int reload_followme(void)
 	featuredigittostr = ast_variable_retrieve(cfg, "general", "featuredigittimeout");
 	
 	if (!ast_strlen_zero(featuredigittostr)) {
-		if (!sscanf(featuredigittostr, "%d", &featuredigittimeout))
+		if (!sscanf(featuredigittostr, "%30d", &featuredigittimeout))
 			featuredigittimeout = 5000;
 	}
 
@@ -805,7 +804,6 @@ static void findmeexec(struct fm_args *tpargs)
 
 		if (option_debug > 1)	
 			ast_log(LOG_DEBUG, "Number %s timeout %ld\n", nm->number,nm->timeout);
-		time(&start_time);
 
 		number = ast_strdupa(nm->number);
 		if (option_debug > 2)
@@ -833,6 +831,10 @@ static void findmeexec(struct fm_args *tpargs)
 			if (outbound) {
 				ast_set_callerid(outbound, caller->cid.cid_num, caller->cid.cid_name, caller->cid.cid_num);
 				ast_channel_inherit_variables(tpargs->chan, outbound);
+				ast_channel_datastore_inherit(tpargs->chan, outbound);
+				ast_string_field_set(outbound, language, tpargs->chan->language);
+				ast_string_field_set(outbound, accountcode, tpargs->chan->accountcode);
+				ast_string_field_set(outbound, musicclass, tpargs->chan->musicclass);
 				if (option_verbose > 2)
 					ast_verbose(VERBOSE_PREFIX_3 "calling %s\n", dialarg);
 				if (!ast_call(outbound,dialarg,0)) {
@@ -876,22 +878,22 @@ static void findmeexec(struct fm_args *tpargs)
 		status = 0;	
 		if (!AST_LIST_EMPTY(findme_user_list))
 			winner = wait_for_winner(findme_user_list, nm, caller, tpargs->namerecloc, &status, tpargs);
-		
-					
+
 		AST_LIST_TRAVERSE_SAFE_BEGIN(findme_user_list, fmuser, entry) {
 			if (!fmuser->cleared && fmuser->ochan != winner)
 				clear_caller(fmuser);
 			AST_LIST_REMOVE_CURRENT(findme_user_list, entry);
 			free(fmuser);
 		}
-		AST_LIST_TRAVERSE_SAFE_END
+		AST_LIST_TRAVERSE_SAFE_END;
+
 		fmuser = NULL;
 		tmpuser = NULL;
 		headuser = NULL;	
 		if (winner)
 			break;
 
-		if (!caller) {
+		if (!caller || ast_check_hangup(caller)) {
 			tpargs->status = 1;
 			free(findme_user_list);
 			return;	
@@ -916,9 +918,35 @@ static void findmeexec(struct fm_args *tpargs)
 		
 }
 
+static void end_bridge_callback (void *data)
+{
+	char buf[80];
+	time_t end;
+	struct ast_channel *chan = data;
+
+	time(&end);
+
+	ast_channel_lock(chan);
+	if (chan->cdr->answer.tv_sec) {
+		snprintf(buf, sizeof(buf), "%ld", end - chan->cdr->answer.tv_sec);
+		pbx_builtin_setvar_helper(chan, "ANSWEREDTIME", buf);
+	}
+
+	if (chan->cdr->start.tv_sec) {
+		snprintf(buf, sizeof(buf), "%ld", end - chan->cdr->start.tv_sec);
+		pbx_builtin_setvar_helper(chan, "DIALEDTIME", buf);
+	}
+	ast_channel_unlock(chan);
+}
+
+static void end_bridge_callback_data_fixup(struct ast_bridge_config *bconfig, struct ast_channel *originator, struct ast_channel *terminator)
+{
+	bconfig->end_bridge_callback_data = originator;
+}
+
 static int app_exec(struct ast_channel *chan, void *data)
 {
-	struct fm_args targs;
+	struct fm_args targs = { 0, };
 	struct ast_bridge_config config;
 	struct call_followme *f;
 	struct number *nm, *newnm;
@@ -930,29 +958,32 @@ static int app_exec(struct ast_channel *chan, void *data)
 	int duration = 0;
 	struct ast_channel *caller;
 	struct ast_channel *outbound;
-	static char toast[80];
 	
 	AST_DECLARE_APP_ARGS(args,
 		AST_APP_ARG(followmeid);
 		AST_APP_ARG(options);
 	);
 	
+	if (ast_strlen_zero(data)) {
+		ast_log(LOG_WARNING, "%s requires an argument (followmeid)\n",app);
+		return -1;
+	}
+
 	if (!(argstr = ast_strdupa((char *)data))) {
 		ast_log(LOG_ERROR, "Out of memory!\n");
 		return -1;
 	}
 
-	if (!data) {
-		ast_log(LOG_WARNING, "%s requires an argument (followmeid)\n",app);
+
+	AST_STANDARD_APP_ARGS(args, argstr);
+	if (ast_strlen_zero(args.followmeid)) {
+		ast_log(LOG_WARNING, "%s requires an argument (followmeid)\n", app);
 		return -1;
 	}
 
 	u = ast_module_user_add(chan);
 
-	AST_STANDARD_APP_ARGS(args, argstr);
-
-	if (!ast_strlen_zero(args.followmeid)) 
-		AST_LIST_LOCK(&followmes);
+	AST_LIST_LOCK(&followmes);
 	AST_LIST_TRAVERSE(&followmes, f, entry) {
 		if (!strcasecmp(f->name, args.followmeid) && (f->active))
 			break;
@@ -1036,7 +1067,11 @@ static int app_exec(struct ast_channel *chan, void *data)
 			ast_set_flag(&(config.features_callee), AST_FEATURE_REDIRECT);
 			ast_set_flag(&(config.features_callee), AST_FEATURE_AUTOMON);
 			ast_set_flag(&(config.features_caller), AST_FEATURE_AUTOMON);
-				
+
+			config.end_bridge_callback = end_bridge_callback;
+			config.end_bridge_callback_data = chan;
+			config.end_bridge_callback_data_fixup = end_bridge_callback_data_fixup;
+
 			ast_moh_stop(caller);
 			/* Be sure no generators are left on it */
 			ast_deactivate_generator(caller);
@@ -1047,13 +1082,7 @@ static int app_exec(struct ast_channel *chan, void *data)
 				ast_hangup(outbound);
 				goto outrun;
 			}
-			time(&answer_time);
 			res = ast_bridge_call(caller,outbound,&config);
-			time(&end_time);
-			snprintf(toast, sizeof(toast), "%ld", (long)(end_time - start_time));
-			pbx_builtin_setvar_helper(caller, "DIALEDTIME", toast);
-			snprintf(toast, sizeof(toast), "%ld", (long)(end_time - answer_time));
-			pbx_builtin_setvar_helper(caller, "ANSWEREDTIME", toast);
 			if (outbound)
 				ast_hangup(outbound);
 		}

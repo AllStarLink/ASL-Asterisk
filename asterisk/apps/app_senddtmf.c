@@ -27,7 +27,7 @@
  
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 50073 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 184078 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -104,7 +104,7 @@ static int manager_play_dtmf(struct mansession *s, const struct message *m)
 		astman_send_error(s, m, "Channel not specified");
 		return 0;
 	}
-	if (!digit) {
+	if (ast_strlen_zero(digit)) {
 		astman_send_error(s, m, "No digit specified");
 		ast_mutex_unlock(&chan->lock);
 		return 0;

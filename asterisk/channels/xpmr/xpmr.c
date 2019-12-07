@@ -1,7 +1,7 @@
 /*
  * xpmr.c - Xelatec Private Mobile Radio Processes
  *
- * All Rights Reserved. Copyright (C)2007-2009, Xelatec, LLC
+ * All Rights Reserved. Copyright (C)2007-2011, Xelatec, LLC
  *
  * 20070808 1235 Steven Henke, W9SH, sph@xelatec.com
  *
@@ -23,15 +23,10 @@
  *
  * A license has been granted to Digium (via disclaimer) for the use of
  * this code.
-
- * A license has been granted to Digium (via disclaimer) for the use of
- * this code.
  *
- * 20160829	inad	added rxlpf rxhpf txlpf txhpf
- * 20161024	inad	fixed set the number of coefficients
- * 20161027	WN3A    allow filters of different tap counts
  * 20090725 2039 sph@xelatec.com improved rxfrontend and squelch
-  */
+ * 20110426 1400 sph@xelatec.com add filter options as suggested by WN3A
+*/
 
 /*! \file
  *
@@ -56,14 +51,6 @@
 
 // XPMR_FILE_VERSION(__FILE__, "$Revision: 491 $")
 
-#define GCC_VERSION (__GNUC__ * 10000 \
-                               + __GNUC_MINOR__ * 100 \
-                               + __GNUC_PATCHLEVEL__)
-#if GCC_VERSION > 40600
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsequence-point"
-#endif
-
 #include <stdio.h>
 #include <ctype.h>
 #include <math.h>
@@ -75,17 +62,23 @@
 #include <sys/time.h>
 #include <stdlib.h>
 #include <errno.h>
-	   
+
 #include "xpmr.h"
 #include "xpmr_coef.h"
 #include "sinetabx.h"
 
+static i16 parentModuleDebugLevel=0;
 static i16 pmrChanIndex=0;	 			// count of created pmr instances
 //static i16 pmrSpsIndex=0;
 
 #if (DTX_PROG == 1) || 	XPMR_PPTP == 1
 static int ppdrvdev=0;
 #endif
+
+int		startskew(t_skewer *skt);
+int		inskew(t_skewer *skt, short int *pin);
+int		outskew(t_skewer *skt, short int *pout);
+void	skewcheck(t_skewer *skt);
 
 /*
 	Trace Routines
@@ -151,6 +144,21 @@ void	pptp_write(i16 bit, i16 state)
 }
 #endif
 /*
+*/
+#if 0
+void fscope( short int *p, int count)
+{
+	static FILE *fd=NULL;
+
+	if(fd==NULL)
+	{
+		fd=fopen("/tmp/fscope_xpmr","w");
+	}
+
+	if (fd) fwrite(p,2,count,fd);
+}
+#endif
+/*
 	take source string allocate and copy
 	copy is modified, delimiters are replaced with zeros to mark
 	end of string
@@ -182,7 +190,7 @@ i16 string_parse(char *src, char **dest, char ***ptrs)
 
 		if( p==0 && pd[i]!=',' && pd[i]!=' ' )
 		{
-			p=&(pd[i]);	
+			p=&(pd[i]);
 		}
 		else if(pd[i]==',' || pd[i]==0 )
 		{
@@ -202,7 +210,7 @@ i16 string_parse(char *src, char **dest, char ***ptrs)
 	*ptrs=calloc(numsub,4);
 	for(i=0;i<numsub;i++)
 	{
-		(*ptrs)[i]=ptstr[i];	
+		(*ptrs)[i]=ptstr[i];
 		TRACEJ(5,(" %i = %s\n",i,(*ptrs)[i]));
 	}
 	TRACEJ(5,("string_parse()=%i\n\n",numsub));
@@ -213,7 +221,6 @@ i16 string_parse(char *src, char **dest, char ***ptrs)
 	the parent program defines
 	pRxCodeSrc and pTxCodeSrc string pointers to the list of codes
 	pTxCodeDefault the default Tx Code.
-
 */
 i16 code_string_parse(t_pmr_chan *pChan)
 {
@@ -224,7 +231,7 @@ i16 code_string_parse(t_pmr_chan *pChan)
 	t_pmr_sps  	*pSps;
 	i16	maxctcssindex;
 
-	TRACEF(1,("code_string_parse(%i)\n",0)); 
+	TRACEF(1,("code_string_parse() start [%s]\n",pChan->name));
 	TRACEF(1,("pChan->pRxCodeSrc %s \n",pChan->pRxCodeSrc));
 	TRACEF(1,("pChan->pTxCodeSrc %s \n",pChan->pTxCodeSrc));
 	TRACEF(1,("pChan->pTxCodeDefault %s \n",pChan->pTxCodeDefault));
@@ -254,7 +261,7 @@ i16 code_string_parse(t_pmr_chan *pChan)
 	pChan->numtxcodes = string_parse( pChan->pTxCodeSrc, &(pChan->pTxCodeStr), &(pChan->pTxCode));
 
 	if(pChan->numrxcodes!=pChan->numtxcodes)printf("ERROR: numrxcodes != numtxcodes \n");
-	
+
 	pChan->rxCtcss->enabled=0;
 	pChan->rxCtcss->gain=1*M_Q8;
 	pChan->rxCtcss->limit=8192;
@@ -274,7 +281,7 @@ i16 code_string_parse(t_pmr_chan *pChan)
 	}
 
 	TRACEF(1,("code_string_parse(%i) 10\n",0));
-	
+
 	#ifdef XPMRX_H
 	xpmrx(pChan,XXO_LSDCODEPARSE);
 	#endif
@@ -493,9 +500,9 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	#define DCgainBpfNoise 	65536
 
 	i16 samples,nx,iOutput, *input, *output, *noutput;
-	i16 *x;
-	i16 decimator, decimate, doNoise, fever, fev1;
-	i32 i, naccum, outputGain, calcAdjust;
+	i16 *x, *coef;
+	i16 decimator, decimate, doNoise;
+    i32 i, naccum, outputGain, calcAdjust;
 	i64 y, npwr;
 
 	TRACEJ(5,("pmr_rx_frontend()\n"));
@@ -508,9 +515,9 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	input     = mySps->source;
 	output    = mySps->sink;
 	noutput   = mySps->parentChan->pRxNoise;
-	fever   = mySps->parentChan->fever;
 
 	nx        = mySps->nx;
+	coef      = mySps->coef;
 
 	calcAdjust = mySps->calcAdjust;
 	outputGain = mySps->outputGain;
@@ -519,14 +526,10 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	x=mySps->x;
 	iOutput=0;
 	npwr=0;
+	mySps->apeak=mySps->bpeak=0;
 
 	if(mySps->parentChan->rxCdType!=CD_XPMR_VOX)doNoise=1;
 	else doNoise=0;
-
-	if (fever)
-	    fev1 = (nx - 1) * 2;
-	else
-	    fev1 = nx - 1;
 
 	for(i=0;i<samples;i++)
 	{
@@ -537,41 +540,47 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 	    for(n=nx-1; n>0; n--)
 	       x[n] = x[n-1];
         #else
-		memmove(x+1,x,fev1);
+		memmove(x+1,x,2*(nx-1));
         #endif
-	    x[0] = input[i*2];
+
+	    //x[0] = input[i*2];		   // stereo
+		x[0] = input[i];		   // mono
 
 #if	XPMR_TRACE_FRONTEND == 1
 	    y=0;
 	    for(n=0; n<nx; n++)
-	        y +=  fir_rxlpf[mySps->parentChan->rxlpf].coefs[n] * x[n];
-
+	        y += coef[n] * x[n];
 	    y=((y/calcAdjust)*outputGain)/M_Q8;
-		input[i*2]=y;	 // debug output LowPass at 48KS/s
+		input[i]=y;	 // debug output LowPass at 48KS/s overwrite input
 #endif
 
 		if(doNoise)
 		{
 			// calculate noise filter output
 			naccum=0;
-			if(mySps->parentChan->rxNoiseFilType==0)
-			{
-			    for(n=0; n<taps_fir_bpf_noise_1; n++)
-			        naccum += coef_fir_bpf_noise_1[n] * x[n];
-			    naccum /= DCgainBpfNoise;
-			}
-			else
+			if(mySps->parentChan->rxNoiseFilType==2)
 			{
 			    for(n=0; n<taps_fir_bpf_noise_2; n++)
 			        naccum += coef_fir_bpf_noise_2[n] * x[n];
 			    naccum /= gain_fir_bpf_noise_2;
+			}
+			else if(mySps->parentChan->rxNoiseFilType==3)
+			{
+			    for(n=0; n<taps_fir_bpf_noise_3; n++)
+			        naccum += coef_fir_bpf_noise_3[n] * x[n];
+			    naccum /= gain_fir_bpf_noise_3;
+			}
+			else
+			{
+			    for(n=0; n<taps_fir_bpf_noise_1; n++)
+			        naccum += coef_fir_bpf_noise_1[n] * x[n];
+			    naccum /= DCgainBpfNoise;
 			}
 #if	XPMR_TRACE_FRONTEND == 1
 			input[i*2+1]=naccum;	 // output noise filter results
 #endif
 		    npwr+=naccum*naccum;
 		}
-
 
 		--decimator;
 
@@ -580,27 +589,36 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 			decimator=decimate;
 
 		    y=0;
+			/*
+				Using a pointer vs. hardcoding may be less efficient than
+				hardcoding. Therefore, it can optionally be fixed at compile time.
+			*/
+			#if XPMR_COMM_FIX == 0
 		    for(n=0; n<nx; n++)
-		        y += fir_rxlpf[mySps->parentChan->rxlpf].coefs[n] * x[n];
-
+		        y += coef[n] * x[n];
+			#else
+		    for(n=0; n<fir_rxlpf[0].taps; n++)
+		        y += fir_rxlpf[0].coefs[n] * x[n];
+			#endif
 		    y=((y/calcAdjust)*outputGain)/M_Q8;
 
 #if	XPMR_TRACE_OVFLW == 1
 			if(y>32767)
 			{
 				y=32767;
-				printf("pmr_rx_frontend() OVRFLW \n"  );
+				printf("WARNING: pmr_rx_frontend() OVRFLW\n");
 			}
 			else if(y<-32767)
 			{
 				y=-32767;
-				printf("pmr_rx_frontend() UNDFLW \n"  );
+				printf("WARNING: pmr_rx_frontend() UNDFLW\n");
 			}
 #else
 			if(y>32767)y=32767;
 			else if(y<-32767)y=-32767;
 #endif
 		    output[iOutput++]=y;					// Rx Baseband decimated
+			if(abs(y)>mySps->apeak)mySps->apeak=abs(y);
 
 		}  // if decimator
 	}
@@ -612,9 +630,9 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 		// compOut=Squelched
 		if(mySps->blanking)mySps->blanking--;
 		mySps->blanking=0;
-		if( !mySps->compOut && 
-		    ( (npwr>(mySps->setpt+mySps->hyst)) || 
-		      ( (mySps->apeak<(mySps->setpt/4)) && (npwr>mySps->setpt) ) 
+		if( !mySps->compOut &&
+		    ( (npwr>(mySps->setpt+mySps->hyst)) ||
+		      ( (mySps->bpeak<(mySps->setpt/4)) && (npwr>mySps->setpt) )
 		    )
 		   )
 		{
@@ -639,11 +657,91 @@ i16 pmr_rx_frontend(t_pmr_sps *mySps)
 		}
 		#endif
 
-		((t_pmr_chan *)(mySps->parentChan))->rxRssi=mySps->apeak=npwr; 
+		((t_pmr_chan *)(mySps->parentChan))->rxRssi=mySps->bpeak=npwr;
 	}
+	mySps->decimator = decimator;
+	return 0;
+}
+
+
+
+/*  *********************************************************************** */
+/*
+	min_rx_frontend
+	minimal rx frontend
+	Takes a block of input samples, low past filters and decimates it.
+*/
+i16 min_rx_frontend(t_pmr_sps *mySps)
+{
+	i16 samples,iOutput, *input, *output;
+	i16 *coef;
+	i16 decimator, decimate;
+    i32 i, inputGain,outputGain, calcAdjust;
+	i32 y;
+	i32 state00;
+ 	i16 coeff00, coeff01;
+
+	TRACEJ(5,("min_rx_frontend()\n"));
+
+	if(!mySps->enabled)return(1);
+
+	decimator = mySps->decimator;
+	decimate = mySps->decimate;
+
+	input     = mySps->source;
+	output    = mySps->sink;
+	coef      = mySps->coef;
+
+	inputGain=mySps->inputGain;
+	outputGain=mySps->outputGain;
+	calcAdjust=mySps->calcAdjust;
+
+	samples=mySps->nSamples*decimate;
+
+	coeff00=((i16*)mySps->coef)[0];
+	coeff01=((i16*)mySps->coef)[1];
+	state00=((i32*)mySps->x)[0];
+
+	iOutput=0;
+
+	for(i=0;i<samples;i++)
+	{
+    	y=input[i*2];
+		state00 = y + (state00*coeff01)/M_Q15;
+		y = (state00*coeff00)/(M_Q15);
+		y =(y*outputGain)/M_Q8;
+
+		--decimator;
+
+		if(decimator<=0)
+		{
+			decimator=decimate;
+
+#if	XPMR_TRACE_OVFLW == 1
+			if(y>32767)
+			{
+				y=32767;
+				printf("pmr_rx_frontend() OVRFLW \n"  );
+			}
+			else if(y<-32767)
+			{
+				y=-32767;
+				printf("pmr_rx_frontend() UNDFLW \n"  );
+			}
+#else
+			if(y>32767)y=32767;
+			else if(y<-32767)y=-32767;
+#endif
+		    output[iOutput++]=y;					// Rx Baseband decimated
+
+		}  // if decimator
+	}
+
+	((i32*)(mySps->x))[0]=state00;
 
 	return 0;
 }
+
 #endif
 /*
 	pmr general purpose fir
@@ -710,12 +808,15 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 		return 0;
 	}
 
+	if(mySps->b.lockinput)
+		ast_mutex_lock(&(mySps->parentChan->mutexWrite));
+
 	ii=0;
 	for(i=0;i<nsamples;i++)
 	{
 		int ix;
 
-		int64_t y=0;
+		i64 y=0;
 
 		if(decimate<0)
 		{
@@ -727,8 +828,12 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 			i16 n;
 			y=0;
 
+			#if 0 == 0
 		    for(n=nx-1; n>0; n--)
 		       x[n] = x[n-1];
+			#else
+			memmove(x+1,x,(nx-1)*sizeof(i16));
+			#endif
 		    x[0] = (input[i]*inputGain)/M_Q8;
 
 			#if 0
@@ -747,7 +852,7 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 
 			y=((y/calcAdjust)*outputGain)/M_Q8;
 
-			if (y>32767)y=32767;		 			// overflow
+			if (y>32767)y=32767;
 			else if(y<-32767)y=-32767;
 
 			if(mixOut){
@@ -804,6 +909,10 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 		}
 	}
 
+	mySps->parentChan->b.gotwrite=0;
+	if(mySps->b.lockinput)
+		ast_mutex_unlock(&(mySps->parentChan->mutexWrite));
+
 	mySps->decimator = decimator;
 
 	mySps->amax=amax;
@@ -816,6 +925,70 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 
 	return 0;
 }
+
+
+/*	***********************************************************************
+	minimal transmit filter
+*/
+
+i16 min_tx_fil(t_pmr_sps *mySps)
+{
+	i32 nsamples,inputGain,outputGain,calcAdjust;
+	i16 *input, *output;
+	i16 *x, *coef;
+    i32 i, ii;
+	i16 nx;
+	i16 interpolate;
+	i16 numChanOut, selChanOut, mixOut, monoOut;
+
+	TRACEJ(5,("min_tx_fil() %i %i\n",mySps->index, mySps->enabled));
+
+	if(!mySps->enabled)return(1);
+
+	inputGain  = mySps->inputGain;
+	calcAdjust = mySps->calcAdjust;
+	outputGain = mySps->outputGain;
+
+	input      = mySps->source;
+	output     = mySps->sink;
+	x          = mySps->x;
+	nx         = mySps->nx;
+	coef       = mySps->coef;
+
+	interpolate = mySps->interpolate;
+	inputGain  = mySps->inputGain;
+	outputGain = mySps->outputGain;
+	numChanOut = mySps->numChanOut;
+	selChanOut = mySps->selChanOut;
+	mixOut     = mySps->mixOut;
+	monoOut    = mySps->monoOut;
+
+	nsamples=mySps->nSamples;
+	ii=0;
+	for(i=0;i<nsamples;i++)
+	{
+		int ix;
+		//int64_t y=0;
+		int32_t y=0;
+
+		y=input[i];
+		if (y>32766)y=32766;		 			// overflow
+		else if(y<-32766)y=-32766;
+
+		for(ix=0;ix<interpolate;ix++)
+		{
+		    //y = (input[i]*inputGain)/M_Q8;
+			//y=(y*outputGain)/M_Q8;
+			output[(ii*2)]=y;
+			output[(ii*2)+1]=0;
+			ii++;
+		}
+	}
+	return 0;
+}
+/*	end of min_tx_fil	*/
+/*	*********************************************************************** */
+
 /*
 	general purpose integrator lpf
 */
@@ -824,7 +997,7 @@ i16 gp_inte_00(t_pmr_sps *mySps)
 	i16 npoints;
  	i16 *input, *output;
 
-	i32 outputGain;
+	i32 inputGain, outputGain,calcAdjust;
 	i32	i;
 	i32 accum;
 
@@ -839,7 +1012,9 @@ i16 gp_inte_00(t_pmr_sps *mySps)
 
 	npoints=mySps->nSamples;
 
+	inputGain=mySps->inputGain;
 	outputGain=mySps->outputGain;
+	calcAdjust=mySps->calcAdjust;
 
 	coeff00=((i16*)mySps->coef)[0];
 	coeff01=((i16*)mySps->coef)[1];
@@ -848,13 +1023,22 @@ i16 gp_inte_00(t_pmr_sps *mySps)
 	// note fixed gain of 2 to compensate for attenuation
 	// in passband
 
+	if(mySps->b.lockoutput)
+		ast_mutex_lock(&(mySps->parentChan->mutexWrite));
+
 	for(i=0;i<npoints;i++)
 	{
 		accum=input[i];
 		state00 = accum + (state00*coeff01)/M_Q15;
 		accum = (state00*coeff00)/(M_Q15/4);
-		output[i]=(accum*outputGain)/M_Q8;
+		accum = (accum*outputGain)/M_Q8;
+		if(accum>32767)accum=32767;
+		else if(accum<-32767)accum=-32767;
+		output[i]=(i16)(accum);
 	}
+
+	if(mySps->b.lockoutput)
+		ast_mutex_unlock(&(mySps->parentChan->mutexWrite));
 
 	((i32*)(mySps->x))[0]=state00;
 
@@ -867,7 +1051,7 @@ i16 gp_diff(t_pmr_sps *mySps)
 {
  	i16 *input, *output;
 	i16 npoints;
-	i32 outputGain, calcAdjust;
+	i32 inputGain, outputGain, calcAdjust;
 	i32	i;
 	i32 temp0,temp1;
  	i16 x0;
@@ -881,14 +1065,15 @@ i16 gp_diff(t_pmr_sps *mySps)
 
 	npoints=mySps->nSamples;
 
+	inputGain=mySps->inputGain;
 	outputGain=mySps->outputGain;
 	calcAdjust=mySps->calcAdjust;
 
 	coef=(i16*)(mySps->coef);
-	x=(i16*)(mySps->x);
 	a0=coef[0];
 	a1=coef[1];
 
+	x=(i16*)(mySps->x);
 	x0=x[0];
 
 	TRACEJ(5,("gp_diff()\n"));
@@ -900,7 +1085,7 @@ i16 gp_diff(t_pmr_sps *mySps)
 		temp1 = input[i] * a0;
 		   y0 = (temp0 + temp1)/calcAdjust;
 		   y0 =(y0*outputGain)/M_Q8;
-		
+
 		if(y0>32767)y0=32767;
 		else if(y0<-32767)y0=-32767;
         output[i]=y0;
@@ -915,10 +1100,10 @@ i16 gp_diff(t_pmr_sps *mySps)
 */
 i16 CenterSlicer(t_pmr_sps *mySps)
 {
-	i16 npoints;
+	i16 npoints,lhit,uhit;
  	i16 *input, *output, *buff;
 
-	i32 inputGainB;
+	i32 inputGain, outputGain, inputGainB;
 	i32	i;
 	i32 accum;
 
@@ -941,6 +1126,8 @@ i16 CenterSlicer(t_pmr_sps *mySps)
 
 	npoints=mySps->nSamples;
 
+	inputGain=mySps->inputGain;
+	outputGain=mySps->outputGain;
 	inputGainB=mySps->inputGainB;
 
 	amax=mySps->amax;
@@ -957,26 +1144,33 @@ i16 CenterSlicer(t_pmr_sps *mySps)
 	{
 		accum=input[i];
 
+		lhit=uhit=0;
+
 		if(accum>amax)
 		{
 			amax=accum;
+			uhit=1;
 			if(amin<(amax-setpt))
 			{
 				amin=(amax-setpt);
+				lhit=1;
 			}
 		}
 		else if(accum<amin)
 		{
 			amin=accum;
+			lhit=1;
 			if(amax>(amin+setpt))
 			{
 				amax=(amin+setpt);
+				uhit=1;
 			}
 		}
 		#if 0
 		if((discounteru-=1)<=0 && amax>amin)
 		{
 			if((amax-=10)<amin)amax=amin;
+			uhit=1;
 		}
 
 		if((discounterl-=1)<=0 && amin<amax)
@@ -988,7 +1182,7 @@ i16 CenterSlicer(t_pmr_sps *mySps)
 		if(lhit)discounterl=discfactor;
 
 		#else
-		 
+
 		if((amax-=discfactor)<amin)amax=amin;
 		if((amin+=discfactor)>amax)amin=amax;
 
@@ -1039,6 +1233,7 @@ i16 MeasureBlock(t_pmr_sps *mySps)
 	i16 npoints;
  	i16 *input, *output;
 
+	i32 inputGain, outputGain;
 	i32	i;
 	i32 accum;
 
@@ -1067,6 +1262,9 @@ i16 MeasureBlock(t_pmr_sps *mySps)
 	output	= mySps->sink;
 
 	npoints=mySps->nSamples;
+
+	inputGain=mySps->inputGain;
+	outputGain=mySps->outputGain;
 
 	amax=mySps->amax;
 	amin=mySps->amin;
@@ -1112,8 +1310,9 @@ i16 MeasureBlock(t_pmr_sps *mySps)
 	mySps->apeak=apeak;
 	mySps->discounteru=discounteru;
 	mySps->discounterl=discounterl;
-	if(apeak>=setpt) mySps->compOut=1;
-	else mySps->compOut=0;
+
+	if(apeak>=setpt)mySps->compOut=1;
+	else if(apeak<(setpt-mySps->hyst))mySps->compOut=0;
 
 	//TRACEX((" -MeasureBlock()=%i\n",mySps->apeak));
 	return 0;
@@ -1127,7 +1326,7 @@ i16 SoftLimiter(t_pmr_sps *mySps)
 	//i16 samples, lhit,uhit;
  	i16 *input, *output;
 
-	i32 outputGain;
+	i32 inputGain, outputGain;
 	i32	i;
 	i32 accum;
 	i32  tmp;
@@ -1136,10 +1335,12 @@ i16 SoftLimiter(t_pmr_sps *mySps)
 	i32  amin;			// buffer amplitude minimum
 	//i32  apeak;		// buffer amplitude peak
 	i32  setpt;			// amplitude set point for amplitude comparator
+	i16  compOut;		// amplitude comparator output
 
 	input   = mySps->source;
 	output	= mySps->sink;
 
+	inputGain=mySps->inputGain;
 	outputGain=mySps->outputGain;
 
 	npoints=mySps->nSamples;
@@ -1160,6 +1361,7 @@ i16 SoftLimiter(t_pmr_sps *mySps)
 		    tmp=((accum-setpt)*4)/128;
 		    accum=setpt+tmp;
 			if(accum>amax)accum=amax;
+			compOut=1;
 			accum=setpt;
 		}
 		else if(accum<-setpt)
@@ -1167,10 +1369,15 @@ i16 SoftLimiter(t_pmr_sps *mySps)
 		    tmp=((accum+setpt)*4)/128;
 		    accum=(-setpt)-tmp;
 			if(accum<amin)accum=amin;
+			compOut=1;
 			accum=-setpt;
 		}
 
-		output[i]=(accum*outputGain)/M_Q8;
+		accum=(accum*outputGain)/M_Q8;
+		if(accum>32767)accum=32767;
+		else if(accum<-32767)accum=-32767;
+		output[i]=accum;
+
 	}
 
 	return 0;
@@ -1191,7 +1398,7 @@ i16	SigGen(t_pmr_sps *mySps)
 	i32 ph;
 	i16 i,outputgain,waveform,numChanOut,selChanOut;
 	i32 accum;
-	
+
 	t_pmr_chan *pChan;
 	pChan=mySps->parentChan;
 	TRACEC(5,("SigGen(%i %i %i)\n",mySps->option,mySps->enabled,mySps->state));
@@ -1232,7 +1439,6 @@ i16	SigGen(t_pmr_sps *mySps)
 		mySps->option=0;
 		mySps->state=0;
 		mySps->enabled=0;
-		mySps->b.mute=0;
 		for(i=0;i<mySps->nSamples;i++)
 			mySps->sink[(i*numChanOut)+selChanOut]=0;
 		return(0);
@@ -1274,8 +1480,6 @@ i16	SigGen(t_pmr_sps *mySps)
 
 		if(mySps->source)accum+=mySps->source[i];
 
-		if(mySps->b.mute) accum = 0;
-
 		mySps->sink[(i*numChanOut)+selChanOut]=accum;
 
 		ph=(ph+mySps->discfactor)%(SAMPLES_PER_SINE*PH_FRACT_FACT);
@@ -1303,7 +1507,6 @@ i16 pmrMixer(t_pmr_sps *mySps)
 	pChan=mySps->parentChan;
 	TRACEF(5,("pmrMixer()\n"));
 
-
 	input     = mySps->source;
 	inputB    = mySps->sourceB;
 	output    = mySps->sink;
@@ -1324,16 +1527,14 @@ i16 pmrMixer(t_pmr_sps *mySps)
 
 	for(i=0;i<npoints;i++)
 	{
-		if (inputB)
-		{
-			accum = ((input[i]*inputGain)/M_Q8) +
+		accum = ((input[i]*inputGain)/M_Q8) +
 				((inputB[i]*inputGainB)/M_Q8);
-		}
-		else
-		{
-			accum = (input[i]*inputGain)/M_Q8;
-		}
+
 		accum=(accum*outputGain)/M_Q8;
+
+		if(accum>32766)accum=32766;
+		else if(accum<-32766)accum=-32766;
+
 		output[i]=accum;
 
 		if(measPeak){
@@ -1398,11 +1599,12 @@ i16 DelayLine(t_pmr_sps *mySps)
 	{
 		if(mySps->b.dirty)
 		{
-			mySps->b.dirty=0; 
+			mySps->b.dirty=0;
 			mySps->buffInIndex=0;
 			memset((void *)(mySps->buff),0,mySps->buffSize*2);
 			memset((void *)(mySps->sink),0,mySps->nSamples*2);
 		}
+		mySps->b.outzero=0;
 		return(0);
 	}
 
@@ -1415,7 +1617,7 @@ i16 DelayLine(t_pmr_sps *mySps)
 	outindex	= inindex-mySps->buffLead;
 
 	if(outindex<0)outindex+=buffsize;
-	
+
 	for(i=0;i<npoints;i++)
 	{
 		inindex %= buffsize;
@@ -1435,7 +1637,8 @@ i16 DelayLine(t_pmr_sps *mySps)
 i16 ctcss_detect(t_pmr_chan *pChan)
 {
 	i16 i,points2do,*pInput,hit,thit,relax;
-	i16 tnum, tmp,indexNow,diffpeak;
+	i16 tnum, tmp,indexNow,gain,diffpeak;
+	i16 difftrig;
 	i16 tv0,tv1,tv2,tv3,indexDebug;
 	i16 points=0;
 	i16 indexWas=0;
@@ -1450,6 +1653,10 @@ i16 ctcss_detect(t_pmr_chan *pChan)
 
 	relax  = pChan->rxCtcss->relax;
 	pInput = pChan->rxCtcss->input;
+	gain   = pChan->rxCtcss->gain;
+
+	if(relax) difftrig=(-0.1*M_Q15);
+	else difftrig=(-0.05*M_Q15);
 
 	thit=hit=-1;
 
@@ -1555,7 +1762,7 @@ i16 ctcss_detect(t_pmr_chan *pChan)
 				thit=tnum;
 				if(pChan->rxCtcss->decode!=tnum)
 				{
-					ptdet->zd=ptdet->dvu=ptdet->dvd=0;	
+					ptdet->zd=ptdet->dvu=ptdet->dvd=0;
 				}
 			}
 
@@ -1593,7 +1800,7 @@ i16 ctcss_detect(t_pmr_chan *pChan)
 			}
 			#endif
 			indexWas=indexNow;
-			ptdet->zIndex=(++ptdet->zIndex)%4;
+			ptdet->zIndex=(ptdet->zIndex+1)%4;
 		}
 		ptdet->counter-=(points2do*CTCSS_SCOUNT_MUL);
 
@@ -1639,7 +1846,7 @@ i16 ctcss_detect(t_pmr_chan *pChan)
 /*
 	TxTestTone
 */
-i16	TxTestTone(t_pmr_chan *pChan, i16 function)
+static i16	TxTestTone(t_pmr_chan *pChan, i16 function)
 {
 	if(function==1)
 	{
@@ -1650,11 +1857,11 @@ i16	TxTestTone(t_pmr_chan *pChan, i16 function)
 	}
 	else
 	{
+		pChan->spsTx->source=pChan->spsSigGen1->sink;
 		pChan->spsSigGen1->option=3;
 	}
 	return 0;
 }
-
 /*
 	assumes:
 	sampling rate is 48KS/s
@@ -1665,7 +1872,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 {
 	i16 i, *inputTmp;
 	t_pmr_chan 	*pChan;
-	t_pmr_sps  	*pSps;;
+	t_pmr_sps  	*pSps;
 	t_dec_ctcss	*pDecCtcss;
 
 	TRACEJ(1,("createPmrChannel(%p,%i)\n",tChan,numSamples));
@@ -1719,13 +1926,17 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->rxSquelchPoint = tChan->rxSquelchPoint;
 		pChan->rxCarrierHyst = tChan->rxCarrierHyst;
 		pChan->rxSqVoxAdj=tChan->rxSqVoxAdj;
+		pChan->rxSqVoxDis=tChan->rxSqVoxDis;
+		pChan->rxSqVoxHyst=tChan->rxSqVoxHyst;
+		pChan->rxSqVoxHtim=tChan->rxSqVoxHtim;
+
 		pChan->rxSquelchDelay=tChan->rxSquelchDelay;
 		pChan->rxNoiseFilType=tChan->rxNoiseFilType;
 
 		pChan->txMod=tChan->txMod;
 		pChan->txHpfEnable=1;
 		pChan->txLpfEnable=1;
-
+		pChan->txboostset=tChan->txboostset;
 		pChan->pTxCodeDefault=tChan->pTxCodeDefault;
 		pChan->pRxCodeSrc=tChan->pRxCodeSrc;
 		pChan->pTxCodeSrc=tChan->pTxCodeSrc;
@@ -1743,40 +1954,38 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->b.dcstxpolarity=tChan->b.dcstxpolarity;
 		pChan->b.lsdrxpolarity=tChan->b.lsdrxpolarity;
 		pChan->b.lsdtxpolarity=tChan->b.lsdtxpolarity;
-		pChan->b.txboost=tChan->b.txboost;
+		pChan->b.repeat=tChan->b.repeat;
+		pChan->b.minsigproc=tChan->b.minsigproc;
 
 		pChan->txsettletime=tChan->txsettletime;
 		pChan->tracelevel=tChan->tracelevel;
 		pChan->tracetype=tChan->tracetype;
+		pChan->parentDebugLevel=tChan->parentDebugLevel;
+		if(tChan->parentDebugLevel)parentModuleDebugLevel=1;
+
 		pChan->ukey=tChan->ukey;
 		pChan->name=tChan->name;
-		pChan->fever = tChan->fever;
 
-        if(tChan->rxlpf<MAX_RXLPF&&tChan->rxlpf>=0)
-            pChan->rxlpf=tChan->rxlpf;
-        else
-            pChan->rxlpf=0;
-        
-        if(tChan->rxhpf<MAX_RXHPF&&tChan->rxhpf>=0)
-            pChan->rxhpf=tChan->rxhpf;
-        else
-            pChan->rxhpf=0;
-        
-        if(tChan->txlpf<MAX_TXLPF&&tChan->txlpf>=0)
-            pChan->txlpf=tChan->txlpf;
-        else
-            pChan->txlpf=0;
-        
-        if(tChan->txhpf<MAX_TXHPF&&tChan->txhpf>=0)
-            pChan->txhpf=tChan->txhpf;
-        else
-            pChan->txhpf=0;
-        ast_log(LOG_NOTICE,"xpmr rxlpf: %d\n",pChan->rxlpf);
-        ast_log(LOG_NOTICE,"xpmr rxhpf: %d\n",pChan->rxhpf);
-        ast_log(LOG_NOTICE,"xpmr txlpf: %d\n",pChan->txlpf);
-        ast_log(LOG_NOTICE,"xpmr txhpf: %d\n",pChan->txhpf);
+		if(tChan->rxlpf<MAX_RXLPF&&tChan->rxlpf>=0)
+			pChan->rxlpf=tChan->rxlpf;
+		else
+			pChan->rxlpf=0;
 
-    }
+		if(tChan->rxhpf<MAX_RXHPF&&tChan->rxhpf>=0)
+			pChan->rxhpf=tChan->rxhpf;
+		else
+			pChan->rxhpf=0;
+
+		if(tChan->txlpf<MAX_TXLPF&&tChan->txlpf>=0)
+			pChan->txlpf=tChan->txlpf;
+		else
+			pChan->txlpf=0;
+
+		if(tChan->txhpf<MAX_TXHPF&&tChan->txhpf>=0)
+			pChan->txhpf=tChan->txhpf;
+		else
+			pChan->txhpf=0;
+	}
 
 	if(pChan->rxCarrierHyst==0)
 		pChan->rxCarrierHyst = 3000;
@@ -1800,23 +2009,33 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->rxCtcssDecodeEnable=1;
 	}
 
-	if(pChan->txMod)
-		pChan->txLimiterEnable=1;
-	if(pChan->txMod > 1)
+	if(pChan->txMod==1){
 		pChan->txPreEmpEnable=1;
+		pChan->txLimiterEnable=1;
+	}
+    else if(pChan->txMod==2){
+		pChan->txPreEmpEnable=1;
+		pChan->txLimiterEnable=0;
+	}
 
-	pChan->dd.option=9;
-	dedrift(pChan);
+	//pChan->dd.option=9;
+	//dedrift(pChan);
 
-	pChan->lastrxdecode = CTCSS_NULL;
+	startskew(&pChan->skewer);
+	pChan->skewer.inpace=0;
+
 
 	TRACEF(1,("calloc buffers \n"));
+
+	pChan->pRead     	= calloc(numSamples,2*4);
+	pChan->pWrite     	= calloc(numSamples,2*4);
 
 	pChan->pRxDemod 	= calloc(numSamples,2);
 	pChan->pRxNoise 	= calloc(numSamples,2);
 	pChan->pRxBase 		= calloc(numSamples,2);
 	pChan->pRxHpf 		= calloc(numSamples,2);
 	pChan->pRxLsd 		= calloc(numSamples,2);
+	pChan->pRxDeEmp 	= calloc(numSamples,2);
 	pChan->pRxSpeaker 	= calloc(numSamples,2);
 	pChan->pRxCtcss 	= calloc(numSamples,2);
 	pChan->pRxDcTrack 	= calloc(numSamples,2);
@@ -1826,22 +2045,661 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	pChan->pTxBase  	= calloc(numSamples,2);
 	pChan->pTxHpf	 	= calloc(numSamples,2);
 	pChan->pTxPreEmp 	= calloc(numSamples,2);
+
 	pChan->pTxLimiter 	= calloc(numSamples,2);
 	pChan->pTxLsd	 	= calloc(numSamples,2);
 	pChan->pTxLsdLpf    = calloc(numSamples,2);
 	pChan->pTxComposite	= calloc(numSamples,2);
 	pChan->pSigGen0		= calloc(numSamples,2);
     pChan->pSigGen1		= calloc(numSamples,2);
-		
+
 	pChan->prxMeasure	= calloc(numSamples,2);
 
 	pChan->pTxOut		= calloc(numSamples,2*2*6);		// output buffer
-    
+
 #ifdef HAVE_XPMRX
 	pChan->pLsdEnc		= calloc(sizeof(t_encLsd),1);
 #endif
 
-	#if XPMR_DEBUG0 == 1
+
+	#ifdef XPMRX_H
+	// LSD GENERATOR
+ 	pSps=pChan->spsLsdGen=createPmrSps(pChan);
+	pSps->source=NULL;
+	pSps->sink=pChan->pTxLsd;
+	pSps->numChanOut=1;
+	pSps->selChanOut=0;
+	pSps->sigProc=LsdGen;
+	pSps->nSamples=pChan->nSamplesTx;
+	pSps->outputGain=(.49*M_Q8);
+	pSps->option=0;
+	pSps->interpolate=1;
+	pSps->decimate=1;
+	pSps->enabled=0;
+	#endif
+
+	// General Purpose Function Generator
+	pSps=pChan->spsSigGen1=createPmrSps(pChan);
+	pSps->sink=pChan->pSigGen1;
+	pSps->numChanOut=1;
+	pSps->selChanOut=0;
+	pSps->sigProc=SigGen;
+	pSps->nSamples=pChan->nSamplesTx;
+	pSps->sampleRate=SAMPLE_RATE_NETWORK;
+	pSps->freq=10000; 						// in increments of 0.1 Hz
+	pSps->outputGain=(.25*M_Q8);
+	pSps->option=0;
+	pSps->interpolate=1;
+	pSps->decimate=1;
+	pSps->enabled=0;
+
+
+	// CTCSS ENCODER
+	pSps = pChan->spsSigGen0 = createPmrSps(pChan);
+	pSps->sink=pChan->pTxLsd;
+	pSps->sigProc=SigGen;
+	pSps->numChanOut=1;
+	pSps->selChanOut=0;
+	pSps->nSamples=pChan->nSamplesTx;
+	pSps->sampleRate=SAMPLE_RATE_NETWORK;
+	pSps->freq=1000;	  					// in 0.1 Hz steps
+	pSps->outputGain=(0.5*M_Q8);
+	pSps->option=0;
+	pSps->interpolate=1;
+	pSps->decimate=1;
+	pSps->enabled=0;
+
+	// Tx LSD Low Pass Filter
+	pSps=pChan->spsTxLsdLpf=createPmrSps(pChan);
+	pSps->source=pChan->pTxLsd;
+	pSps->sink=pChan->pTxLsdLpf;
+	pSps->sigProc=pmr_gp_fir;
+	pSps->enabled=0;
+	pSps->numChanOut=1;
+	pSps->selChanOut=0;
+	pSps->nSamples=pChan->nSamplesTx;
+	pSps->decimator=pSps->decimate=1;
+	pSps->interpolate=1;
+	pSps->inputGain=(1*M_Q8);
+	pSps->outputGain=(1*M_Q8);
+
+	// configure the longer, lower cutoff filter by default
+	pSps->ncoef=taps_fir_lpf_215_9_88;
+	pSps->size_coef=2;
+	pSps->coef=(void*)coef_fir_lpf_215_9_88;
+	pSps->nx=taps_fir_lpf_215_9_88;
+	pSps->size_x=2;
+	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+	pSps->calcAdjust=gain_fir_lpf_215_9_88;
+
+	pSps->inputGain=(1*M_Q8);
+	pSps->outputGain=(1*M_Q8);
+
+	TRACEF(1,("spsTxLsdLpf = sps \n"));
+
+	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+
+
+	// RX Process
+	TRACEF(1,("create rx\n"));
+	pSps = NULL;
+
+	// allocate space for first sps and set pointers
+
+	if(pChan->b.minsigproc)
+	{
+		/* minimal signal processing */
+		pSps=pChan->spsRx=createPmrSps(pChan);
+		pSps->source=NULL;
+		pSps->sink=pChan->pRxSpeaker;
+		pSps->sigProc=min_rx_frontend;
+		pSps->enabled=1;
+		pSps->decimator=pSps->decimate=6;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->ncoef=taps_int_lpf_3300_1_2;
+		pSps->size_coef=2;
+		pSps->coef=(void*)coef_int_lpf_3300_1_2;
+		pSps->nx=taps_int_lpf_300_1_2;
+		pSps->size_x=4;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+
+		pSps->calcAdjust=(gain_int_lpf_3300_1_2*256)/0x0100;
+		pSps->outputGain=(1.0*M_Q8);
+
+		pChan->prxVoiceMeasure=pSps->sink;
+		pChan->prxVoiceAdjust=&(pSps->outputGain);
+		pChan->spsRxOut=pSps;
+
+		#if XPMR_DEBUG0 == 1
+		pSps->debugBuff0=pChan->pRxDemod;
+		pSps->debugBuff2=pChan->prxDebug0;
+		#endif
+
+		// dummy stubs for unused references to avoid seg faults
+		pChan->spsRxLsdNrz=createPmrSps(pChan);
+		pChan->prxCtcssAdjust=&(pSps->outputGain);
+		pChan->prxSquelchAdjust=&pChan->spsRxLsdNrz->setpt;
+		pChan->spsRxLsd=pChan->spsRxLsdNrz;
+		TRACEF(1,("created rx minsigproc %p %p\n",pSps->source,pSps->sink));
+	}
+	else
+	{
+		/* full signal processing */
+		pSps=pChan->spsRx=createPmrSps(pChan);
+		pSps->source=NULL;
+		pSps->sink=pChan->pRxBase;
+		pSps->sigProc=pmr_rx_frontend;
+		pSps->enabled=1;
+		pSps->decimator=pSps->decimate=6;
+		pSps->interpolate=1;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->ncoef = pSps->nx = fir_rxlpf[pChan->rxlpf].taps;
+		pSps->size_coef=2;
+		pSps->coef=(void*)fir_rxlpf[pChan->rxlpf].coefs;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_coef));
+		pSps->calcAdjust=(fir_rxlpf[pChan->rxlpf].gain*256)/0x0100;
+ 		pSps->outputGain=(1.0*M_Q8);
+		pSps->discfactor=2;
+		pSps->hyst=pChan->rxCarrierHyst;
+		pSps->setpt=pChan->rxCarrierPoint;
+		pChan->prxSquelchAdjust=&pSps->setpt;
+		#if XPMR_DEBUG0 == 1
+		pSps->debugBuff0=pChan->pRxDemod;
+		pSps->debugBuff1=pChan->pRxNoise;
+		pSps->debugBuff2=pChan->prxDebug0;
+		#endif
+		pChan->spsRxOut=pSps;
+
+
+		// allocate space for next sps and set pointers
+		// Rx SubAudible Decoder Low Pass Filter
+		pSps=pChan->spsRxLsd=pSps->nextSps=createPmrSps(pChan);
+		pSps->source=pChan->pRxBase;
+		pSps->sink=pChan->pRxLsd;
+		pSps->sigProc=pmr_gp_fir;
+		pSps->enabled=1;
+		pSps->numChanOut=1;
+		pSps->selChanOut=0;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->decimator=pSps->decimate=1;
+		pSps->interpolate=1;
+
+		// configure the larger, lower cutoff filter by default
+		pSps->ncoef=taps_fir_lpf_215_9_88;
+		pSps->size_coef=2;
+		pSps->coef=(void*)coef_fir_lpf_215_9_88;
+		pSps->nx=taps_fir_lpf_215_9_88;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		pSps->calcAdjust=gain_fir_lpf_215_9_88;
+
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		pChan->prxCtcssMeasure=pSps->sink;
+		pChan->prxCtcssAdjust=&(pSps->outputGain);
+
+		// CTCSS CenterSlicer
+		pSps=pChan->spsRxLsdNrz=pSps->nextSps=createPmrSps(pChan);
+		pSps->source=pChan->pRxLsd;
+		pSps->sink=pChan->pRxDcTrack;
+		pSps->buff=pChan->pRxLsdLimit;
+		pSps->sigProc=CenterSlicer;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->discfactor=LSD_DFS;		  		// centering time constant
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		pSps->setpt=4900;	  			// ptp clamp for DC centering
+		pSps->inputGainB=625; 			// peak output limiter clip point
+		pSps->enabled=0;
+
+
+		// Rx HPF
+		pSps=pSps->nextSps=createPmrSps(pChan);
+		pChan->spsRxHpf=pSps;
+		pSps->source=pChan->pRxBase;
+		pSps->sink=pChan->pRxHpf;
+		pSps->sigProc=pmr_gp_fir;
+		pSps->enabled=1;
+		pSps->numChanOut=1;
+		pSps->selChanOut=0;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->decimator=pSps->decimate=1;
+		pSps->interpolate=1;
+		pSps->ncoef = pSps->nx = fir_rxhpf[pChan->rxhpf].taps;
+		pSps->size_coef=2;
+		pSps->coef = (void*)fir_rxhpf[pChan->rxhpf].coefs;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+		pSps->calcAdjust = fir_rxhpf[pChan->rxhpf].gain;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		pChan->prxVoiceAdjust=&(pSps->outputGain);
+		pChan->spsRxOut=pSps;
+		TRACEF(1,("created rx hpf %p %p\n",pSps->source,pSps->sink));
+
+		// allocate space for next sps and set pointers
+		// Rx DeEmp
+		if(pChan->rxDeEmpEnable){
+			pSps=pSps->nextSps=createPmrSps(pChan);
+			pChan->spsRxDeEmp=pSps;
+			pSps->source=pChan->pRxHpf;
+			pSps->sink=pChan->pRxSpeaker;
+			pChan->spsRxOut=pSps;
+			pSps->sigProc=gp_inte_00;
+			pSps->enabled=1;
+			pSps->nSamples=pChan->nSamplesRx;
+
+			pSps->ncoef=taps_int_lpf_300_1_2;
+			pSps->size_coef=2;
+			pSps->coef=(void*)coef_int_lpf_300_1_2;
+
+			pSps->nx=taps_int_lpf_300_1_2;
+			pSps->size_x=4;
+			pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+			if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+			pSps->calcAdjust=gain_int_lpf_300_1_2/2;
+			pSps->inputGain=(1.0*M_Q8);
+			pSps->outputGain=(1.0*M_Q8);
+			pChan->prxVoiceMeasure=pSps->sink;
+			pChan->prxVoiceAdjust=&(pSps->outputGain);
+			TRACEF(1,("created rx deemphasis %p %p\n",pSps->source,pSps->sink));
+		}
+
+		#if 0
+		if(1){
+			pSps=pSps->nextSps=createPmrSps(pChan);
+			pSps->source=pChan->pRxHpf;
+			pSps->sink=pChan->pRxDeEmp;
+			pSps->sigProc=gp_inte_00;
+			pSps->enabled=1;
+			pSps->nSamples=pChan->nSamplesRx;
+
+			pSps->ncoef=taps_int_lpf_300_1_2;
+			pSps->size_coef=2;
+			pSps->coef=(void*)coef_int_lpf_300_1_2;
+
+			pSps->nx=taps_int_lpf_300_1_2;
+			pSps->size_x=4;
+			pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+			if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+			pSps->calcAdjust=gain_int_lpf_300_1_2/2;
+			pSps->inputGain=(1.0*M_Q8);
+			pSps->outputGain=(1.0*M_Q8);
+			TRACEF(1,("created rx deemphasis test %p %p\n",pSps->source,pSps->sink));
+		}
+		#endif
+
+	}
+
+	if(pChan->rxSquelchDelay>RXSQDELAYBUFSIZE/8-1)
+	{
+		pChan->rxSquelchDelay=RXSQDELAYBUFSIZE/8-1;
+	}
+	if(pChan->rxSquelchDelay>0)
+	{
+		TRACEF(1,("create rx squelch delay\n"));
+		pSps=pChan->spsDelayLine=pSps->nextSps=createPmrSps(pChan);
+		pChan->spsRxSquelchDelay=pSps;
+		pSps->sigProc=DelayLine;
+        if(pChan->rxDeEmpEnable){
+            pSps->source=pChan->pRxSpeaker;
+            pSps->sink=pChan->pRxSpeaker;
+
+        }else{
+            pSps->source=pChan->pRxHpf;
+            pSps->sink=pChan->pRxHpf;
+        }
+		pChan->spsRxOut=pSps;
+		pSps->enabled=1;
+		pSps->b.outzero=0;
+		pSps->inputGain=1*M_Q8;
+		pSps->outputGain=1*M_Q8;
+		pSps->nSamples=pChan->nSamplesRx;
+		pSps->buffSize=RXSQDELAYBUFSIZE;
+		pSps->buff=calloc(RXSQDELAYBUFSIZE,2);
+		pSps->buffLead = pChan->rxSquelchDelay*8;  // convert ms to samples
+		pSps->buffInIndex=0;
+		pSps->buffOutIndex=0;
+	}
+
+	if(pChan->rxCdType==CD_XPMR_VOX)
+	{
+		TRACEF(1,("create vox measureblock\n"));
+		pChan->prxVoxMeas=calloc(pChan->nSamplesRx,2);
+
+		pSps=pChan->spsRxVox=pSps->nextSps=createPmrSps(pChan);
+		pSps->sigProc=MeasureBlock;
+		pSps->parentChan=pChan;
+		pSps->source=pChan->pRxBase;
+		pSps->sink=pChan->prxVoxMeas;
+		pSps->inputGain=1*M_Q8;
+		pSps->outputGain=1*M_Q8;
+		pSps->nSamples=pChan->nSamplesRx;
+
+    	if(pChan->rxSqVoxDis==0)
+			pSps->discfactor=3;
+		else
+			pSps->discfactor=(pChan->rxSqVoxDis);
+
+		if(pChan->rxSqVoxAdj==0)
+			pSps->setpt=(0.011*M_Q15);
+		else
+			pSps->setpt=(pChan->rxSqVoxAdj);
+
+		if(pChan->rxSqVoxHyst==0)
+			pSps->hyst=pSps->setpt/10;
+		else
+			pSps->hyst=(pChan->rxSqVoxHyst);
+
+		if(pChan->rxSqVoxHtim==0)
+			pChan->rxSqVoxHtim=2000;
+
+		pSps->enabled=1;
+	}
+
+	// tuning measure block
+	pSps=pChan->spsMeasure=pSps->nextSps=createPmrSps(pChan);
+	pSps->source=pChan->spsRx->sink;
+	pSps->sink=pChan->prxMeasure;
+	pSps->sigProc=MeasureBlock;
+	pSps->enabled=0;
+	pSps->nSamples=pChan->nSamplesRx;
+	pSps->discfactor=10;
+
+	pSps->nextSps=NULL;		// last sps in chain RX
+
+	pChan->spsRxOut->b.lockoutput=0;
+
+
+	// CREATE TRANSMIT CHAIN
+	TRACEF(1,("create tx\n"));
+	inputTmp=NULL;
+	pSps = NULL;
+
+	// allocate space for first sps and set pointers
+	pChan->pTxVoice=pChan->pTxBase;
+
+	// Tx HPF SubAudible
+	if(pChan->txHpfEnable)
+	{
+		pSps=createPmrSps(pChan);
+		pChan->spsTx=pSps;
+		pSps->source=pChan->pTxBase;
+		pSps->sink=pChan->pTxHpf;
+		pSps->sigProc=pmr_gp_fir;
+		pSps->enabled=1;
+		pSps->numChanOut=1;
+		pSps->selChanOut=0;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->decimator=pSps->decimate=1;
+		pSps->interpolate=1;
+		pSps->ncoef = pSps->nx = fir_txhpf[pChan->txhpf].taps;
+		pSps->size_coef=2;
+		pSps->coef = (void*) fir_txhpf[pChan->txhpf].coefs;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+		pSps->calcAdjust = fir_txhpf[pChan->txhpf].gain;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		inputTmp=pChan->pTxVoice=pChan->pTxHpf;
+		TRACEF(1,("created tx hpf %p %p\n",pSps->source,pSps->sink));
+	}
+
+	// Tx PreEmphasis
+	if(pChan->txPreEmpEnable)
+	{
+		if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
+		else pSps=pSps->nextSps=createPmrSps(pChan);
+
+		pSps->source=inputTmp;
+		pSps->sink=pChan->pTxPreEmp;
+
+		pSps->sigProc=gp_diff;
+		pSps->enabled=1;
+		pSps->numChanOut = 1;
+		pSps->selChanOut = 0;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->decimator=pSps->decimate=1;
+
+		pSps->ncoef=taps_int_hpf_4000_1_2;
+		pSps->size_coef=2;
+		pSps->coef=(void*)coef_int_hpf_4000_1_2;
+
+		pSps->nx=taps_int_hpf_4000_1_2;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+
+		pSps->calcAdjust=gain_int_hpf_4000_1_2;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);	 // to match flat at 1KHz
+		inputTmp=pChan->pTxVoice=pSps->sink;
+		TRACEF(1,("created tx preemphasis %p %p\n",pSps->source,pSps->sink));
+	}
+
+
+	// Tx Mixer to combine repeat audio
+
+	if(pChan->b.repeat)
+	{
+		if(pSps==NULL)
+			pSps=pChan->spsTx=createPmrSps(pChan);
+		else
+			pChan->spsTxRpt=pSps=pSps->nextSps=createPmrSps(pChan);
+		pSps->source=inputTmp;
+		pSps->sourceB=pChan->pRxHpf;
+		pSps->sink=pChan->pTxRpt=calloc(numSamples,2);
+		pSps->sigProc=pmrMixer;
+		pSps->enabled=1;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->inputGain=1*M_Q8;
+		pSps->inputGainB=1*M_Q8;
+		pSps->outputGain=1*M_Q8;
+		pSps->setpt=0;
+		inputTmp=pChan->pTxVoice=pSps->sink;
+		TRACEF(1,("created tx mixer %p %p %p\n",pSps->source,pSps->sourceB,pSps->sink));
+	}
+
+
+    // Tx Limiter
+	if(pChan->txLimiterEnable)
+	{
+		if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
+		else pSps=pSps->nextSps=createPmrSps(pChan);
+		pSps->source=inputTmp;
+		pSps->sink=pChan->pTxLimiter;
+		pSps->sigProc=SoftLimiter;
+		pSps->enabled=1;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		pSps->setpt=12000;			// limiting point for 100 modulation
+		inputTmp=pChan->pTxVoice=pSps->sink;
+		TRACEF(1,("created tx limiter %p %p\n",pSps->source,pSps->sink));
+	}
+
+	// Composite Mix of Voice and LSD
+	if((pChan->txMixA==TX_OUT_COMPOSITE)||(pChan->txMixB==TX_OUT_COMPOSITE))
+	{
+		if(pSps==NULL)
+			pSps=pChan->spsTx=createPmrSps(pChan);
+		else
+			pSps=pSps->nextSps=createPmrSps(pChan);
+		pSps->source=inputTmp;
+		pSps->sourceB=pChan->pTxLsdLpf;		 //asdf ??? !!! maw pTxLsdLpf
+		pSps->sink=pChan->pTxComposite;
+		pSps->sigProc=pmrMixer;
+		pSps->enabled=1;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->inputGain=2*M_Q8;
+		pSps->inputGainB=1*M_Q8/8;
+		pSps->outputGain=1*M_Q8;
+		pSps->setpt=0;
+		inputTmp=pSps->sink;
+		pChan->ptxCtcssAdjust=&pSps->inputGainB;
+	}
+
+	// Chan A Upsampler and Filter
+	if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
+	else pSps=pSps->nextSps=createPmrSps(pChan);
+
+
+	if(pChan->b.minsigproc)
+	{
+		/* minimal tx signal processing */
+		pChan->spsTxOutA=pSps;
+		pSps->source=pChan->pTxBase;
+		pSps->sink=pChan->pTxOut;
+		pSps->sigProc=min_tx_fil;
+		pSps->enabled=1;
+		pSps->numChanOut=2;
+		pSps->selChanOut=0;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->interpolate=6;
+		pSps->ncoef=taps_int_lpf_3300_1_2;
+		pSps->size_coef=2;
+		pSps->coef=(void*)coef_int_lpf_3300_1_2;
+		pSps->nx=taps_int_lpf_3300_1_2;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+		pSps->calcAdjust=gain_int_lpf_3300_1_2;
+		if(pChan->txboostset)pSps->calcAdjust/=2;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		pSps->monoOut=1;
+		TRACEF(1,("created tx minsigproc %p %p\n",pSps->source,pSps->sink));
+	}
+	else
+	{
+		/* full tx signal processing */
+		pChan->spsTxOutA=pSps;
+		if(!pChan->spsTx)pChan->spsTx=pSps;
+
+		if(pChan->txMixA==TX_OUT_COMPOSITE)
+		{
+			pSps->source=pChan->pTxComposite;
+			TRACEF(1,("txMixA TX_OUT_COMPOSITE\n"));
+		}
+		else if(pChan->txMixA==TX_OUT_LSD)
+		{
+			pSps->source=pChan->pTxLsdLpf;
+			TRACEF(1,("txMixA TX_OUT_LSD\n"));
+		}
+		else if(pChan->txMixA==TX_OUT_VOICE)
+		{
+			pSps->source=pChan->pTxVoice;
+			TRACEF(1,("txMixA TX_OUT_VOICE\n"));
+		}
+		else if (pChan->txMixA==TX_OUT_AUX)
+		{
+			pSps->source=inputTmp;
+			TRACEF(1,("txMixA TX_OUT_AUX\n"));
+		}
+		else
+		{
+			pSps->source=NULL;
+			pSps->source=inputTmp;
+		}
+
+		pSps->sink=pChan->pTxOut;
+		pSps->sigProc=pmr_gp_fir;
+		pSps->enabled=1;
+		pSps->numChanOut=2;
+		pSps->selChanOut=0;
+		pSps->nSamples=pChan->nSamplesTx;
+		pSps->interpolate=6;
+		pSps->ncoef = pSps->nx = fir_txlpf[pChan->txlpf].taps;
+		pSps->size_coef=2;
+		pSps->coef = (void*) fir_txlpf[pChan->txlpf].coefs;
+		pSps->size_x=2;
+		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+		pSps->calcAdjust = fir_txlpf[pChan->txlpf].gain;
+		if(pChan->txboostset)
+			pSps->calcAdjust/=2;
+		pSps->inputGain=(1*M_Q8);
+		pSps->outputGain=(1*M_Q8);
+		if(pChan->txMixA==pChan->txMixB)
+			pSps->monoOut=1;
+		else
+			pSps->monoOut=0;
+		TRACEF(1,("created tx a output proc %p %p\n",pSps->source,pSps->sink));
+
+
+		// Chan B Upsampler and Filter
+		if((pChan->txMixA!=pChan->txMixB)&&(pChan->txMixB!=TX_OUT_OFF))
+		{
+			if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
+			else pSps=pSps->nextSps=createPmrSps(pChan);
+
+			pChan->spsTxOutB=pSps;
+			if(pChan->txMixB==TX_OUT_COMPOSITE)
+			{
+				pSps->source=pChan->pTxComposite;
+			}
+			else if(pChan->txMixB==TX_OUT_LSD)
+			{
+				pSps->source=pChan->pTxLsdLpf;
+				// pChan->ptxCtcssAdjust=&pSps->inputGain;
+			}
+			else if(pChan->txMixB==TX_OUT_VOICE)
+			{
+				pSps->source=inputTmp;
+			}
+			else if(pChan->txMixB==TX_OUT_AUX)
+			{
+				pSps->source=pChan->pTxHpf;
+			}
+			else
+			{
+				pSps->source=NULL;
+			}
+
+			pSps->sink=pChan->pTxOut;
+			pSps->sigProc=pmr_gp_fir;
+			pSps->enabled=1;
+			pSps->numChanOut=2;
+			pSps->selChanOut=1;
+			pSps->mixOut=0;
+			pSps->nSamples=pChan->nSamplesTx;
+			pSps->interpolate=6;
+			pSps->ncoef = pSps->nx = fir_txlpf[pChan->txlpf].taps;
+			pSps->size_coef=2;
+			pSps->coef = (void*) fir_txlpf[pChan->txlpf].coefs;
+			pSps->size_x=2;
+			pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
+			if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
+			pSps->calcAdjust = fir_txlpf[pChan->txlpf].gain;
+			if(pChan->txboostset)
+				pSps->calcAdjust/=2;
+			pSps->inputGain=(1*M_Q8);
+			pSps->outputGain=(1*M_Q8);
+			TRACEF(1,("created tx b output proc %p %p\n",pSps->source,pSps->sink));
+		}
+	}	/* end of tx filters */
+
+	pSps->nextSps=NULL;
+
+	pChan->spsTx->b.lockinput=1;
+
+	// Configure Coded Signaling
+	if(!pChan->b.minsigproc)code_string_parse(pChan);
+
+	pChan->smode=SMODE_NULL;
+	pChan->smodewas=SMODE_NULL;
+	pChan->smodetime=2500;
+	pChan->smodetimer=0;
+	pChan->b.smodeturnoff=0;
+
+	pChan->txsettletimer=0;
+	pChan->txrxblankingtimer=0;
+
+#if XPMR_DEBUG0 == 1
+
 	TRACEF(1,("configure tracing\n"));
 
 	pChan->pTstTxOut	= calloc(numSamples,2);
@@ -1878,7 +2736,8 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	// TSCOPE CONFIGURATION SETSCOPE configure debug traces and sources for each channel of the output
 	pChan->sdbg			= (t_sdbg *)calloc(sizeof(t_sdbg),1);
 
-	for(i=0;i<XPMR_DEBUG_CHANS;i++)pChan->sdbg->trace[i]=-1; 	
+	/*	set pointers for trace output now that we know where everything is */
+	for(i=0;i<XPMR_DEBUG_CHANS;i++)pChan->sdbg->trace[i]=-1;
 
 	TRACEF(1,("pChan->tracetype = %i\n",pChan->tracetype));
 
@@ -1996,537 +2855,41 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 		pChan->sdbg->source [10]=pChan->pTxLimiter;
 		pChan->sdbg->source [11]=pChan->pTxComposite;
 		pChan->sdbg->source [12]=pChan->pTxLsdLpf;
+
+	    pChan->sdbg->source [13]=pChan->pRxDemod;
+	    pChan->sdbg->source [14]=pChan->pRxSpeaker;
+		pChan->sdbg->source [15]=pChan->pTstTxOut;
 	}
 
+	else if(pChan->tracetype==8)
+	{
+		pChan->sdbg->source [0]=pChan->pRxDemod;	 		/* undersampled raw input */
+		pChan->sdbg->source [1]=pChan->pRxBase;				/* output of rx head end, downsampled and filtered */
+		pChan->sdbg->trace  [2]=RX_NOISE_TRIG;
+		pChan->sdbg->source [3]=pChan->pRxLsd;
+		pChan->sdbg->trace  [4]=RX_CTCSS_DECODE;
+		pChan->sdbg->source [5]=pChan->pRxHpf;
+
+        //pChan->sdbg->source [6]=pChan->spsRxDeEmp->sink;
+		pChan->sdbg->source [7]=pChan->pRxSpeaker;
+		pChan->sdbg->source [8]=pChan->spsRxOut->sink;
+
+		pChan->sdbg->source [9]=pChan->pTxBase;
+		pChan->sdbg->source [10]=pChan->pTxHpf;
+		pChan->sdbg->source [11]=pChan->pTxPreEmp;
+		pChan->sdbg->source [12]=pChan->pTxLimiter;
+		pChan->sdbg->source [13]=pChan->pTxLsdLpf;
+		pChan->sdbg->source [14]=pChan->pTxComposite;
+		pChan->sdbg->source [15]=pChan->pTstTxOut;			/*undersampled upsampled tx output */
+	}
 	for(i=0;i<XPMR_DEBUG_CHANS;i++){
-		if(pChan->sdbg->trace[i]>=0)pChan->sdbg->point[pChan->sdbg->trace[i]]=i; 	
+		if(pChan->sdbg->trace[i]>=0)pChan->sdbg->point[pChan->sdbg->trace[i]]=i;
 	}
 	pChan->sdbg->mode=1;
- 	#endif
-
-	#ifdef XPMRX_H
-	// LSD GENERATOR
- 	pSps=pChan->spsLsdGen=createPmrSps(pChan);
-	pSps->source=NULL;
-	pSps->sink=pChan->pTxLsd;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->sigProc=LsdGen;
-	pSps->nSamples=pChan->nSamplesTx;
-	pSps->outputGain=(.49*M_Q8);
-	pSps->option=0;
-	pSps->interpolate=1;
-	pSps->decimate=1;
-	pSps->enabled=0;
-	#endif
-
-	// General Purpose Function Generator
-	pSps=pChan->spsSigGen1=createPmrSps(pChan);
-	pSps->sink=pChan->pSigGen1;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->sigProc=SigGen;
-	pSps->nSamples=pChan->nSamplesTx;
-	pSps->sampleRate=SAMPLE_RATE_NETWORK;
-	pSps->freq=10000; 						// in increments of 0.1 Hz
-	pSps->outputGain=(.25*M_Q8);
-	pSps->option=0;
-	pSps->interpolate=1;
-	pSps->decimate=1;
-	pSps->enabled=0;
-
-
-	// CTCSS ENCODER
-	pSps = pChan->spsSigGen0 = createPmrSps(pChan);
-	pSps->sink=pChan->pTxLsd;
-	pSps->sigProc=SigGen;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->nSamples=pChan->nSamplesTx;
-	pSps->sampleRate=SAMPLE_RATE_NETWORK;
-	pSps->freq=1000;	  					// in 0.1 Hz steps
-	pSps->outputGain=(0.5*M_Q8);
-	pSps->option=0;
-	pSps->interpolate=1;
-	pSps->decimate=1;
-	pSps->enabled=0;
-
-	// Tx LSD Low Pass Filter
-	pSps=pChan->spsTxLsdLpf=createPmrSps(pChan);
-	pSps->source=pChan->pTxLsd;
-	pSps->sink=pChan->pTxLsdLpf;
-	pSps->sigProc=pmr_gp_fir;
-	pSps->enabled=0;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->nSamples=pChan->nSamplesTx;
-	pSps->decimator=pSps->decimate=1;
-	pSps->interpolate=1;
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-	 
-	// configure the longer, lower cutoff filter by default
-	pSps->ncoef=taps_fir_lpf_215_9_88;
-	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_lpf_215_9_88;
-	pSps->nx=taps_fir_lpf_215_9_88;
-	pSps->size_x=2;
-	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-	pSps->calcAdjust=gain_fir_lpf_215_9_88;
-
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-
-	TRACEF(1,("spsTxLsdLpf = sps \n"));
-
-	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-
-
-	// RX Process
-	TRACEF(1,("create rx\n"));
-	pSps = NULL;
-
-	// allocate space for first sps and set pointers
-	pSps=pChan->spsRx=createPmrSps(pChan);
-	pSps->source=NULL;					//set when called
-	pSps->sink=pChan->pRxBase;
-	pSps->sigProc=pmr_rx_frontend;
-	pSps->enabled=1;
-	pSps->decimator=pSps->decimate=6;
-	pSps->interpolate=pSps->interpolate=1;
-	pSps->nSamples=pChan->nSamplesRx;
-	pSps->ncoef=fir_rxlpf[pChan->rxlpf].taps;
-	pSps->size_coef=2;
-	pSps->coef=(void*)fir_rxlpf[pChan->rxlpf].coefs;
-	pSps->nx=fir_rxlpf[pChan->rxlpf].taps;
-	pSps->size_x=2;
-	pSps->x=(void*)(calloc(pSps->nx,pSps->size_coef));
-	pSps->calcAdjust=(fir_rxlpf[pChan->rxlpf].gain*256)/0x0100;
-	pSps->outputGain=(1.0*M_Q8);
-	pSps->discfactor=2;
-	pSps->hyst=pChan->rxCarrierHyst;
-	pSps->setpt=pChan->rxCarrierPoint;
-	pChan->prxSquelchAdjust=&pSps->setpt;
-	#if XPMR_DEBUG0 == 1
-	pSps->debugBuff0=pChan->pRxDemod;
-	pSps->debugBuff1=pChan->pRxNoise;
-	pSps->debugBuff2=pChan->prxDebug0;
-	#endif
-
-
-	// allocate space for next sps and set pointers
-	// Rx SubAudible Decoder Low Pass Filter
-	pSps=pChan->spsRxLsd=pSps->nextSps=createPmrSps(pChan);
-	pSps->source=pChan->pRxBase;
-	pSps->sink=pChan->pRxLsd;
-	pSps->sigProc=pmr_gp_fir;
-	pSps->enabled=1;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->nSamples=pChan->nSamplesRx;
-	pSps->decimator=pSps->decimate=1;
-	pSps->interpolate=1;
-
-	// configure the the larger, lower cutoff filter by default
-	pSps->ncoef=taps_fir_lpf_215_9_88;
-	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_lpf_215_9_88;
-	pSps->nx=taps_fir_lpf_215_9_88;
-	pSps->size_x=2;
-	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-	pSps->calcAdjust=gain_fir_lpf_215_9_88;
-
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-	pChan->prxCtcssMeasure=pSps->sink;
-	pChan->prxCtcssAdjust=&(pSps->outputGain);
-
-	// CTCSS CenterSlicer
-	pSps=pChan->spsRxLsdNrz=pSps->nextSps=createPmrSps(pChan);
-	pSps->source=pChan->pRxLsd;
-	pSps->sink=pChan->pRxDcTrack;
-	pSps->buff=pChan->pRxLsdLimit;
-	pSps->sigProc=CenterSlicer;
-	pSps->nSamples=pChan->nSamplesRx;
-	pSps->discfactor=LSD_DFS;		  		// centering time constant
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-	pSps->setpt=4900;	  			// ptp clamp for DC centering
-	pSps->inputGainB=625; 			// peak output limiter clip point
-	pSps->enabled=0;
-
-
-	// Rx HPF
-	pSps=pSps->nextSps=createPmrSps(pChan);
-	pChan->spsRxHpf=pSps;
-	pSps->source=pChan->pRxBase;
-	pSps->sink=pChan->pRxHpf;
-	pSps->sigProc=pmr_gp_fir;
-	pSps->enabled=1;
-	pSps->numChanOut=1;
-	pSps->selChanOut=0;
-	pSps->nSamples=pChan->nSamplesRx;
-	pSps->decimator=pSps->decimate=1;
-	pSps->interpolate=1;
-	pSps->ncoef=fir_rxhpf[pChan->rxhpf].taps;
-	pSps->size_coef=2;
-	pSps->coef=(void*)fir_rxhpf[pChan->rxhpf].coefs;
-	pSps->nx=fir_rxhpf[pChan->rxhpf].taps;
-	pSps->size_x=2;
-	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-	pSps->calcAdjust=fir_rxhpf[pChan->rxhpf].gain;
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-	pChan->prxVoiceAdjust=&(pSps->outputGain);
-	pChan->spsRxOut=pSps;
-
-	// allocate space for next sps and set pointers
-	// Rx DeEmp
-	if(pChan->rxDeEmpEnable){
-		pSps=pSps->nextSps=createPmrSps(pChan);
-		pChan->spsRxDeEmp=pSps;
-		pSps->source=pChan->pRxHpf;
-		pSps->sink=pChan->pRxSpeaker;
-		pChan->spsRxOut=pSps;					 // OUTPUT STRUCTURE!
-		pSps->sigProc=gp_inte_00;
-		pSps->enabled=1;
-		pSps->nSamples=pChan->nSamplesRx;
-
-		pSps->ncoef=taps_int_lpf_300_1_2;
-		pSps->size_coef=2;
-		pSps->coef=(void*)coef_int_lpf_300_1_2;
-
-		pSps->nx=taps_int_lpf_300_1_2;
-		pSps->size_x=4;
-		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		pSps->calcAdjust=gain_int_lpf_300_1_2/2;
-		pSps->inputGain=(1.0*M_Q8);
-		pSps->outputGain=(1.0*M_Q8);
-		pChan->prxVoiceMeasure=pSps->sink;
-		pChan->prxVoiceAdjust=&(pSps->outputGain);
-	} else {
-		// force delay to be true
-		if (pChan->rxSquelchDelay == 0)
-			pChan->rxSquelchDelay = 30;
-	}
-
-	if(pChan->rxSquelchDelay>RXSQDELAYBUFSIZE/8-1)
-	{
-		pChan->rxSquelchDelay=RXSQDELAYBUFSIZE/8-1;	
-	}
-	if(pChan->rxSquelchDelay>0)
-	{
-		TRACEF(1,("create rx squelch delay\n"));
-		pSps=pChan->spsDelayLine=pSps->nextSps=createPmrSps(pChan);
-		pChan->spsRxSquelchDelay=pSps;
-		pSps->sigProc=DelayLine;
-		if (pChan->rxDeEmpEnable)
-			pSps->source=pChan->pRxSpeaker;
-		else
-			pSps->source=pChan->pRxHpf;
-		pSps->sink=pChan->pRxSpeaker;
-		pChan->spsRxOut=pSps;					 // OUTPUT STRUCTURE!
-		pSps->enabled=1;
-		pSps->b.outzero=0;
-		pSps->inputGain=1*M_Q8;
-		pSps->outputGain=1*M_Q8;
-		pSps->nSamples=pChan->nSamplesRx;
-		pSps->buffSize=RXSQDELAYBUFSIZE;
-		pSps->buff=calloc(RXSQDELAYBUFSIZE,2);	 		 
-		pSps->buffLead = pChan->rxSquelchDelay*8;  // convert ms to samples
-		pSps->buffInIndex=0;
-		pSps->buffOutIndex=0;
-	}
-
-	if(pChan->rxCdType==CD_XPMR_VOX)
-	{
-		TRACEF(1,("create vox measureblock\n"));
-		pChan->prxVoxMeas=calloc(pChan->nSamplesRx,2);
-
-		pSps=pChan->spsRxVox=pSps->nextSps=createPmrSps(pChan);
-		pSps->sigProc=MeasureBlock;
-		pSps->parentChan=pChan;
-		pSps->source=pChan->pRxBase;
-		pSps->sink=pChan->prxVoxMeas;
-		pSps->inputGain=1*M_Q8;
-		pSps->outputGain=1*M_Q8;
-		pSps->nSamples=pChan->nSamplesRx;
-		pSps->discfactor=3;
-		if(pChan->rxSqVoxAdj==0)
-			pSps->setpt=(0.011*M_Q15);
-		else
-			pSps->setpt=(pChan->rxSqVoxAdj);
-		pSps->hyst=(pSps->setpt/10);
-		pSps->enabled=1;
-	}
-
-	// tuning measure block
-	pSps=pChan->spsMeasure=pSps->nextSps=createPmrSps(pChan);
-	pSps->source=pChan->spsRx->sink;
-	pSps->sink=pChan->prxMeasure;
-	pSps->sigProc=MeasureBlock;
-	pSps->enabled=0;
-	pSps->nSamples=pChan->nSamplesRx;
-	pSps->discfactor=10;
-
-	pSps->nextSps=NULL;		// last sps in chain RX
-
-
-	// CREATE TRANSMIT CHAIN
-	TRACEF(1,("create tx\n"));
-	inputTmp=NULL;
-	pSps = NULL;
-
-	// allocate space for first sps and set pointers
-
-	// Tx HPF SubAudible
-	if(pChan->txHpfEnable)
-	{
-		pSps=createPmrSps(pChan);
-		pChan->spsTx=pSps;
-		pSps->source=pChan->pTxBase;
-		pSps->sink=pChan->pTxHpf;
-		pSps->sigProc=pmr_gp_fir;
-		pSps->enabled=1;
-		pSps->numChanOut=1;
-		pSps->selChanOut=0;
-		pSps->nSamples=pChan->nSamplesTx;
-		pSps->decimator=pSps->decimate=1;
-		pSps->interpolate=1;
-		pSps->ncoef=fir_txhpf[pChan->txhpf].taps;
-		pSps->size_coef=2;
-		pSps->coef=(void*)fir_txhpf[pChan->txhpf].coefs;
-		pSps->nx=fir_txhpf[pChan->txhpf].taps;
-		pSps->size_x=2;
-		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		pSps->calcAdjust=fir_txhpf[pChan->txhpf].gain;
-		pSps->inputGain=(1*M_Q8);
-		pSps->outputGain=(1*M_Q8);
-		inputTmp=pChan->pTxHpf;
-	}
-
-	// Tx PreEmphasis
-	if(pChan->txPreEmpEnable)
-	{
-		if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
-		else pSps=pSps->nextSps=createPmrSps(pChan);
-
-		pSps->source=inputTmp;
-		pSps->sink=pChan->pTxPreEmp;
-
-		pSps->sigProc=gp_diff;
-		pSps->enabled=1;
-		pSps->nSamples=pChan->nSamplesTx;
-
-		pSps->ncoef=taps_int_hpf_4000_1_2;
-		pSps->size_coef=2;
-		pSps->coef=(void*)coef_int_hpf_4000_1_2;
-
-		pSps->nx=taps_int_hpf_4000_1_2;
-		pSps->size_x=2;
-		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		 
-		pSps->calcAdjust=gain_int_hpf_4000_1_2;
-		pSps->inputGain=(1*M_Q8);
-		pSps->outputGain=(1*M_Q8);	 // to match flat at 1KHz 
-		inputTmp=pSps->sink;
-	}
-
-	// Tx Limiter
-	if(pChan->txLimiterEnable)
-	{
-		if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
-		else pSps=pSps->nextSps=createPmrSps(pChan);
-		pSps->source=inputTmp;
-		pSps->sink=pChan->pTxLimiter;
-		pSps->sigProc=SoftLimiter;
-		pSps->enabled=1;
-		pSps->nSamples=pChan->nSamplesTx;
-		pSps->inputGain=(1*M_Q8);
-		pSps->outputGain=(1*M_Q8);
-		pSps->setpt=12000;			// limiting point for 100 modulation		
-		inputTmp=pSps->sink;
-	}
-
-	// Composite Mix of Voice and LSD
-	if((pChan->txMixA==TX_OUT_COMPOSITE)||(pChan->txMixB==TX_OUT_COMPOSITE))
-	{
-		if(pSps==NULL)
-			pSps=pChan->spsTx=createPmrSps(pChan);
-		else
-			pSps=pSps->nextSps=createPmrSps(pChan);
-		pSps->source=inputTmp;
-		pSps->sourceB=pChan->pTxLsdLpf;		 //asdf ??? !!! maw pTxLsdLpf
-		pSps->sink=pChan->pTxComposite;
-		pSps->sigProc=pmrMixer;
-		pSps->enabled=1;
-		pSps->nSamples=pChan->nSamplesTx;
-		pSps->inputGain=2*M_Q8;
-		pSps->inputGainB=1*M_Q8/8;
-		pSps->outputGain=1*M_Q8;
-		pSps->setpt=0;
-		inputTmp=pSps->sink;
-		pChan->ptxCtcssAdjust=&pSps->inputGainB;
-	}
-	else
-	{
-		if (pChan->b.txboost)
-		{
-			if(pSps==NULL)
-				pSps=pChan->spsTx=createPmrSps(pChan);
-			else
-				pSps=pSps->nextSps=createPmrSps(pChan);
-			pSps->source=inputTmp;
-			pSps->sourceB=NULL;
-			pSps->sink=pChan->pTxComposite;
-			pSps->sigProc=pmrMixer;
-			pSps->enabled=1;
-			pSps->nSamples=pChan->nSamplesTx;
-			pSps->inputGain=2*M_Q8;
-			pSps->inputGainB=0;
-			pSps->outputGain=1*M_Q8;
-			pSps->setpt=0;
-			inputTmp=pSps->sink;
-		}
-	}
-
-	// Chan A Upsampler and Filter
-	if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
-	else pSps=pSps->nextSps=createPmrSps(pChan);
-
-	pChan->spsTxOutA=pSps;
-	if(!pChan->spsTx)pChan->spsTx=pSps;
-
-	if(pChan->txMixA==TX_OUT_COMPOSITE)
-	{
-		pSps->source=pChan->pTxComposite;
-	}
-	else if(pChan->txMixA==TX_OUT_LSD)
-	{
-		pSps->source=pChan->pTxLsdLpf;
-	}
-	else if(pChan->txMixA==TX_OUT_VOICE)
-	{
-		pSps->source=inputTmp;
-	}
-	else if (pChan->txMixA==TX_OUT_AUX)
-	{
-		pSps->source=pChan->pTxHpf;
-	}
-	else
-	{
-		pSps->source=NULL;		// maw sph asdf !!!	no blow up
-		pSps->source=inputTmp;
-	}
-
-	pSps->sink=pChan->pTxOut;
-	pSps->sigProc=pmr_gp_fir;
-	pSps->enabled=1;
-	pSps->numChanOut=2;
-	pSps->selChanOut=0;
-	pSps->nSamples=pChan->nSamplesTx;
-#ifdef	XPMR_VOTER
-	pSps->interpolate=1;
-	pSps->ncoef=taps_fir_lpf_3K_2;
-	pSps->size_coef=2;
-	pSps->coef=(void*)coef_fir_lpf_3K_2;
-	pSps->nx=taps_fir_lpf_3K_2;
-	pSps->calcAdjust=gain_fir_lpf_3K_2;
-#else
-	pSps->interpolate=6;
-	pSps->ncoef=fir_txlpf[pChan->txlpf].taps;
-	pSps->size_coef=2;
-	pSps->coef=(void*)fir_txlpf[pChan->txlpf].coefs;
-	pSps->nx=fir_txlpf[pChan->txlpf].taps;
-	pSps->calcAdjust=fir_txlpf[pChan->txlpf].gain;
+	for(i=0;i<XPMR_DEBUG_CHANS;i++)
+		TRACEF(1,("sdbg->source[%02i] %p\n",i,pChan->sdbg->source[i]));
 #endif
-	pSps->size_x=2;
-	pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-	if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-	pSps->inputGain=(1*M_Q8);
-	pSps->outputGain=(1*M_Q8);
-	if(pChan->txMixA==pChan->txMixB)pSps->monoOut=1;
-	else pSps->monoOut=0;
-
-
-	// Chan B Upsampler and Filter
-	if((pChan->txMixA!=pChan->txMixB)&&(pChan->txMixB!=TX_OUT_OFF))
-	{
-		if(pSps==NULL) pSps=pChan->spsTx=createPmrSps(pChan);
-		else pSps=pSps->nextSps=createPmrSps(pChan);
-
-		pChan->spsTxOutB=pSps;
-		if(pChan->txMixB==TX_OUT_COMPOSITE)
-		{
-			pSps->source=pChan->pTxComposite;
-		}
-		else if(pChan->txMixB==TX_OUT_LSD)
-		{
-			pSps->source=pChan->pTxLsdLpf;
-			// pChan->ptxCtcssAdjust=&pSps->inputGain;
-		}
-		else if(pChan->txMixB==TX_OUT_VOICE)
-		{
-			pSps->source=inputTmp;
-		}
-		else if(pChan->txMixB==TX_OUT_AUX)
-		{
-			pSps->source=pChan->pTxHpf;
-		}
-		else
-		{
-			pSps->source=NULL;
-		}
-
-		pSps->sink=pChan->pTxOut;
-		pSps->sigProc=pmr_gp_fir;
-		pSps->enabled=1;
-		pSps->numChanOut=2;
-		pSps->selChanOut=1;
-		pSps->mixOut=0;
-		pSps->nSamples=pChan->nSamplesTx;
-#ifdef	XPMR_VOTER
-		pSps->interpolate=1;
-		pSps->ncoef=taps_fir_lpf_3K_2;
-		pSps->size_coef=2;
-		pSps->coef=(void*)coef_fir_lpf_3K_2;
-		pSps->nx=taps_fir_lpf_3K_2;
-		pSps->calcAdjust=(gain_fir_lpf_3K_2);
-#else
-		pSps->interpolate=6;
-		pSps->ncoef=fir_txlpf[pChan->txlpf].taps;
-		pSps->size_coef=2;
-		pSps->coef=(void*)fir_txlpf[pChan->txlpf].coefs;
-		pSps->nx=fir_txlpf[pChan->txlpf].taps;
-		pSps->calcAdjust=(fir_txlpf[pChan->txlpf].gain);
-#endif
-		pSps->size_x=2;
-		pSps->x=(void*)(calloc(pSps->nx,pSps->size_x));
-		if(pSps==NULL)printf("Error: calloc(), createPmrChannel()\n");
-		pSps->inputGain=(1*M_Q8);
-		pSps->outputGain=(1*M_Q8);
-	}
-
-	pSps->nextSps=NULL;
-
-	// Configure Coded Signaling
-	code_string_parse(pChan);
-
-	pChan->smode=SMODE_NULL;
-	pChan->smodewas=SMODE_NULL;
-	pChan->smodetime=2500;
-	pChan->smodetimer=0;
-	pChan->b.smodeturnoff=0;
-
-	pChan->txsettletimer=0;
-	pChan->txrxblankingtimer=0;
-
 	TRACEF(1,("createPmrChannel() end\n"));
-
 	return pChan;
 }
 /*
@@ -2536,18 +2899,20 @@ i16 destroyPmrChannel(t_pmr_chan *pChan)
 	t_pmr_sps  	*pmr_sps, *tmp_sps;
 
 	TRACEF(1,("destroyPmrChannel()\n"));
-	
+
 	free(pChan->pRxDemod);
 	free(pChan->pRxNoise);
 	free(pChan->pRxBase);
 	free(pChan->pRxHpf);
 	free(pChan->pRxLsd);
+	free(pChan->pRxDeEmp);
 	free(pChan->pRxSpeaker);
 	free(pChan->pRxDcTrack);
 	if(pChan->pRxLsdLimit)free(pChan->pRxLsdLimit);
 	free(pChan->pTxBase);
 	free(pChan->pTxHpf);
 	free(pChan->pTxPreEmp);
+	if(pChan->pTxRpt)free(pChan->pTxRpt);
 	free(pChan->pTxLimiter);
 	free(pChan->pTxLsd);
 	free(pChan->pTxLsdLpf);
@@ -2557,7 +2922,7 @@ i16 destroyPmrChannel(t_pmr_chan *pChan)
 	if(pChan->prxMeasure)free(pChan->prxMeasure);
 	if(pChan->pSigGen0)free(pChan->pSigGen0);
 	if(pChan->pSigGen1)free(pChan->pSigGen1);
-	 
+
 
 	#if XPMR_DEBUG0 == 1
 	//if(pChan->prxDebug)free(pChan->prxDebug);
@@ -2634,47 +2999,62 @@ i16 destroyPmrSps(t_pmr_sps  *pSps)
 	free(pSps);
 	return 0;
 }
-/*
-	PmrTx - takes data from network and holds it for PmrRx
-*/
-i16 PmrTx(t_pmr_chan *pChan, i16 *input)
+
+/*  from network writes */
+static int  PmrWrite(t_pmr_chan *pChan, i16 *input, i16 option)
 {
-	pChan->frameCountTx++;
+	static int total_gotwrites=0;
+	int icount=0;
 
-	TRACEF(5,("PmrTx() start %i\n",pChan->frameCountTx));
+	if(urd_debug>5)printf("[%s] PmrWrite() %p %p %i \n",pChan->name,pChan->pWrite,input,pChan->nSamplesTx);
 
-	#if XPMR_PPTP == 99
-	pptp_p2^=1;
-	if(pptp_p2)ioctl(ppdrvdev,PPDRV_IOC_PINSET,LP_PIN02);
-	else ioctl(ppdrvdev,PPDRV_IOC_PINCLEAR,LP_PIN02);
-	#endif
-
-	if(pChan==NULL){
-		printf("PmrTx() pChan == NULL\n");
+	if(pChan<0){
+		if(urd_debug>0)printf("PmrWrite() pChan==NULL \n");
 		return 1;
 	}
 
-	#if XPMR_DEBUG0 == 1
-	if(pChan->b.rxCapture && pChan->tracetype==5)
-	{
-		memcpy(pChan->pTxInput,input,pChan->nSamplesRx*2);
-	}
-	#endif
+    pChan->framesWrite++;
 
-	dedrift_write(pChan,input);
+	if(pChan->b.gotwrite && option)total_gotwrites++;
+	while(0 && pChan->b.gotwrite && option && ++icount<40)
+	{
+		if(urd_debug>3 || 1)
+			printf("[%s] PmrWrite() icount=%i  total=%i  framesWr-Rd=%i\n",
+				pChan->name,icount,total_gotwrites,pChan->framesWrite-pChan->framesRead);
+		usleep(1000);
+	}
+
+	ast_mutex_lock(&(pChan->mutexWrite));
+	pChan->b.gotwrite=1;
+	memcpy(pChan->pWrite,input,pChan->nSamplesTx*2);
+	ast_mutex_unlock(&(pChan->mutexWrite));
+
+	inskew(&pChan->skewer, input);
 
 	return 0;
 }
+
 /*
-	PmrRx handles a block of data from the usb audio device
+	process the stream from the usb radio interface
+	called when a new rx block is available for the device
+	produces tx block for the device
+	minimum latency
+
+	this process should call the rate adjust module between
+	the network device and the radio interface
 */
-i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
+static int PmrProc(t_pmr_chan *pChan)
 {
 	int i,hit;
+	char bhit;	/* txrxblanking hit */
 	float f=0;
 	t_pmr_sps *pmr_sps;
 
-	TRACEC(5,("PmrRx(%p %p %p %p)\n",pChan, input, outputrx, outputtx));
+	i16 *outputtx;
+
+	outputtx=pChan->pTxOut;
+
+	TRACEC(5,("PmrProc(%p)\n",pChan));
 
     #if XPMR_PPTP == 1
 	if(pChan->b.radioactive)
@@ -2684,11 +3064,16 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	#endif
 
 	if(pChan==NULL){
-		printf("PmrRx() pChan == NULL\n");
+		printf("PmrProc() pChan == NULL\n");
 		return 1;
 	}
 
+	pChan->framesRead++;
+
+	pChan->framesRx+=pChan->nSamplesRx;
+
 	pChan->frameCountRx++;
+	pChan->framesTx++;
 
 	#if XPMR_DEBUG0 == 1
 	if(pChan->b.rxCapture)
@@ -2703,33 +3088,39 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	}
 	#endif
 
-#ifndef XPMR_VOTER
 	pmr_sps=pChan->spsRx;		// first sps
-	pmr_sps->source=input;
 
-	if(outputrx!=NULL)pChan->spsRxOut->sink=outputrx;	 //last sps
 
 	if(pChan->txrxblankingtimer>0){
-	    for(i=0;i<pChan->nSamplesRx*6;i++)input[i]=0;
-	
 	    pChan->txrxblankingtimer-=MS_PER_FRAME;
 	    if(pChan->txrxblankingtimer<=0){
 	        pChan->txrxblankingtimer=0;
-	        TRACEC(1,("TXRXBLANKING TIME OUT **********\n"));
+	        TRACEC(1,("TXRXBLANKING TIME OUT\n"));
 	    }
 	}
 
 	#if 0
 	if(pChan->inputBlanking>0)
 	{
+		hit=1;
 		pChan->inputBlanking-=pChan->nSamplesRx;
 		if(pChan->inputBlanking<0)pChan->inputBlanking=0;
-		for(i=0;i<pChan->nSamplesRx*6;i++)
-			input[i]=0;
 	}
 	#endif
 
-	if( pChan->rxCpuSaver && !pChan->rxCarrierDetect && 
+	bhit=0;
+	if (pChan->txrxblankingtimer>0||(!pChan->radioDuplex&&pChan->txPttOut))
+	{
+		bhit=1;
+	}
+
+	if(hit)
+	{
+		/*	rx input blanking */
+		//for(i=0;i<pChan->nSamplesRx*6;i++)pChan->spsRx->source[i]=0;
+	}
+
+	if( pChan->rxCpuSaver && !pChan->rxCarrierDetect &&
 	    pChan->smode==SMODE_NULL &&
 	   !pChan->txPttIn && !pChan->txPttOut)
 	{
@@ -2738,7 +3129,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 			if(pChan->spsRxHpf)pChan->spsRxHpf->enabled=0;
 			if(pChan->spsRxDeEmp)pChan->spsRxDeEmp->enabled=0;
 			pChan->b.rxhalted=1;
-			TRACEC(1,("PmrRx() rx sps halted\n"));
+			TRACEC(1,("PmrProc() rx sps halted\n"));
 		}
 	}
 	else if(pChan->b.rxhalted)
@@ -2746,27 +3137,25 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		if(pChan->spsRxHpf)pChan->spsRxHpf->enabled=1;
 		if(pChan->spsRxDeEmp)pChan->spsRxDeEmp->enabled=1;
 		pChan->b.rxhalted=0;
-		TRACEC(1,("PmrRx() rx sps un-halted\n"));
+		TRACEC(1,("PmrProc() rx sps un-halted\n"));
 	}
 
 	i=0;
 	while(pmr_sps!=NULL && pmr_sps!=0)
 	{
-		TRACEC(5,("PmrRx() sps %i\n",i++));
+		TRACEC(5,("PmrProc() sps %i\n",i++));
 		pmr_sps->sigProc(pmr_sps);
 		pmr_sps = (t_pmr_sps *)(pmr_sps->nextSps);
 		//pmr_sps=NULL;	// sph maw
 	}
 
-	#define XPMR_VOX_HANGTIME	2000
-
 	if(pChan->rxCdType==CD_XPMR_VOX)
 	{
 		if(pChan->spsRxVox->compOut)
 		{
-			pChan->rxVoxTimer=XPMR_VOX_HANGTIME;    //VOX HangTime in ms
+			pChan->rxVoxTimer=pChan->rxSqVoxHtim;    //VOX HangTime in ms
 		}
-		if(pChan->rxVoxTimer>0)
+		if(pChan->rxVoxTimer>0 && !bhit)
 		{
 			pChan->rxVoxTimer-=MS_PER_FRAME;
 			pChan->rxCarrierDetect=1;
@@ -2779,16 +3168,24 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	}
 	else
 	{
-		pChan->rxCarrierDetect=!pChan->spsRx->compOut;
-		if(pChan->rxSquelchDelay)
-			pChan->spsRxSquelchDelay->b.outzero=pChan->spsRx->compOut;
+		if (bhit)
+		{
+			pChan->rxCarrierDetect=0;
+		}
+		else
+		{
+			pChan->rxCarrierDetect=!pChan->spsRx->compOut;
+		}
+
+		if(pChan->rxSquelchDelay>0 && !pChan->rxCarrierDetect)
+			pChan->spsRxSquelchDelay->b.outzero=1;
 	}
 
 	// stop and start these engines instead to eliminate falsing
-	if( pChan->b.ctcssRxEnable && 
-	    ( (!pChan->b.rxhalted || 
+	if( pChan->b.ctcssRxEnable &&
+	    ( (!pChan->b.rxhalted ||
 		   pChan->rxCtcss->decode!=CTCSS_NULL || pChan->smode==SMODE_CTCSS) &&
-		(pChan->smode!=SMODE_DCS&&pChan->smode!=SMODE_LSD) ) 
+		(pChan->smode!=SMODE_DCS&&pChan->smode!=SMODE_LSD) )
 	  )
 	{
 		ctcss_detect(pChan);
@@ -2798,7 +3195,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	if(pChan->txPttIn!=pChan->b.pttwas)
 	{
 		pChan->b.pttwas=pChan->txPttIn;
-		TRACEC(1,("PmrRx() txPttIn=%i\n",pChan->b.pttwas));
+		TRACEC(1,("PmrProc() txPttIn=%i\n",pChan->b.pttwas));
 	}
 	#endif
 
@@ -2809,7 +3206,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	if(pChan->smodetimer>0 && !pChan->txPttIn)
 	{
 		pChan->smodetimer-=MS_PER_FRAME;
-	 	
+
 		if(pChan->smodetimer<=0)
 		{
 			pChan->smodetimer=0;
@@ -2820,7 +3217,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		}
 	}
 
-	if(pChan->rxCtcss->decode > CTCSS_NULL && 
+	if(pChan->rxCtcss->decode > CTCSS_NULL &&
 	   (pChan->smode==SMODE_NULL||pChan->smode==SMODE_CTCSS) )
 	{
 		if(pChan->smode!=SMODE_CTCSS)
@@ -2830,53 +3227,25 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		}
 		pChan->smodetimer=pChan->smodetime;
 	}
-	if(pChan->smode==SMODE_CTCSS)
-	{
-		if(pChan->rxCtcss->decode != pChan->lastrxdecode)
-		{
-			pChan->lastrxdecode = pChan->rxCtcss->decode;
-			f = 0;
-			if(pChan->rxCtcss->decode>CTCSS_NULL)
-			{
-				if(pChan->rxCtcssMap[pChan->rxCtcss->decode]!=CTCSS_RXONLY)
-				{
-					f=freq_ctcss[pChan->rxCtcssMap[pChan->rxCtcss->decode]];
-				}
-			}
-			else
-			{
-				f=pChan->txctcssdefault_value;	
-			}
-			if (f && pChan->spsSigGen0->freq != f*10)
-			{
-				pChan->spsSigGen0->freq=f*10;
-				pChan->spsSigGen0->option=1;
-			}
-		}
-	}
-	else
-	{
-		pChan->lastrxdecode = CTCSS_NULL;
 
-	}
 	#ifdef HAVE_XPMRX
 	xpmrx(pChan,XXO_LSDCTL);
 	#endif
 
-#endif
-	//TRACEX(("PmrRx() tx portion.\n"));
+	/* TRACEX(("PmrRx() tx portion.\n")); */
 
-	// handle radio transmitter ptt input
+	/* handle radio transmitter ptt input	*/
 	hit=0;
 	if( !(pChan->smode==SMODE_DCS||pChan->smode==SMODE_LSD) )
 	{
 
-	if( pChan->txPttIn && (pChan->txState==CHAN_TXSTATE_IDLE ))
+	if( pChan->txPttIn && pChan->txState==CHAN_TXSTATE_IDLE )
 	{
 		TRACEC(1,("txPttIn==1 from CHAN_TXSTATE_IDLE && !SMODE_LSD. codeindex=%i  %i \n",
 			pChan->rxCtcss->decode, pChan->rxCtcssMap[pChan->rxCtcss->decode] ));
 		pChan->dd.b.doitnow=1;
 		pChan->spsSigGen0->freq=0;
+
 	    if(pChan->smode==SMODE_CTCSS && !pChan->b.txCtcssInhibit)
 		{
 			if(pChan->rxCtcss->decode>CTCSS_NULL)
@@ -2888,13 +3257,13 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 			}
 			else
 			{
-				f=pChan->txctcssdefault_value;	
+				f=pChan->txctcssdefault_value;
 			}
 			TRACEC(1,("txPttIn - Start CTCSSGen  %f \n",f));
 			if(f)
 			{
 				t_pmr_sps *pSps;
-	
+
 				pChan->spsSigGen0->freq=f*10;
 				pSps=pChan->spsTxLsdLpf;
 				pSps->enabled=1;
@@ -3031,7 +3400,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	}
 	else if(pChan->txState==CHAN_TXSTATE_COMPLETE)
 	{
-		hit=1;	
+		hit=1;
 	}
 	}	// end of if SMODE==LSD
 
@@ -3050,10 +3419,10 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		pChan->b.txCtcssReady = 1;
 		TRACEC(1,("Tx Off hit.\n"));
 	}
-			  
+
 	if(pChan->b.reprog)
 	{
-		pChan->b.reprog=0;	
+		pChan->b.reprog=0;
 		progdtx(pChan);
 	}
 
@@ -3064,23 +3433,23 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	}
 
 	// enable this after we know everything else is working
-	if( pChan->txCpuSaver && 
-	    !pChan->txPttIn && !pChan->txPttOut && 
+	if( pChan->txCpuSaver &&
+	    !pChan->txPttIn && !pChan->txPttOut &&
 	    pChan->txState==CHAN_TXSTATE_IDLE &&
-	    !pChan->dd.b.doitnow 
-	    ) 
+	    !pChan->dd.b.doitnow
+	    )
 	{
 		if(!pChan->b.txhalted)
 		{
 			pChan->b.txhalted=1;
-			TRACEC(1,("PmrRx() tx sps halted\n"));
+			TRACEC(1,("PmrProc() tx sps halted\n"));
 		}
 	}
 	else if(pChan->b.txhalted)
 	{
 		pChan->dd.b.doitnow=1;
 		pChan->b.txhalted=0;
-		TRACEC(1,("PmrRx() tx sps un-halted\n"));
+		TRACEC(1,("PmrProc() tx sps un-halted\n"));
 	}
 
 	if(pChan->b.txhalted)return(1);
@@ -3091,14 +3460,14 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		pChan->spsSigGen1->option=1;
 		pChan->spsSigGen1->enabled=1;
 		pChan->b.doingSpecialTone=1;
-	} 
+	}
 	else if(pChan->b.stopSpecialTone)
 	{
 		pChan->b.stopSpecialTone=0;
 		pChan->spsSigGen1->option=0;
 		pChan->b.doingSpecialTone=0;
 		pChan->spsSigGen1->enabled=0;
-	} 
+	}
 	else if(pChan->b.doingSpecialTone)
 	{
 		pChan->spsSigGen1->sink=outputtx;
@@ -3107,9 +3476,8 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		return 0;
 	}
 
-	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled)
+	if(pChan->spsSigGen0 && pChan->spsSigGen0->enabled && (!pChan->b.txCtcssOff))
 	{
-		pChan->spsSigGen0->b.mute = pChan->b.txCtcssOff;
 		pChan->spsSigGen0->sigProc(pChan->spsSigGen0);
 	}
 
@@ -3129,16 +3497,23 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	pmr_sps=pChan->spsTx;
 
 	// get tx data from de-drift process
+	#if 0
 	pChan->dd.option=0;
 	pChan->dd.ptr=pChan->pTxBase;
 	dedrift(pChan);
+	#endif
 
+	outskew(&pChan->skewer, pChan->pWrite);
+
+	// pmr_sps->source=outskew(&pChan->skewer);
+
+	#if 1 /* stop tx process */
 	// tx process
-	if(!pChan->spsSigGen1->enabled)
+	if(pChan->spsSigGen1->enabled)
 	{
-		pmr_sps->source=pChan->pTxBase;
+		pmr_sps->source=pChan->spsSigGen1->sink;
 	}
-	else input=pmr_sps->source;
+	else pmr_sps->source=pChan->pWrite;
 
 	if(outputtx!=NULL)
 	{
@@ -3162,6 +3537,7 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	if(pChan->txMixB==TX_OUT_OFF || !pChan->txPttOut ){
 		for(i=0;i<pChan->nSamplesTx*2*6;i+=2)outputtx[i+1]=0;
 	}
+	#endif
 
 	#if XPMR_PPTP == 1
 	if(	pChan->b.radioactive && pChan->b.pptp_p1!=pChan->txPttOut)
@@ -3174,11 +3550,17 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	#if XPMR_DEBUG0 == 1
 	// TRACEF(1,("PmrRx() - debug outputs \n"));
 	if(pChan->b.rxCapture){
+		//TRACEF(1,("PmrRx() rxCapture debug outputs\n"));
 		for(i=0;i<pChan->nSamplesRx;i++)
 		{
-			pChan->pRxDemod[i]=input[i*2*6];
-			pChan->pTstTxOut[i]=outputtx[i*2*6+0]; // txa
-			//pChan->pTstTxOut[i]=outputtx[i*2*6+1]; // txb
+			//pChan->pRxDemod[i]=input[i*2*6];
+			pChan->pRxDemod[i]=pChan->spsRx->source[i*6];
+
+			//pChan->pRxSpeaker[i]=pChan->spsRxOut->sink[i];
+
+			pChan->pTstTxOut[i]=outputtx[i*2*6+0]; 								// txa
+			//pChan->pTstTxOut[i]=outputtx[i*2*6+1]; 							// txb
+
 			TSCOPE((RX_NOISE_TRIG, pChan->sdbg, i, (pChan->rxCarrierDetect*XPMR_TRACE_AMP)-XPMR_TRACE_AMP/2));
 			TSCOPE((RX_CTCSS_DECODE, pChan->sdbg, i, pChan->rxCtcss->decode*(M_Q14/CTCSS_NUM_CODES)));
 			TSCOPE((RX_SMODE, pChan->sdbg, i, pChan->smode*(XPMR_TRACE_AMP/4)));
@@ -3193,12 +3575,19 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 	#endif
 
 	strace2(pChan->sdbg);
-	TRACEC(5,("PmrRx() return  cd=%i smode=%i  txPttIn=%i  txPttOut=%i \n",pChan->rxCarrierDetect,pChan->smode,pChan->txPttIn,pChan->txPttOut));
+
+	ast_mutex_lock(&(pChan->mutexWrite));
+	pChan->b.gotwrite=0;
+	ast_mutex_unlock(&(pChan->mutexWrite));
+
+	TRACEC(5,("PmrProc() return  cd=%i smode=%i  txPttIn=%i  txPttOut=%i \n",pChan->rxCarrierDetect,pChan->smode,pChan->txPttIn,pChan->txPttOut));
 	return 0;
 }
-/*
-	parallel binary programming of an RF Transceiver*/
 
+
+/*
+	parallel binary programming of an RF Transceiver
+*/
 void	ppbinout	(u8 chan)
 {
 #if(DTX_PROG == 1)
@@ -3225,8 +3614,8 @@ void	ppbinout	(u8 chan)
 	ioctl(ppdrvdev, PPDRV_IOC_PINSET,    BIN_PROG_3|BIN_PROG_2|BIN_PROG_1|BIN_PROG_0);
 	ioctl(ppdrvdev, PPDRV_IOC_PINCLEAR, i );
 
-    // ioctl(ppdrvdev, PPDRV_IOC_PINSET, BIN_PROG_3|BIN_PROG_2|BIN_PROG_1|BIN_PROG_0 ); 
-    ast_log(LOG_NOTICE, "mask=%i 0x%x\n",i,i); 
+    // ioctl(ppdrvdev, PPDRV_IOC_PINSET, BIN_PROG_3|BIN_PROG_2|BIN_PROG_1|BIN_PROG_0 );
+    ast_log(LOG_NOTICE, "mask=%i 0x%x\n",i,i);
 #endif
 }
 /*
@@ -3255,7 +3644,7 @@ void	ppspiout	(u32 spidata)
 	if(firstrun==0)
 	{
 		firstrun=1;
-		for(ii=0;ii<PP_BIT_TIME*200;ii++);	
+		for(ii=0;ii<PP_BIT_TIME*200;ii++);
 	}
 	else
 	{
@@ -3294,7 +3683,7 @@ void	ppspiout	(u32 spidata)
 */
 void	progdtx(t_pmr_chan *pChan)
 {
-#if(DTX_PROG == 1)	
+#if(DTX_PROG == 1)
 	//static u32	progcount=0;
 
 	u32 reffreq;
@@ -3351,7 +3740,7 @@ void	progdtx(t_pmr_chan *pChan)
 	{
 		ioctl(ppdrvdev, PPDRV_IOC_PINCLEAR, DTX_TXPWR );
 		ioctl(ppdrvdev, PPDRV_IOC_PINSET, DTX_TX );
-		if(pChan->txpower && 0) ioctl(ppdrvdev, PPDRV_IOC_PINSET, DTX_TXPWR );
+		if(pChan->txpower)ioctl(ppdrvdev, PPDRV_IOC_PINSET, DTX_TXPWR );
 	}
 	else
 	{
@@ -3361,8 +3750,8 @@ void	progdtx(t_pmr_chan *pChan)
 }
 
 /*	dedrift
-	reconciles clock differences between the usb adapter and 
-	asterisk's frame rate clock	
+	reconciles clock differences between the usb adapter and
+	asterisk's frame rate clock
 	take out all accumulated drift error on these events:
 	before transmitter on
 	when ptt release from mobile units detected
@@ -3428,7 +3817,7 @@ void dedrift(t_pmr_chan *pChan)
 		{
 			memcpy(pChan->dd.ptr,(void*)(pChan->dd.buff + pChan->dd.outputindex),pChan->dd.framesize*2);
 		}
-		
+
 		// compute clock error and correction factor
 		if(pChan->dd.outputindex > inputindex)
 		{
@@ -3461,7 +3850,7 @@ void dedrift(t_pmr_chan *pChan)
 		// event sync'd correction
 		if(pChan->dd.b.doitnow)
 		{
-		    pChan->dd.b.doitnow=0;	
+		    pChan->dd.b.doitnow=0;
 			indextweak=pChan->dd.factor;
 			pChan->dd.factor = pChan->dd.x1 = pChan->dd.x0 = pChan->dd.y1 = pChan->dd.y0 = 0;
 			pChan->dd.timer=20000/MS_PER_FRAME;
@@ -3512,8 +3901,108 @@ void dedrift_write(t_pmr_chan *pChan, i16 *src )
 	pChan->dd.accum+=pChan->dd.framesize;
 }
 
-#if GCC_VERSION > 40600
-#pragma GCC diagnostic pop
-#endif
+
+/*
+
+*/
+int	startskew(t_skewer *skt)
+{
+	ast_mutex_lock(&skt->skt_lock);
+	memset(skt->skewbuf,0,SKT_BUF_FRAMES*SKT_FRAME_SAMPLES*2);
+	skt->out_dex=skt->incount=skt->outcount=0;
+	skt->in_dex=SKT_NOM_LEAD*SKT_FRAME_SAMPLES;
+	skt->checktime=skt->checktimer=SKT_CHECK_TIME;
+	ast_mutex_unlock(&skt->skt_lock);
+	return 0;
+}
+
+/*
+
+*/
+int	inskew(t_skewer *skt, short int *pin)
+{
+    int dex;
+
+	ast_mutex_lock(&skt->skt_lock);
+
+	skt->incount+=SKT_FRAME_SAMPLES;
+
+	dex=skt->in_dex%(SKT_BUF_FRAMES*SKT_FRAME_SAMPLES);
+	//dex=0;
+
+	memcpy(&skt->skewbuf[dex],pin,SKT_FRAME_SAMPLES*2);
+
+	skt->in_dex+=SKT_FRAME_SAMPLES;
+
+	if(skt->inpace)skewcheck(skt);
+
+	ast_mutex_unlock(&skt->skt_lock);
+	return 0;
+}
+
+/*
+
+*/
+int	outskew(t_skewer *skt, short int *pout)
+{
+    int dex;
+	ast_mutex_lock(&skt->skt_lock);
+
+	skt->outcount+=SKT_FRAME_SAMPLES;
+
+	if( skt->out_dex >= skt->in_dex ) skt->out_dex -= SKT_FRAME_SAMPLES;
+	if( skt->out_dex < (skt->in_dex-SKT_MAX_LEAD) ) skt->out_dex = skt->in_dex - SKT_NOM_LEAD*SKT_FRAME_SAMPLES;
+
+	dex=skt->out_dex%(SKT_BUF_FRAMES*SKT_FRAME_SAMPLES);
+	//dex=0;
+
+	memcpy(pout,&skt->skewbuf[dex],SKT_FRAME_SAMPLES*2);
+	skt->out_dex+=SKT_FRAME_SAMPLES;
+
+	if(!skt->inpace)skewcheck(skt);
+	ast_mutex_unlock(&skt->skt_lock);
+	return 0;
+}
+
+/*
+	at an interval, determine which clock is faster
+	and reset the counters and indexes to prevent overflow
+	if needed move the pointer to grow or shrink the buffer
+*/
+void skewcheck(t_skewer *skt)
+{
+	int clerr_was,dex,diff;
+
+	skt->checktimer-=SKT_TIME_FRAME;
+
+	if(skt->checktimer<=0)
+	{
+		skt->checktimer=skt->checktime;
+
+		if(parentModuleDebugLevel)
+			printf("skew clock error=%8i  %8i  %8i %i\n", skt->incount-skt->outcount, skt->incount, skt->outcount,skt->clerr);
+
+		clerr_was=skt->clerr;
+		if( skt->outcount > skt->incount )
+		{
+			skt->clerr=1;
+		}
+		else if( skt->incount < skt->outcount )
+		{
+			skt->clerr=-1;
+		}
+		else
+			skt->clerr=0;
+
+		skt->incount=skt->outcount=0;
+
+		dex=skt->out_dex%(SKT_BUF_FRAMES*SKT_FRAME_SAMPLES);
+		diff=skt->in_dex-skt->out_dex;
+		skt->out_dex=dex;
+		skt->in_dex=skt->out_dex+diff;
+	}
+}
+
+
 
 /* end of file */

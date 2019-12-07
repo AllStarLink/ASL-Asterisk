@@ -24,7 +24,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 107484 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -662,7 +662,9 @@ static void sms_log (sms_t * h, char status)
 					*p++ = h->ud[n];
 			*p++ = '\n';
 			*p = 0;
-			write (o, line, strlen (line));
+			if (write (o, line, strlen (line)) < 0) {
+				ast_log(LOG_WARNING, "write() failed: %s\n", strerror(errno));
+			}
 			close (o);
 		}
 		*h->oa = *h->da = h->udl = 0;
@@ -745,7 +747,7 @@ static void sms_readfile (sms_t * h, char *fn)
 						  H,
 						  M,
 						  S;
-						if (sscanf (p, "%d-%d-%dT%d:%d:%d", &Y, &m, &d, &H, &M, &S) == 6)
+						if (sscanf (p, "%30d-%30d-%30dT%30d:%30d:%30d", &Y, &m, &d, &H, &M, &S) == 6)
 						{
 							struct tm t;
 							t.tm_year = Y - 1900;

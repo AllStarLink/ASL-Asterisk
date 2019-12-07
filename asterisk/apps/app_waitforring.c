@@ -27,7 +27,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 211528 $")
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -60,7 +60,7 @@ static int waitforring_exec(struct ast_channel *chan, void *data)
 	int res = 0;
 	int ms;
 
-	if (!data || (sscanf(data, "%d", &ms) != 1)) {
+	if (!data || (sscanf(data, "%30d", &ms) != 1)) {
                 ast_log(LOG_WARNING, "WaitForRing requires an argument (minimum seconds)\n");
 		return 0;
 	}
