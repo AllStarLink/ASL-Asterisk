@@ -22122,6 +22122,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (who == myrpt->telechannel) /* if is telemetry conference output */
 		{
 			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->rxchankeyed,myrpt->remrx,myrpt->noduck);
+			if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->keyed,myrpt->remrx,myrpt->noduck);
 			f = ast_read(myrpt->telechannel);
 			if (!f)
 			{
@@ -22133,7 +22134,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				float gain;
 
 				//if(!myrpt->noduck&&(myrpt->rxchankeyed||myrpt->remrx)) /* This is for when/if simple voter is implemented.  It replaces the line below it. */
-				if(!myrpt->noduck&&myrpt->remrx)
+				if(!myrpt->noduck&&(myrpt->keyed||myrpt->remrx))
 					gain = myrpt->p.telemduckgain;
 				else
 					gain = myrpt->p.telemnomgain;
