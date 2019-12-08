@@ -831,43 +831,43 @@ static  pthread_t rpt_master_thread;
 struct rpt;
 
 /*
- * Structure used to manage links 
+ * Structure used to manage links (phone,another rpt,iaxRpt)
 */
 struct rpt_link
 {
 	struct rpt_link *next;
 	struct rpt_link *prev;
-	char	mode;			/* 1 if in tx mode */
-	char	isremote;
-	char	phonemode;
-	char	phonevox;		/* vox the phone */
-	char	phonemonitor;		/* no tx or funs for the phone */
-	char	name[MAXNODESTR];	/* identifier (routing) string */
-	char	lasttx;
+	char	mode;				/*!< \brief 1 if in tx mode */
+	char	isremote;			/*!< \brief Link is to a Remote */
+	char	phonemode;			/*!< \brief Link is to a Phone */
+	char	phonevox;			/*!< \brief Link is to a Phone with VOX */
+	char	phonemonitor;		/*!< \brief no tx or functions for the phone */
+	char	name[MAXNODESTR];	/*!< \brief identifier (routing) string */
+	char	lasttx;				/*!< \brief Transmitter State Last Sent to Radio */
 	char	lasttx1;
 	char	lastrx;
 	char	lastrealrx;
-	char	lastrx1;
+	char	lastrx1;			/*!< \brief Receiver Squelch State Last Handled */
 	char	wouldtx;
 	char	connected;
 	char	hasconnected;
-	char	perma;
+	char	perma;				/*!< \brief Permanent Link. Restore if down. */
 	char	thisconnected;
-	char	outbound;
+	char	outbound;			/*!< \brief This is the calling link. */
 	char	disced;
 	char	killme;
 	long	elaptime;
 	long	disctime;
 	long 	retrytimer;
-	long	retxtimer;
-	long	rerxtimer;
-	long	rxlingertimer;
+	long	retxtimer;			/*!< \brief To send recurring ACRK messages */
+	long	rerxtimer;			/*!< \brief Loss of Packets Timer */
+	long	rxlingertimer;		/*!< \brief Loss of Voice Packets Timer */
 	int	retries;
 	int	max_retries;
 	int	reconnects;
 	long long connecttime;
-	struct ast_channel *chan;	
-	struct ast_channel *pchan;	
+	struct 	ast_channel *chan;	   /*!< \brief Tx stream to Link from psuedo */
+	struct 	ast_channel *pchan;	   /*!< \brief Rx stream from Link to psuedo */
 	char	linklist[MAXLINKLIST];
 	time_t	linklistreceived;
 	long	linklisttimer;
@@ -881,7 +881,7 @@ struct rpt_link
 	int voxtotimer;
 	char voxtostate;
 	char newkey;
-	char iaxkey;
+	char iaxkey;		    /*!< \brief Link iax control type */
 	int linkmode;
 	int newkeytimer;
 	char gott;
@@ -1036,6 +1036,9 @@ struct rpt_cmd_struct
     int command_source;
 };
 
+/*!
+ * \brief Tone Burst Detection
+ */
 typedef struct {
 	int v2;
 	int v3;
@@ -1093,6 +1096,7 @@ static struct rpt
 	mdc_decoder_t *mdc;
 #endif
 
+	/* the following are set in rpt.conf */
 	struct {
 		char *ourcontext;
 		char *ourcallerid;
@@ -1188,16 +1192,16 @@ static struct rpt
 		char *connpgm;
 		char *mdclog;
 		char nolocallinkct;
-		char nounkeyct;
+		char nounkeyct;					/*!< \brief No Unkey Connect Telemetry */
 		char holdofftelem;
 		char beaconing;
-		int rxburstfreq;
+		int rxburstfreq;				/*!< \brief Tone Burst Squelch */
 		int rxbursttime;
 		int rxburstthreshold;
 		int litztime;
 		char *litzchar;
 		char *litzcmd;
-		int itxctcss;		
+		int itxctcss;					/*!< \brief inhibit tx ctcss */
 		int gpsfeet;
 		int default_split_2m;
 		int default_split_70cm;
@@ -1222,11 +1226,11 @@ static struct rpt
 	int unkeytocttimer;
 	time_t lastkeyedtime;
 	time_t lasttxkeyedtime;
-	char keyed;
-	char txkeyed;
+	char keyed;							/*!< \brief Receiver Key State from rxchannel */
+	char txkeyed;  						/*!< \brief Transmitter Key State */
 	char exttx;
 	char localtx;
-	char remrx;	
+	char remrx;							/*!< \brief Indicate keying from a link */
 	char remoterx;
 	char remotetx;
 	char remoteon;
@@ -1318,7 +1322,7 @@ static struct rpt
 	long	authtimer;
 	int iofd;
 	time_t start_time,last_activity_time;
-	char	lasttone[32];
+	char	lasttone[32];					/*!< \brief last squelch code processed for squelch code macros */
 	struct rpt_tele *active_telem;
 	struct 	rpt_topkey topkey[TOPKEYN];
 	int topkeystate;
@@ -1331,10 +1335,10 @@ static struct rpt
 	int linkposttimer;			
 	int keyposttimer;			
 	int lastkeytimer;			
-	char newkey;
-	char iaxkey;
+	char newkey;				/*!< \brief node keying type */
+	char iaxkey;				/*!< \brief node control type */
 	char inpadtest;
-	long rxlingertimer;
+	long rxlingertimer;			/*!< \brief rx key timer after no voice packets */
 	char localoverride;
 	char ready;
 	char lastrxburst;
