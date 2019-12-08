@@ -45,7 +45,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program
- *  version 0.330 01/12/2018
+ *  version 0.330 12/07/2019
  *
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -53,6 +53,10 @@
  * \note contributions by Steven Henke, W9SH, <w9sh@arrl.net>
  * \note contributions by Mike Zingman, N4IRR
  * \note contributions by Steve Zingman, N4IRS
+ *
+ * \note Allison ducking code by W9SH
+ * \ported by Adam KC1KCC
+ * \ported by Mike N4IRR
  *
  * See http://www.zapatatelephony.org/app_rpt.html
  *
@@ -529,7 +533,7 @@ enum{DAQ_TYPE_UCHAMELEON};
  * use the simple format YYMMDD (better for sort)
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision: 191207 $")
 // ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
 
 #include <signal.h>
