@@ -428,6 +428,7 @@
 #define	REQUIRED_ZAPTEL_VERSION 'A'
 
 #define	STATPOST_PROGRAM "/usr/bin/wget,-q,--output-document=/dev/null,--no-check-certificate"
+#define STATPOST_MIN 2000 /* minimum node number for which stats will be reported */
 
 #define	ALLOW_LOCAL_CHANNELS
 
@@ -1172,6 +1173,7 @@ static struct rpt
 		char lnkactenable;
 		char *statpost_program;
 		char *statpost_url;
+		int suppress_statpost;
 		char linkmode[10];
 		char linkmodedynamic[10];
 		char *locallist[16];
@@ -5582,6 +5584,8 @@ time_t	now;
 unsigned int seq;
 
 	if (!myrpt->p.statpost_url) return;
+	ast_log(LOG_DEBUG,"suppress_statpost: %d\n", myrpt->p.suppress_statpost);
+	if (myrpt->p.suppress_statpost) return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
 	astr = ast_strdup(myrpt->p.statpost_program);
 	if ((!str) || (!astr)) return;
@@ -5603,6 +5607,7 @@ unsigned int seq;
 	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
 	if (!(pid = fork()))
 	{
+		ast_log(LOG_DEBUG, "registering stats to %s\n", str);
 		execv(astrs[0],astrs);
 		ast_log(LOG_ERROR, "exec of %s failed.\n", astrs[0]);
 		perror("asterisk");
@@ -6113,6 +6118,15 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		else rpt_vars[n].p.statpost_program = STATPOST_PROGRAM;
 	rpt_vars[n].p.statpost_url = 
 		(char *) ast_variable_retrieve(cfg,this,"statpost_url");
+	val = (char *) ast_variable_retrieve(cfg,this,"force_statpost");
+	ast_log(LOG_DEBUG,"force_statpost: %s\n", val);
+	if ((!val || atoi(val) == 0) && atoi(rpt_vars[n].name) < STATPOST_MIN) {
+		rpt_vars[n].p.suppress_statpost = 1;
+		ast_log(LOG_DEBUG,"suppressing statpost\n");
+	} else {
+		rpt_vars[n].p.suppress_statpost = 0;
+		ast_log(LOG_DEBUG,"not suppressing statpost\n");
+	}
 	rpt_vars[n].p.tailmessagetime = retrieve_astcfgint(&rpt_vars[n],this, "tailmessagetime", 0, 200000000, 0);		
 	rpt_vars[n].p.tailsquashedtime = retrieve_astcfgint(&rpt_vars[n],this, "tailsquashedtime", 0, 200000000, 0);		
 	rpt_vars[n].p.duplex = retrieve_astcfgint(&rpt_vars[n],this,"duplex",0,4,(ISRANGER(rpt_vars[n].name) ? 0 : 2));
