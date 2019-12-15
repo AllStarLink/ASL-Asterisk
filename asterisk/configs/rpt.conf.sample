@@ -181,7 +181,7 @@ startup_macro =
 ; ** For ACID and Debian ***
 ;statpost_program = /usr/bin/wget,-q,--timeout=15,--tries=1,--output-document=/dev/null                       
 ;statpost_url = http://stats.allstarlink.org/uhandler.php ; Status updates 
-;force_statpost = 0
+;force_statpost = 0 ; only use this if you have a very good reason to register nodes below 2000
 
 ; ** For Limey Linux **
 ;statpost_program = /bin/wget,-q,--timeout=15,--tries=1,--output-document=/dev/null                       
