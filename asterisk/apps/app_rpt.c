@@ -2600,7 +2600,7 @@ static int uchameleon_connect(struct daq_entry_tag *t)
         }
 	if(debug >= 3)
         	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
-	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
+	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(rxbuf)-4))){
 		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", t->name);
 		close(t->fd);
 		t->fd = -1;
@@ -4292,10 +4292,10 @@ struct	ast_frame *f1;
 static int linkcount(struct rpt *myrpt)
 {
 	struct	rpt_link *l;
-	char *reverse_patch_state;
+	//char *reverse_patch_state;
  	int numoflinks;
 
-	reverse_patch_state = "DOWN";
+	//reverse_patch_state = "DOWN";
 	numoflinks = 0;
 	l = myrpt->links.next;
 	while(l && (l != &myrpt->links)){
@@ -4805,7 +4805,7 @@ struct	mdcparams *mdcp;
 		ast_log(LOG_ERROR,"Cannot alloc!!\n");
 		return;
 	}
-	memset(mdcp,0,sizeof(mdcp));
+	memset(mdcp,0,sizeof(*mdcp));
 	mdcp->type[0] = 'A';
 	mdcp->UnitID = UnitID;
 	rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
@@ -6957,7 +6957,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 
 static int rpt_do_lstats(int fd, int argc, char *argv[])
 {
-	int i,j;
+	int i; //,j;
 	char *connstate;
 	struct rpt *myrpt;
 	struct rpt_link *l;
@@ -6977,7 +6977,7 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 			myrpt = &rpt_vars[i];
 			rpt_mutex_lock(&myrpt->lock); /* LOCK */
 			/* Traverse the list of connected nodes */
-			j = 0;
+			//j = 0;
 			l = myrpt->links.next;
 			while(l && (l != &myrpt->links)){
 				if (l->name[0] == '0'){ /* Skip '0' nodes */
@@ -7765,7 +7765,7 @@ static int rpt_do_showvars(int fd, int argc, char *argv[])
 
 static int rpt_do_asl(int fd, int argc, char *argv[])
 {
-       double warpone = 75139293848.398696166028333356763;
+       //double warpone = 75139293848.398696166028333356763;
        double warpfactor = 1.0;
 
        if (argc > 2) return RESULT_SHOWUSAGE;
@@ -7773,8 +7773,8 @@ static int rpt_do_asl(int fd, int argc, char *argv[])
                 return RESULT_SHOWUSAGE;
 
        ast_cli(fd, "This command doe not do anything\n");
-       ast_cli(fd, "73 Steve N4IRS\n",
-               warpfactor * warpfactor * warpfactor * warpone,warpfactor);
+       ast_cli(fd, "73 Steve N4IRS\n"/*,
+               warpfactor * warpfactor * warpfactor * warpone,warpfactor*/);
        ast_cli(fd,"Replace a command that does nothing but waste space. RIP WB6NIL\n");
        return RESULT_SUCCESS;
 }
@@ -9018,7 +9018,7 @@ struct	rpt *myrpt;
 struct	rpt_link *l,*l1,linkbase;
 struct	ast_channel *mychannel;
 int id_malloc, vmajor, vminor, m;
-char *p,*ct,*ct_copy,*ident, *nodename,*cp;
+char *p,*ct,*ct_copy,*ident, *nodename;//,*cp;
 time_t t,t1,was;
 #ifdef	NEW_ASTERISK
 struct ast_tm localtm;
@@ -9911,7 +9911,7 @@ treataslocal:
 			res = ast_streamfile(mychannel, "rpt/invalid-freq", mychannel->language);
 		break;
 	    case REMMODE:
-		cp = 0;
+		//cp = 0;
 		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		switch(myrpt->remmode)
 		{
@@ -11501,7 +11501,7 @@ static void send_old_newkey(struct ast_channel *chan)
 
 static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 {
-	char *s, *s1, *s2, *tele,*cp;
+	char *s, *s1, /**s2, */*tele,*cp;
 	char lstr[MAXLINKLIST],*strs[MAXLINKLIST];
 	char tmp[300], deststr[300] = "",modechange = 0;
 	char sx[320],*sy;
@@ -11565,7 +11565,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			sprintf(sx,"%s:4569/%s",s1,sy + 1);
 			s1 = sx;
 		}
-		s2 = strsep(&s,",");
+		//s2 = strsep(&s,",");
 	}
 	rpt_mutex_lock(&myrpt->lock);
 	l = myrpt->links.next;
@@ -12994,7 +12994,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if (argc < 3) break;
 			mdcp = ast_calloc(1,sizeof(struct mdcparams));
 			if (!mdcp) return DC_ERROR;
-			memset(mdcp,0,sizeof(mdcp));
+			memset(mdcp,0,sizeof(*mdcp));
 			if (*argv[1] == 'C')
 			{
 				if (argc < 5) return DC_ERROR;
@@ -14980,7 +14980,7 @@ int	band,txoffset = 0,txpower = 0,rxpl;
 static int setrtx(struct rpt *myrpt)
 {
 char tmp[MAXREMSTR] = "",*s,rigstr[200],pwr,res = 0;
-int	band,txoffset = 0,txpower = 0,rxpl,txpl,mysplit;
+int	band,/*txoffset = 0,txpower = 0,*/rxpl,txpl,mysplit;
 float ofac;
 double txfreq;
 
@@ -15044,7 +15044,7 @@ double txfreq;
 	 	return -1;
 	}
 	
-	switch(myrpt->offset)
+	/*switch(myrpt->offset)
 	{
 	    case REM_MINUS:
 		txoffset = 0;
@@ -15067,7 +15067,7 @@ double txfreq;
 	    case REM_HIPWR:
 		txpower = 0x10;
 		break;
-	}
+	}*/
 
 	res = setrtx_check(myrpt);
 	if (res < 0) return res;
@@ -15549,11 +15549,11 @@ static int check_freq_ft897(int m, int d, int *defmode)
 static int set_freq_ft897(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
-	int fd,m,d;
+	int /*fd,*/m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
+	//fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -15949,11 +15949,11 @@ static int check_freq_ft100(int m, int d, int *defmode)
 static int set_freq_ft100(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
-	int fd,m,d;
+	int /*fd,*/m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
+	//fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -16253,11 +16253,11 @@ static int check_freq_ft950(int m, int d, int *defmode)
 static int set_freq_ft950(struct rpt *myrpt, char *newfreq)
 {
 	char cmdstr[20];
-	int fd,m,d;
+	int /*fd,*/m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
+	//fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -16791,9 +16791,9 @@ static int set_freq_ic706(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
-	int fd,m,d;
+	int /*fd,*/m,d;
 
-	fd = 0;
+	//fd = 0;
 	if(debug) 
 		ast_log(LOG_NOTICE,"newfreq:%s\n",newfreq); 			
 
@@ -17220,9 +17220,9 @@ static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
-	int fd,m,d;
+	int /*fd,*/m,d;
 
-	fd = 0;
+	//fd = 0;
 	if(debug) 
 		ast_log(LOG_NOTICE,"newfreq:%s\n",newfreq); 			
 
@@ -18595,7 +18595,7 @@ int	res;
 
 static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 {
-	char *s, *s1, *s2, *tele;
+	char *s, *s1, /**s2, */*tele;
 	char tmp[300], deststr[300] = "";
 	char sx[320],*sy;
 	struct ast_frame *f1;
@@ -18623,7 +18623,7 @@ static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 		sprintf(sx,"%s:4569/%s",s1,sy + 1);
 		s1 = sx;
 	}
-	s2 = strsep(&s,",");
+	//s2 = strsep(&s,",");
 	snprintf(deststr, sizeof(deststr), "IAX2/%s", s1);
 	tele = strchr(deststr, '/');
 	if (!tele) {
@@ -20657,12 +20657,12 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		}			
 		if (myrpt->cmdAction.state == CMD_STATE_READY)
 		{ /* there is a command waiting to be processed */
-			int status;
+			//`int status;
 			myrpt->cmdAction.state = CMD_STATE_EXECUTING;
 			// lose the lock
 			rpt_mutex_unlock(&myrpt->lock);
 			// do the function
-			status = (*function_table[myrpt->cmdAction.functionNumber].function)(myrpt,myrpt->cmdAction.param, myrpt->cmdAction.digits, myrpt->cmdAction.command_source, NULL);
+			//status = (*function_table[myrpt->cmdAction.functionNumber].function)(myrpt,myrpt->cmdAction.param, myrpt->cmdAction.digits, myrpt->cmdAction.command_source, NULL);
 			// get the lock again
 			rpt_mutex_lock(&myrpt->lock);
 			myrpt->cmdAction.state = CMD_STATE_IDLE;
@@ -20895,8 +20895,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					if ((myrpt->p.duplex < 2) && myrpt->keyed &&
 					    myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
 					{
-						int bs;
-						bs = write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f1),f1->datalen);
+						/*int bs;
+						bs = */write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f1),f1->datalen);
 					}
 				}
 			}
@@ -21878,8 +21878,8 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (((myrpt->p.duplex >= 2) || (!myrpt->keyed)) &&
 					myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
 				{
-					int bs;
-					bs = write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f),f->datalen);
+					/*int bs;
+					bs = */write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f),f->datalen);
 				}
 				fs = ast_frdup(f);
 				fac = 1.0;
@@ -25138,7 +25138,7 @@ static void * mdcgen_alloc(struct ast_channel *chan, void *params)
 	}
 	else if (p->type[0] == 'K') // kill a unit W9CR
 	{
-		mdc_encoder_set_packet(ps->mdc,0x22b,0x00,p->UnitID);
+		mdc_encoder_set_packet(ps->mdc,0x22/*b*/,0x00,p->UnitID);
 	}
 	else if (p->type[0] == 'U') // UnKill a unit W9CR
 	{
