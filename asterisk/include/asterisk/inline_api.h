@@ -21,19 +21,19 @@
 
 /*! \file
  * \brief Inlinable API function macro
-
   Small API functions that are candidates for inlining need to be specially
   declared and defined, to ensure that the 'right thing' always happens.
   For example:
-  	- there must _always_ be a non-inlined version of the function
+	- there must _always_ be a non-inlined version of the function
 	available for modules compiled out of the tree to link to
 	- references to a function that cannot be inlined (for any
 	reason that the compiler deems proper) must devolve into an
 	'extern' reference, instead of 'static', so that multiple
-	copies of the function body are not built in different modules
-	- when LOW_MEMORY is defined, inlining should be disabled
+	copies of the function body are not built in different modules.
+	However, since this doesn't work for clang, we go with 'static'
+	anyway and hope for the best!
+	- when DISABLE_INLINE is defined, inlining should be disabled
 	completely, even if the compiler is configured to support it
-
   The AST_INLINE_API macro allows this to happen automatically, when
   used to define your function. Proper usage is as follows:
   - define your function one place, in a header file, using the macro
@@ -43,15 +43,19 @@
   including the header file
  */
 
-#if !defined(LOW_MEMORY)
+#if !defined(DISABLE_INLINE)
 
 #if !defined(AST_API_MODULE)
+#if defined(__clang__) || defined(__GNUC_STDC_INLINE__)
+#define AST_INLINE_API(hdr, body) static hdr; static inline hdr body
+#else /* if defined(__clang__) */
 #define AST_INLINE_API(hdr, body) hdr; extern inline hdr body
-#else
+#endif
+#else /* if !defined(AST_API_MODULE) */
 #define AST_INLINE_API(hdr, body) hdr; hdr body
 #endif
 
-#else /* defined(LOW_MEMORY) */
+#else /* defined(DISABLE_INLINE) */
 
 #if !defined(AST_API_MODULE)
 #define AST_INLINE_API(hdr, body) hdr;
