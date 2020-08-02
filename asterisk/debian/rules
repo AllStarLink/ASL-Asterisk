@@ -88,11 +88,6 @@ menuselect.makeopts: config.status
 	$(FETCH_ENV) $(MAKE) $(BUILDFLAGS) menuselect.makeopts
 	sed -i -e '/^MENUSELECT_MOH=/d' menuselect.makeopts
 
-	# some voodoo in order to get chan_h323 built, and make it in one
-	# build pass:
-	# enable chan_h323 (not enabled by default). Note that modules listed
-	# in MENUSELECT_CHANNEL are ones to disable:
-	sed -i -e '/MENUSELECT_CHANNELS=/s/chan_h323//' menuselect.makeopts
 	cat menuselect.makedeps
 	cat menuselect.makeopts
 
