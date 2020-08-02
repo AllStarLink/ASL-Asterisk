@@ -29,7 +29,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 47051 $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <sys/types.h>
 #include <openssl/ssl.h>

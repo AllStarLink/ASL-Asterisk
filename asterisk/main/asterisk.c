@@ -52,7 +52,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 148000 $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #undef sched_setscheduler
 #undef setpriority
