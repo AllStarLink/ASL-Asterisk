@@ -26,7 +26,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
  *
- * Version Info: $Id: compat_h323.cxx 43345 2006-09-20 17:45:25Z pcadach $
+ * Version Info: $Id$
  */
 #include <ptlib.h>
 #include <h323.h>

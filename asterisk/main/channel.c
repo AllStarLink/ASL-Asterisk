@@ -25,7 +25,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
+ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -4308,7 +4308,6 @@ static int tonepair_generator(struct ast_channel *chan, void *data, int len, int
 	ts->f.offset = AST_FRIENDLY_OFFSET;
 	ts->f.data = ts->data;
 	ast_write(chan, &ts->f);
-
 	ts->pos += x;
 	if (ts->duration > 0) {
 		if (ts->pos >= ts->duration * 8)

@@ -21,10 +21,11 @@
 
 /*! \file
  * \brief Inlinable API function macro
+
   Small API functions that are candidates for inlining need to be specially
   declared and defined, to ensure that the 'right thing' always happens.
   For example:
-	- there must _always_ be a non-inlined version of the function
+  	- there must _always_ be a non-inlined version of the function
 	available for modules compiled out of the tree to link to
 	- references to a function that cannot be inlined (for any
 	reason that the compiler deems proper) must devolve into an
