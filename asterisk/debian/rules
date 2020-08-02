@@ -139,26 +139,22 @@ install: install-arch install-indep
 install-arch: build-arch
 	dh_testdir
 	dh_testroot
-	dh_clean -k -s
-	dh_installdirs -s
+	dh_prep -a
+	dh_installdirs -a
 	
 	$(FETCH_ENV) $(MAKE) $(BUILDFLAGS) DESTDIR=$(CURDIR)/debian/tmp install
 
-	dh_install -s --sourcedir=debian/tmp
-	dh_lintian -s
+	dh_install -a --sourcedir=debian/tmp
+	dh_lintian -a
 
 	$(RM) -f $(CURDIR)/debian/asterisk/usr/sbin/streamplayer
 	$(RM) -f $(CURDIR)/debian/asterisk/usr/sbin/stereorize
 	touch $@
 
-override_dh_shlibdeps:
-	dh_shlibdeps
-	sed -i s/[^-]libtonezone2.0/asl-libtonezone2.0/g debian/asterisk.substvars
-
 install-indep: build-indep
 	dh_testdir
 	dh_testroot
-	dh_clean -k -i
+	dh_prep -i
 	dh_installdirs -i
 
 	$(FETCH_ENV) $(MAKE) $(BUILDFLAGS) DESTDIR=$(CURDIR)/debian/tmp install samples
@@ -205,6 +201,7 @@ binary-arch: install-arch
 	dh_installdeb -a
 	rm -f debian/asterisk/usr/lib/asterisk/modules/chan_h323.so
 	dh_shlibdeps -a
+	sed -i s/libtonezone2.0/asl-libtonezone2.0/g debian/asterisk.substvars
 	dh_gencontrol -a
 	dh_md5sums -a
 	dh_builddeb -a
@@ -242,4 +239,4 @@ get-orig-source:
 	@@$(RM) -rf ../tarballs/asterisk-$(UPVERSION).tmp/
 
 binary: binary-indep binary-arch
-.PHONY: build clean binary-indep binary-arch binary install clean patch unpatch
+
