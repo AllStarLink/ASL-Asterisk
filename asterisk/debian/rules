@@ -151,6 +151,10 @@ install-arch: build-arch
 	$(RM) -f $(CURDIR)/debian/asterisk/usr/sbin/stereorize
 	touch $@
 
+override_dh_shlibdeps:
+	dh_shlibdeps
+	sed -i s/[^-]libtonezone2.0/asl-libtonezone2.0/g debian/asterisk.substvars
+
 install-indep: build-indep
 	dh_testdir
 	dh_testroot
