@@ -41,25 +41,6 @@ Description: Open Source Private Branch Exchange (PBX)
  This is the main package that includes the Asterisk daemon and most channel
  drivers and applications.
 
-Package: asterisk-h323
-Architecture: any
-Section: comm
-Depends: asterisk-1.4, ${shlibs:Depends}
-Description: H.323 protocol support for Asterisk
- Asterisk is an Open Source PBX and telephony toolkit.
- .
- This channel driver (chan_h323) provides support for the H.323 protocol
- for Asterisk. This is an implementation originally contributed by NuFone and
- nowdays maintained and distributed by Digium, Inc. Hence, it is considered 
- the official H.323 chanel driver.
- .
- This is one of many H.323 channel implementations for Asterisk with others
- being chan_oh323 and chan_ooh323c, distributed by Debian as asterisk-oh323 and
- asterisk-ooh323c, respectively.
- .
- For more information about the Asterisk PBX, have a look at the Asterisk
- package.
-
 Package: asterisk-doc
 Recommends: asterisk
 Section: doc
