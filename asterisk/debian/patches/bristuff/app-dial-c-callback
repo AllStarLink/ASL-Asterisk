@@ -1,0 +1,62 @@
+--- a/apps/app_dial.c
++++ b/apps/app_dial.c
+@@ -201,7 +201,8 @@ static char *descrip =
+ "    R	  - indicate ringing to the calling party when the called party indicates\n"
+ "            ringing, pass no audio until answered.\n"
+ "    S(x) - Hang up the call after 'x' seconds *after* the called party has\n"
+-"           answered the call.\n"  	
++"           answered the call.\n"
++"    c    - callback initiation, ring once and hangup.\n"
+ "    t    - Allow the called party to transfer the calling party by sending the\n"
+ "           DTMF sequence defined in features.conf.\n"
+ "    T    - Allow the calling party to transfer the called party by sending the\n"
+@@ -257,6 +258,7 @@ enum {
+ 	OPT_CALLER_PARK =	(1 << 26),
+ 	OPT_IGNORE_FORWARDING = (1 << 27),
+ 	OPT_NOINBAND = 		(1 << 28),
++	OPT_CALLBACK_INIT = 	(1 << 29),
+ } dial_exec_option_flags;
+ 
+ #define DIAL_STILLGOING			(1 << 30)
+@@ -301,6 +303,7 @@ AST_APP_OPTIONS(dial_exec_options, {
+ 	AST_APP_OPTION_ARG('P', OPT_PRIVACY, OPT_ARG_PRIVACY),
+ 	AST_APP_OPTION('r', OPT_RINGBACK),
+ 	AST_APP_OPTION('R', OPT_NOINBAND),
++	AST_APP_OPTION('c', OPT_CALLBACK_INIT),
+ 	AST_APP_OPTION_ARG('S', OPT_DURATION_STOP, OPT_ARG_DURATION_STOP),
+ 	AST_APP_OPTION('t', OPT_CALLEE_TRANSFER),
+ 	AST_APP_OPTION('T', OPT_CALLER_TRANSFER),
+@@ -621,14 +624,20 @@ static struct ast_channel *wait_for_answ
+ 					HANDLE_CAUSE(AST_CAUSE_CONGESTION, in);
+ 					break;
+ 				case AST_CONTROL_RINGING:
+-					if (option_verbose > 2)
++                                         if (ast_test_flag(peerflags, OPT_CALLBACK_INIT)) {
++                                             if (option_verbose > 2)
++                                                 ast_verbose( VERBOSE_PREFIX_3 "%s is ringing, hanging up.\n", o->chan->name);
++                                             return NULL;
++                                         } else {
++					    if (option_verbose > 2)
+ 						ast_verbose(VERBOSE_PREFIX_3 "%s is ringing\n", c->name);
+-					/* Setup early media if appropriate */
+-					if (single && CAN_EARLY_BRIDGE(peerflags))
++					    /* Setup early media if appropriate */
++					    if (single && CAN_EARLY_BRIDGE(peerflags))
+ 						ast_rtp_early_bridge(in, c);
+-					if (!(*sentringing) && !ast_test_flag(outgoing, OPT_MUSICBACK)) {
++					    if (!(*sentringing) && !ast_test_flag(outgoing, OPT_MUSICBACK)) {
+ 						ast_indicate(in, AST_CONTROL_RINGING);
+ 						(*sentringing)++;
++					    }
+ 					}
+ 					break;
+ 				case AST_CONTROL_PROGRESS:
+@@ -1095,7 +1104,7 @@ static int dial_exec_full(struct ast_cha
+ 		outbound_group = pbx_builtin_getvar_helper(chan, "OUTBOUND_GROUP");
+ 	}
+ 	    
+-	ast_copy_flags(peerflags, &opts, OPT_DTMF_EXIT | OPT_GO_ON | OPT_ORIGINAL_CLID | OPT_CALLER_HANGUP | OPT_IGNORE_FORWARDING | OPT_NOINBAND);
++	ast_copy_flags(peerflags, &opts, OPT_DTMF_EXIT | OPT_GO_ON | OPT_ORIGINAL_CLID | OPT_CALLER_HANGUP | OPT_IGNORE_FORWARDING | OPT_CALLBACK_INIT | OPT_NOINBAND);
+ 	/* loop through the list of dial destinations */
+ 	rest = args.peers;
+ 	while ((cur = strsep(&rest, "&")) ) {

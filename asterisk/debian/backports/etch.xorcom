@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# Hook for extra backport changes of the xorcom buildd.
+#
+
+# from --configure:
+sed -i -e '/--with-imap/d' debian/rules
+# disable patch that enables building of app_voicemail_{imap,odbc}.so
+sed -i -e '/hack-multiple-app-voicemail/d' debian/patches/series
+
+exit 0

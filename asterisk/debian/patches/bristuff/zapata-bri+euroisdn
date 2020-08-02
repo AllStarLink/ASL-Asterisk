@@ -1,0 +1,2171 @@
+--- a/include/asterisk/channel.h
++++ b/include/asterisk/channel.h
+@@ -435,6 +435,7 @@ struct ast_channel {
+ 	unsigned int flags;				/*!< channel flags of AST_FLAG_ type */
+ 	unsigned short transfercapability;		/*!< ISDN Transfer Capbility - AST_FLAG_DIGITAL is not enough */
+ 	AST_LIST_HEAD_NOLOCK(, ast_frame) readq;
++	char lowlayercompat[16];			/*!< ISDN Low Layer Compatibility */
+ 	int alertpipe[2];
+ 
+ 	int nativeformats;				/*!< Kinds of data this channel can natively handle */
+--- a/channels/chan_zap.c
++++ b/channels/chan_zap.c
+@@ -11,6 +11,10 @@
+  * the project provides a web site, mailing lists and IRC
+  * channels for your use.
+  *
++ * Copyright (C) 2003-2006 Junghanns.NET GmbH
++ * Klaus-Peter Junghanns <kpj@junghanns.net>
++ *
++ *
+  * This program is free software, distributed under the terms of
+  * the GNU General Public License Version 2. See the LICENSE file
+  * at the top of the source tree.
+@@ -216,8 +220,6 @@ static struct ast_channel inuse;
+ #ifdef PRI_GETSET_TIMERS
+ static int pritimers[PRI_MAX_TIMERS];
+ #endif
+-static int pridebugfd = -1;
+-static char pridebugfilename[1024] = "";
+ #endif
+ 
+ /*! \brief Wait up to 16 seconds for first digit (FXO logic) */
+@@ -235,10 +237,6 @@ AST_MUTEX_DEFINE_STATIC(iflock);
+ 
+ static int ifcount = 0;
+ 
+-#ifdef HAVE_PRI
+-AST_MUTEX_DEFINE_STATIC(pridebugfdlock);
+-#endif
+-
+ /*! \brief Protect the monitoring thread, so only one process can kill or start it, and not
+    when it's doing something critical. */
+ AST_MUTEX_DEFINE_STATIC(monlock);
+@@ -253,6 +251,7 @@ static enum ast_bridge_result zt_bridge(
+ 
+ static int zt_sendtext(struct ast_channel *c, const char *text);
+ 
++
+ /*! \brief Avoid the silly zt_getevent which ignores a bunch of events */
+ static inline int zt_get_event(int fd)
+ {
+@@ -297,6 +296,14 @@ static int ringt_base = DEFAULT_RINGT;
+ #define PRI_SPAN(p) (((p) >> 8) & 0xff)
+ #define PRI_EXPLICIT(p) (((p) >> 16) & 0x01)
+ 
++struct zt_suspended_call {
++	ast_mutex_t lock;		/* Mutex */
++	char msn[AST_MAX_EXTENSION];	/* the MSN to which this parked call belongs */
++	char callid[10];			/* the callID provided by the user */
++	int parked_at;			/* extension in the call parking context */
++	struct zt_suspended_call *next;
++};
++
+ struct zt_pri {
+ 	pthread_t master;						/*!< Thread of master */
+ 	ast_mutex_t lock;						/*!< Mutex */
+@@ -310,6 +317,8 @@ struct zt_pri {
+ 	int nsf;							/*!< Network-Specific Facilities */
+ 	int dialplan;							/*!< Dialing plan */
+ 	int localdialplan;						/*!< Local dialing plan */
++ 	char nocid[AST_MAX_EXTENSION];					/*!< CallerID string to use if none provided */
++ 	char withheldcid[AST_MAX_EXTENSION];				/*!< CallerID string to use if CallerID is withheld */
+ 	char internationalprefix[10];					/*!< country access code ('00' for european dialplans) */
+ 	char nationalprefix[10];					/*!< area access code ('0' for european dialplans) */
+ 	char localprefix[20];						/*!< area access code + area code ('0'+area code for european dialplans) */
+@@ -321,6 +330,7 @@ struct zt_pri {
+ 	int prilogicalspan;						/*!< Logical span number within trunk group */
+ 	int numchans;							/*!< Num of channels we represent */
+ 	int overlapdial;						/*!< In overlap dialing mode */
++	int usercid;
+ 	int facilityenable;						/*!< Enable facility IEs */
+ 	struct pri *dchans[NUM_DCHANS];					/*!< Actual d-channels */
+ 	int dchanavail[NUM_DCHANS];					/*!< Whether each channel is available */
+@@ -336,6 +346,8 @@ struct zt_pri {
+ 	struct zt_pvt *pvts[MAX_CHANNELS];				/*!< Member channel pvt structs */
+ 	struct zt_pvt *crvs;						/*!< Member CRV structs */
+ 	struct zt_pvt *crvend;						/*!< Pointer to end of CRV structs */
++ 	struct zt_suspended_call *suspended_calls; /* Calls parked with SUSPEND messages */
++	int debugfd;
+ };
+ 
+ 
+@@ -453,6 +465,8 @@ static struct zt_pvt {
+ 	unsigned int echocanbridged:1;
+ 	unsigned int echocanon:1;
+ 	unsigned int faxhandled:1;			/*!< Has a fax tone already been handled? */
++ 							/*!< KPJ: i will abuse this flag to implement a zapata option for dialing out
++ 							    on a zap channel with EC to be off no matter what happens. */
+ 	unsigned int firstradio:1;
+ 	unsigned int hanguponpolarityswitch:1;
+ 	unsigned int hardwaredtmf:1;
+@@ -467,7 +481,8 @@ static struct zt_pvt {
+ 	unsigned int overlapdial:1;
+ 	unsigned int permcallwaiting:1;
+ 	unsigned int permhidecallerid:1;		/*!< Whether to hide our outgoing caller ID or not */
+-	unsigned int priindication_oob:1;
++	unsigned int priindication_oob:2;
++	unsigned int pritransfer:2;
+ 	unsigned int priexclusive:1;
+ 	unsigned int pulse:1;
+ 	unsigned int pulsedial:1;			/*!< whether a pulse dial phone is detected */
+@@ -504,6 +519,7 @@ static struct zt_pvt {
+ #endif
+ 	char cid_num[AST_MAX_EXTENSION];
+ 	int cid_ton;					/*!< Type Of Number (TON) */
++	int cid_pres;					/*!< Calling Presentation */
+ 	char cid_name[AST_MAX_EXTENSION];
+ 	char lastcid_num[AST_MAX_EXTENSION];
+ 	char lastcid_name[AST_MAX_EXTENSION];
+@@ -569,6 +585,8 @@ static struct zt_pvt {
+ 	struct zt_pvt *bearer;
+ 	struct zt_pvt *realcall;
+ 	q931_call *call;
++	int tei;					/* channel in use by this tei */
++	q931_call *holdedcall;
+ 	int prioffset;
+ 	int logicalspan;
+ #endif	
+@@ -614,11 +632,14 @@ static struct zt_chan_conf zt_chan_conf_
+ 			.minunused = 2,
+ 			.idleext = "",
+ 			.idledial = "",
++			.nocid = "No CID available",
++			.withheldcid = "CID withheld",
+ 			.internationalprefix = "",
+ 			.nationalprefix = "",
+ 			.localprefix = "",
+ 			.privateprefix = "",
+ 			.unknownprefix = "",
++			.usercid = 0,
+ 
+ 			.resetinterval = 3600
+ 		},
+@@ -630,6 +651,8 @@ static struct zt_chan_conf zt_chan_conf_
+ 			.mohinterpret = "default",
+ 			.mohsuggest = "",
+ 			.transfertobusy = 1,
++			.priindication_oob = 0,
++			.pritransfer = 0,
+ 
+ 			.cid_signalling = CID_SIG_BELL,
+ 			.cid_start = CID_START_RING,
+@@ -684,6 +707,8 @@ static int zt_indicate(struct ast_channe
+ static int zt_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
+ static int zt_setoption(struct ast_channel *chan, int option, void *data, int datalen);
+ static int zt_func_read(struct ast_channel *chan, char *function, char *data, char *buf, size_t len); 
++static void enable_dtmf_detect(struct zt_pvt *p);
++static void disable_dtmf_detect(struct zt_pvt *p);
+ 
+ static const struct ast_channel_tech zap_tech = {
+ 	.type = "Zap",
+@@ -715,6 +740,13 @@ static const struct ast_channel_tech zap
+ struct zt_pvt *round_robin[32];
+ 
+ #ifdef HAVE_PRI
++struct app_tmp {
++	char app[256];
++	char data[256];
++	struct ast_channel *chan;
++	pthread_t t;
++};
++
+ static inline int pri_grab(struct zt_pvt *pvt, struct zt_pri *pri)
+ {
+ 	int res;
+@@ -1410,12 +1442,16 @@ static void zt_enable_ec(struct zt_pvt *
+ 	int res;
+ 	if (!p)
+ 		return;
++ 	if (p->faxhandled)  {
++ 		ast_log(LOG_DEBUG, "Not enabling echo cancellation on a fax/modem call\n");
++		return;
++ 	}
+ 	if (p->echocanon) {
+ 		ast_log(LOG_DEBUG, "Echo cancellation already on\n");
+ 		return;
+ 	}
+ 	if (p->digital) {
+-		ast_log(LOG_DEBUG, "Echo cancellation isn't required on digital connection\n");
++		ast_log(LOG_DEBUG, "Echo cancellation does not make any sense on digital connections!\n");
+ 		return;
+ 	}
+ 	if (p->echocancel) {
+@@ -1442,7 +1478,7 @@ static void zt_train_ec(struct zt_pvt *p
+ {
+ 	int x;
+ 	int res;
+-	if (p && p->echocancel && p->echotraining) {
++	if (p && p->echocancel && p->echotraining && (!p->digital) && (!p->faxhandled)) {
+ 		x = p->echotraining;
+ 		res = ioctl(p->subs[SUB_REAL].zfd, ZT_ECHOTRAIN, &x);
+ 		if (res)
+@@ -1803,7 +1839,12 @@ static int zt_call(struct ast_channel *a
+ 		ast_log(LOG_WARNING, "Unable to flush input on channel %d\n", p->channel);
+ 	p->outgoing = 1;
+ 
+-	set_actual_gain(p->subs[SUB_REAL].zfd, 0, p->rxgain, p->txgain, p->law);
++	if (IS_DIGITAL(ast->transfercapability)) {
++	    set_actual_gain(p->subs[SUB_REAL].zfd, 0, 0, 0, p->law);
++	} else {
++	    set_actual_gain(p->subs[SUB_REAL].zfd, 0, p->rxgain, p->txgain, p->law);
++	}
++
+ 
+ 	mysig = p->sig;
+ 	if (p->outsigmod > -1)
+@@ -2034,6 +2075,7 @@ static int zt_call(struct ast_channel *a
+ 	case SIG_PRI:
+ 		/* We'll get it in a moment -- but use dialdest to store pre-setup_ack digits */
+ 		p->dialdest[0] = '\0';
++		disable_dtmf_detect(p);
+ 		break;
+ 	default:
+ 		ast_log(LOG_DEBUG, "not yet implemented\n");
+@@ -2054,6 +2096,12 @@ static int zt_call(struct ast_channel *a
+ 		const char *rr_str;
+ 		int redirect_reason;
+ 
++ 		if ((p->pri->nodetype == BRI_NETWORK_PTMP) || (p->pri->nodetype == BRI_NETWORK)) {
++ 		    // pass NO audio when ringing an isdn phone
++ 		    p->dialing = 1;
++ 		    // maybe we could allow passing audio when calling a p2p PBX, but well... ;-)
++ 		}
++
+ 		c = strchr(dest, '/');
+ 		if (c)
+ 			c++;
+@@ -2076,6 +2124,7 @@ static int zt_call(struct ast_channel *a
+ 			ast_mutex_unlock(&p->lock);
+ 			return -1;
+ 		}
++		strncpy(p->dnid, (c + p->stripmsd), sizeof(p->dnid)-1);
+ 		if (mysig != SIG_FXSKS) {
+ 			p->dop.op = ZT_DIAL_OP_REPLACE;
+ 			s = strchr(c + p->stripmsd, 'w');
+@@ -2099,6 +2148,8 @@ static int zt_call(struct ast_channel *a
+ 			pri_rel(p->pri);
+ 			ast_mutex_unlock(&p->lock);
+ 			return -1;
++		} else {
++		//	ast_log(LOG_NOTICE, "call %d\n", p->call);
+ 		}
+ 		if (!(sr = pri_sr_new())) {
+ 			ast_log(LOG_WARNING, "Failed to allocate setup request channel %d\n", p->channel);
+@@ -2131,7 +2182,7 @@ static int zt_call(struct ast_channel *a
+ 		pri_sr_set_channel(sr, p->bearer ? PVT_TO_CHANNEL(p->bearer) : PVT_TO_CHANNEL(p), exclusive, 1);
+ 		pri_sr_set_bearer(sr, p->digital ? PRI_TRANS_CAP_DIGITAL : ast->transfercapability, 
+ 					(p->digital ? -1 : 
+-						((p->law == ZT_LAW_ALAW) ? PRI_LAYER_1_ALAW : PRI_LAYER_1_ULAW)));
++						((p->law == ZT_LAW_ALAW) ? PRI_LAYER_1_ALAW : PRI_LAYER_1_ULAW)), ast->lowlayercompat);
+ 		if (p->pri->facilityenable)
+ 			pri_facility_enable(p->pri->pri);
+ 
+@@ -2395,8 +2446,10 @@ static int pri_find_dchan(struct zt_pri 
+ 	}
+ 	if (newslot < 0) {
+ 		newslot = 0;
+-		ast_log(LOG_WARNING, "No D-channels available!  Using Primary channel %d as D-channel anyway!\n",
++		if (pri->nodetype != BRI_CPE_PTMP) {
++		    ast_log(LOG_WARNING, "No D-channels available!  Using Primary channel %d as D-channel anyway!\n",
+ 			pri->dchannels[newslot]);
++		}
+ 	}
+ 	if (old && (oldslot != newslot))
+ 		ast_log(LOG_NOTICE, "Switching from from d-channel %d to channel %d!\n",
+@@ -2406,6 +2459,16 @@ static int pri_find_dchan(struct zt_pri 
+ }
+ #endif
+ 
++static int zt_setlaw(int zfd, int law)
++{
++	int res;
++	res = ioctl(zfd, ZT_SETLAW, &law);
++	if (res)
++		return res;
++	return 0;
++}
++
++
+ static int zt_hangup(struct ast_channel *ast)
+ {
+ 	int res;
+@@ -2453,8 +2516,7 @@ static int zt_hangup(struct ast_channel 
+ 	if (option_debug)
+ 		ast_log(LOG_DEBUG, "Hangup: channel: %d index = %d, normal = %d, callwait = %d, thirdcall = %d\n",
+ 		p->channel, index, p->subs[SUB_REAL].zfd, p->subs[SUB_CALLWAIT].zfd, p->subs[SUB_THREEWAY].zfd);
+-	p->ignoredtmf = 0;
+-	
++
+ 	if (index > -1) {
+ 		/* Real channel, do some fixup */
+ 		p->subs[index].owner = NULL;
+@@ -2556,6 +2618,7 @@ static int zt_hangup(struct ast_channel 
+ 	}
+ 
+ 	if (!p->subs[SUB_REAL].owner && !p->subs[SUB_CALLWAIT].owner && !p->subs[SUB_THREEWAY].owner) {
++		int outgoing = p->outgoing;
+ 		p->owner = NULL;
+ 		p->ringt = 0;
+ 		p->distinctivering = 0;
+@@ -2598,7 +2661,7 @@ static int zt_hangup(struct ast_channel 
+ 						pri_call_set_useruser(p->call, useruser);
+ #endif
+ 
+-						pri_hangup(p->pri->pri, p->call, -1);
++						pri_hangup(p->pri->pri, p->call, -1, -1);
+ 						p->call = NULL;
+ 						if (p->bearer) 
+ 							p->bearer->call = NULL;
+@@ -2618,7 +2681,28 @@ static int zt_hangup(struct ast_channel 
+ 							if (atoi(cause))
+ 								icause = atoi(cause);
+ 						}
+-						pri_hangup(p->pri->pri, p->call, icause);
++
++						pri_hangup(p->pri->pri, p->call, icause, -1);
++
++						/* if we send a rel9999ease complete we wont ge no hangup event, so clear the call here */
++						if (icause == 34 || icause == 44 || icause == 82 || icause == 1 || icause == 81 || icause == 17) {
++						    if ((ast->_state == AST_STATE_RING) || (ast->_state == AST_STATE_RINGING) || (ast->_state == AST_STATE_DIALING) || (ast->_state == AST_STATE_RESERVED)) {
++							p->call = NULL;
++						    } else {
++							ast_log(LOG_ERROR, "What is wrong with you? You cannot use cause %d number when in state %d!\n", icause, ast->_state);
++							icause = 16; /* Note, in pri_hangup() libpri will already override the cause */
++						    }
++						}
++
++						if (p->pri->nodetype == BRI_NETWORK_PTMP) {
++						    if ((icause == 16 || icause == -1) && (ast->_state != AST_STATE_UP)) {
++							if (outgoing) {
++							    p->call = NULL;
++							}
++						    }
++						}
++
++
+ 					}
+ 					if (res < 0) 
+ 						ast_log(LOG_WARNING, "pri_disconnect failed\n");
+@@ -2802,10 +2886,14 @@ static int zt_answer(struct ast_channel 
+ 			p->proceeding = 1;
+ 			res = pri_answer(p->pri->pri, p->call, 0, !p->digital);
+ 			pri_rel(p->pri);
++			/* stop ignoring inband dtmf */
++			enable_dtmf_detect(p);
+ 		} else {
+ 			ast_log(LOG_WARNING, "Unable to grab PRI on span %d\n", p->span);
+ 			res = -1;
+ 		}
++		/* the audio path is complete now, train the echo canceler */
++		zt_train_ec(p);
+ 		break;
+ #endif
+ 	case 0:
+@@ -3436,6 +3524,15 @@ static int zt_fixup(struct ast_channel *
+ {
+ 	struct zt_pvt *p = newchan->tech_pvt;
+ 	int x;
++ 	if (newchan && newchan->tech_pvt) {
++ 	    p = newchan->tech_pvt;
++ 	}
++ 	if (!p) {
++ 	    if (newchan) {
++ 		ast_log(LOG_ERROR, "channel %s has no tech_pvt structure\n", newchan->name);
++ 	    }
++ 	    return 0;
++ 	}
+ 	ast_mutex_lock(&p->lock);
+ 	ast_log(LOG_DEBUG, "New owner for channel %d is %s\n", p->channel, newchan->name);
+ 	if (p->owner == oldchan) {
+@@ -3645,8 +3742,10 @@ static void zt_handle_dtmfup(struct ast_
+ 					pbx_builtin_setvar_helper(ast, "FAXEXTEN", ast->exten);
+ 					if (ast_async_goto(ast, target_context, "fax", 1))
+ 						ast_log(LOG_WARNING, "Failed to async goto '%s' into fax of '%s'\n", ast->name, target_context);
+-				} else
++				} else {
++				    if (option_verbose > 2)
+ 					ast_log(LOG_NOTICE, "Fax detected, but no fax extension\n");
++				}
+ 			} else if (option_debug)
+ 				ast_log(LOG_DEBUG, "Already in a fax extension, not redirecting\n");
+ 		} else if (option_debug)
+@@ -3805,7 +3904,7 @@ static struct ast_frame *zt_handle_event
+ 				if (p->call) {
+ 					if (p->pri && p->pri->pri) {
+ 						if (!pri_grab(p, p->pri)) {
+-							pri_hangup(p->pri->pri, p->call, -1);
++							pri_hangup(p->pri->pri, p->call, -1, -1);
+ 							pri_destroycall(p->pri->pri, p->call);
+ 							p->call = NULL;
+ 							pri_rel(p->pri);
+@@ -4876,7 +4975,7 @@ static struct ast_frame  *zt_read(struct
+ 		p->subs[index].f.data = NULL;
+ 		p->subs[index].f.datalen= 0;
+ 	}
+-	if (p->dsp && (!p->ignoredtmf || p->callwaitcas || p->busydetect  || p->callprogress) && !index) {
++	if (p->dsp && (!p->ignoredtmf || p->callwaitcas || p->busydetect || p->callprogress) && !index) {
+ 		/* Perform busy detection. etc on the zap line */
+ 		f = ast_dsp_process(ast, p->dsp, &p->subs[index].f);
+ 		if (f) {
+@@ -4888,8 +4987,9 @@ static struct ast_frame  *zt_read(struct
+ 				}
+ 			} else if (f->frametype == AST_FRAME_DTMF) {
+ #ifdef HAVE_PRI
+-				if (!p->proceeding && p->sig==SIG_PRI && p->pri && p->pri->overlapdial) {
+-					/* Don't accept in-band DTMF when in overlap dial mode */
++				if (p->sig==SIG_PRI && p->pri && p->pri->overlapdial && p->ignoredtmf) {
++					/* Don't accept in-band DTMF when in overlap dial mode
++					   or when in non-overlap overlapdialing mode ... */
+ 					f->frametype = AST_FRAME_NULL;
+ 					f->subclass = 0;
+ 				}
+@@ -4964,7 +5064,9 @@ static int zt_write(struct ast_channel *
+ #endif
+ 	/* Write a frame of (presumably voice) data */
+ 	if (frame->frametype != AST_FRAME_VOICE) {
+-		if (frame->frametype != AST_FRAME_IMAGE)
++		if (frame->frametype == AST_FRAME_TEXT) {
++			ast_log(LOG_NOTICE, "text\n");
++		} else if (frame->frametype != AST_FRAME_IMAGE)
+ 			ast_log(LOG_WARNING, "Don't know what to do with frame type '%d'\n", frame->frametype);
+ 		return 0;
+ 	}
+@@ -5032,7 +5134,7 @@ static int zt_indicate(struct ast_channe
+ 		switch (condition) {
+ 		case AST_CONTROL_BUSY:
+ #ifdef HAVE_PRI
+-			if (p->priindication_oob && p->sig == SIG_PRI) {
++			if ((p->priindication_oob == 1) && p->sig == SIG_PRI) {
+ 				chan->hangupcause = AST_CAUSE_USER_BUSY;
+ 				chan->_softhangup |= AST_SOFTHANGUP_DEV;
+ 				res = 0;
+@@ -5114,7 +5216,7 @@ static int zt_indicate(struct ast_channe
+ 		case AST_CONTROL_CONGESTION:
+ 			chan->hangupcause = AST_CAUSE_CONGESTION;
+ #ifdef HAVE_PRI
+-			if (p->priindication_oob && p->sig == SIG_PRI) {
++			if ((p->priindication_oob == 1) && p->sig == SIG_PRI) {
+ 				chan->hangupcause = AST_CAUSE_SWITCH_CONGESTION;
+ 				chan->_softhangup |= AST_SOFTHANGUP_DEV;
+ 				res = 0;
+@@ -5311,8 +5413,12 @@ static struct ast_channel *zt_new(struct
+ 	if (state == AST_STATE_RING)
+ 		tmp->rings = 1;
+ 	tmp->tech_pvt = i;
++#ifdef HAVE_PRI
++	if ((i->sig == SIG_FXOKS) || (i->sig == SIG_FXOGS) || (i->sig == SIG_FXOLS) || (i->sig == SIG_PRI)) {
++#else
+ 	if ((i->sig == SIG_FXOKS) || (i->sig == SIG_FXOGS) || (i->sig == SIG_FXOLS)) {
+-		/* Only FXO signalled stuff can be picked up */
++#endif
++		/* Only FXO signalled stuff can be picked up */ /* i dont think so, mr. ulaw! we alaws like to pick up BRIs/PRIs */
+ 		tmp->callgroup = i->callgroup;
+ 		tmp->pickupgroup = i->pickupgroup;
+ 	}
+@@ -5442,6 +5548,7 @@ static void *ss_thread(void *data)
+ 	int len = 0;
+ 	int res;
+ 	int index;
++	int network;
+ 
+ 	/* in the bizarre case where the channel has become a zombie before we
+ 	   even get started here, abort safely
+@@ -5470,10 +5577,17 @@ static void *ss_thread(void *data)
+ 		len = strlen(exten);
+ 		res = 0;
+ 		while ((len < AST_MAX_EXTENSION-1) && ast_matchmore_extension(chan, chan->context, exten, 1, p->cid_num)) {
+-			if (len && !ast_ignore_pattern(chan->context, exten))
++			if (len && !ast_ignore_pattern(chan->context, exten)) {
+ 				tone_zone_play_tone(p->subs[index].zfd, -1);
+-			else
+-				tone_zone_play_tone(p->subs[index].zfd, ZT_TONE_DIALTONE);
++			} else {
++				network = p->pri->nodetype == PRI_NETWORK || p->pri->nodetype == BRI_NETWORK || p->pri->nodetype == BRI_NETWORK_PTMP;
++				if (network) {
++				    tone_zone_play_tone(p->subs[index].zfd, ZT_TONE_DIALTONE);
++				} else {
++				    /* cpe be quiet */
++				    tone_zone_play_tone(p->subs[index].zfd, -1);
++				}
++			}
+ 			if (ast_exists_extension(chan, chan->context, exten, 1, p->cid_num))
+ 				timeout = matchdigittimeout;
+ 			else
+@@ -6687,9 +6801,20 @@ static int handle_init_event(struct zt_p
+ 	case ZT_EVENT_NOALARM:
+ 		i->inalarm = 0;
+ 		if (!i->unknown_alarm) {
++#ifdef HAVE_PRI
++		    if (i->pri) {
++			if ((i->pri->nodetype == BRI_CPE_PTMP) || (i->pri->nodetype == BRI_CPE)) {
++			    /* dont annoy BRI TE mode users with layer2layer alarms */
++			} else {
++#endif
+ 			ast_log(LOG_NOTICE, "Alarm cleared on channel %d\n", i->channel);
+ 			manager_event(EVENT_FLAG_SYSTEM, "AlarmClear",
+ 				"Channel: %d\r\n", i->channel);
++#ifdef HAVE_PRI
++			}
++		    }
++#endif
++
+ 		} else {
+ 			i->unknown_alarm = 0;
+ 		}
+@@ -6698,7 +6823,13 @@ static int handle_init_event(struct zt_p
+ 		i->inalarm = 1;
+ 		res = get_alarms(i);
+ 		do {
+-			const char *alarm_str = alarm2str(res);
++#ifdef HAVE_PRI
++		    if (i->pri) {
++			if ((i->pri->nodetype == BRI_CPE_PTMP) || (i->pri->nodetype == BRI_CPE)) {
++			    /* dont annoy BRI TE mode users with layer2layer alarms */
++			} else {
++#endif
++			    const char *alarm_str = alarm2str(res);
+ 
+ 			/* hack alert!  Zaptel 1.4 now exposes FXO battery as an alarm, but asterisk 1.4
+ 			 * doesn't know what to do with it.  Don't confuse users with log messages. */
+@@ -6714,6 +6845,10 @@ static int handle_init_event(struct zt_p
+ 				"Alarm: %s\r\n"
+ 				"Channel: %d\r\n",
+ 				alarm_str, i->channel);
++#ifdef HAVE_PRI
++			}
++		    }
++#endif
+ 		} while (0);
+ 		/* fall thru intentionally */
+ 	case ZT_EVENT_ONHOOK:
+@@ -6758,8 +6893,10 @@ static int handle_init_event(struct zt_p
+ 			zt_set_hook(i->subs[SUB_REAL].zfd, ZT_ONHOOK);
+ 			break;
+ 		case SIG_PRI:
+-			zt_disable_ec(i);
+-			res = tone_zone_play_tone(i->subs[SUB_REAL].zfd, -1);
++			if (event != ZT_EVENT_ALARM) {
++			    zt_disable_ec(i);
++			    res = tone_zone_play_tone(i->subs[SUB_REAL].zfd, -1);
++			}
+ 			break;
+ 		default:
+ 			ast_log(LOG_WARNING, "Don't know how to handle on hook with signalling %s on channel %d\n", sig2str(i->sig), i->channel);
+@@ -7052,6 +7189,8 @@ static int pri_resolve_span(int *span, i
+ 		} else {
+ 			if (si->totalchans == 31) { /* if it's an E1 */
+ 				pris[*span].dchannels[0] = 16 + offset;
++			} else if (si->totalchans == 3) { /* if it's an S0 ZAPBRI */
++				pris[*span].dchannels[0] = 3 + offset;
+ 			} else {
+ 				pris[*span].dchannels[0] = 24 + offset;
+ 			}
+@@ -7305,6 +7444,11 @@ static struct zt_pvt *mkintf(int channel
+ 							destroy_zt_pvt(&tmp);
+ 							return NULL;
+ 						}
++                                          	if ((pris[span].localdialplan) && (pris[span].localdialplan != conf->pri.localdialplan)) {
++  							ast_log(LOG_ERROR, "Span %d is already a %s local dialing plan\n", span + 1, dialplan2str(pris[span].localdialplan));
++  							destroy_zt_pvt(&tmp);
++                                                  	return NULL;
++   						}
+ 						if (pris[span].minunused && (pris[span].minunused != conf->pri.minunused)) {
+ 							ast_log(LOG_ERROR, "Span %d already has minunused of %d.\n", span + 1, conf->pri.minunused);
+ 							destroy_zt_pvt(&tmp);
+@@ -7322,6 +7466,11 @@ static struct zt_pvt *mkintf(int channel
+ 							return NULL;
+ 						}
+ 						pris[span].nodetype = conf->pri.nodetype;
++
++						if (conf->pri.nodetype == BRI_NETWORK_PTMP) {
++						    pris[span].dchanavail[0] =  DCHAN_AVAILABLE;
++						    pri_find_dchan(&pris[span]);
++						}
+ 						pris[span].switchtype = myswitchtype;
+ 						pris[span].nsf = conf->pri.nsf;
+ 						pris[span].dialplan = conf->pri.dialplan;
+@@ -7330,9 +7479,13 @@ static struct zt_pvt *mkintf(int channel
+ 						pris[span].minunused = conf->pri.minunused;
+ 						pris[span].minidle = conf->pri.minidle;
+ 						pris[span].overlapdial = conf->pri.overlapdial;
++						pris[span].usercid = conf->pri.usercid;
++						pris[span].suspended_calls = NULL;
+ 						pris[span].facilityenable = conf->pri.facilityenable;
+ 						ast_copy_string(pris[span].idledial, conf->pri.idledial, sizeof(pris[span].idledial));
+ 						ast_copy_string(pris[span].idleext, conf->pri.idleext, sizeof(pris[span].idleext));
++  						ast_copy_string(pris[span].nocid, conf->pri.nocid, sizeof(pris[span].nocid));
++  						ast_copy_string(pris[span].withheldcid, conf->pri.withheldcid, sizeof(pris[span].withheldcid));
+ 						ast_copy_string(pris[span].internationalprefix, conf->pri.internationalprefix, sizeof(pris[span].internationalprefix));
+ 						ast_copy_string(pris[span].nationalprefix, conf->pri.nationalprefix, sizeof(pris[span].nationalprefix));
+ 						ast_copy_string(pris[span].localprefix, conf->pri.localprefix, sizeof(pris[span].localprefix));
+@@ -7485,6 +7638,7 @@ static struct zt_pvt *mkintf(int channel
+ 		tmp->restrictcid = conf->chan.restrictcid;
+ 		tmp->use_callingpres = conf->chan.use_callingpres;
+ 		tmp->priindication_oob = conf->chan.priindication_oob;
++ 		tmp->pritransfer = conf->chan.pritransfer;
+ 		tmp->priexclusive = conf->chan.priexclusive;
+ 		if (tmp->usedistinctiveringdetection) {
+ 			if (!tmp->use_callerid) {
+@@ -7767,7 +7921,7 @@ static int pri_find_empty_chan(struct zt
+ 			break;
+ 		if (!backwards && (x >= pri->numchans))
+ 			break;
+-		if (pri->pvts[x] && !pri->pvts[x]->inalarm && !pri->pvts[x]->owner) {
++		if (pri->pvts[x] && !pri->pvts[x]->inalarm && !pri->pvts[x]->owner && !pri->pvts[x]->call) {
+ 			ast_log(LOG_DEBUG, "Found empty available channel %d/%d\n", 
+ 				pri->pvts[x]->logicalspan, pri->pvts[x]->prioffset);
+ 			return x;
+@@ -7963,6 +8117,11 @@ static struct ast_channel *zt_request(co
+ 					p->digital = 1;
+ 					if (tmp)
+ 						tmp->transfercapability = AST_TRANS_CAP_DIGITAL;
++				} else if (opt == 'm') {
++					/* If this is a modem/fax call, pretend to have the fax handled and dont do EC */
++					p->faxhandled = 1;
++					if (tmp)
++					    tmp->transfercapability = AST_TRANS_CAP_3_1K_AUDIO;
+ 				} else {
+ 					ast_log(LOG_WARNING, "Unknown option '%c' in '%s'\n", opt, (char *)data);
+ 				}
+@@ -7996,13 +8155,14 @@ next:
+ 				*cause = AST_CAUSE_BUSY;
+ 		} else if (groupmatched) {
+ 			*cause = AST_CAUSE_CONGESTION;
++		} else {
++			*cause = AST_CAUSE_CONGESTION;
+ 		}
+ 	}
+ 		
+ 	return tmp;
+ }
+ 
+-
+ #ifdef HAVE_PRI
+ static struct zt_pvt *pri_find_crv(struct zt_pri *pri, int crv)
+ {
+@@ -8047,6 +8207,7 @@ static int pri_find_principle(struct zt_
+ static int pri_fixup_principle(struct zt_pri *pri, int principle, q931_call *c)
+ {
+ 	int x;
++	int res = 0;
+ 	struct zt_pvt *crv;
+ 	if (!c) {
+ 		if (principle < 0)
+@@ -8077,6 +8238,7 @@ static int pri_fixup_principle(struct zt
+ 				}
+ 				/* Fix it all up now */
+ 				new->owner = old->owner;
++				new->outgoing = old->outgoing;
+ 				old->owner = NULL;
+ 				if (new->owner) {
+ 					ast_string_field_build(new->owner, name, 
+@@ -8096,6 +8258,34 @@ static int pri_fixup_principle(struct zt
+ 				new->dsp_features = old->dsp_features;
+ 				old->dsp = NULL;
+ 				old->dsp_features = 0;
++
++				/* Copy faxhandled/digial, alreadyhungup */
++				new->faxhandled = old->faxhandled;
++				new->digital = old->digital;
++				new->alreadyhungup = old->alreadyhungup;
++
++				/* Copy law, gains, etc */
++				new->law = old->law;
++				if (ioctl(new->subs[SUB_REAL].zfd, ZT_AUDIOMODE, &new->law) == -1)
++				    ast_log(LOG_WARNING, "Unable to set audio mode on channel %d to %d\n", new->channel, new->law);
++				res = zt_setlaw(new->subs[SUB_REAL].zfd, new->law);
++				if (res < 0)
++				    ast_log(LOG_WARNING, "Unable to set law on channel %d\n", new->channel);
++				if (!new->digital) {
++				    res = set_actual_gain(new->subs[SUB_REAL].zfd, 0, new->rxgain, new->txgain, new->law);
++				} else {
++				    res = set_actual_gain(new->subs[SUB_REAL].zfd, 0, 0, 0, new->law);
++				}
++				if (res < 0)
++				    ast_log(LOG_WARNING, "Unable to set gains on channel %d\n", new->channel);
++
++				/* Shutdown old channel */
++				zt_confmute(old, 0);
++				update_conf(old);
++				reset_conf(old);
++				restore_gains(old);
++				zt_disable_ec(old);
++				zt_setlinear(old->subs[SUB_REAL].zfd, 0);
+ 			}
+ 			return principle;
+ 		}
+@@ -8124,7 +8314,9 @@ static int pri_fixup_principle(struct zt
+ 		}
+ 		crv = crv->next;
+ 	}
+-	ast_log(LOG_WARNING, "Call specified, but not found?\n");
++	if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++	    ast_log(LOG_WARNING, "Call specified, but not found?\n");
++	}
+ 	return -1;
+ }
+ 
+@@ -8183,86 +8375,21 @@ static void *do_idle_thread(void *vchan)
+ #ifndef PRI_RESTART
+ #error "Upgrade your libpri"
+ #endif
+-static void zt_pri_message(struct pri *pri, char *s)
++static void zt_pri_message(char *s, int span)
+ {
+-	int x, y;
+-	int dchan = -1, span = -1;
+-	int dchancount = 0;
+-
+-	if (pri) {
+-		for (x = 0; x < NUM_SPANS; x++) {
+-			for (y = 0; y < NUM_DCHANS; y++) {
+-				if (pris[x].dchans[y])
+-					dchancount++;
+-
+-				if (pris[x].dchans[y] == pri)
+-					dchan = y;
+-			}
+-			if (dchan >= 0) {
+-				span = x;
+-				break;
+-			}
+-			dchancount = 0;
+-		}
+-		if ((dchan >= 0) && (span >= 0)) {
+-			if (dchancount > 1)
+-				ast_verbose("[Span %d D-Channel %d]%s", span, dchan, s);
+-			else
+-				ast_verbose("%s", s);
+-		} else
+-			ast_log(LOG_ERROR, "PRI debug error: could not find pri associated it with debug message output\n");
+-	} else
+-		ast_verbose("%s", s);
+-
+-	ast_mutex_lock(&pridebugfdlock);
+-
+-	if (pridebugfd >= 0)
+-		write(pridebugfd, s, strlen(s));
+-
+-	ast_mutex_unlock(&pridebugfdlock);
++	ast_verbose("%d %s", span, s);
+ }
+ 
+-static void zt_pri_error(struct pri *pri, char *s)
++static void zt_pri_error(char *s, int span)
+ {
+-	int x, y;
+-	int dchan = -1, span = -1;
+-	int dchancount = 0;
+-
+-	if (pri) {
+-		for (x = 0; x < NUM_SPANS; x++) {
+-			for (y = 0; y < NUM_DCHANS; y++) {
+-				if (pris[x].dchans[y])
+-					dchancount++;
+-
+-				if (pris[x].dchans[y] == pri)
+-					dchan = y;
+-			}
+-			if (dchan >= 0) {
+-				span = x;
+-				break;
+-			}
+-			dchancount = 0;
+-		}
+-		if ((dchan >= 0) && (span >= 0)) {
+-			if (dchancount > 1)
+-				ast_log(LOG_ERROR, "[Span %d D-Channel %d] PRI: %s", span, dchan, s);
+-			else
+-				ast_log(LOG_ERROR, "%s", s);
+-		} else
+-			ast_log(LOG_ERROR, "PRI debug error: could not find pri associated it with debug message output\n");
+-	} else
+-		ast_log(LOG_ERROR, "%s", s);
+-
+-	ast_mutex_lock(&pridebugfdlock);
+-
+-	if (pridebugfd >= 0)
+-		write(pridebugfd, s, strlen(s));
+-
+-	ast_mutex_unlock(&pridebugfdlock);
++	ast_log(LOG_WARNING, "%d %s", span, s);
+ }
+ 
+ static int pri_check_restart(struct zt_pri *pri)
+ {
++	if ((pri->nodetype != PRI_NETWORK) && (pri->nodetype != PRI_CPE)) {
++	    return 0;
++	}
+ 	do {
+ 		pri->resetpos++;
+ 	} while ((pri->resetpos < pri->numchans) &&
+@@ -8344,13 +8471,30 @@ static void apply_plan_to_number(char *b
+ 	}
+ }
+ 
+-static int zt_setlaw(int zfd, int law)
+-{
+-	int res;
+-	res = ioctl(zfd, ZT_SETLAW, &law);
+-	if (res)
+-		return res;
+-	return 0;
++static void pri_make_callerid(struct zt_pri *pri, char *callerid, int callerid_len, char *callingnum, int callingnum_len, int callingplan, int callingpres, int stripmsd) {
++    if (callingnum && (callingnum_len > stripmsd)) {
++	callingnum += stripmsd;
++    }
++    switch (callingplan) {
++	case PRI_INTERNATIONAL_ISDN:
++	    snprintf(callerid, callerid_len, "%s%s", pri->internationalprefix, callingnum);
++	    break;
++	case PRI_NATIONAL_ISDN:
++	    snprintf(callerid, callerid_len, "%s%s", pri->nationalprefix, callingnum);
++	    break;
++	case PRI_LOCAL_ISDN:
++	    snprintf(callerid, callerid_len, "%s%s", pri->localprefix, callingnum);
++	    break;
++	case PRI_PRIVATE:
++	    snprintf(callerid, callerid_len, "%s%s", pri->privateprefix, callingnum);
++	    break;
++	case PRI_UNKNOWN:
++	    snprintf(callerid, callerid_len, "%s%s", pri->unknownprefix, callingnum);
++	    break;
++	default:
++	    snprintf(callerid, callerid_len, "%s", callingnum);
++	    break;
++    }
+ }
+ 
+ static void *pri_dchannel(void *vpri)
+@@ -8530,15 +8674,44 @@ static void *pri_dchannel(void *vpri)
+ 					/* Check for an event */
+ 					x = 0;
+ 					res = ioctl(pri->fds[which], ZT_GETEVENT, &x);
+-					if (x) 
++					if ((pri->nodetype != BRI_CPE) && (pri->nodetype != BRI_CPE_PTMP)) {
++					    /* dont annoy BRI TE mode users with layer2layer alarms */
++					    if (x)
+ 						ast_log(LOG_NOTICE, "PRI got event: %s (%d) on %s D-channel of span %d\n", event2str(x), x, pri_order(which), pri->span);
++					}
+ 					/* Keep track of alarm state */	
+ 					if (x == ZT_EVENT_ALARM) {
+ 						pri->dchanavail[which] &= ~(DCHAN_NOTINALARM | DCHAN_UP);
+ 						pri_find_dchan(pri);
++						if ((pri->nodetype == BRI_CPE) || (pri->nodetype == BRI_CPE_PTMP)) {
++						    if (pri->pri) {
++							for (i=0; i<pri->numchans; i++) {
++							    struct zt_pvt *p = pri->pvts[i];
++							    if (p) {
++								if (p->call) {
++								    if (p->pri && p->pri->pri) {
++								    	pri_destroycall(p->pri->pri, p->call);
++									p->call = NULL;
++									p->tei = -1;
++								    } else
++									ast_log(LOG_WARNING, "The PRI Call have not been destroyed\n");
++								}
++								if (p->owner)
++								    p->owner->_softhangup |= AST_SOFTHANGUP_DEV;
++								p->inalarm = 1;
++							    }
++							}
++							pri_shutdown(pri->pri);
++						    }
++						}
+ 					} else if (x == ZT_EVENT_NOALARM) {
+-						pri->dchanavail[which] |= DCHAN_NOTINALARM;
+-						pri_restart(pri->dchans[which]);
++						if ((pri->nodetype == BRI_CPE) || (pri->nodetype == BRI_CPE_PTMP)) {
++						    pri->dchanavail[which] |= DCHAN_NOTINALARM;
++						//    pri->dchanavail[which] |= DCHAN_UP;
++						} else {
++						    pri->dchanavail[which] |= DCHAN_NOTINALARM;
++						    pri_restart(pri->dchans[which]);
++						}
+ 					}
+ 				
+ 					if (option_debug)
+@@ -8550,8 +8723,7 @@ static void *pri_dchannel(void *vpri)
+ 					break;
+ 			}
+ 		} else if (errno != EINTR)
+-			ast_log(LOG_WARNING, "pri_event returned error %d (%s)\n", errno, strerror(errno));
+-
++ 			ast_log(LOG_WARNING, "pri_event returned error %d (%s) on span %d\n", errno, strerror(errno), pri->span);
+ 		if (e) {
+ 			if (pri->debug)
+ 				pri_dump_event(pri->dchans[which], e);
+@@ -8576,6 +8748,17 @@ static void *pri_dchannel(void *vpri)
+ 
+ 			switch (e->e) {
+ 			case PRI_EVENT_DCHAN_UP:
++				if (pri->nodetype == BRI_NETWORK_PTMP) {
++				    if (option_verbose > 3)
++					ast_verbose(VERBOSE_PREFIX_2 "%s D-Channel on span %d up for TEI %d\n", pri_order(which), pri->span, e->gen.tei);
++				} else if (pri->nodetype == BRI_CPE_PTMP) {
++				    if (option_verbose > 3)
++					    ast_verbose(VERBOSE_PREFIX_2 "%s D-Channel on span %d up\n", pri_order(which), pri->span);
++				} else {
++				    if (option_verbose > 1)
++					    ast_verbose(VERBOSE_PREFIX_2 "%s D-Channel on span %d up\n", pri_order(which), pri->span);
++				}
++
+ 				if (!pri->pri) pri_find_dchan(pri);
+ 
+ 				/* Note presense of D-channel */
+@@ -8594,6 +8777,12 @@ static void *pri_dchannel(void *vpri)
+ 					}
+ 				break;
+ 			case PRI_EVENT_DCHAN_DOWN:
++				if (pri->nodetype == BRI_NETWORK_PTMP) {
++  				    if (option_verbose > 3)
++  					ast_verbose(VERBOSE_PREFIX_2 "%s D-Channel on span %d down for TEI %d\n", pri_order(which), pri->span, e->gen.tei);
++  				    // PTMP BRIs have N dchans, handled by libpri
++  				    if (e->gen.tei == 0) break;
++				}
+ 				pri_find_dchan(pri);
+ 				if (!pri_is_up(pri)) {
+ 					pri->resetting = 0;
+@@ -8601,16 +8790,18 @@ static void *pri_dchannel(void *vpri)
+ 					for (i = 0; i < pri->numchans; i++) {
+ 						struct zt_pvt *p = pri->pvts[i];
+ 						if (p) {
++						    if ((p->tei == e->gen.tei) || (pri->nodetype != BRI_NETWORK_PTMP)) {
+ 							if (!p->pri || !p->pri->pri || pri_get_timer(p->pri->pri, PRI_TIMER_T309) < 0) {
+ 								/* T309 is not enabled : hangup calls when alarm occurs */
+ 								if (p->call) {
+ 									if (p->pri && p->pri->pri) {
+-										pri_hangup(p->pri->pri, p->call, -1);
++										pri_hangup(p->pri->pri, p->call, -1, -1);
+ 										pri_destroycall(p->pri->pri, p->call);
+ 										p->call = NULL;
+ 									} else
+ 										ast_log(LOG_WARNING, "The PRI Call have not been destroyed\n");
+ 								}
++  								p->tei = -1;
+ 								if (p->realcall) {
+ 									pri_hangup_all(p->realcall, pri);
+ 								} else if (p->owner)
+@@ -8619,6 +8810,7 @@ static void *pri_dchannel(void *vpri)
+ 							p->inalarm = 1;
+ 						}
+ 					}
++				    }
+ 				}
+ 				break;
+ 			case PRI_EVENT_RESTART:
+@@ -8653,8 +8845,8 @@ static void *pri_dchannel(void *vpri)
+ 								pri_destroycall(pri->pri, pri->pvts[x]->call);
+ 								pri->pvts[x]->call = NULL;
+ 							}
+-							if (pri->pvts[chanpos]->realcall) 
+-								pri_hangup_all(pri->pvts[chanpos]->realcall, pri);
++							if (pri->pvts[x]->realcall)
++								pri_hangup_all(pri->pvts[x]->realcall, pri);
+  							else if (pri->pvts[x]->owner)
+ 								pri->pvts[x]->owner->_softhangup |= AST_SOFTHANGUP_DEV;
+ 							ast_mutex_unlock(&pri->pvts[x]->lock);
+@@ -8688,7 +8880,6 @@ static void *pri_dchannel(void *vpri)
+ 					}
+ 				}
+ 				break;
+-				
+ 			case PRI_EVENT_INFO_RECEIVED:
+ 				chanpos = pri_find_principle(pri, e->ring.channel);
+ 				if (chanpos < 0) {
+@@ -8697,9 +8888,11 @@ static void *pri_dchannel(void *vpri)
+ 				} else {
+ 					chanpos = pri_fixup_principle(pri, chanpos, e->ring.call);
+ 					if (chanpos > -1) {
++//					ast_log(LOG_NOTICE, "INFO received on  channel %d/%d span %d\n",
++//						PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span);
+ 						ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 						/* queue DTMF frame if the PBX for this call was already started (we're forwarding INFORMATION further on */
+-						if (pri->overlapdial && pri->pvts[chanpos]->call==e->ring.call && pri->pvts[chanpos]->owner) {
++						if (pri->pvts[chanpos]->call==e->ring.call && pri->pvts[chanpos]->owner) {
+ 							/* how to do that */
+ 							int digitlen = strlen(e->ring.callednum);
+ 							char digit;
+@@ -8711,6 +8904,14 @@ static void *pri_dchannel(void *vpri)
+ 									zap_queue_frame(pri->pvts[chanpos], &f, pri);
+ 								}
+ 							}
++							if (!pri->overlapdial) {
++							    strncat(pri->pvts[chanpos]->exten, e->ring.callednum, sizeof(pri->pvts[chanpos]->exten));
++							    if (!ast_ignore_pattern(pri->pvts[chanpos]->context, pri->pvts[chanpos]->exten + 1)) {
++								tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, -1);
++							    } else {
++								tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, ZT_TONE_DIALTONE);
++							    }
++							}
+ 						}
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 					}
+@@ -8718,36 +8919,59 @@ static void *pri_dchannel(void *vpri)
+ 				break;
+ 			case PRI_EVENT_RING:
+ 				crv = NULL;
+-				if (e->ring.channel == -1)
++ 				if (e->ring.channel == -1) {
++ 					/* if no channel specified find one empty */
+ 					chanpos = pri_find_empty_chan(pri, 1);
+-				else
++				} else {
+ 					chanpos = pri_find_principle(pri, e->ring.channel);
++				}
+ 				/* if no channel specified find one empty */
+ 				if (chanpos < 0) {
+-					ast_log(LOG_WARNING, "Ring requested on unconfigured channel %d/%d span %d\n", 
+-						PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span);
++ 					/* no channel specified and no free channel. this is a callwating SETUP */
++ 					if (e->ring.channel <= 0) {
++ 					    if (option_verbose > 2)
++ 						ast_verbose(VERBOSE_PREFIX_3 "Ignoring callwaiting SETUP on channel %d/%d span %d %d\n", PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span, e->ring.channel);
++ 					    pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_USER_BUSY, -1);
++ 					    break;
++ 					}
+ 				} else {
++					/* ok, we got a b channel for this call, lock it */
+ 					ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 					if (pri->pvts[chanpos]->owner) {
+-						if (pri->pvts[chanpos]->call == e->ring.call) {
+-							ast_log(LOG_WARNING, "Duplicate setup requested on channel %d/%d already in use on span %d\n", 
++					    /* safety check, for messed up retransmissions? */
++					    if (pri->pvts[chanpos]->call == e->ring.call) {
++						ast_log(LOG_WARNING, "Duplicate setup requested on channel %d/%d already in use on span %d\n",
+ 								PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span);
+-							break;
++						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++						chanpos = -1;
++						break;
++					    } else {
++ 						ast_log(LOG_WARNING, "Ring requested on channel %d/%d already in use on span %d. Hanging up owner.\n",
++						PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span);
++						if (pri->pvts[chanpos]->realcall) {
++ 							pri_hangup_all(pri->pvts[chanpos]->realcall, pri);
+ 						} else {
+-							/* This is where we handle initial glare */
+-							ast_log(LOG_DEBUG, "Ring requested on channel %d/%d already in use or previously requested on span %d.  Attempting to renegotiating channel.\n", 
+-							PRI_SPAN(e->ring.channel), PRI_CHANNEL(e->ring.channel), pri->span);
+-							ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+-							chanpos = -1;
++							pri->pvts[chanpos]->owner->_softhangup |= AST_SOFTHANGUP_DEV;
++							/* XXX destroy the call here, so we can accept the retransmission as a new call */
++							pri_destroycall(pri->pri, e->ring.call);
+ 						}
+-					}
+-					if (chanpos > -1)
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++						chanpos = -1;
++						break;
++					    }
++					}
++ 					if (chanpos > -1) {
++						/* everything is ok with the b channel */
++					    ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++					}
+ 				}
+-				if ((chanpos < 0) && (e->ring.flexible))
+-					chanpos = pri_find_empty_chan(pri, 1);
++ 				/* actually, we already got a valid channel by now */
+ 				if (chanpos > -1) {
+ 					ast_mutex_lock(&pri->pvts[chanpos]->lock);
++					/* dont detect dtmfs before the signalling is done */
++					disable_dtmf_detect(pri->pvts[chanpos]);
++					/* this channel is owned by this TEI */
++					pri->pvts[chanpos]->tei = e->ring.tei;
+ 					if (pri->switchtype == PRI_SWITCH_GR303_TMC) {
+ 						/* Should be safe to lock CRV AFAIK while bearer is still locked */
+ 						crv = pri_find_crv(pri, pri_get_crv(pri->pri, e->ring.call, NULL));
+@@ -8761,13 +8985,14 @@ static void *pri_dchannel(void *vpri)
+ 								ast_log(LOG_WARNING, "Call received for busy CRV %d on span %d\n", pri_get_crv(pri->pri, e->ring.call, NULL), pri->span);
+ 							} else
+ 								ast_log(LOG_NOTICE, "Call received for unconfigured CRV %d on span %d\n", pri_get_crv(pri->pri, e->ring.call, NULL), pri->span);
+-							pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_INVALID_CALL_REFERENCE);
++							pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_INVALID_CALL_REFERENCE, -1);
+ 							if (crv)
+ 								ast_mutex_unlock(&crv->lock);
+ 							ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 							break;
+ 						}
+ 					}
++  					/* assign call to b channel */
+ 					pri->pvts[chanpos]->call = e->ring.call;
+ 					apply_plan_to_number(plancallingnum, sizeof(plancallingnum), pri, e->ring.callingnum, e->ring.callingplan);
+ 					if (pri->pvts[chanpos]->use_callerid) {
+@@ -8792,34 +9017,82 @@ static void *pri_dchannel(void *vpri)
+ 					}
+ 					apply_plan_to_number(pri->pvts[chanpos]->rdnis, sizeof(pri->pvts[chanpos]->rdnis), pri,
+ 							     e->ring.redirectingnum, e->ring.callingplanrdnis);
++  					/* get callingpres */
++  					pri->pvts[chanpos]->cid_pres = e->ring.callingpres;
++					switch (e->ring.callingpres) {
++					    case PRES_PROHIB_USER_NUMBER_NOT_SCREENED:
++					    case PRES_PROHIB_USER_NUMBER_PASSED_SCREEN:
++					    case PRES_PROHIB_USER_NUMBER_FAILED_SCREEN:
++					    case PRES_PROHIB_NETWORK_NUMBER:
++						ast_copy_string(pri->pvts[chanpos]->cid_name, pri->withheldcid, sizeof(pri->pvts[chanpos]->cid_name));
++						break;
++					    case PRES_NUMBER_NOT_AVAILABLE:
++						ast_copy_string(pri->pvts[chanpos]->cid_name, pri->nocid, sizeof(pri->pvts[chanpos]->cid_name));
++						break;
++					}
+ 					/* If immediate=yes go to s|1 */
+ 					if (pri->pvts[chanpos]->immediate) {
+ 						if (option_verbose > 2)
+ 							ast_verbose(VERBOSE_PREFIX_3 "Going to extension s|1 because of immediate=yes\n");
+ 						pri->pvts[chanpos]->exten[0] = 's';
+ 						pri->pvts[chanpos]->exten[1] = '\0';
+-					}
+-					/* Get called number */
+-					else if (!ast_strlen_zero(e->ring.callednum)) {
+-						ast_copy_string(pri->pvts[chanpos]->exten, e->ring.callednum, sizeof(pri->pvts[chanpos]->exten));
+-						ast_copy_string(pri->pvts[chanpos]->dnid, e->ring.callednum, sizeof(pri->pvts[chanpos]->dnid));
+-					} else if (pri->overlapdial)
+-						pri->pvts[chanpos]->exten[0] = '\0';
+-					else {
+-						/* Some PRI circuits are set up to send _no_ digits.  Handle them as 's'. */
+-						pri->pvts[chanpos]->exten[0] = 's';
+-						pri->pvts[chanpos]->exten[1] = '\0';
+-					}
+-					/* Set DNID on all incoming calls -- even immediate */
+-					if (!ast_strlen_zero(e->ring.callednum))
+-						ast_copy_string(pri->pvts[chanpos]->dnid, e->ring.callednum, sizeof(pri->pvts[chanpos]->dnid));
+-					/* No number yet, but received "sending complete"? */
+-					if (e->ring.complete && (ast_strlen_zero(e->ring.callednum))) {
++  					} else if (ast_strlen_zero(e->ring.callednum)) {
++  					    /* called party number is empty */
++  					    if ((pri->nodetype == BRI_NETWORK_PTMP) || (pri->nodetype == BRI_NETWORK)) {
++  						if (!pri->overlapdial) {
++  						    // be able to set digittimeout for BRI phones
++  						    pri->pvts[chanpos]->exten[0] = 's';
++  						    pri->pvts[chanpos]->exten[1] = '\0';
++  						    tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, ZT_TONE_DIALTONE);
++  						} else {
++  						    pri->pvts[chanpos]->exten[0] = '\0';
++  						}
++  					    } else {
++  						if (pri->nodetype == BRI_CPE) {
++  						    /* fix for .at p2p bri lines */
++  						    pri->pvts[chanpos]->exten[0] = 's';
++  						    pri->pvts[chanpos]->exten[1] = '\0';
++  						} else if (pri->overlapdial) {
++  						    pri->pvts[chanpos]->exten[0] = '\0';
++  						} else {
++						    /* Some PRI circuits are set up to send _no_ digits.  Handle them as 's'. */
++  						    pri->pvts[chanpos]->exten[0] = 's';
++  						    pri->pvts[chanpos]->exten[1] = '\0';
++  						}
++  					    }
++  					    /* No number yet, but received "sending complete"? */
++   					    if (e->ring.complete) {
+ 						if (option_verbose > 2)
+ 							ast_verbose(VERBOSE_PREFIX_3 "Going to extension s|1 because of Complete received\n");
+ 						pri->pvts[chanpos]->exten[0] = 's';
+ 						pri->pvts[chanpos]->exten[1] = '\0';
+-					}
++ 					    }
++  					} else {
++  						/* Get called number */
++  						pri_make_callerid(pri, pri->pvts[chanpos]->dnid, sizeof(pri->pvts[chanpos]->dnid), e->ring.callednum, sizeof(e->ring.callednum),  e->ring.calledplan, 0, pri->pvts[chanpos]->stripmsd);
++  						pri_make_callerid(pri, pri->pvts[chanpos]->exten, sizeof(pri->pvts[chanpos]->exten), e->ring.callednum, sizeof(e->ring.callednum), e->ring.calledplan, 0, pri->pvts[chanpos]->stripmsd);
++  						if ((pri->nodetype == BRI_NETWORK_PTMP) || (pri->nodetype == BRI_NETWORK)) {
++  						    /* if we get the next digit we should stop the dialtone */
++  						    if (!pri->overlapdial) {
++  							// with overlapdial=no the exten is always prefixed by "s"
++  							if (!ast_ignore_pattern(pri->pvts[chanpos]->context, pri->pvts[chanpos]->exten + 1)) {
++  							    tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, -1);
++  							} else {
++  							    tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, ZT_TONE_DIALTONE);
++  							}
++  						    } else {
++  							if (!ast_ignore_pattern(pri->pvts[chanpos]->context, pri->pvts[chanpos]->exten)) {
++  							    tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, -1);
++  							} else {
++  							    tone_zone_play_tone(pri->pvts[chanpos]->subs[SUB_REAL].zfd, ZT_TONE_DIALTONE);
++  							}
++  						    }
++  						}
++					}
++  					/* Part 3: create channel, setup audio... */
++ 					/* Set DNID on all incoming calls -- even immediate */
++ 					if (!ast_strlen_zero(e->ring.callednum))
++ 						strncpy(pri->pvts[chanpos]->dnid, e->ring.callednum, sizeof(pri->pvts[chanpos]->dnid) - 1);
+ 					/* Make sure extension exists (or in overlap dial mode, can exist) */
+ 					if ((pri->overlapdial && ast_canmatch_extension(NULL, pri->pvts[chanpos]->context, pri->pvts[chanpos]->exten, 1, pri->pvts[chanpos]->cid_num)) ||
+ 						ast_exists_extension(NULL, pri->pvts[chanpos]->context, pri->pvts[chanpos]->exten, 1, pri->pvts[chanpos]->cid_num)) {
+@@ -8838,19 +9111,36 @@ static void *pri_dchannel(void *vpri)
+ 						res = zt_setlaw(pri->pvts[chanpos]->subs[SUB_REAL].zfd, law);
+ 						if (res < 0) 
+ 							ast_log(LOG_WARNING, "Unable to set law on channel %d\n", pri->pvts[chanpos]->channel);
+-						res = set_actual_gain(pri->pvts[chanpos]->subs[SUB_REAL].zfd, 0, pri->pvts[chanpos]->rxgain, pri->pvts[chanpos]->txgain, law);
++ 						if (IS_DIGITAL(e->ring.ctype)) {
++						    res = set_actual_gain(pri->pvts[chanpos]->subs[SUB_REAL].zfd, 0, 0, 0, pri->pvts[chanpos]->law);
++						} else {
++ 						    res = set_actual_gain(pri->pvts[chanpos]->subs[SUB_REAL].zfd, 0, pri->pvts[chanpos]->rxgain, pri->pvts[chanpos]->txgain, law);
++ 						}
+ 						if (res < 0)
+ 							ast_log(LOG_WARNING, "Unable to set gains on channel %d\n", pri->pvts[chanpos]->channel);
+-						if (e->ring.complete || !pri->overlapdial) {
++ 						if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++  						    if (e->ring.complete || !pri->overlapdial) {
+ 							/* Just announce proceeding */
+ 							pri->pvts[chanpos]->proceeding = 1;
+ 							pri_proceeding(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 0);
+-						} else {
++						    } else {
+ 							if (pri->switchtype != PRI_SWITCH_GR303_TMC) 
+ 								pri_need_more_info(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 1);
+ 							else
+ 								pri_answer(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 1);
++						    }
++						} else {
++ 							/* BRI_NETWORK | BRI_NETWORK_PTMP */
++ 							if (pri->overlapdial || (!strcasecmp(pri->pvts[chanpos]->exten, "s"))) {
++ 							    /* send a SETUP_ACKNOWLEDGE */
++ 							    pri_need_more_info(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 1);
++ 							} else {
++  							    /* send an ALERTING ??? wtf */
++ 							//    pri_acknowledge(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 1);
++ 							    pri_proceeding(pri->pri, e->ring.call, PVT_TO_CHANNEL(pri->pvts[chanpos]), 0);
++ 							}
+ 						}
++ 						/* overlapdial = yes  and the extension can be valid */
+ 						/* Get the use_callingpres state */
+ 						pri->pvts[chanpos]->callingpres = e->ring.callingpres;
+ 					
+@@ -8862,10 +9152,17 @@ static void *pri_dchannel(void *vpri)
+ 								/* Set bearer and such */
+ 								pri_assign_bearer(crv, pri, pri->pvts[chanpos]);
+ 								c = zt_new(crv, AST_STATE_RESERVED, 0, SUB_REAL, law, e->ring.ctype);
++								if (c && (e->ring.lowlayercompat[0] > 0)) {
++								    memcpy(c->lowlayercompat, e->ring.lowlayercompat, sizeof(c->lowlayercompat));
++								}
+ 								pri->pvts[chanpos]->owner = &inuse;
+ 								ast_log(LOG_DEBUG, "Started up crv %d:%d on bearer channel %d\n", pri->trunkgroup, crv->channel, crv->bearer->channel);
+ 							} else {
+ 								c = zt_new(pri->pvts[chanpos], AST_STATE_RESERVED, 0, SUB_REAL, law, e->ring.ctype);
++								if (c && (e->ring.lowlayercompat[0] > 0)) {
++								    memcpy(c->lowlayercompat, e->ring.lowlayercompat, sizeof(c->lowlayercompat));
++								}
++ 								zt_enable_ec(pri->pvts[chanpos]);  /* XXX rethink */
+ 							}
+ 
+ 							ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+@@ -8873,6 +9170,16 @@ static void *pri_dchannel(void *vpri)
+ 							if (!ast_strlen_zero(e->ring.callingsubaddr)) {
+ 								pbx_builtin_setvar_helper(c, "CALLINGSUBADDR", e->ring.callingsubaddr);
+ 							}
++ 					    		if (!ast_strlen_zero(e->ring.callingnum)) {
++ 							    char tmpstr[256];
++ 							    pri_make_callerid(pri, tmpstr, sizeof(tmpstr), e->ring.callingnum, sizeof(e->ring.callingnum), e->ring.callingplan, e->ring.callingpres, 0);
++ 							    pbx_builtin_setvar_helper(c, "PRI_NETWORK_CID", tmpstr);
++ 							}
++ 							if (!ast_strlen_zero(e->ring.callingani)) {
++ 							    char tmpstr[256];
++ 							    pri_make_callerid(pri, tmpstr, sizeof(tmpstr), e->ring.callingani, sizeof(e->ring.callingani), e->ring.callingplanuser, e->ring.callingpresuser, 0);
++ 							    pbx_builtin_setvar_helper(c, "PRI_USER_CID", tmpstr);
++ 							}
+ 							if (e->ring.ani2 >= 0) {
+ 								snprintf(ani2str, 5, "%.2d", e->ring.ani2);
+ 								pbx_builtin_setvar_helper(c, "ANI2", ani2str);
+@@ -8896,8 +9203,8 @@ static void *pri_dchannel(void *vpri)
+ 							pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+ 							if (c && !ast_pthread_create(&threadid, &attr, ss_thread, c)) {
+ 								if (option_verbose > 2)
+-									ast_verbose(VERBOSE_PREFIX_3 "Accepting overlap call from '%s' to '%s' on channel %d/%d, span %d\n",
+-										plancallingnum, S_OR(pri->pvts[chanpos]->exten, "<unspecified>"),
++									ast_verbose(VERBOSE_PREFIX_3 "Accepting overlap %s call from '%s' to '%s' on channel %d/%d, span %d\n",
++										pri->pvts[chanpos]->digital ? "data" : "voice", plancallingnum, S_OR(pri->pvts[chanpos]->exten, "<unspecified>"),
+ 										pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span);
+ 							} else {
+ 								ast_log(LOG_WARNING, "Unable to start PBX on channel %d/%d, span %d\n", 
+@@ -8905,15 +9212,19 @@ static void *pri_dchannel(void *vpri)
+ 								if (c)
+ 									ast_hangup(c);
+ 								else {
+-									pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_SWITCH_CONGESTION);
++									pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_SWITCH_CONGESTION, -1);
+ 									pri->pvts[chanpos]->call = NULL;
+ 								}
+ 							}
+ 							pthread_attr_destroy(&attr);
+ 						} else  {
++							/* overlapdial = no */
+ 							ast_mutex_unlock(&pri->lock);
+ 							/* Release PRI lock while we create the channel */
+ 							c = zt_new(pri->pvts[chanpos], AST_STATE_RING, 1, SUB_REAL, law, e->ring.ctype);
++							if (c && (e->ring.lowlayercompat[0] > 0)) {
++							    memcpy(c->lowlayercompat, e->ring.lowlayercompat, sizeof(c->lowlayercompat));
++							}
+ 							if (c) {
+ 								char calledtonstr[10];
+ 
+@@ -8940,26 +9251,43 @@ static void *pri_dchannel(void *vpri)
+ 								ast_mutex_lock(&pri->lock);
+ 
+ 								if (option_verbose > 2)
+-									ast_verbose(VERBOSE_PREFIX_3 "Accepting call from '%s' to '%s' on channel %d/%d, span %d\n",
+-										plancallingnum, pri->pvts[chanpos]->exten, 
++ 									ast_verbose(VERBOSE_PREFIX_3 "Accepting %s call from '%s' to '%s' on channel %d/%d, span %d\n",
++ 										pri->pvts[chanpos]->digital ? "data" : "voice", e->ring.callingnum, pri->pvts[chanpos]->exten,
+ 											pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span);
+ 								zt_enable_ec(pri->pvts[chanpos]);
++ 							    if(!ast_strlen_zero(e->ring.callingsubaddr)) {
++ 								pbx_builtin_setvar_helper(c, "CALLINGSUBADDR", e->ring.callingsubaddr);
++ 							    }
++ 					    		    if (!ast_strlen_zero(e->ring.callingnum)) {
++ 								char tmpstr[256];
++ 							        pri_make_callerid(pri, tmpstr, sizeof(tmpstr), e->ring.callingnum, sizeof(e->ring.callingnum), e->ring.callingplan, e->ring.callingpres, 0);
++ 							        pbx_builtin_setvar_helper(c, "PRI_NETWORK_CID", tmpstr);
++ 							    }
++ 							    if (!ast_strlen_zero(e->ring.callingani)) {
++ 								char tmpstr[256];
++ 							        pri_make_callerid(pri, tmpstr,sizeof(tmpstr),  e->ring.callingani, sizeof(e->ring.callingani), e->ring.callingplanuser, e->ring.callingpresuser, 0);
++ 							        pbx_builtin_setvar_helper(c, "PRI_USER_CID", e->ring.callednum);
++ 							    }
++							    if (!ast_strlen_zero(e->ring.useruserinfo)) {
++							        pbx_builtin_setvar_helper(c, "UUI", e->ring.useruserinfo);
++							    }
+ 							} else {
+ 
+ 								ast_mutex_lock(&pri->lock);
+ 
+ 								ast_log(LOG_WARNING, "Unable to start PBX on channel %d/%d, span %d\n", 
+ 									pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span);
+-								pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_SWITCH_CONGESTION);
++								pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_SWITCH_CONGESTION, -1);
+ 								pri->pvts[chanpos]->call = NULL;
+ 							}
+ 						}
+ 					} else {
++					/* invalid extension */
+ 						if (option_verbose > 2)
+ 							ast_verbose(VERBOSE_PREFIX_3 "Extension '%s' in context '%s' from '%s' does not exist.  Rejecting call on channel %d/%d, span %d\n",
+ 								pri->pvts[chanpos]->exten, pri->pvts[chanpos]->context, pri->pvts[chanpos]->cid_num, pri->pvts[chanpos]->logicalspan, 
+ 									pri->pvts[chanpos]->prioffset, pri->span);
+-						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_UNALLOCATED);
++						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_UNALLOCATED, -1);
+ 						pri->pvts[chanpos]->call = NULL;
+ 						pri->pvts[chanpos]->exten[0] = '\0';
+ 					}
+@@ -8968,9 +9296,9 @@ static void *pri_dchannel(void *vpri)
+ 					ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 				} else {
+ 					if (e->ring.flexible)
+-						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_NORMAL_CIRCUIT_CONGESTION);
++						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_NORMAL_CIRCUIT_CONGESTION, -1);
+ 					else
+-						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_REQUESTED_CHAN_UNAVAIL);
++						pri_hangup(pri->pri, e->ring.call, PRI_CAUSE_REQUESTED_CHAN_UNAVAIL, -1);
+ 				}
+ 				break;
+ 			case PRI_EVENT_RINGING:
+@@ -8986,7 +9314,7 @@ static void *pri_dchannel(void *vpri)
+ 					} else {
+ 						ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 						if (ast_strlen_zero(pri->pvts[chanpos]->dop.dialstr)) {
+-							zt_enable_ec(pri->pvts[chanpos]);
++						// XXX	zt_enable_ec(pri->pvts[chanpos]);
+ 							pri->pvts[chanpos]->subs[SUB_REAL].needringing = 1;
+ 							pri->pvts[chanpos]->alerting = 1;
+ 						} else
+@@ -9018,9 +9346,16 @@ static void *pri_dchannel(void *vpri)
+ 				}
+ 				break;
+ 			case PRI_EVENT_PROGRESS:
+-				/* Get chan value if e->e is not PRI_EVNT_RINGING */
++				/* Get chan value if e->e is not PRI_EVENT_RINGING */
+ 				chanpos = pri_find_principle(pri, e->proceeding.channel);
+ 				if (chanpos > -1) {
++				    if ((pri->pvts[chanpos]->priindication_oob == 2) && (e->proceeding.cause == PRI_CAUSE_USER_BUSY)) {
++					/* received PROGRESS with cause BUSY, no inband callprogress wanted => hang up! */
++					if (pri->pvts[chanpos]->owner) {
++					    pri->pvts[chanpos]->owner->hangupcause = AST_CAUSE_USER_BUSY;
++					    pri->pvts[chanpos]->owner->_softhangup |= AST_SOFTHANGUP_DEV;
++					}
++				    } else {
+ #ifdef PRI_PROGRESS_MASK
+ 					if ((!pri->pvts[chanpos]->progress) || (e->proceeding.progressmask & PRI_PROG_INBAND_AVAILABLE)) {
+ #else
+@@ -9062,11 +9397,18 @@ static void *pri_dchannel(void *vpri)
+ 						pri->pvts[chanpos]->progress = 1;
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 					}
++				    }
+ 				}
+ 				break;
+ 			case PRI_EVENT_PROCEEDING:
+ 				chanpos = pri_find_principle(pri, e->proceeding.channel);
+ 				if (chanpos > -1) {
++ 				    chanpos = pri_fixup_principle(pri, chanpos, e->proceeding.call);
++ 				    if (chanpos < 0) {
++ 					ast_log(LOG_WARNING, "Received PROCEEDING on channel %d/%d not in use on span %d\n",
++						PRI_SPAN(e->proceeding.channel), PRI_CHANNEL(e->proceeding.channel), pri->span);
++ 					chanpos = -1;
++ 				    } else {
+ 					if (!pri->pvts[chanpos]->proceeding) {
+ 						struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_PROCEEDING, };
+ 						
+@@ -9091,6 +9433,7 @@ static void *pri_dchannel(void *vpri)
+ 						pri->pvts[chanpos]->proceeding = 1;
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 					}
++				    }
+ 				}
+ 				break;
+ 			case PRI_EVENT_FACNAME:
+@@ -9114,6 +9457,163 @@ static void *pri_dchannel(void *vpri)
+ 					}
+ 				}
+ 				break;				
++			case PRI_EVENT_SUSPEND_REQ:
++				if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++				    pri_suspend_reject(pri->pri, e->suspend_req.call, "");
++				    break;
++				}
++				chanpos = pri_find_principle(pri, e->suspend_req.channel);
++				if (chanpos < 0)  {
++					ast_log(LOG_WARNING, "Suspend requested on unconfigured channel %d span %d\n", chanpos, pri->span);
++					chanpos = -1;
++				}
++
++				if (chanpos > -1) {
++				    ast_mutex_lock(&pri->pvts[chanpos]->lock);
++				    if (pri->pvts[chanpos]->owner) {
++					if (ast_bridged_channel(pri->pvts[chanpos]->owner)) {
++					    struct zt_suspended_call *zpc;
++					    char tmpstr[256];
++					    zpc = malloc(sizeof(struct zt_suspended_call));
++					    if (!zpc) {
++						ast_log(LOG_ERROR, "unable to malloc zt_suspended_call\n");
++						break;
++					    }
++					    strncpy(zpc->msn,  pri->pvts[chanpos]->cid_num, sizeof(zpc->msn));
++					    strncpy(zpc->callid,  e->suspend_req.callid, sizeof(zpc->callid));
++					    ast_masq_park_call(ast_bridged_channel(pri->pvts[chanpos]->owner), NULL, 0, &zpc->parked_at);
++					    zpc->next = pri->suspended_calls;
++					    pri->suspended_calls = zpc;
++					    snprintf(tmpstr, sizeof(tmpstr), "Parked at %d", zpc->parked_at);
++					    pri_suspend_acknowledge(pri->pri, e->suspend_req.call,tmpstr);
++					    pri->pvts[chanpos]->call = NULL;
++					    pri->pvts[chanpos]->tei = -1;
++					    pri->pvts[chanpos]->owner->_softhangup |= AST_SOFTHANGUP_DEV;
++					} else {
++					    pri_suspend_reject(pri->pri, e->suspend_req.call, "cant park a non-bridge");
++					    ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++					    break;
++					}
++				    } else {
++					pri_suspend_reject(pri->pri, e->suspend_req.call, "");
++				    }
++				    ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++				}
++				break;
++			case PRI_EVENT_RESUME_REQ:
++				if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++				    break;
++				}
++				chanpos = pri_find_empty_chan(pri, 1);
++				if (chanpos < 0) {
++					pri_resume_reject(pri->pri, e->resume_req.call,"All channels busy");
++					ast_log(LOG_WARNING, "Resume requested on odd channel number %d span %d\n", chanpos, pri->span);
++					chanpos = -1;
++				} else if (!pri->pvts[chanpos]) {
++					pri_resume_reject(pri->pri, e->resume_req.call,"General protection fault in module 0x0BRI");
++					chanpos = -1;
++				}
++
++				if (chanpos > -1) {
++ 				    ast_mutex_lock(&pri->pvts[chanpos]->lock);
++				    if (!pri->pvts[chanpos]->owner) {
++					struct zt_suspended_call *zpc, *zpcl;
++					int unparked=0;
++					char extenstr[255], temp[255];
++					zpc = NULL;
++					zpcl = pri->suspended_calls;
++					while (zpcl) {
++					//    ast_log(LOG_NOTICE, "zpc->parked_at %d zpcl->callid %s\n",zpcl->parked_at, zpcl->callid);
++					    if (((strlen(zpcl->callid) == 0) && (strlen(e->resume_req.callid)==0)) || (!strcmp(zpcl->callid,e->resume_req.callid))) {
++						int law;
++						// found a parked call
++						snprintf(extenstr, sizeof(extenstr), "%d", zpcl->parked_at);
++						strncpy(pri->pvts[chanpos]->exten, extenstr, sizeof(pri->pvts[chanpos]->exten));
++					//	strncpy(pri->pvts[chanpos]->context, ast_parking_con(), sizeof(pri->pvts[chanpos]->context));
++					        pri->pvts[chanpos]->call = e->resume_req.call;
++ 					        law = 1;
++					        if (ioctl(pri->pvts[chanpos]->subs[SUB_REAL].zfd, ZT_AUDIOMODE, &law) == -1)
++					    	    ast_log(LOG_WARNING, "Unable to set audio mode on channel %d to %d\n", PVT_TO_CHANNEL(pri->pvts[chanpos]), law);
++					// uhh ohh...what shall we do without the bearer cap???
++						law = ZT_LAW_ALAW;
++						res = zt_setlaw(pri->pvts[chanpos]->subs[SUB_REAL].zfd, law);
++						if (res < 0)
++						    ast_log(LOG_WARNING, "Unable to set law on channel %d\n", PVT_TO_CHANNEL(pri->pvts[chanpos]));
++						if (!pri->pvts[chanpos]->digital) {
++						    res = set_actual_gain(pri->pvts[chanpos]->subs[SUB_REAL].zfd, 0, pri->pvts[chanpos]->rxgain, pri->pvts[chanpos]->txgain, law);
++  						} else {
++  						    res = set_actual_gain(pri->pvts[chanpos]->subs[SUB_REAL].zfd, 0, 0, 0, pri->pvts[chanpos]->law);
++						}
++						if (res < 0)
++						    ast_log(LOG_WARNING, "Unable to set gains on channel %d\n", PVT_TO_CHANNEL(pri->pvts[chanpos]));
++						/* Start PBX */
++						c = zt_new(pri->pvts[chanpos], AST_STATE_UP, 1, SUB_REAL, law, PRI_TRANS_CAP_SPEECH);
++						if (c) {
++						    pri->pvts[chanpos]->owner = c;
++						    pri->pvts[chanpos]->call = e->resume_req.call;
++						    zt_enable_ec(pri->pvts[chanpos]);
++						    zt_train_ec(pri->pvts[chanpos]);
++						} else {
++						    ast_log(LOG_ERROR, "unable to start pbx\n");
++						}
++
++						if (zpc) {
++						    zpc->next = zpcl->next;
++						    free(zpcl);
++						    zpcl = zpc->next;
++						} else {
++						    // remove head
++						    pri->suspended_calls = zpcl->next;
++						    free(zpcl);
++						    zpcl = pri->suspended_calls;
++						    zpc = NULL;
++						}
++						unparked = 1;
++						snprintf(temp, sizeof(temp), "Unparked %s", extenstr);
++						pri_resume_acknowledge(pri->pri, e->resume_req.call, chanpos + 1, temp);
++					        break;
++					    }
++					    zpc = zpcl;
++					    if (zpcl) zpcl = zpcl->next;
++					}
++					if (!unparked)
++					    pri_resume_reject(pri->pri, e->resume_req.call,"No suspended call to unpark!");
++				    } else {
++					pri_resume_reject(pri->pri, e->resume_req.call,"No suspended call to unpark!");
++				    }
++				    ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++				}
++				break;
++			case PRI_EVENT_HOLD_REQ:
++				if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++				    pri_hold_reject(pri->pri, e->hold_req.call);
++				    break;
++				}
++				/* holded calls are not implemented yet */
++				pri_hold_reject(pri->pri, e->hold_req.call);
++				break;
++			case PRI_EVENT_RETRIEVE_REQ:
++				if ((pri->nodetype != BRI_NETWORK_PTMP) && (pri->nodetype != BRI_NETWORK)) {
++				    pri_retrieve_reject(pri->pri, e->retrieve_req.call);
++				    break;
++				}
++				/* Holded calls are currently not supported */
++				pri_retrieve_reject(pri->pri, e->retrieve_req.call);
++				chanpos = -1;
++				break;
++			case PRI_EVENT_DISPLAY_RECEIVED:
++				ast_log(LOG_NOTICE, "DISPLAY IE: [ %s ] received\n",e->display.text);
++				chanpos = pri_find_principle(pri, e->display.channel);
++				if (chanpos < 0) {
++				    ast_log(LOG_WARNING, "odd channel number %d span %d\n", chanpos, pri->span);
++				    chanpos = -1;
++				}
++				if (chanpos > -1) {
++				    if (pri->pvts[chanpos]->owner) {
++			//		ast_sendtext(pri->pvt[chanpos]->owner, e->display.text);
++				    }
++				}
++				break;
+ 			case PRI_EVENT_ANSWER:
+ 				chanpos = pri_find_principle(pri, e->answer.channel);
+ 				if (chanpos < 0) {
+@@ -9126,6 +9626,7 @@ static void *pri_dchannel(void *vpri)
+ 							PRI_SPAN(e->answer.channel), PRI_CHANNEL(e->answer.channel), pri->span);
+ 					} else {
+ 						ast_mutex_lock(&pri->pvts[chanpos]->lock);
++  						pri->pvts[chanpos]->tei = e->answer.tei;
+ 						/* Now we can do call progress detection */
+ 
+ 						/* We changed this so it turns on the DSP no matter what... progress or no progress.
+@@ -9155,11 +9656,16 @@ static void *pri_dchannel(void *vpri)
+ 								ast_log(LOG_DEBUG, "Sent deferred digit string: %s\n", pri->pvts[chanpos]->dop.dialstr);
+ 							pri->pvts[chanpos]->dop.dialstr[0] = '\0';
+ 						} else if (pri->pvts[chanpos]->confirmanswer) {
+-							ast_log(LOG_DEBUG, "Waiting on answer confirmation on channel %d!\n", pri->pvts[chanpos]->channel);
++							ast_log(LOG_DEBUG, "Waiting for answer confirmation on channel %d!\n", pri->pvts[chanpos]->channel);
++							enable_dtmf_detect(pri->pvts[chanpos]);
+ 						} else {
++							pri->pvts[chanpos]->dialing = 0;
+ 							pri->pvts[chanpos]->subs[SUB_REAL].needanswer =1;
+ 							/* Enable echo cancellation if it's not on already */
+ 							zt_enable_ec(pri->pvts[chanpos]);
++							zt_train_ec(pri->pvts[chanpos]);
++							/* stop ignoring inband dtmf */
++							enable_dtmf_detect(pri->pvts[chanpos]);
+ 						}
+ 
+ #ifdef SUPPORT_USERUSER
+@@ -9216,20 +9722,29 @@ static void *pri_dchannel(void *vpri)
+ 								ast_verbose(VERBOSE_PREFIX_3 "Channel %d/%d, span %d got hangup, cause %d\n", 
+ 									pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span, e->hangup.cause);
+ 						} else {
+-							pri_hangup(pri->pri, pri->pvts[chanpos]->call, e->hangup.cause);
++							pri_hangup(pri->pri, pri->pvts[chanpos]->call, e->hangup.cause, -1);
+ 							pri->pvts[chanpos]->call = NULL;
++							pri->pvts[chanpos]->tei = -1;
+ 						}
+ 						if (e->hangup.cause == PRI_CAUSE_REQUESTED_CHAN_UNAVAIL) {
+-							if (option_verbose > 2)
++ 							if ((pri->nodetype != BRI_CPE_PTMP) && (pri->nodetype != BRI_NETWORK_PTMP)) {
++							    if (option_verbose > 2)
+ 								ast_verbose(VERBOSE_PREFIX_3 "Forcing restart of channel %d/%d on span %d since channel reported in use\n", 
+-									PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
+-							pri_reset(pri->pri, PVT_TO_CHANNEL(pri->pvts[chanpos]));
+-							pri->pvts[chanpos]->resetting = 1;
+-						}
+-						if (e->hangup.aoc_units > -1)
++ 									PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++							    pri_reset(pri->pri, PVT_TO_CHANNEL(pri->pvts[chanpos]));
++							    pri->pvts[chanpos]->resetting = 1;
++ 							}
++						}
++ 						if (e->hangup.aoc_units > -1) {
++							if (pri->pvts[chanpos]->owner) {
++							    char tmpstr[256];
++							    snprintf(tmpstr, sizeof(tmpstr), "%d", (int)e->hangup.aoc_units);
++							    pbx_builtin_setvar_helper(pri->pvts[chanpos]->owner, "AOCEUNITS", tmpstr);
++							}
+ 							if (option_verbose > 2)
+ 								ast_verbose(VERBOSE_PREFIX_3 "Channel %d/%d, span %d received AOC-E charging %d unit%s\n",
+ 									pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span, (int)e->hangup.aoc_units, (e->hangup.aoc_units == 1) ? "" : "s");
++						}
+ 
+ #ifdef SUPPORT_USERUSER
+ 						if (pri->pvts[chanpos]->owner && !ast_strlen_zero(e->hangup.useruserinfo)) {
+@@ -9242,8 +9757,9 @@ static void *pri_dchannel(void *vpri)
+ 
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 					} else {
+-						ast_log(LOG_WARNING, "Hangup on bad channel %d/%d on span %d\n", 
+-							PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++						ast_log(LOG_NOTICE, "Hangup, did not find cref %d, tei %d\n",e->hangup.cref, e->hangup.tei);
++						ast_log(LOG_WARNING, "Hangup on bad channel %d/%d on span %d\n",
++								PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
+ 					}
+ 				} 
+ 				break;
+@@ -9253,15 +9769,23 @@ static void *pri_dchannel(void *vpri)
+ 			case PRI_EVENT_HANGUP_REQ:
+ 				chanpos = pri_find_principle(pri, e->hangup.channel);
+ 				if (chanpos < 0) {
+-					ast_log(LOG_WARNING, "Hangup REQ requested on unconfigured channel %d/%d span %d\n", 
+-						PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
+-				} else {
++					if (pri->nodetype == BRI_NETWORK_PTMP) {
++					    pri_hangup(pri->pri, e->hangup.call, e->hangup.cause, -1);
++					} else {
++					    ast_log(LOG_WARNING, "Hangup REQ requested on unconfigured channel %d/%d span %d\n",
++  						PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++					}
++				} else if ((pri->pvts[chanpos]->priindication_oob != 2) || (!e->hangup.inband_progress) || (!pri->pvts[chanpos]->outgoing)) {
++								    /* dont hang up if we want to hear inband call progress */
+ 					chanpos = pri_fixup_principle(pri, chanpos, e->hangup.call);
+ 					if (chanpos > -1) {
+ 						ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 						if (pri->pvts[chanpos]->realcall) 
+ 							pri_hangup_all(pri->pvts[chanpos]->realcall, pri);
+ 						else if (pri->pvts[chanpos]->owner) {
++							char tmpstr[256];
++							snprintf(tmpstr, sizeof(tmpstr), "%d", e->hangup.cause);
++							pbx_builtin_setvar_helper(pri->pvts[chanpos]->owner, "PRI_CAUSE", tmpstr);
+ 							pri->pvts[chanpos]->owner->hangupcause = e->hangup.cause;
+ 							if (pri->pvts[chanpos]->owner->_state == AST_STATE_UP)
+ 								pri->pvts[chanpos]->owner->_softhangup |= AST_SOFTHANGUP_DEV;
+@@ -9288,16 +9812,34 @@ static void *pri_dchannel(void *vpri)
+ 								if (option_verbose > 2)
+ 									ast_verbose(VERBOSE_PREFIX_3 "Channel %d/%d, span %d received AOC-E charging %d unit%s\n",
+ 										pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span, (int)e->hangup.aoc_units, (e->hangup.aoc_units == 1) ? "" : "s");
++							if (e->hangup.aoc_units > -1) {
++							    if (pri->pvts[chanpos]->owner) {
++								char tmpstr[256];
++								snprintf(tmpstr, sizeof(tmpstr), "%d", (int)e->hangup.aoc_units);
++								pbx_builtin_setvar_helper(pri->pvts[chanpos]->owner, "AOCEUNITS", tmpstr);
++							    }
++							    if (option_verbose > 2)
++							    	ast_verbose(VERBOSE_PREFIX_3 "Channel %d/%d, span %d received AOC-E charging %d unit%s\n",
++									pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span, (int)e->hangup.aoc_units, (e->hangup.aoc_units == 1) ? "" : "s");
++							}
++							if (pri->nodetype == BRI_NETWORK_PTMP) {
++								pri_hangup(pri->pri, pri->pvts[chanpos]->call, e->hangup.cause, -1);
++								pri->pvts[chanpos]->call = NULL;
++								pri->pvts[chanpos]->tei = -1;
++							}
+ 						} else {
+-							pri_hangup(pri->pri, pri->pvts[chanpos]->call, e->hangup.cause);
++							pri_hangup(pri->pri, pri->pvts[chanpos]->call, e->hangup.cause, -1);
+ 							pri->pvts[chanpos]->call = NULL;
++ 							pri->pvts[chanpos]->tei = -1;
+ 						}
+ 						if (e->hangup.cause == PRI_CAUSE_REQUESTED_CHAN_UNAVAIL) {
+-							if (option_verbose > 2)
++ 							if ((pri->nodetype != BRI_CPE_PTMP) && (pri->nodetype != BRI_NETWORK_PTMP)) {
++							    if (option_verbose > 2)
+ 								ast_verbose(VERBOSE_PREFIX_3 "Forcing restart of channel %d/%d span %d since channel reported in use\n", 
+ 									PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
+-							pri_reset(pri->pri, PVT_TO_CHANNEL(pri->pvts[chanpos]));
+-							pri->pvts[chanpos]->resetting = 1;
++							    pri_reset(pri->pri, PVT_TO_CHANNEL(pri->pvts[chanpos]));
++							    pri->pvts[chanpos]->resetting = 1;
++							}
+ 						}
+ 
+ #ifdef SUPPORT_USERUSER
+@@ -9311,9 +9853,27 @@ static void *pri_dchannel(void *vpri)
+ 
+ 						ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 					} else {
+-						ast_log(LOG_WARNING, "Hangup REQ on bad channel %d/%d on span %d\n", PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++ 						if (pri->nodetype != BRI_NETWORK_PTMP) {
++  						    ast_log(LOG_WARNING, "Hangup REQ on bad channel %d/%d on span %d\n", PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++ 						} else {
++							ast_log(LOG_WARNING, "Hangup REQ on bad channel %d/%d on span %d\n", PRI_SPAN(e->hangup.channel), PRI_CHANNEL(e->hangup.channel), pri->span);
++ 						}
+ 					}
+ 				} 
++				if ((chanpos > -1) && (pri->pvts[chanpos]->owner) && (pri->pvts[chanpos]->priindication_oob == 2) && (e->hangup.inband_progress) && (pri->pvts[chanpos]->outgoing)) {
++				    ast_mutex_lock(&pri->pvts[chanpos]->lock);
++					if (e->hangup.aoc_units > -1) {
++					    char tmpstr[256];
++					    snprintf(tmpstr, sizeof(tmpstr), "%d", (int)e->hangup.aoc_units);
++					    pbx_builtin_setvar_helper(pri->pvts[chanpos]->owner, "AOCEUNITS", tmpstr);
++					    if (option_verbose > 2)
++						ast_verbose(VERBOSE_PREFIX_3 "Channel %d/%d, span %d received AOC-E charging %d unit%s\n",
++						    pri->pvts[chanpos]->logicalspan, pri->pvts[chanpos]->prioffset, pri->span, (int)e->hangup.aoc_units, (e->hangup.aoc_units == 1) ? "" : "s");
++					}
++					pri->pvts[chanpos]->owner->hangupcause = e->hangup.cause;
++					ast_channel_setwhentohangup(pri->pvts[chanpos]->owner, 5);
++				    ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++				}
+ 				break;
+ 			case PRI_EVENT_HANGUP_ACK:
+ 				chanpos = pri_find_principle(pri, e->hangup.channel);
+@@ -9325,6 +9885,7 @@ static void *pri_dchannel(void *vpri)
+ 					if (chanpos > -1) {
+ 						ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 						pri->pvts[chanpos]->call = NULL;
++						pri->pvts[chanpos]->tei = -1;
+ 						pri->pvts[chanpos]->resetting = 0;
+ 						if (pri->pvts[chanpos]->owner) {
+ 							if (option_verbose > 2) 
+@@ -9431,10 +9992,22 @@ static void *pri_dchannel(void *vpri)
+ 					ast_mutex_lock(&pri->pvts[chanpos]->lock);
+ 					switch (e->notify.info) {
+ 					case PRI_NOTIFY_REMOTE_HOLD:
++						if ((pri->nodetype == BRI_NETWORK_PTMP) || (pri->nodetype == BRI_NETWORK)) {
++						    ast_log(LOG_DEBUG, "Received REMOTE_HOLD notification on NETWORK channel. Starting MoH\n");
++						    ast_moh_start(ast_bridged_channel(pri->pvts[chanpos]->owner), NULL, pri->pvts[chanpos]->mohinterpret);
++						} else {
++						    ast_log(LOG_DEBUG, "Received REMOTE_HOLD notification on CPE channel. Not Starting MoH\n");
++						}
+ 						f.subclass = AST_CONTROL_HOLD;
+ 						zap_queue_frame(pri->pvts[chanpos], &f, pri);
+ 						break;
+ 					case PRI_NOTIFY_REMOTE_RETRIEVAL:
++						if ((pri->nodetype == BRI_NETWORK_PTMP) || (pri->nodetype == BRI_NETWORK)) {
++						    ast_log(LOG_DEBUG, "Received REMOTE_RETRIEVAL notification on NETWORK channel. Stopping MoH\n");
++						    ast_moh_stop(ast_bridged_channel(pri->pvts[chanpos]->owner));
++						} else {
++						    ast_log(LOG_DEBUG, "Received REMOTE_RETRIEVAL notification on CPE channel.\n");
++						}
+ 						f.subclass = AST_CONTROL_UNHOLD;
+ 						zap_queue_frame(pri->pvts[chanpos], &f, pri);
+ 						break;
+@@ -9442,6 +10015,23 @@ static void *pri_dchannel(void *vpri)
+ 					ast_mutex_unlock(&pri->pvts[chanpos]->lock);
+ 				}
+ 				break;
++ 			case PRI_EVENT_FACILITY:
++ 				    if (e->facility.operation == 0x0D) {
++				    	struct ast_channel *owner = pri->pvts[chanpos]->owner;
++
++ 					ast_log(LOG_NOTICE, "call deflection to %s requested.\n", e->facility.forwardnum);
++ 					ast_mutex_lock(&pri->pvts[chanpos]->lock);
++ 					    /* transfer */
++ 					    if (owner) {
++						ast_string_field_build(owner, call_forward, 
++								"Local/%s@%s",  e->facility.forwardnum,
++								owner->context);
++ 					    }
++ 					ast_mutex_unlock(&pri->pvts[chanpos]->lock);
++ 				    } else {
++ 					ast_log(LOG_WARNING, "Unknown facility operation %#x requested.\n", e->facility.operation);
++ 				    }
++ 				break;
+ 			default:
+ 				ast_log(LOG_DEBUG, "Event: %d\n", e->e);
+ 			}
+@@ -9503,7 +10093,7 @@ static int start_pri(struct zt_pri *pri)
+ 			pri->fds[i] = -1;
+ 			return -1;
+ 		}
+-		pri->dchans[i] = pri_new(pri->fds[i], pri->nodetype, pri->switchtype);
++		pri->dchans[i] = pri_new(pri->fds[i], pri->nodetype, pri->switchtype, pri->span);
+ 		/* Force overlap dial if we're doing GR-303! */
+ 		if (pri->switchtype == PRI_SWITCH_GR303_TMC)
+ 			pri->overlapdial = 1;
+@@ -9571,39 +10161,77 @@ static char *complete_span_5(const char 
+ 
+ static int handle_pri_set_debug_file(int fd, int argc, char **argv)
+ {
+-	int myfd;
++ 	int myfd, x, d;
++ 	int span;
++
++ 	if (argc < 6)
++ 		return RESULT_SHOWUSAGE;
+ 
+ 	if (!strncasecmp(argv[1], "set", 3)) {
+-		if (argc < 5) 
++		if (argc < 7)
+ 			return RESULT_SHOWUSAGE;
+ 
+-		if (ast_strlen_zero(argv[4]))
++		if (!argv[4] || ast_strlen_zero(argv[4]))
+ 			return RESULT_SHOWUSAGE;
+ 
++ 		if (!argv[5])
++ 			return RESULT_SHOWUSAGE;
++
++ 		if (!argv[6] || ast_strlen_zero(argv[6]))
++ 			return RESULT_SHOWUSAGE;
++
++ 		span = atoi(argv[6]);
++ 		if ((span < 1) && (span > NUM_SPANS)) {
++ 			return RESULT_SUCCESS;
++ 		}
++
++
+ 		myfd = open(argv[4], O_CREAT|O_WRONLY, 0600);
+ 		if (myfd < 0) {
+ 			ast_cli(fd, "Unable to open '%s' for writing\n", argv[4]);
+ 			return RESULT_SUCCESS;
+ 		}
++ 		for (x=0; x < NUM_SPANS; x++) {
++ 	    	    ast_mutex_lock(&pris[x].lock);
+ 
+-		ast_mutex_lock(&pridebugfdlock);
+-
+-		if (pridebugfd >= 0)
+-			close(pridebugfd);
+-
+-		pridebugfd = myfd;
+-		ast_copy_string(pridebugfilename,argv[4],sizeof(pridebugfilename));
+-		
+-		ast_mutex_unlock(&pridebugfdlock);
++ 		    if (pris[x].span == span) {
++ 			if (pris[x].debugfd >= 0)
++ 			    close(pris[x].debugfd);
++ 			pris[x].debugfd = myfd;
++ 			for (d=0; d < NUM_DCHANS; d++) {
++ 			    if (pris[x].dchans[d])
++ 				pri_set_debug_fd(pris[x].dchans[d], myfd);
++ 			}
++ 		    }
++ 	    	    ast_mutex_unlock(&pris[x].lock);
++ 		}
+ 
+-		ast_cli(fd, "PRI debug output will be sent to '%s'\n", argv[4]);
++ 		ast_cli(fd, "PRI debug output for span %d will be sent to '%s'\n", span, argv[4]);
+ 	} else {
++ 		if (!argv[5] || ast_strlen_zero(argv[5]))
++ 			return RESULT_SHOWUSAGE;
+ 		/* Assume it is unset */
+-		ast_mutex_lock(&pridebugfdlock);
+-		close(pridebugfd);
+-		pridebugfd = -1;
+-		ast_cli(fd, "PRI debug output to file disabled\n");
+-		ast_mutex_unlock(&pridebugfdlock);
++		span = atoi(argv[5]);
++ 		if ((span < 1) && (span > NUM_SPANS)) {
++ 			return RESULT_SUCCESS;
++ 		}
++
++ 		for (x=0; x < NUM_SPANS; x++) {
++ 	    	    ast_mutex_lock(&pris[x].lock);
++
++ 		    if (pris[x].span == span) {
++ 			if (pris[x].debugfd >= 0)
++ 			    close(pris[x].debugfd);
++ 			pris[x].debugfd = -1;
++ 			for (d=0; d < NUM_DCHANS; d++) {
++ 			    if (pris[x].dchans[d])
++ 				pri_set_debug_fd(pris[x].dchans[d], -1);
++ 			}
++ 		    }
++ 	    	    ast_mutex_unlock(&pris[x].lock);
++ 		}
++
++ 		ast_cli(fd, "PRI debug output to file for span %d disabled\n", span);
+ 	}
+ 
+ 	return RESULT_SUCCESS;
+@@ -9644,6 +10272,7 @@ static int handle_pri_debug(int fd, int 
+ 
+ 
+ 
++
+ static int handle_pri_no_debug(int fd, int argc, char *argv[])
+ {
+ 	int span;
+@@ -9793,10 +10422,6 @@ static int handle_pri_show_debug(int fd,
+ 		}
+ 
+ 	}
+-	ast_mutex_lock(&pridebugfdlock);
+-	if (pridebugfd >= 0) 
+-		ast_cli(fd, "Logging PRI debug to file %s\n", pridebugfilename);
+-	ast_mutex_unlock(&pridebugfdlock);
+ 	    
+ 	if (!count) 
+ 		ast_cli(fd, "No debug set or no PRI running\n");
+@@ -9823,6 +10448,18 @@ static const char pri_show_spans_help[] 
+ 	"Usage: pri show spans\n"
+ 	"       Displays PRI Information\n";
+ 
++static char bri_debug_help[] =
++	"Usage: bri debug span <span>\n"
++	"       Enables debugging on a given BRI span\n";
++
++static char bri_no_debug_help[] =
++	"Usage: bri no debug span <span>\n"
++	"       Disables debugging on a given BRI span\n";
++
++static char bri_really_debug_help[] =
++	"Usage: bri intensive debug span <span>\n"
++	"       Enables debugging down to the Q.921 level\n";
++
+ static struct ast_cli_entry zap_pri_cli[] = {
+ 	{ { "pri", "debug", "span", NULL },
+ 	handle_pri_debug, "Enables PRI debugging on a span",
+@@ -9847,6 +10484,15 @@ static struct ast_cli_entry zap_pri_cli[
+ 	{ { "pri", "show", "debug", NULL },
+ 	handle_pri_show_debug, "Displays current PRI debug settings" },
+ 
++	{ { "bri", "debug", "span", NULL }, handle_pri_debug,
++	  "Enables BRI debugging on a span", bri_debug_help, complete_span_4 },
++
++	{ { "bri", "no", "debug", "span", NULL }, handle_pri_no_debug,
++	  "Disables BRI debugging on a span", bri_no_debug_help, complete_span_5 },
++
++	{ { "bri", "intense", "debug", "span", NULL }, handle_pri_really_debug,
++	  "Enables REALLY INTENSE BRI debugging", bri_really_debug_help, complete_span_5 },
++
+ 	{ { "pri", "set", "debug", "file", NULL },
+ 	handle_pri_set_debug_file, "Sends PRI debug output to the specified file" },
+ 
+@@ -9859,8 +10505,76 @@ static struct ast_cli_entry zap_pri_cli[
+ #endif
+ };
+ 
++static char *zapCD_tdesc = "Call Deflection";
++static char *zapCD_app = "zapCD";
++static char *zapCD_synopsis = "Call Deflection";
++
++static int app_zapCD(struct ast_channel *chan, void *data)
++{
++ struct zt_pvt *p = chan->tech_pvt;
++
++ if((!p->pri) || (!p->pri->pri)) {
++	return -1;
++ }
++
++ if(!data) {
++     ast_log(LOG_WARNING, "zapCD wants a number to deflect to\n");
++	return -1;
++ }
++ return pri_deflect(p->pri->pri, p->call, data);
++}
++
++static char *zapInband_tdesc = "Inband Call Progress (pre-answer)";
++static char *zapInband_app = "zapInband";
++static char *zapInband_synopsis = "Inband Call Progress";
++
++static int app_zapInband(struct ast_channel *chan, void *data)
++{
++ struct zt_pvt *p = chan->tech_pvt;
++
++ return pri_acknowledge(p->pri->pri, p->call, PVT_TO_CHANNEL(p), 1);
++}
++
+ #endif /* HAVE_PRI */
+ 
++static int app_zapEC(struct ast_channel *chan, void *data)
++{
++ int res=-1;
++ struct zt_pvt *p = NULL;
++
++ if (!data) {
++	ast_log(LOG_WARNING, "zapEC requires one argument (on | off)\n");
++ }
++ if (chan && !strcasecmp("ZAP",chan->tech->type)) {
++	p = chan->tech_pvt;
++	if (!p) return res;
++	if (!strcasecmp("on",(char *)data)) {
++	    zt_enable_ec(p);
++	    res = 0;
++	    if (option_verbose > 3) {
++		ast_verbose(VERBOSE_PREFIX_3 "Enabled echo cancelation on channel %s.\n", chan->name);
++	    }
++	} else if (!strcasecmp("off",(char *)data)) {
++	    zt_disable_ec(p);
++	    res = 0;
++	    if (option_verbose > 3) {
++		ast_verbose(VERBOSE_PREFIX_3 "Disabled echo cancelation on channel %s.\n", chan->name);
++	    }
++	} else {
++ 	    ast_log(LOG_WARNING, "Unknown argument %s to zapEC\n", (char *)data);
++	}
++ } else {
++  ast_log(LOG_WARNING, "zapNoEC only works on ZAP channels, check your extensions.conf!\n");
++  res = 0;
++ }
++
++ return res;
++}
++
++static char *zapEC_tdesc = "Enable/disable Echo cancelation";
++static char *zapEC_app = "zapEC";
++static char *zapEC_synopsis = "Enable/Disable Echo Cancelation on a Zap channel";
++
+ static int zap_destroy_channel(int fd, int argc, char **argv)
+ {
+ 	int channel;
+@@ -10441,8 +11155,11 @@ static int __unload_module(void)
+ 	}
+ 	ast_cli_unregister_multiple(zap_pri_cli, sizeof(zap_pri_cli) / sizeof(struct ast_cli_entry));
+ 	ast_unregister_application(zap_send_keypad_facility_app);
++	ast_unregister_application(zapCD_app);
++	ast_unregister_application(zapInband_app);
+ #endif
+ 	ast_cli_unregister_multiple(zap_cli, sizeof(zap_cli) / sizeof(struct ast_cli_entry));
++	ast_unregister_application(zapEC_app);
+ 	ast_manager_unregister( "ZapDialOffhook" );
+ 	ast_manager_unregister( "ZapHangup" );
+ 	ast_manager_unregister( "ZapTransfer" );
+@@ -10944,6 +11661,22 @@ static int process_zap(struct zt_chan_co
+ 					confp->chan.sig = SIG_GR303FXSKS;
+ 					confp->chan.radio = 0;
+ 					confp->pri.nodetype = PRI_CPE;
++ 				} else if (!strcasecmp(v->value, "bri_net_ptmp")) {
++ 					confp->chan.radio = 0;
++ 					confp->chan.sig = SIG_PRI;
++ 					confp->pri.nodetype = BRI_NETWORK_PTMP;
++ 				} else if (!strcasecmp(v->value, "bri_cpe_ptmp")) {
++ 					confp->chan.sig = SIG_PRI;
++ 					confp->chan.radio = 0;
++ 					confp->pri.nodetype = BRI_CPE_PTMP;
++ 				} else if (!strcasecmp(v->value, "bri_net")) {
++ 					confp->chan.radio = 0;
++ 					confp->chan.sig = SIG_PRI;
++ 					confp->pri.nodetype = BRI_NETWORK;
++ 				} else if (!strcasecmp(v->value, "bri_cpe")) {
++ 					confp->chan.sig = SIG_PRI;
++ 					confp->chan.radio = 0;
++ 					confp->pri.nodetype = BRI_CPE;
+ #endif
+ 				} else {
+ 					ast_log(LOG_ERROR, "Unknown signalling method '%s'\n", v->value);
+@@ -11056,9 +11789,21 @@ static int process_zap(struct zt_chan_co
+ 					confp->chan.priindication_oob = 1;
+ 				else if (!strcasecmp(v->value, "inband"))
+ 					confp->chan.priindication_oob = 0;
++				else if (!strcasecmp(v->value, "passthrough"))
++					confp->chan.priindication_oob = 2;
+ 				else
+-					ast_log(LOG_WARNING, "'%s' is not a valid pri indication value, should be 'inband' or 'outofband' at line %d\n",
++					ast_log(LOG_WARNING, "'%s' is not a valid pri indication value, should be 'inband', 'outofband' or 'passthrough' at line %d\n",
+ 						v->value, v->lineno);
++			} else if (!strcasecmp(v->name, "pritransfer")) {
++				if (!strcasecmp(v->value, "no"))
++					confp->chan.pritransfer = 0;
++				else if (!strcasecmp(v->value, "ect"))
++					confp->chan.pritransfer = 1;
++				else if (!strcasecmp(v->value, "hangup"))
++					confp->chan.pritransfer = 2;
++  				else
++ 					ast_log(LOG_WARNING, "'%s' is not a valid pri transfer value, should be 'no' , 'ect' or 'hangup' at line %d\n",
++  						v->value, v->lineno);
+ 			} else if (!strcasecmp(v->name, "priexclusive")) {
+ 				confp->chan.priexclusive = ast_true(v->value);
+ 			} else if (!strcasecmp(v->name, "internationalprefix")) {
+@@ -11071,6 +11816,10 @@ static int process_zap(struct zt_chan_co
+ 				ast_copy_string(confp->pri.privateprefix, v->value, sizeof(confp->pri.privateprefix));
+ 			} else if (!strcasecmp(v->name, "unknownprefix")) {
+ 				ast_copy_string(confp->pri.unknownprefix, v->value, sizeof(confp->pri.unknownprefix));
++ 			} else if (!strcasecmp(v->name, "nocid")) {
++  				ast_copy_string(confp->pri.nocid, v->value, sizeof(confp->pri.nocid));
++  			} else if (!strcasecmp(v->name, "withheldcid")) {
++  				ast_copy_string(confp->pri.withheldcid, v->value, sizeof(confp->pri.withheldcid));
+ 			} else if (!strcasecmp(v->name, "resetinterval")) {
+ 				if (!strcasecmp(v->value, "never"))
+ 					confp->pri.resetinterval = -1;
+@@ -11087,6 +11836,8 @@ static int process_zap(struct zt_chan_co
+ 				ast_copy_string(confp->pri.idleext, v->value, sizeof(confp->pri.idleext));
+ 			} else if (!strcasecmp(v->name, "idledial")) {
+ 				ast_copy_string(confp->pri.idledial, v->value, sizeof(confp->pri.idledial));
++  			} else if (!strcasecmp(v->name, "pritrustusercid")) {
++  				confp->pri.usercid = ast_true(v->value);
+ 			} else if (!strcasecmp(v->name, "overlapdial")) {
+ 				confp->pri.overlapdial = ast_true(v->value);
+ 			} else if (!strcasecmp(v->name, "pritimer")) {
+@@ -11389,6 +12140,7 @@ static int setup_zap(int reload)
+ #ifdef HAVE_PRI
+ 	if (!reload) {
+ 		for (x = 0; x < NUM_SPANS; x++) {
++			pris[x].debugfd = -1;
+ 			if (pris[x].pvts[0]) {
+ 				if (start_pri(pris + x)) {
+ 					ast_log(LOG_ERROR, "Unable to start D-channel on span %d\n", x + 1);
+@@ -11436,7 +12188,10 @@ static int load_module(void)
+ 	ast_string_field_init(&inuse, 16);
+ 	ast_string_field_set(&inuse, name, "GR-303InUse");
+ 	ast_cli_register_multiple(zap_pri_cli, sizeof(zap_pri_cli) / sizeof(struct ast_cli_entry));
++	ast_register_application(zapCD_app, app_zapCD, zapCD_synopsis, zapCD_tdesc);
++        ast_register_application(zapInband_app, app_zapInband, zapInband_synopsis, zapInband_tdesc);
+ #endif	
++	ast_register_application(zapEC_app, app_zapEC, zapEC_synopsis, zapEC_tdesc);
+ 	ast_cli_register_multiple(zap_cli, sizeof(zap_cli) / sizeof(struct ast_cli_entry));
+ 	
+ 	memset(round_robin, 0, sizeof(round_robin));
+@@ -11470,6 +12225,7 @@ static int zt_sendtext(struct ast_channe
+ 	float scont = 0.0;
+ 	int index;
+ 
++
+ 	index = zt_get_index(c, p, 0);
+ 	if (index < 0) {
+ 		ast_log(LOG_WARNING, "Huh?  I don't exist?\n");
+--- a/configs/zapata.conf.sample
++++ b/configs/zapata.conf.sample
+@@ -123,9 +123,20 @@ switchtype=national
+ ; 
+ ; outofband:      Signal Busy/Congestion out of band with RELEASE/DISCONNECT
+ ; inband:         Signal Busy/Congestion using in-band tones
++; passthrough:	  Listen to the telco
+ ;
+ ; priindication = outofband
+ ;
++; PRI/BRI transfers (HOLD -> SETUP -> ECT/Hangup)
++;
++; Configure how transfers are initiated. ECT should be preferred
++;
++; no:		no transfers allowed (results in hangup)
++; ect:  	use ECT (facility)
++; hangup:	transfer on hangup (if your phones dont support ECT)
++;
++; pritransfer = ect
++;
+ ; If you need to override the existing channels selection routine and force all
+ ; PRI channels to be marked as exclusively selected, set this to yes.
+ ; priexclusive = yes

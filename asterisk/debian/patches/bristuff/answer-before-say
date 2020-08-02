@@ -1,0 +1,57 @@
+Answer the channel before saying things (SayNumber, SayDigits,
+SayCharacters, SayPhonetic).
+
+--- a/main/pbx.c
++++ b/main/pbx.c
+@@ -6076,6 +6076,9 @@ static int pbx_builtin_saynumber(struct 
+ 			return -1;
+ 		}
+ 	}
++	if (chan->_state != AST_STATE_UP) {
++	    ast_answer(chan);
++	}
+ 
+ 	if (ast_say_number(chan, atoi(tmp), "", chan->language, options)) {
+ 		ast_log(LOG_WARNING, "We were unable to say the number %s, is it too large?\n", tmp);
+@@ -6088,8 +6091,12 @@ static int pbx_builtin_saydigits(struct 
+ {
+ 	int res = 0;
+ 
+-	if (data)
++	if (data) {
++		if (chan->_state != AST_STATE_UP) {
++		    ast_answer(chan);
++		}
+ 		res = ast_say_digit_str(chan, data, "", chan->language);
++	}
+ 	return res;
+ }
+ 
+@@ -6097,8 +6104,12 @@ static int pbx_builtin_saycharacters(str
+ {
+ 	int res = 0;
+ 
+-	if (data)
++	if (data) {
++		if (chan->_state != AST_STATE_UP) {
++		    ast_answer(chan);
++		}
+ 		res = ast_say_character_str(chan, data, "", chan->language);
++	}
+ 	return res;
+ }
+ 
+@@ -6106,8 +6117,12 @@ static int pbx_builtin_sayphonetic(struc
+ {
+ 	int res = 0;
+ 
+-	if (data)
++	if (data) {
++		if (chan->_state != AST_STATE_UP) {
++		    ast_answer(chan);
++		}
+ 		res = ast_say_phonetic_str(chan, data, "", chan->language);
++	}
+ 	return res;
+ }
+ 

@@ -1,0 +1,165 @@
+--- /dev/null
++++ b/configs/watchdog.conf.sample
+@@ -0,0 +1,22 @@
++;
++; Configuration file for res_watchdog
++;
++; type     = isdnguard | watchdog
++; device   = /dev/...
++; interval = interval to trigger the watchdog in ms
++
++;[ISDNguard-direct]
++;type = isdnguard
++;device = /dev/ttyS0
++;interval = 200
++
++;[ISDNguard-with-daemon]
++;type = isdnguard
++;device = /var/run/guard.ctl
++;interval = 200
++
++;[kernel_watchdog]
++;type = watchdog
++;device = /dev/watchdog
++;interval = 100
++
+--- /dev/null
++++ b/res/res_watchdog.c
+@@ -0,0 +1,137 @@
++/*
++ * Asterisk -- A telephony toolkit for Linux.
++ *
++ * Resource to make watchdogs happy
++ *
++ * Copyright (C) 2005, Junghanns.NET GmbH
++ *
++ * Klaus-Peter Junghanns <kpj@junghanns.net>
++ *
++ * This program is free software, distributed under the terms of
++ * the GNU General Public License
++ */
++
++#include "asterisk.h"
++#include <stdlib.h>
++#include <errno.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <sys/time.h>
++#include <sys/signal.h>
++#include <netinet/in.h>
++
++#include <asterisk/logger.h>
++#include <asterisk/channel.h>
++#include <asterisk/pbx.h>
++#include <asterisk/options.h>
++#include <asterisk/module.h>
++#include <asterisk/translate.h>
++#include <asterisk/say.h>
++#include <asterisk/features.h>
++#include <asterisk/musiconhold.h>
++#include <asterisk/config.h>
++#include <asterisk/cli.h>
++#include <asterisk/manager.h>
++#include <asterisk/utils.h>
++#include <asterisk/lock.h>
++#include <asterisk/adsi.h>
++
++static struct watchdog_pvt *watchdogs = NULL;
++
++typedef struct watchdog_pvt {
++    char device[80];
++    int fd;
++    int type;
++    int interval;
++    pthread_t watchdog_thread;
++    struct watchdog_pvt *next;
++} watchdog_pvt;
++
++static void *do_watchdog_thread(void *data) {
++    struct watchdog_pvt *woof = (struct watchdog_pvt *)data;
++    for (;;) {
++	if (woof->fd) {
++	    write(woof->fd, "PING\n", 5);
++	}
++	usleep(woof->interval * 1000);
++    }
++    return NULL;
++}
++
++
++static int load_module(void)
++{
++	int res = 0;
++	const char *cat, *utype, *udevice, *uinterval;
++	struct ast_config *cfg;
++	struct watchdog_pvt *woof = NULL;
++
++	cfg = ast_config_load("watchdog.conf");
++	if (cfg) {
++	    cat = ast_category_browse(cfg, NULL);
++	    while(cat) {
++		cat = ast_category_browse(cfg, cat);
++		utype = ast_variable_retrieve(cfg, cat, "type");
++/*		if (utype) {
++		    ast_log(LOG_NOTICE, "type = %s\n", utype);
++		} */
++		udevice = ast_variable_retrieve(cfg, cat, "device");
++/*		if (udevice) {
++		    ast_log(LOG_NOTICE, "device = %s\n", udevice);
++		} */
++		uinterval = ast_variable_retrieve(cfg, cat, "interval");
++/*		if (uinterval) {
++		    ast_log(LOG_NOTICE, "interval = %s\n", uinterval);
++		} */
++		if (uinterval && udevice && utype) {
++		    woof = malloc(sizeof(struct watchdog_pvt));
++		    if (!woof) {
++			ast_log(LOG_ERROR, "unable to malloc!\n");
++			return -1;
++		    }
++		    memset(woof, 0x0, sizeof(struct watchdog_pvt));
++		    strncpy(woof->device, udevice, sizeof(woof->device) - 1);
++		    
++		    woof->interval = atoi(uinterval);;
++		    woof->next = watchdogs;
++		    watchdogs = woof;
++		    woof->fd = open(woof->device, O_WRONLY | O_SYNC);
++		    if (woof->fd) {
++			if (!strncmp(utype, "isdnguard", sizeof(utype))) {
++			    woof->type = 1;
++			    write(woof->fd, "START\n", 6);
++			}
++			ast_pthread_create(&woof->watchdog_thread, NULL, do_watchdog_thread, woof);
++		    } else {
++			ast_log(LOG_WARNING, "error opening watchdog device %s !\n", woof->device);
++		    }
++		}
++	    }
++    	    ast_config_destroy(cfg);
++	}
++	return res;
++}
++
++
++static int unload_module(void)
++{
++	struct watchdog_pvt *dogs, *woof;
++	dogs = watchdogs;
++	while (dogs) {
++	    pthread_cancel(dogs->watchdog_thread);
++	    pthread_join(dogs->watchdog_thread, NULL);
++	    close(dogs->fd);
++	    woof = dogs->next;
++	    free(dogs);
++	    dogs = woof;
++	}
++	return 0;
++}
++
++
++AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Watchdog Resource",
++		.load = load_module,
++		.unload = unload_module,
++);

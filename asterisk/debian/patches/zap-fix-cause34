@@ -1,0 +1,23 @@
+fix "cause34" with BRI: reset 'call' when no call
+Reset the 'call' of a zaptel channel if failing to make a call.
+
+(commit 232eb51c7572d8f4d73649103d51d70643bd4ad9 on Xorcom's tree)
+
+ -- Faidon Liambotis <paravoid@debian.org>
+
+--- a/channels/chan_zap.c
++++ b/channels/chan_zap.c
+@@ -2735,11 +2735,12 @@ static int zt_hangup(struct ast_channel 
+ 						/* if we send a rel9999ease complete we wont ge no hangup event, so clear the call here */
+ 						if (icause == 34 || icause == 44 || icause == 82 || icause == 1 || icause == 81 || icause == 17) {
+ 						    if ((ast->_state == AST_STATE_RING) || (ast->_state == AST_STATE_RINGING) || (ast->_state == AST_STATE_DIALING) || (ast->_state == AST_STATE_RESERVED)) {
+-							p->call = NULL;
++							/* no-op */
+ 						    } else {
+ 							ast_log(LOG_ERROR, "What is wrong with you? You cannot use cause %d number when in state %d!\n", icause, ast->_state);
+ 							icause = 16; /* Note, in pri_hangup() libpri will already override the cause */
+ 						    }
++						    p->call = NULL;
+ 						}
+ 
+ 						if (p->pri->nodetype == BRI_NETWORK_PTMP) {

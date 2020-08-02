@@ -1,0 +1,434 @@
+--- a/include/asterisk/devicestate.h
++++ b/include/asterisk/devicestate.h
+@@ -47,7 +47,7 @@ extern "C" {
+ #define AST_DEVICE_ONHOLD	8
+ 
+ /*! \brief Devicestate watcher call back */
+-typedef int (*ast_devstate_cb_type)(const char *dev, int state, void *data);
++typedef int (*ast_devstate_cb_type)(const char *dev, int state, void *data, char *cid_num, char *cid_name);
+ 
+ /*!  \brief Devicestate provider call back */
+ typedef int (*ast_devstate_prov_cb_type)(const char *data);
+@@ -92,7 +92,7 @@ int ast_device_state_changed(const char 
+  * callbacks for the changed extensions
+  * Returns 0 on success, -1 on failure
+  */
+-int ast_device_state_changed_literal(const char *device);
++int ast_device_state_changed_literal(const char *device, const char *cid_num, const char *cid_name);
+ 
+ /*! \brief Registers a device state change callback 
+  * \param callback Callback
+--- a/main/devicestate.c
++++ b/main/devicestate.c
+@@ -78,6 +78,8 @@ static AST_LIST_HEAD_STATIC(devstate_cbs
+ 
+ struct state_change {
+ 	AST_LIST_ENTRY(state_change) list;
++	char cid_num[AST_MAX_EXTENSION];
++	char cid_name[AST_MAX_EXTENSION];
+ 	char device[1];
+ };
+ 
+@@ -277,7 +279,7 @@ void ast_devstate_del(ast_devstate_cb_ty
+ /*! \brief Notify callback watchers of change, and notify PBX core for hint updates
+ 	Normally executed within a separate thread
+ */
+-static void do_state_change(const char *device)
++static void do_state_change(const char *device, char *cid_num, char *cid_name)
+ {
+ 	int state;
+ 	struct devstate_cb *devcb;
+@@ -288,13 +290,13 @@ static void do_state_change(const char *
+ 
+ 	AST_LIST_LOCK(&devstate_cbs);
+ 	AST_LIST_TRAVERSE(&devstate_cbs, devcb, list)
+-		devcb->callback(device, state, devcb->data);
++		devcb->callback(device, state, devcb->data, cid_num, cid_name);
+ 	AST_LIST_UNLOCK(&devstate_cbs);
+ 
+-	ast_hint_state_changed(device);
++	ast_hint_state_changed(device, cid_num, cid_name);
+ }
+ 
+-static int __ast_device_state_changed_literal(char *buf, int norecurse)
++static int __ast_device_state_changed_literal(char *buf, int norecurse, char *cid_num, char *cid_name)
+ {
+ 	char *device;
+ 	struct state_change *change;
+@@ -308,10 +310,16 @@ static int __ast_device_state_changed_li
+ 	if (change_thread == AST_PTHREADT_NULL || !(change = ast_calloc(1, sizeof(*change) + strlen(device)))) {
+ 		/* we could not allocate a change struct, or */
+ 		/* there is no background thread, so process the change now */
+-		do_state_change(device);
++		do_state_change(device, cid_num, cid_name);
+ 	} else {
+ 		/* queue the change */
+ 		strcpy(change->device, device);
++		if (cid_num && (!ast_strlen_zero(cid_num))) {
++		    strncpy(change->cid_num, cid_num, sizeof(change->cid_num) - 1);
++		}
++		if (cid_name && (!ast_strlen_zero(cid_name))) {
++		    strncpy(change->cid_name, cid_name, sizeof(change->cid_name) - 1);
++		}
+ 		AST_LIST_LOCK(&state_changes);
+ 		AST_LIST_INSERT_TAIL(&state_changes, change, list);
+ 		if (AST_LIST_FIRST(&state_changes) == change)
+@@ -329,17 +337,23 @@ static int __ast_device_state_changed_li
+ 	 */
+ 	if (!norecurse && (tmp = strrchr(device, '-'))) {
+ 		*tmp = '\0';
+-		__ast_device_state_changed_literal(device, 1);
++		__ast_device_state_changed_literal(device, 1, cid_num, cid_name);
+ 	}
+ 	
+ 	return 1;
+ }
+ 
+-int ast_device_state_changed_literal(const char *dev)
++int ast_device_state_changed_literal(const char *dev, const char *cid_num, const char *cid_name)
+ {
+ 	char *buf;
++	char *buf2 = NULL;
++	char *buf3 = NULL;
+ 	buf = ast_strdupa(dev);
+-	return __ast_device_state_changed_literal(buf, 0);
++	if (cid_num)
++	    buf2 = ast_strdupa(cid_num);
++	if (cid_name)
++	    buf3 = ast_strdupa(cid_name);
++	return __ast_device_state_changed_literal(buf, 0, buf2, buf3);
+ }
+ 
+ /*! \brief Accept change notification, add it to change queue */
+@@ -351,7 +365,7 @@ int ast_device_state_changed(const char 
+ 	va_start(ap, fmt);
+ 	vsnprintf(buf, sizeof(buf), fmt, ap);
+ 	va_end(ap);
+-	return __ast_device_state_changed_literal(buf, 0);
++	return __ast_device_state_changed_literal(buf, 0, NULL, NULL);
+ }
+ 
+ /*! \brief Go through the dev state change queue and update changes in the dev state thread */
+@@ -366,7 +380,7 @@ static void *do_devstate_changes(void *d
+ 		if (cur) {
+ 			/* we got an entry, so unlock the list while we process it */
+ 			AST_LIST_UNLOCK(&state_changes);
+-			do_state_change(cur->device);
++			do_state_change(cur->device, cur->cid_num, cur->cid_name);
+ 			free(cur);
+ 			AST_LIST_LOCK(&state_changes);
+ 		} else {
+--- a/include/asterisk/channel.h
++++ b/include/asterisk/channel.h
+@@ -613,8 +613,13 @@ int ast_channel_datastore_remove(struct 
+ /*! \brief Find a datastore on a channel */
+ struct ast_datastore *ast_channel_datastore_find(struct ast_channel *chan, const struct ast_datastore_info *info, char *uid);
+ 
++extern ast_mutex_t uniquelock;
++
++/*! \brief Change the state of a channel and the callerid of the calling channel*/
++int ast_setstate_and_callerid(struct ast_channel *chan, enum ast_channel_state state, char *cid_num, char *cid_name);
++
+ /*! \brief Change the state of a channel */
+-int ast_setstate(struct ast_channel *chan, enum ast_channel_state);
++int ast_setstate(struct ast_channel *chan, enum ast_channel_state state);
+ 
+ /*! \brief Create a channel structure 
+     \return Returns NULL on failure to allocate.
+--- a/main/channel.c
++++ b/main/channel.c
+@@ -1261,7 +1261,7 @@ void ast_channel_free(struct ast_channel
+ 	free(chan);
+ 	AST_LIST_UNLOCK(&channels);
+ 
+-	ast_device_state_changed_literal(name);
++	ast_device_state_changed_literal(name, NULL, NULL);
+ }
+ 
+ struct ast_datastore *ast_channel_datastore_alloc(const struct ast_datastore_info *info, char *uid)
+@@ -3673,7 +3673,7 @@ void ast_set_callerid(struct ast_channel
+ 	ast_channel_unlock(chan);
+ }
+ 
+-int ast_setstate(struct ast_channel *chan, enum ast_channel_state state)
++int ast_setstate_and_callerid(struct ast_channel *chan, enum ast_channel_state state, char *cid_num, char *cid_name)
+ {
+ 	int oldstate = chan->_state;
+ 
+@@ -3681,7 +3681,7 @@ int ast_setstate(struct ast_channel *cha
+ 		return 0;
+ 
+ 	chan->_state = state;
+-	ast_device_state_changed_literal(chan->name);
++	ast_device_state_changed_literal(chan->name, cid_num, cid_name);
+ 	/* setstate used to conditionally report Newchannel; this is no more */
+ 	manager_event(EVENT_FLAG_CALL,
+ 		      "Newstate",
+@@ -3698,6 +3698,11 @@ int ast_setstate(struct ast_channel *cha
+ 	return 0;
+ }
+ 
++int ast_setstate(struct ast_channel *chan, enum ast_channel_state state)
++{
++    return ast_setstate_and_callerid(chan, state, NULL, NULL);
++}
++
+ /*! \brief Find bridged channel */
+ struct ast_channel *ast_bridged_channel(struct ast_channel *chan)
+ {
+--- a/include/asterisk/pbx.h
++++ b/include/asterisk/pbx.h
+@@ -63,7 +63,7 @@ struct ast_ignorepat;
+ struct ast_sw;
+ 
+ /*! \brief Typedef for devicestate and hint callbacks */
+-typedef int (*ast_state_cb_type)(char *context, char* id, enum ast_extension_states state, void *data);
++typedef int (*ast_state_cb_type)(char *context, char* id, enum ast_extension_states state, void *data, char *cid_num, char *cid_name);
+ 
+ /*! \brief Data structure associated with a custom dialplan function */
+ struct ast_custom_function {
+@@ -875,7 +875,7 @@ int ast_func_read(struct ast_channel *ch
+  */
+ int ast_func_write(struct ast_channel *chan, char *function, const char *value);
+ 
+-void ast_hint_state_changed(const char *device);
++void ast_hint_state_changed(const char *device, char *cid_num, char *cid_name);
+ 
+ #if defined(__cplusplus) || defined(c_plusplus)
+ }
+--- a/main/pbx.c
++++ b/main/pbx.c
+@@ -2022,7 +2022,7 @@ int ast_extension_state(struct ast_chann
+ 	return ast_extension_state2(e);    		/* Check all devices in the hint */
+ }
+ 
+-void ast_hint_state_changed(const char *device)
++void ast_hint_state_changed(const char *device, char *cid_num, char *cid_name)
+ {
+ 	struct ast_hint *hint;
+ 
+@@ -2053,11 +2053,11 @@ void ast_hint_state_changed(const char *
+ 
+ 		/* For general callbacks */
+ 		for (cblist = statecbs; cblist; cblist = cblist->next)
+-			cblist->callback(hint->exten->parent->name, hint->exten->exten, state, cblist->data);
++			cblist->callback(hint->exten->parent->name, hint->exten->exten, state, cblist->data, cid_num, cid_name);
+ 
+ 		/* For extension callbacks */
+ 		for (cblist = hint->callbacks; cblist; cblist = cblist->next)
+-			cblist->callback(hint->exten->parent->name, hint->exten->exten, state, cblist->data);
++			cblist->callback(hint->exten->parent->name, hint->exten->exten, state, cblist->data, cid_num, cid_name);
+ 
+ 		hint->laststate = state;	/* record we saw the change */
+ 	}
+@@ -2252,7 +2252,7 @@ static int ast_remove_hint(struct ast_ex
+ 				/* Notify with -1 and remove all callbacks */
+ 				cbprev = cblist;
+ 				cblist = cblist->next;
+-				cbprev->callback(hint->exten->parent->name, hint->exten->exten, AST_EXTENSION_DEACTIVATED, cbprev->data);
++				cbprev->callback(hint->exten->parent->name, hint->exten->exten, AST_EXTENSION_DEACTIVATED, cbprev->data, NULL, NULL);
+ 				free(cbprev);
+ 	    		}
+ 	    		hint->callbacks = NULL;
+@@ -4021,7 +4021,7 @@ void ast_merge_contexts_and_delete(struc
+ 			while (thiscb) {
+ 				prevcb = thiscb;
+ 				thiscb = thiscb->next;
+-				prevcb->callback(this->context, this->exten, AST_EXTENSION_REMOVED, prevcb->data);
++				prevcb->callback(this->context, this->exten, AST_EXTENSION_REMOVED, prevcb->data, NULL, NULL);
+ 				free(prevcb);
+ 	    		}
+ 		} else {
+--- a/channels/chan_sip.c
++++ b/channels/chan_sip.c
+@@ -1343,7 +1343,7 @@ static void ast_quiet_chan(struct ast_ch
+ static int attempt_transfer(struct sip_dual *transferer, struct sip_dual *target);
+ 
+ /*--- Device monitoring and Device/extension state handling */
+-static int cb_extensionstate(char *context, char* exten, int state, void *data);
++static int cb_extensionstate(char *context, char* exten, int state, void *data, char *cid_num, char *cid_name);
+ static int sip_devicestate(void *data);
+ static int sip_poke_noanswer(const void *data);
+ static int sip_poke_peer(struct sip_peer *peer);
+@@ -8599,7 +8599,7 @@ static void sip_peer_hold(struct sip_pvt
+ /*! \brief Callback for the devicestate notification (SUBSCRIBE) support subsystem
+ \note	If you add an "hint" priority to the extension in the dial plan,
+ 	you will get notifications on device state changes */
+-static int cb_extensionstate(char *context, char* exten, int state, void *data)
++static int cb_extensionstate(char *context, char* exten, int state, void *data, char *cid_num, char *cid_name)
+ {
+ 	struct sip_pvt *p = data;
+ 
+@@ -12787,7 +12787,7 @@ static void handle_response(struct sip_p
+ 					if (ast_test_flag(&p->flags[1], SIP_PAGE2_STATECHANGEQUEUE)) {
+ 						/* Ready to send the next state we have on queue */
+ 						ast_clear_flag(&p->flags[1], SIP_PAGE2_STATECHANGEQUEUE);
+-						cb_extensionstate((char *)p->context, (char *)p->exten, p->laststate, (void *) p);
++						cb_extensionstate((char *)p->context, (char *)p->exten, p->laststate, (void *) p, NULL, NULL);
+ 					}
+ 				}
+ 			} else if (sipmethod == SIP_REGISTER) 
+@@ -13040,7 +13040,7 @@ static void handle_response(struct sip_p
+ 					if (ast_test_flag(&p->flags[1], SIP_PAGE2_STATECHANGEQUEUE)) {
+ 						/* Ready to send the next state we have on queue */
+ 						ast_clear_flag(&p->flags[1], SIP_PAGE2_STATECHANGEQUEUE);
+-						cb_extensionstate((char *)p->context, (char *)p->exten, p->laststate, (void *) p);
++						cb_extensionstate((char *)p->context, (char *)p->exten, p->laststate, (void *) p, NULL, NULL);
+ 					}
+ 				}
+ 			} else if (sipmethod == SIP_BYE)
+--- a/apps/app_queue.c
++++ b/apps/app_queue.c
+@@ -721,7 +721,7 @@ static void *device_state_thread(void *d
+ 	return NULL;
+ }
+ /*! \brief Producer of the statechange queue */
+-static int statechange_queue(const char *dev, int state, void *ign)
++static int statechange_queue(const char *dev, int state, void *ign, char *cid_num, char *cid_name)
+ {
+ 	struct statechange *sc;
+ 
+--- a/include/asterisk/manager.h
++++ b/include/asterisk/manager.h
+@@ -55,6 +55,7 @@
+ #define EVENT_FLAG_AGENT		(1 << 5) /* Ability to read/set agent info */
+ #define EVENT_FLAG_USER                 (1 << 6) /* Ability to read/set user info */
+ #define EVENT_FLAG_CONFIG		(1 << 7) /* Ability to modify configurations */
++#define EVENT_FLAG_EXTENSIONSTATUS	(1 << 8) /* ExtensionStatus events */
+ 
+ /* Export manager structures */
+ #define AST_MAX_MANHEADERS 128
+--- a/main/manager.c
++++ b/main/manager.c
+@@ -129,6 +129,7 @@ static struct permalias {
+ 	{ EVENT_FLAG_AGENT, "agent" },
+ 	{ EVENT_FLAG_USER, "user" },
+ 	{ EVENT_FLAG_CONFIG, "config" },
++	{ EVENT_FLAG_EXTENSIONSTATUS, "extensionstatus" },
+ 	{ -1, "all" },
+ 	{ 0, "none" },
+ };
+@@ -2592,10 +2593,12 @@ int ast_manager_unregister(char *action)
+ 	return 0;
+ }
+ 
+-static int manager_state_cb(char *context, char *exten, int state, void *data)
++static int manager_state_cb(char *context, char *exten, int state, void *data, char *cid_num, char *cid_name)
+ {
++	char hint[256] = "";
++	ast_get_hint(hint, sizeof(hint) - 1, NULL, 0, NULL, context, exten);
+ 	/* Notify managers of change */
+-	manager_event(EVENT_FLAG_CALL, "ExtensionStatus", "Exten: %s\r\nContext: %s\r\nStatus: %d\r\n", exten, context, state);
++	manager_event(EVENT_FLAG_EXTENSIONSTATUS, "ExtensionStatus", "Exten: %s\r\nContext: %s\r\nStatus: %d\r\nCallerID: \"%s\" <%s>\r\nHint: %s\r\n", exten, context, state, cid_num, cid_name, hint);
+ 	return 0;
+ }
+ 
+--- a/apps/app_devstate.c
++++ b/apps/app_devstate.c
+@@ -50,7 +50,7 @@ static struct ast_cli_entry  cli_dev_sta
+ static int devstate_cli(int fd, int argc, char *argv[])
+ {
+     char devName[128];
+-    if (argc != 3)
++    if ((argc != 3) && (argc != 4) && (argc != 5))
+         return RESULT_SHOWUSAGE;
+ 
+     if (ast_db_put("DEVSTATES", argv[1], argv[2]))
+@@ -58,7 +58,15 @@ static int devstate_cli(int fd, int argc
+         ast_log(LOG_DEBUG, "ast_db_put failed\n");
+     }
+     snprintf(devName, sizeof(devName), "DS/%s", argv[1]);
+-    ast_device_state_changed_literal(devName);
++    if (argc == 4) {
++        ast_log(LOG_NOTICE, "devname %s cid %s\n", devName, argv[3]);
++	ast_device_state_changed_literal(devName, argv[3], NULL);
++    } else if (argc == 5) {
++        ast_log(LOG_NOTICE, "devname %s cid %s cidname %s\n", devName, argv[3], argv[4]);
++	ast_device_state_changed_literal(devName, argv[3], argv[4]);
++    } else {
++	ast_device_state_changed_literal(devName, NULL, NULL);
++    }
+     return RESULT_SUCCESS;
+ }
+ 
+@@ -93,7 +101,7 @@ static int devstate_exec(struct ast_chan
+     }
+ 
+     snprintf(devName, sizeof(devName), "DS/%s", device);
+-    ast_device_state_changed_literal(devName);
++    ast_device_state_changed_literal(devName, NULL, NULL);
+ 
+     ast_module_user_remove(u);
+     return 0;
+@@ -150,6 +158,8 @@ static int action_devstate(struct manses
+         const char *devstate = astman_get_header(m, "Devstate");
+         const char *value = astman_get_header(m, "Value");
+ 	const char *id = astman_get_header(m,"ActionID");
++        const char *cid_num = astman_get_header(m, "CallerID");
++        const char *cid_name = astman_get_header(m, "CallerIDName");
+ 	char devName[128];
+ 	char idText[256] = "";
+ 
+@@ -166,7 +176,7 @@ static int action_devstate(struct manses
+ 
+         if (!ast_db_put("DEVSTATES", devstate, (char *)value)) {
+ 	    snprintf(devName, sizeof(devName), "DS/%s", devstate);
+-	    ast_device_state_changed_literal(devName);
++	    ast_device_state_changed_literal(devName, cid_num, cid_name);
+ 	    astman_append(s, "Response: Success\r\n%s\r\n", idText);
+ 	} else {
+ 	    ast_log(LOG_DEBUG, "ast_db_put failed\n");
+--- a/res/res_esel.c
++++ b/res/res_esel.c
+@@ -51,6 +51,8 @@ typedef struct esel_extension_state {
+     char context[AST_MAX_EXTENSION];
+     char exten[AST_MAX_EXTENSION];
+     int state;
++    char cid_num[AST_MAX_EXTENSION];
++    char cid_name[AST_MAX_EXTENSION];
+     char devstate[AST_MAX_EXTENSION];
+     struct esel_extension_state *next;
+     struct esel_extension_state *prev;
+@@ -93,7 +95,7 @@ typedef struct esel_pvt {
+ 
+ static struct esel_pvt *donkeys = NULL;
+ 
+-static int esel_queue_extension_state(struct esel_queue *queue, char *context, char *exten, int state, void *data) {
++static int esel_queue_extension_state(struct esel_queue *queue, char *context, char *exten, int state, void *data, char *cid_num, char *cid_name) {
+ 	struct esel_extension_state *exstate = NULL;
+ 
+ 	exstate = malloc(sizeof(struct esel_extension_state));
+@@ -115,6 +117,8 @@ static int esel_queue_extension_state(st
+ 	}
+ 	ast_copy_string(exstate->exten, exten, sizeof(exstate->exten));
+ 	ast_copy_string(exstate->context, context, sizeof(exstate->context));
++	ast_copy_string(exstate->cid_num, cid_num, sizeof(exstate->cid_num));
++	ast_copy_string(exstate->cid_name, cid_name, sizeof(exstate->cid_name));
+ 	exstate->state = state;
+ 	if (!queue->head) {
+ 		/* Empty queue */
+@@ -161,7 +165,7 @@ static void esel_export_to_remote(struct
+     char msg[1024];
+     int sent = 0;
+     memset(msg, 0x0, sizeof(msg));
+-    snprintf(msg, sizeof(msg) - 1, "Action: Devstate\r\nDevstate: %s\r\nValue: %d\r\n\r\n", exstate->devstate, esel_state2devstate(exstate->state));
++    snprintf(msg, sizeof(msg) - 1, "Action: Devstate\r\nDevstate: %s\r\nValue: %d\r\nCallerID: %s\r\nCallerIDName: %s\r\n\r\n", exstate->devstate, esel_state2devstate(exstate->state), exstate->cid_num, exstate->cid_name);
+     sent = send(esel->sockfd, msg, strlen(msg), 0);
+     if (sent == -1) {
+ 	esel->connected = 0;
+@@ -250,13 +254,13 @@ static void *do_esel_thread(void *data) 
+     return NULL;
+ }
+ 
+-static int esel_state_cb(char *context, char *exten, int state, void *data) {
++static int esel_state_cb(char *context, char *exten, int state, void *data, char *cid_num, char *cid_name) {
+ 	struct esel_pvt *esel;
+ 
+ 	esel = donkeys;
+         ast_mutex_lock(&listlock);
+ 	while (esel) {
+-	    esel_queue_extension_state(&esel->queue, context, exten, state, data);
++	    esel_queue_extension_state(&esel->queue, context, exten, state, data, cid_num, cid_name);
+ 	    esel = esel->next;
+ 	}
+         ast_mutex_unlock(&listlock);

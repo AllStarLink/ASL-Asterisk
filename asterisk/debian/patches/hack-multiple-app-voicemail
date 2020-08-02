@@ -1,0 +1,60 @@
+This is a very ugly hack on upstream's Makefiles to allow building multiple
+variants of app_voicemail. Three variants are created:
+  * app_voicemail.so: plain old filesystem storage that doesn't break existing
+    setups
+  * app_voicemail_imap.so: IMAP storage
+  * app_voicemail_odbc.so: ODBC storage (and app_directory_odbc.so)
+All these conflict with each other and Asterisk will refuse to load them
+concurrently.
+They are marked noload on our default autoload configuration.
+
+A bug should be opened with upstream so that we can discuss the matter.
+
+ -- Faidon Liambotis <paravoid@debian.org>
+
+--- a/apps/Makefile
++++ b/apps/Makefile
+@@ -18,6 +18,16 @@ ALL_C_MODS:=$(patsubst %.c,%,$(wildcard 
+ ALL_CC_MODS:=$(patsubst %.cc,%,$(wildcard app_*.cc))
+ 
+ C_MODS:=$(filter-out $(MENUSELECT_APPS),$(ALL_C_MODS))
++ifeq ($(findstring IMAP_STORAGE,$(MENUSELECT_OPTS_app_voicemail)),)
++C_MODS+=app_voicemail_imap
++MENUSELECT_DEPENDS_app_voicemail_imap+=IMAP_TK SSL
++MENUSELECT_DEPENDS_app_directory_imap+=IMAP_TK SSL
++endif
++ifeq ($(findstring ODBC_STORAGE,$(MENUSELECT_OPTS_app_voicemail)),)
++C_MODS+=app_voicemail_odbc app_directory_odbc
++MENUSELECT_DEPENDS_app_voicemail_odbc+=UNIXODBC LTDL
++MENUSELECT_DEPENDS_app_directory_odbc+=UNIXODBC LTDL
++endif
+ CC_MODS:=$(filter-out $(MENUSELECT_APPS),$(ALL_CC_MODS))
+ 
+ LOADABLE_MODS:=$(C_MODS) $(CC_MODS)
+@@ -28,6 +38,8 @@ ifneq ($(findstring apps,$(MENUSELECT_EM
+ endif
+ 
+ MENUSELECT_OPTS_app_directory:=$(MENUSELECT_OPTS_app_voicemail)
++MENUSELECT_OPTS_app_directory_imap:=$(MENUSELECT_OPTS_app_voicemail)
++MENUSELECT_OPTS_app_directory_odbc:=$(MENUSELECT_OPTS_app_voicemail)
+ ifneq ($(findstring ODBC_STORAGE,$(MENUSELECT_OPTS_app_voicemail)),)
+ MENUSELECT_DEPENDS_app_voicemail+=$(MENUSELECT_DEPENDS_ODBC_STORAGE)
+ MENUSELECT_DEPENDS_app_directory+=$(MENUSELECT_DEPENDS_ODBC_STORAGE)
+@@ -44,4 +56,17 @@ endif
+ 
+ all: _all
+ 
++app_voicemail_%.c:
++	ln -s app_voicemail.c $@
++
++app_directory_%.c:
++	ln -s app_directory.c $@
++
++clean::
++	rm -f app_voicemail_*.c
++
++app_voicemail_imap.o: ASTCFLAGS+=-DIMAP_STORAGE
++app_voicemail_odbc.o: ASTCFLAGS+=-DODBC_STORAGE
++app_directory_odbc.o: ASTCFLAGS+=-DODBC_STORAGE
++
+ include $(ASTTOPDIR)/Makefile.moddir_rules

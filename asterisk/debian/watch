@@ -1,0 +1,5 @@
+version=3
+opts=dversionmangle=s/\~dfsg//,downloadurlmangle=s/.*ref=// \
+	http://downloads.digium.com/pub/telephony/asterisk/releases/ \
+	http://www\.digium\.com/elqNow/elqRedir\.htm\?ref=http://downloads\.digium\.com/pub/telephony/asterisk/releases/asterisk-([0-9.]*)\.tar\.gz\
+	debian svn-upgrade

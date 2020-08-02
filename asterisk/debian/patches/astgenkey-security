@@ -1,0 +1,19 @@
+astgenkey should generate a private key that is not world-readable.
+
+Upstream bug: http://bugs.digium.com/view.php?id=12373
+
+ -- Lionel Elie Mamane <lionel@mamane.lu>
+
+--- a/contrib/scripts/astgenkey
++++ b/contrib/scripts/astgenkey
+@@ -47,7 +47,10 @@ done
+ rm -f ${KEY}.key ${KEY}.pub
+ 
+ echo "Generating SSL key '$KEY': "
++umask 0077
+ openssl genrsa -out ${KEY}.key ${DES3} 1024
++[ "$(id -u)" = 0 ] && chown asterisk:asterisk ${KEY}.key
++umask 0022
+ openssl rsa -in ${KEY}.key -pubout -out ${KEY}.pub
+ 
+ if [ -f "${KEY}.key" ] && [ -f "${KEY}.pub" ]; then

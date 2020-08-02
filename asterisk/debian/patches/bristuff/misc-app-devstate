@@ -1,0 +1,205 @@
+--- /dev/null
++++ b/apps/app_devstate.c
+@@ -0,0 +1,202 @@
++/*
++ * Devstate application
++ *
++ * Since we like the snom leds so much, a little app to
++ * light the lights on the snom on demand ....
++ *
++ * Copyright (C) 2005, Druid Software
++ *
++ * This program is free software, distributed under the terms of
++ * the GNU General Public License
++ */
++
++#include "asterisk.h"
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdio.h>
++
++#include "asterisk/lock.h"
++#include "asterisk/file.h"
++#include "asterisk/logger.h"
++#include "asterisk/channel.h"
++#include "asterisk/pbx.h"
++#include "asterisk/astdb.h"
++#include "asterisk/cli.h"
++#include "asterisk/manager.h"
++#include "asterisk/devicestate.h"
++#include "asterisk/module.h"
++
++
++static char type[] = "DS";
++static char tdesc[] = "Application for sending device state messages";
++
++static char app[] = "Devstate";
++
++static char synopsis[] = "Generate a device state change event given the input parameters";
++
++static char descrip[] = " Devstate(device|state):  Generate a device state change event given the input parameters. Returns 0. State values match the asterisk device states. They are 0 = unknown, 1 = not inuse, 2 = inuse, 3 = busy, 4 = invalid, 5 = unavailable, 6 = ringing\n";
++
++static char devstate_cli_usage[] =
++"Usage: devstate device state\n"
++"       Generate a device state change event given the input parameters.\n Mainly used for lighting the LEDs on the snoms.\n";
++
++static int devstate_cli(int fd, int argc, char *argv[]);
++static struct ast_cli_entry  cli_dev_state =
++        { { "devstate", NULL }, devstate_cli, "Set the device state on one of the \"pseudo devices\".", devstate_cli_usage };
++
++
++static int devstate_cli(int fd, int argc, char *argv[])
++{
++    char devName[128];
++    if (argc != 3)
++        return RESULT_SHOWUSAGE;
++
++    if (ast_db_put("DEVSTATES", argv[1], argv[2]))
++    {
++        ast_log(LOG_DEBUG, "ast_db_put failed\n");
++    }
++    snprintf(devName, sizeof(devName), "DS/%s", argv[1]);
++    ast_device_state_changed_literal(devName);
++    return RESULT_SUCCESS;
++}
++
++static int devstate_exec(struct ast_channel *chan, void *data)
++{
++    char *device, *state, *info;
++    char devName[128];
++    struct ast_module_user *u;
++
++
++    if (!(info = ast_strdupa(data))) {
++            ast_log(LOG_WARNING, "Unable to dupe data :(\n");
++            return -1;
++    }
++
++    u = ast_module_user_add(chan);
++    device = info;
++    state = strchr(info, '|');
++    if (state) {
++        *state = '\0';
++        state++;
++    }
++    else
++    {
++        ast_log(LOG_DEBUG, "No state argument supplied\n");
++        return -1;
++    }
++
++    if (ast_db_put("DEVSTATES", device, state))
++    {
++        ast_log(LOG_DEBUG, "ast_db_put failed\n");
++    }
++
++    snprintf(devName, sizeof(devName), "DS/%s", device);
++    ast_device_state_changed_literal(devName);
++
++    ast_module_user_remove(u);
++    return 0;
++}
++
++
++static int ds_devicestate(void *data)
++{
++    char *dest = data;
++    char stateStr[16];
++    if (ast_db_get("DEVSTATES", dest, stateStr, sizeof(stateStr)))
++    {
++        ast_log(LOG_DEBUG, "ds_devicestate couldnt get state in astdb\n");
++        return 0;
++    }
++    else
++    {
++        ast_log(LOG_DEBUG, "ds_devicestate dev=%s returning state %d\n",
++               dest, atoi(stateStr));
++        return (atoi(stateStr));
++    }
++}
++
++static struct ast_channel_tech devstate_tech = {
++	.type = type,
++	.description = tdesc,
++	.capabilities = ((AST_FORMAT_MAX_AUDIO << 1) - 1),
++	.devicestate = ds_devicestate,
++	.requester = NULL,
++	.send_digit_begin = NULL,
++	.send_digit_end = NULL,
++	.send_text = NULL,
++	.call = NULL,
++	.hangup = NULL,
++	.answer = NULL,
++	.read = NULL,
++	.write = NULL,
++	.bridge = NULL,
++	.exception = NULL,
++	.indicate = NULL,
++	.fixup = NULL,
++	.setoption = NULL,
++};
++
++static char mandescr_devstate[] =
++"Description: Put a value into astdb\n"
++"Variables: \n"
++"	Family: ...\n"
++"	Key: ...\n"
++"	Value: ...\n";
++
++static int action_devstate(struct mansession *s, const struct message *m)
++{
++        const char *devstate = astman_get_header(m, "Devstate");
++        const char *value = astman_get_header(m, "Value");
++	const char *id = astman_get_header(m,"ActionID");
++	char devName[128];
++	char idText[256] = "";
++
++	if (!strlen(devstate)) {
++		astman_send_error(s, m, "No Devstate specified");
++		return 0;
++	}
++	if (!strlen(value)) {
++		astman_send_error(s, m, "No Value specified");
++		return 0;
++	}
++	if (!ast_strlen_zero(id))
++		snprintf(idText, sizeof(idText), "ActionID: %s\r\n", id);
++
++        if (!ast_db_put("DEVSTATES", devstate, (char *)value)) {
++	    snprintf(devName, sizeof(devName), "DS/%s", devstate);
++	    ast_device_state_changed_literal(devName);
++	    astman_append(s, "Response: Success\r\n%s\r\n", idText);
++	} else {
++	    ast_log(LOG_DEBUG, "ast_db_put failed\n");
++	    astman_append(s, "Response: Failed\r\n%s\r\n", idText);
++	}
++	return 0;
++}
++
++static int load_module(void)
++{
++    if (ast_channel_register(&devstate_tech)) {
++        ast_log(LOG_DEBUG, "Unable to register channel class %s\n", type);
++        return -1;
++    }
++    ast_cli_register(&cli_dev_state);
++    ast_manager_register2( "Devstate", EVENT_FLAG_CALL, action_devstate, "Change a device state", mandescr_devstate );
++    return ast_register_application(app, devstate_exec, synopsis, descrip);
++}
++
++static int unload_module(void)
++{
++    int res = 0;
++
++    ast_module_user_hangup_all();
++    ast_manager_unregister( "Devstate");
++    ast_cli_unregister(&cli_dev_state);
++    res = ast_unregister_application(app);
++    ast_channel_unregister(&devstate_tech);
++    return res;
++}
++
++AST_MODULE_INFO_STANDARD(ASTERISK_GPL_KEY, "Simple Devstate Application");
++

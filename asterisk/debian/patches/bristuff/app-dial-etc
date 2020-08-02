@@ -1,0 +1,45 @@
+--- a/apps/app_dial.c
++++ b/apps/app_dial.c
+@@ -71,6 +71,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revisi
+ #include "asterisk/privacy.h"
+ #include "asterisk/stringfields.h"
+ #include "asterisk/global_datastores.h"
++#include "asterisk/transcap.h"
+ 
+ static char *app = "Dial";
+ 
+@@ -1652,23 +1653,25 @@ static int dial_exec_full(struct ast_cha
+ 				ast_set_flag(&(config.features_caller), AST_FEATURE_PLAY_WARNING);
+ 			if (play_to_callee)
+ 				ast_set_flag(&(config.features_callee), AST_FEATURE_PLAY_WARNING);
+-			if (ast_test_flag(peerflags, OPT_CALLEE_TRANSFER))
++			if ((chan->transfercapability != AST_TRANS_CAP_DIGITAL) && (chan->transfercapability != AST_TRANS_CAP_RESTRICTED_DIGITAL)) {
++			    /* only non-digital calls are allowed to go through userspace */
++			    if (ast_test_flag(peerflags, OPT_CALLEE_TRANSFER))
+ 				ast_set_flag(&(config.features_callee), AST_FEATURE_REDIRECT);
+-			if (ast_test_flag(peerflags, OPT_CALLER_TRANSFER))
++			    if (ast_test_flag(peerflags, OPT_CALLER_TRANSFER))
+ 				ast_set_flag(&(config.features_caller), AST_FEATURE_REDIRECT);
+-			if (ast_test_flag(peerflags, OPT_CALLEE_HANGUP))
++			    if (ast_test_flag(peerflags, OPT_CALLEE_HANGUP))
+ 				ast_set_flag(&(config.features_callee), AST_FEATURE_DISCONNECT);
+-			if (ast_test_flag(peerflags, OPT_CALLER_HANGUP))
++			    if (ast_test_flag(peerflags, OPT_CALLER_HANGUP))
+ 				ast_set_flag(&(config.features_caller), AST_FEATURE_DISCONNECT);
+-			if (ast_test_flag(peerflags, OPT_CALLEE_MONITOR))
++			    if (ast_test_flag(peerflags, OPT_CALLEE_MONITOR))
+ 				ast_set_flag(&(config.features_callee), AST_FEATURE_AUTOMON);
+-			if (ast_test_flag(peerflags, OPT_CALLER_MONITOR)) 
++			    if (ast_test_flag(peerflags, OPT_CALLER_MONITOR)) 
+ 				ast_set_flag(&(config.features_caller), AST_FEATURE_AUTOMON);
+-			if (ast_test_flag(peerflags, OPT_CALLEE_PARK))
++			    if (ast_test_flag(peerflags, OPT_CALLEE_PARK))
+ 				ast_set_flag(&(config.features_callee), AST_FEATURE_PARKCALL);
+-			if (ast_test_flag(peerflags, OPT_CALLER_PARK))
++			    if (ast_test_flag(peerflags, OPT_CALLER_PARK))
+ 				ast_set_flag(&(config.features_caller), AST_FEATURE_PARKCALL);
+-
++			}
+ 			config.timelimit = timelimit;
+ 			config.play_warning = play_warning;
+ 			config.warning_freq = warning_freq;

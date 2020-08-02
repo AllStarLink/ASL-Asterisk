@@ -1,0 +1,88 @@
+### upstream fixes
+allow-tilde-destdir
+
+debian-banner
+silence-buildsum-warning
+hack-multiple-app-voicemail
+astvarrundir
+make-clean-fixes
+safe_asterisk-config
+safe_asterisk-nobg
+h323-no-deps-on-asterisk
+h323-workaround-openh323-segfault
+
+astgenkey-security
+apptest_sleep
+
+### new features
+pubkey_jnctn
+func_devstate
+
+# for chan_vpb
+vpb-handle-nocards
+
+# for chan_misdn (even though it's not enabled yet)
+misdn_FOP
+
+### bristuff
+bristuff/bristuff-notice
+
+bristuff/configurable-AST_SYSTEM_NAME
+
+# standalone changes/applications
+# - they don't break the API
+# - they don't need other API changes
+bristuff/xagi
+bristuff/misc-app-segfault
+bristuff/misc-app-pickup
+bristuff/misc-app-devstate
+bristuff/misc-res-watchdog
+bristuff/misc-manager-dbdel
+bristuff/misc-res-esel
+
+# small non-API-breaking bug fixes
+bristuff/chan-iax2-hangup-cause
+bristuff/isdn-fixes
+bristuff/app-meetme-avoid-overflows
+bristuff/answer-before-say
+
+# app_dial adding of options 
+bristuff/app-dial-priority-202
+bristuff/app-dial-etc
+bristuff/app-dial-R-noinband
+bristuff/app-dial-c-callback
+
+bristuff/zapata_num_spans
+
+# use /usr/include/bristuffed/libpri.h - /usr/lib/libpri-bristuffed.so.1.0
+use-libpri-bristuffed
+# euroISDN, BRI support
+bristuff/zapata-bri+euroisdn
+
+bristuff/ast-send-message
+
+# don't split these up!
+bristuff/ast_monitor_start-targetscript
+bristuff/ast-device-state-CID
+bristuff/uniqueid-10-channel-ops-uniqueid
+bristuff/uniqueid-20-monitor
+bristuff/uniqueid-30-app-chanspy
+bristuff/uniqueid-40-manager
+
+# these depend on the uniqueid changes; the following are a set
+bristuff/feature-autoanswer
+bristuff/feature-holdedcalls
+
+#bristuff/zapata_euroisdn_holded
+
+# GSM support; it needs the above patch applied first, unfortunately.
+bristuff/zapata-gsm
+
+# bridging app backported from 1.6
+# it needs the above feature patches applied first.
+feature-bridge
+
+# bugfixes on top of everything
+zap-fix-timing-source
+zap-fix-deadlock
+zap-fix-cause34

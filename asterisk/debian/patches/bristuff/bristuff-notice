@@ -1,0 +1,47 @@
+--- a/README
++++ b/README
+@@ -4,6 +4,8 @@ and the Asterisk.org developer community
+ 
+ Copyright (C) 2001-2006 Digium, Inc.
+ and other copyright holders.
++Copyright (C) 2002-2005 Junghanns.NET GmbH 
++and other copyright holders.
+ ================================================================
+ 
+ * SECURITY
+--- a/LICENSE
++++ b/LICENSE
+@@ -1,7 +1,7 @@
+-Asterisk is distributed under the GNU General Public License version 2
+-and is also available under alternative licenses negotiated directly
+-with Digium, Inc. If you obtained Asterisk under the GPL, then the GPL
+-applies to all loadable Asterisk modules used on your system as well,
++BRIstuffed Asterisk is distributed under the GNU General Public License version 2
++and is not available under any alternative licenses.
++If you obtained BRIstuffed Asterisk under the GPL, then the GPL
++applies to all loadable BRIstuffed Asterisk modules used on your system as well,
+ except as defined below. The GPL (version 2) is included in this
+ source tree in the file COPYING.
+ 
+--- a/doc/hardware.txt
++++ b/doc/hardware.txt
+@@ -31,6 +31,19 @@ Zaptel compatible hardware
+    * Wildcard TE410P - Quad T1/E1 switchable interface.  Supports PRI and 
+      RBS signalling, as well as PPP, FR, and HDLC data modes.
+ 
++-- Junghanns.NET (Primary author of BRIstuff)
++	http://www.junghanns.net
++	
++    * quadBRI PCI ISDN - 4port BRI ISDN interface, supports NT and TE mode
++    
++    * octoBRI PCI ISDN - 8port BRI ISDN interface, supports NT and TE mode
++
++    * singleE1 PCI ISDN - Single E1 interface
++
++    * doubleE1 PCI ISDN - Double E1 interface
++    
++    * uno/duo/quad GSM PCI - 1/2/4 channel GSM interface cards
++
+ Non-zaptel compatible hardware
+ ==============================
+ 

@@ -1,0 +1,402 @@
+--- /dev/null
++++ b/configs/esel.conf.sample
+@@ -0,0 +1,12 @@
++;
++; Configuration file for res_esel
++;
++
++;[asterisk-2]
++;host = 192.168.0.1
++;port = 5038
++;username = manager
++;secret = donkey
++
++; export the extension snom in context phones to DS/100
++;export => snom@phones,100
+--- /dev/null
++++ b/res/res_esel.c
+@@ -0,0 +1,384 @@
++/*
++ * Asterisk -- A telephony toolkit for Linux.
++ *
++ * Extension State Export Logic (E.S.E.L) (Sorry, i couldnt resist...)
++ *
++ * Resource to export extension states to other Asterisk servers
++ *
++ * Copyright (C) 2006, Junghanns.NET GmbH
++ *
++ * Klaus-Peter Junghanns <kpj@junghanns.net>
++ *
++ * This program is free software, distributed under the terms of
++ * the GNU General Public License
++ */
++
++#include "asterisk.h"
++
++#include <stdlib.h>
++#include <errno.h>
++#include <unistd.h>
++#include <string.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <sys/time.h>
++#include <sys/signal.h>
++#include <netinet/in.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++
++#include "asterisk/file.h"
++#include "asterisk/logger.h"
++#include "asterisk/channel.h"
++#include "asterisk/pbx.h"
++#include "asterisk/options.h"
++#include "asterisk/module.h"
++#include "asterisk/translate.h"
++#include "asterisk/say.h"
++#include "asterisk/features.h"
++#include "asterisk/musiconhold.h"
++#include "asterisk/config.h"
++#include "asterisk/cli.h"
++#include "asterisk/manager.h"
++#include "asterisk/utils.h"
++#include "asterisk/lock.h"
++#include "asterisk/adsi.h"
++
++
++AST_MUTEX_DEFINE_STATIC(listlock);
++
++typedef struct esel_extension_state {
++    char context[AST_MAX_EXTENSION];
++    char exten[AST_MAX_EXTENSION];
++    int state;
++    char devstate[AST_MAX_EXTENSION];
++    struct esel_extension_state *next;
++    struct esel_extension_state *prev;
++} esel_extension_state;
++
++typedef struct esel_export {
++    char context[AST_MAX_EXTENSION];
++    char exten[AST_MAX_EXTENSION];
++    char devstate[AST_MAX_EXTENSION];
++    struct esel_export *next;
++} esel_export;
++
++typedef struct esel_queue {
++	struct esel_extension_state *head;
++	struct esel_extension_state *tail;
++	int count;
++	ast_cond_t cond;
++	ast_mutex_t lock;
++}  esel_queue;
++
++typedef struct esel_pvt {
++    char name[80];
++    char username[80];
++    char secret[80];
++    char host[80];
++    int port;
++    struct sockaddr_in raddr;
++    int sockfd;
++    int connected;
++    pthread_t esel_thread;
++
++    /* list of extensions to export */
++    struct esel_export *extensions;
++
++    /* queue */
++    struct esel_queue queue;
++    
++    struct esel_pvt *next;
++} esel_pvt;
++
++static struct esel_pvt *donkeys = NULL;
++
++static int esel_queue_extension_state(struct esel_queue *queue, char *context, char *exten, int state, void *data) {
++	struct esel_extension_state *exstate = NULL;
++
++	exstate = malloc(sizeof(struct esel_extension_state));
++	if (!exstate) {
++	    ast_log(LOG_ERROR, "Unable to malloc!\n");
++	    return 1;
++	}
++	memset(exstate,0,sizeof(struct esel_extension_state));
++	exstate->next = NULL;
++	exstate->prev = NULL;
++
++	ast_mutex_lock(&queue->lock);
++	if (queue->count > 100) {
++	    ast_mutex_unlock(&queue->lock);
++	    free(exstate);
++	    if (option_verbose > 5)
++		ast_log(LOG_WARNING, "E.S.E.L Queue too long.\n");
++	    return -1;
++	}
++	ast_copy_string(exstate->exten, exten, sizeof(exstate->exten));
++	ast_copy_string(exstate->context, context, sizeof(exstate->context));
++	exstate->state = state;
++	if (!queue->head) {
++		/* Empty queue */
++		queue->head = exstate;
++		queue->tail = exstate;
++	} else {
++		/* Double link */
++		queue->tail->next = exstate;
++		exstate->prev = queue->tail;
++		queue->tail = exstate;
++	}
++	queue->count++;
++	ast_cond_signal(&queue->cond);
++	ast_mutex_unlock(&queue->lock);
++	return 0;
++}
++
++static int esel_is_exported(struct esel_export *extensions, struct esel_extension_state *exstate) {
++    struct esel_export *export = NULL;
++    export = extensions;
++    while (export) {
++	if ((!strcasecmp(export->exten, exstate->exten)) && (!strcasecmp(export->context, exstate->context))) {
++	    /* copy mapping */
++	    ast_copy_string(exstate->devstate, export->devstate, sizeof(exstate->devstate));
++	    return 1;
++	}
++	export = export->next;
++    }
++    return 0;
++}
++
++static int esel_state2devstate(int state) {
++    switch(state) {
++	case 1:
++	    return 2;
++	case 8:
++	    return 6;
++	default:
++	    return state;
++    }
++}
++
++static void esel_export_to_remote(struct esel_extension_state *exstate, struct esel_pvt *esel) {
++    char msg[1024];
++    int sent = 0;
++    memset(msg, 0x0, sizeof(msg));
++    snprintf(msg, sizeof(msg) - 1, "Action: Devstate\r\nDevstate: %s\r\nValue: %d\r\n\r\n", exstate->devstate, esel_state2devstate(exstate->state));
++    sent = send(esel->sockfd, msg, strlen(msg), 0);
++    if (sent == -1) {
++	esel->connected = 0;
++    }
++//    ast_log(LOG_NOTICE, "%s", msg);
++}
++
++static void *do_esel_thread(void *data) {
++    struct esel_pvt *esel = (struct esel_pvt *)data;
++    struct esel_queue *queue = &esel->queue;
++    struct esel_extension_state *exstate = NULL;
++    char msg[1024];
++    char buf[1024];
++    int numbytes = 0;
++    int sent = 0;
++    int res = 0;
++    for (;;) {
++	if (esel->connected) {
++	    ast_mutex_lock(&queue->lock);
++	    if (queue->count == 0) 
++		ast_cond_wait(&queue->cond, &queue->lock);
++	    exstate = queue->head;
++	    if (exstate) {
++		if (exstate->next) {
++		    queue->head = exstate->next;
++		} else {
++		    queue->head = NULL;
++		    queue->tail = NULL;
++		}
++		queue->count--;
++	    } else {
++		ast_log(LOG_ERROR, "I SHOULD NEVER HAPPEN! EXPECT SOME MAJOR KABOOM! DUCK AND COVER!\n");
++	    }
++	    ast_mutex_unlock(&queue->lock);
++	    
++	    if (exstate) {
++	        if (esel_is_exported(esel->extensions, exstate)) {
++		    esel_export_to_remote(exstate, esel);
++		}
++		free(exstate);
++		exstate = NULL;
++	    }	    
++	} else {
++	    if (esel->sockfd > 0)
++		close(esel->sockfd);
++	    if ((esel->sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
++		ast_log(LOG_ERROR, "unable to request socket!\n");
++		return NULL;
++	    }
++	    /* try to connect */
++	    res = connect(esel->sockfd, (struct sockaddr *)&esel->raddr, sizeof(struct sockaddr));
++	    if (res) {
++		ast_log(LOG_NOTICE, "error connecting to %s:%d\n", esel->host, esel->port);
++	    } else {
++		while (strncasecmp(buf, "Asterisk Call Manager:", 21)) {
++		    if ((numbytes=recv(esel->sockfd, buf, sizeof(buf), 0)) == -1) {
++			esel->connected = 0;
++			continue;
++		    }
++		    buf[numbytes] = '\0';
++		//    ast_log(LOG_NOTICE, "read: %s", buf);
++		}
++		/* log into remote manager */
++		memset(msg, 0x0, sizeof(msg));
++		snprintf(msg, sizeof(msg) - 1, "Action: Login\r\nUsername: %s\r\nSecret: %s\r\n\r\n", esel->username, esel->secret);
++		sent = send(esel->sockfd, msg, strlen(msg), 0);
++	
++		while (strncasecmp(buf, "Response:", 9)) {
++		    if ((numbytes=recv(esel->sockfd, buf, sizeof(buf), 0)) == -1) {
++			continue;
++		    }
++		    buf[numbytes] = '\0';
++		//    ast_log(LOG_NOTICE, "read: %s", buf);
++		}
++	
++		if (!strncasecmp(buf, "Response: Success", 17)) {
++		    esel->connected = 1;
++		} else {
++		    ast_log(LOG_ERROR, "error login into remote asterisk %s\n", esel->name);
++		}
++	    }
++	    /* time heals everything... */
++	    sleep(10);
++  	}
++    }
++    return NULL;
++}
++
++static int esel_state_cb(char *context, char *exten, int state, void *data) {
++	struct esel_pvt *esel;
++
++	esel = donkeys;
++        ast_mutex_lock(&listlock);
++	while (esel) {
++	    esel_queue_extension_state(&esel->queue, context, exten, state, data);
++	    esel = esel->next;
++	}
++        ast_mutex_unlock(&listlock);
++	return 0;
++}
++
++
++static int load_module(void)
++{
++	int res = 0;
++	const char *cat, *host, *port, *username, *secret, *name;
++	struct ast_config *cfg;
++	struct ast_variable *var;
++	struct esel_pvt *esel = NULL;
++	struct esel_export *export = NULL;
++	struct hostent *he;
++	struct ast_hostent h;
++
++	cfg = ast_config_load("esel.conf");
++	if (cfg) {
++	    cat = ast_category_browse(cfg, NULL);
++	    while(cat) {
++		name = cat;
++		host = ast_variable_retrieve(cfg, cat, "host");
++		username = ast_variable_retrieve(cfg, cat, "username");
++		secret = ast_variable_retrieve(cfg, cat, "secret");
++		port = ast_variable_retrieve(cfg, cat, "port");
++
++		if (name && host && username && secret && port) {
++		    esel = malloc(sizeof(struct esel_pvt));
++		    if (!esel) {
++			ast_log(LOG_ERROR, "unable to malloc!\n");
++			return -1;
++		    }
++		    memset(esel, 0x0, sizeof(struct esel_pvt));
++		    ast_copy_string(esel->name, name, sizeof(esel->name));
++		    ast_copy_string(esel->host, host, sizeof(esel->host));
++		    ast_copy_string(esel->username, username, sizeof(esel->username));
++		    ast_copy_string(esel->secret, secret, sizeof(esel->secret));
++		    
++		    esel->port = atoi(port);
++		    if ((he=ast_gethostbyname(host, &h)) == NULL) {
++			ast_log(LOG_ERROR, "unknown host!\n");
++			return -1;
++		    }
++
++		    esel->raddr.sin_family = AF_INET;
++		    esel->raddr.sin_port = htons(esel->port);
++		    esel->raddr.sin_addr = *((struct in_addr *)he->h_addr);
++		    bzero(&(esel->raddr.sin_zero), 8);  
++		    
++		    esel->connected = 0;
++
++		    ast_mutex_init(&esel->queue.lock);
++		    ast_cond_init(&esel->queue.cond, NULL);
++
++
++		    /* read exports */
++		    var = ast_variable_browse(cfg, cat);
++		    while (var) {
++			if (!strcasecmp(var->name, "export")) {
++			    char *extenp = NULL, *contextp = NULL, *devstatep = NULL;
++			    extenp = var->value;
++			    devstatep = strchr(var->value, ',') + 1;
++			    contextp = strchr(var->value, '@') + 1;
++			    if (devstatep && contextp) {
++				export = malloc(sizeof(struct esel_export));
++				if (!export) {
++				    ast_log(LOG_ERROR, "unable to malloc!\n");
++				    return -1;
++				}
++				memset(export, 0x0, sizeof(struct esel_export));
++		    		ast_copy_string(export->exten, extenp, contextp - extenp);
++		    		ast_copy_string(export->context, contextp, devstatep - contextp);
++		    		ast_copy_string(export->devstate, devstatep, sizeof(export->devstate));
++				if (option_verbose > 2)
++				    ast_verbose(VERBOSE_PREFIX_3 "exporting %s @ %s as %s to %s\n", export->exten, export->context , export->devstate , esel->name);		    
++				export->next = esel->extensions;
++				esel->extensions = export;
++				export = NULL;
++			    }
++			}
++			var = var->next;
++		    }
++
++
++
++		    esel->next = donkeys;
++		    donkeys = esel;
++
++		    ast_pthread_create(&esel->esel_thread, NULL, do_esel_thread, esel);
++
++		}
++		cat = ast_category_browse(cfg, cat);
++	    }
++    	    ast_config_destroy(cfg);
++	}
++	ast_extension_state_add(NULL, NULL, esel_state_cb, NULL);
++	return res;
++}
++
++
++static int unload_module(void)
++{
++	struct esel_pvt *esel, *eseln;
++	ast_module_user_hangup_all();
++	esel = donkeys;
++        ast_mutex_lock(&listlock);
++	while (esel) {
++	    pthread_cancel(esel->esel_thread);
++	    pthread_join(esel->esel_thread, NULL);
++	    ast_mutex_destroy(&esel->queue.lock);
++	    close(esel->sockfd);
++	    eseln = esel->next;
++	    free(esel);
++	    esel = eseln;
++	}
++        ast_mutex_unlock(&listlock);
++	return 0;
++}
++
++AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Extension State Export Logic (E.S.E.L.) Resource",
++		.load = load_module,
++		.unload = unload_module,
++);

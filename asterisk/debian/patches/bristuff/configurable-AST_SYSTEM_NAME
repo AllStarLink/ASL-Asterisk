@@ -1,0 +1,29 @@
+--- a/build_tools/make_defaults_h
++++ b/build_tools/make_defaults_h
+@@ -17,6 +17,7 @@ cat << END
+ #define AST_KEY_DIR    "${INSTALL_PATH}${ASTDATADIR}/keys"
+ #define AST_DB         "${INSTALL_PATH}${ASTVARLIBDIR}/astdb"
+ #define AST_TMP_DIR    "${INSTALL_PATH}${ASTSPOOLDIR}/tmp"
++#define AST_SYSTEM_NAME	"asterisk"
+ 
+ #define AST_CONFIG_FILE "${INSTALL_PATH}${ASTCONFPATH}"
+ 
+--- a/main/asterisk.c
++++ b/main/asterisk.c
+@@ -2455,6 +2455,7 @@ static void ast_readconfig(void) 
+ 	ast_copy_string(ast_config_AST_PID, AST_PID, sizeof(ast_config_AST_PID));
+ 	ast_copy_string(ast_config_AST_SOCKET, AST_SOCKET, sizeof(ast_config_AST_SOCKET));
+ 	ast_copy_string(ast_config_AST_RUN_DIR, AST_RUN_DIR, sizeof(ast_config_AST_RUN_DIR));
++	ast_copy_string(ast_config_AST_SYSTEM_NAME, AST_SYSTEM_NAME, sizeof(ast_config_AST_SYSTEM_NAME));
+ 
+ 	/* no asterisk.conf? no problem, use buildtime config! */
+ 	if (!cfg) {
+@@ -2579,6 +2580,8 @@ static void ast_readconfig(void) 
+ 			ast_copy_string(ast_config_AST_RUN_GROUP, v->value, sizeof(ast_config_AST_RUN_GROUP));
+ 		} else if (!strcasecmp(v->name, "systemname")) {
+ 			ast_copy_string(ast_config_AST_SYSTEM_NAME, v->value, sizeof(ast_config_AST_SYSTEM_NAME));
++  		} else if (!strcasecmp(v->name, "uniquename")) {
++  			ast_copy_string(ast_config_AST_SYSTEM_NAME, v->value, sizeof(ast_config_AST_SYSTEM_NAME));
+ 		} else if (!strcasecmp(v->name, "languageprefix")) {
+ 			ast_language_is_prefix = ast_true(v->value);
+ 		}

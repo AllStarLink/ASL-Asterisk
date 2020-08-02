@@ -1,0 +1,82 @@
+--- a/res/res_monitor.c
++++ b/res/res_monitor.c
+@@ -340,6 +340,11 @@ int ast_monitor_stop(struct ast_channel 
+ 			result = ast_safe_system(tmp);
+ 			if (result == -1)
+ 				ast_log(LOG_WARNING, "Execute of %s failed.\n",tmp);
++			manager_event(EVENT_FLAG_CALL, "MonitorStopped",
++                    			    "Channel: %s\r\n"
++                    			    "Uniqueid: %s\r\n"
++					    "Result: %d\r\n"
++                    			,chan->name, chan->uniqueid, result);
+ 		}
+ 		
+ 		free(chan->monitor->format);
+@@ -518,18 +523,28 @@ static int start_monitor_action(struct m
+ 	const char *fname = astman_get_header(m, "File");
+ 	const char *format = astman_get_header(m, "Format");
+ 	const char *mix = astman_get_header(m, "Mix");
++	const char *uniqueid = astman_get_header(m, "Uniqueid");
+ 	const char *target_url = astman_get_header(m, "TargetURL");
+ 	const char *target_script = astman_get_header(m, "TargetScript");
+ 	char *d;
+ 	
+-	if (ast_strlen_zero(name)) {
+-		astman_send_error(s, m, "No channel specified");
++	if (ast_strlen_zero(name) && ast_strlen_zero(uniqueid)) {
++		astman_send_error(s, m, "No channel/uniqueid specified");
++  		return 0;
++  	}
++
++	if (!ast_strlen_zero(uniqueid)) {
++	    c = ast_get_channel_by_uniqueid_locked(uniqueid);
++	    if (!c) {
++		astman_send_error(s, m, "No such uniqueid");
+ 		return 0;
+-	}
+-	c = ast_get_channel_by_name_locked(name);
+-	if (!c) {
++	    }
++	} else {
++	    c = ast_get_channel_by_name_locked(name);
++	    if (!c) {
+ 		astman_send_error(s, m, "No such channel");
+ 		return 0;
++	    }
+ 	}
+ 
+ 	if (ast_strlen_zero(fname)) {
+@@ -570,16 +585,30 @@ static int stop_monitor_action(struct ma
+ {
+ 	struct ast_channel *c = NULL;
+ 	const char *name = astman_get_header(m, "Channel");
++	const char *uniqueid = astman_get_header(m, "Uniqueid");
+ 	int res;
+ 	if (ast_strlen_zero(name)) {
+ 		astman_send_error(s, m, "No channel specified");
+ 		return 0;
+ 	}
+-	c = ast_get_channel_by_name_locked(name);
+-	if (!c) {
+-		astman_send_error(s, m, "No such channel");
++	if (ast_strlen_zero(name) && ast_strlen_zero(uniqueid)) {
++		astman_send_error(s, m, "No channel/uniqueid specified");
++ 		return 0;
++ 	}
++	if (!ast_strlen_zero(uniqueid)) {
++	    c = ast_get_channel_by_uniqueid_locked(uniqueid);
++	    if (!c) {
++		astman_send_error(s, m, "No such uniqueid");
+ 		return 0;
++	    }
++	} else {
++	    c = ast_get_channel_by_name_locked(name);
++	    if (!c) {
++ 		astman_send_error(s, m, "No such channel");
++ 		return 0;
++	    }
+ 	}
++
+ 	res = ast_monitor_stop(c, 1);
+ 	ast_channel_unlock(c);
+ 	if (res) {

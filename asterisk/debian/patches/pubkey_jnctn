@@ -1,0 +1,35 @@
+Public key for Junction Networks. From http://www.jnctn.net/jnctn.pub
+at Wed, 12 Oct 2005 23:35:06 +0200
+
+See also http://www.junctionnetworks.com/Asterisk-config.htm
+
+ -- Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+Also fix the Makefile to copy all keys on make install instead of mentioning
+them explicitely.
+
+Forwarded as a note to #10811.
+
+ -- Faidon Liambotis <paravoid@debian.org>
+
+--- /dev/null
++++ b/keys/jnctn.pub
+@@ -0,0 +1,6 @@
++-----BEGIN PUBLIC KEY-----
++MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDWaDv4190BpeL5K+Yuq5Q7+vPs
++FVrkibbIp+Io1gCQ6CGZJbR0kUZvTdf58bBdG0zqf6azFN8XPaNz9PVLDl+KgHwU
++3Ilu//eX8ph8Wu+Oxs/ymi/hzKm+Cd6aty94zYuqiegc0KdrjvU5TLQAkIQpiB6k
++CvuIm0R0XXQjj3R7LwIDAQAB
++-----END PUBLIC KEY-----
+--- a/Makefile
++++ b/Makefile
+@@ -469,8 +469,7 @@ bininstall: _all installdirs $(SUBDIRS_I
+ 	mkdir -p $(DESTDIR)$(ASTDATADIR)/firmware
+ 	mkdir -p $(DESTDIR)$(ASTDATADIR)/firmware/iax
+ 	mkdir -p $(DESTDIR)$(ASTMANDIR)/man8
+-	$(INSTALL) -m 644 keys/iaxtel.pub $(DESTDIR)$(ASTDATADIR)/keys
+-	$(INSTALL) -m 644 keys/freeworlddialup.pub $(DESTDIR)$(ASTDATADIR)/keys
++	$(INSTALL) -m 644 keys/* $(DESTDIR)$(ASTDATADIR)/keys
+ 	$(INSTALL) -m 644 doc/asterisk.8 $(DESTDIR)$(ASTMANDIR)/man8
+ 	$(INSTALL) -m 644 contrib/scripts/astgenkey.8 $(DESTDIR)$(ASTMANDIR)/man8
+ 	$(INSTALL) -m 644 contrib/scripts/autosupport.8 $(DESTDIR)$(ASTMANDIR)/man8
