@@ -173,7 +173,6 @@ binary-indep: install-indep
 	dh_installdocs -i -XREADME.cygwin
 	dh_installexamples -i
 	dh_installcron -i
-	dh_installchangelogs ChangeLog -i
 	dh_link -i 
 	dh_compress -i
 	dh_fixperms -i
@@ -194,7 +193,6 @@ binary-arch: install-arch
 	dh_installdocs -a
 	dh_installman utils/*.1 doc/*.8 contrib/scripts/*.8
 	dh_installexamples -a
-	dh_installchangelogs ChangeLog -a
 	dh_installinit -a -- defaults 21
 	dh_strip -a --dbg-package=asterisk-dbg
 	dh_link -a
