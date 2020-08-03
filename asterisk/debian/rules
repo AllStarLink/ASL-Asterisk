@@ -201,7 +201,6 @@ binary-arch: install-arch
 	dh_installdeb -a
 	rm -f debian/asterisk/usr/lib/asterisk/modules/chan_h323.so
 	dh_shlibdeps -a
-	sed -i s/libtonezone2.0/asl-libtonezone2.0/g debian/asterisk.substvars
 	dh_gencontrol -a
 	dh_md5sums -a
 	dh_builddeb -a
