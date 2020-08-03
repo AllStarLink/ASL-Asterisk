@@ -78,7 +78,6 @@ config.status: check-sounds patch
 	chmod 755 $(CURDIR)/debian/dummyprogs/fetch
 	
 	$(FETCH_ENV) ./configure \
-		--host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) \
 		--prefix=/usr \
 		--mandir=\$${prefix}/share/man \
 		--infodir=\$${prefix}/share/info \
@@ -194,7 +193,7 @@ binary-arch: install-arch
 	dh_installman utils/*.1 doc/*.8 contrib/scripts/*.8
 	dh_installexamples -a
 	dh_installinit -a -- defaults 21
-	dh_strip -a --dbg-package=asterisk-dbg
+	dh_strip -a --dbg-package=asl-asterisk-dbg
 	dh_link -a
 	dh_compress -a
 	dh_fixperms -a

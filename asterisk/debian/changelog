@@ -1,3 +1,11 @@
+asl-asterisk (1:1.4.23-1) unstable; urgency=medium
+
+  * change naming convention to asl-asterisk
+  * depend on new asl-dahdi packages
+  * Compile with modern gcc
+
+ -- Adam Paul <adamjpaul@gmail.com> Mon, 3 Aug 2020 02:03:52 -0400
+
 asterisk (1:1.4.21.2~dfsg-2) unstable; urgency=low
 
   [ Victor Seva ]
