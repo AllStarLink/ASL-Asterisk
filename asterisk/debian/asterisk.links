@@ -1,0 +1,3 @@
+usr/share/man/man8/asterisk.8		usr/share/man/man8/rasterisk.8
+usr/local/share/asterisk/sounds		usr/share/asterisk/sounds/custom
+var/lib/asterisk/sounds/custom		usr/share/asterisk/sounds/recordings

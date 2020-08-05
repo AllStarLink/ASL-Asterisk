@@ -1,0 +1,110 @@
+Source: asl-asterisk
+Priority: optional
+Section: comm
+Maintainer: Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>
+Uploaders: Mark Purcell <msp@debian.org>, Kilian Krause <kilian@debian.org>, Tzafrir Cohen <tzafrir.cohen@xorcom.com>, Faidon Liambotis <paravoid@debian.org>
+Build-Depends: debhelper (>= 6.0.7), quilt, zlib1g-dev, libreadline-gplv2-dev, libgsm1-dev, libssl-dev, libtonezone-dev (>= 1:1.4.1~0), libasound2-dev, libpq-dev, unixodbc-dev, libpri-dev (>= 1.4.1), libvpb-dev, asl-dahdi-source (>= 1:1.4.1~0), autotools-dev, libnewt-dev, libsqlite-dev, libspeex-dev, libspeexdsp-dev, graphviz, libcurl4-openssl-dev | libcurl-dev, doxygen, gsfonts, libpopt-dev, libiksemel-dev, freetds-dev, libvorbis-dev, libsnmp-dev, libcap-dev
+Standards-Version: 3.7.3
+Homepage: http://www.asterisk.org/
+Vcs-Svn: svn://svn.debian.org/pkg-voip/asterisk/trunk/
+Vcs-Browser: http://svn.debian.org/wsvn/pkg-voip/asterisk/?op=log
+
+Package: asl-asterisk
+Architecture: any
+Section: comm
+Depends: ${shlibs:Depends}, asterisk-config (= ${source:Version}) | asterisk-config-custom, adduser, asterisk-sounds-main
+Conflicts: asterisk, asterisk-classic, asterisk-bristuff, asterisk-chan-capi (<< 1.1.1-1~)
+Replaces: asterisk, asterisk-classic, asterisk-bristuff
+Provides: asterisk, asterisk-1.4
+Suggests: ekiga, ohphone, twinkle, kphone, asterisk-doc, asterisk-dev, asterisk-h323
+Description: Open Source Private Branch Exchange (PBX)
+ Asterisk is an Open Source PBX and telephony toolkit.  It is, in a
+ sense, middleware between Internet and telephony channels on the bottom,
+ and Internet and telephony applications at the top.
+ .
+ Asterisk can be used with Voice over IP (SIP, H.323, IAX and more) standards,
+ or the Public Switched Telephone Network (PSTN) through supported hardware.
+ .
+ Supported hardware:
+ .
+  * All Wildcard (tm) ISDN PRI cards from Digium (http://www.digium.com)
+  * HFC-S/HFC-4S-based ISDN BRI cards (Junghanns.NET, beroNet, Digium etc.)
+  * All TDM (FXO/FXS) cards from Digium
+  * Various clones of Digium cards such as those by OpenVox
+  * Xorcom Astribank USB telephony adapter (http://www.xorcom.com)
+  * Voicetronix OpenPCI, OpenLine and OpenSwitch cards
+  * CAPI-compatible ISDN cards (using the add-on package chan-capi)
+  * Full Duplex Sound Card (ALSA or OSS) supported by Linux
+  * Tormenta T1/E1 card (http://www.zapatatelephony.org)
+  * QuickNet Internet PhoneJack and LineJack (http://www.quicknet.net)
+ .
+ This is the main package that includes the Asterisk daemon and most channel
+ drivers and applications.
+
+Package: asl-asterisk-doc
+Recommends: asl-asterisk
+Section: doc
+Priority: extra
+Architecture: all
+Provides: asterisk-doc
+Conflicts: asterisk-doc
+Replaces: asterisk-doc
+Description: Source code documentation for Asterisk
+ Asterisk is an Open Source PBX and telephony toolkit.
+ .
+ This package contains the source code documentation needed if you wish to
+ extend Asterisk by writing loadable modules for it.
+
+Package: asl-asterisk-dev
+Architecture: all
+Recommends: asl-asterisk
+Section: devel
+Priority: extra
+Replaces: asterisk (<< 1:1.4.21.1~dfsg-1), asterisk-dev
+Provides: asterisk-dev
+Conflicts: asterisk-dev
+Description: Development files for Asterisk
+ Asterisk is an Open Source PBX and telephony toolkit.
+ .
+ This package contains the include files used if you wish to compile a
+ package which requires Asterisk's source file headers.
+
+Package: asl-asterisk-dbg
+Architecture: any
+Depends: asl-asterisk (= ${binary:Version})
+Provides: asterisk-dbg
+Replaces: asterisk-dbg
+Conflicts: asterisk-dbg
+Section: devel
+Priority: extra
+Description: Debugging symbols for Asterisk
+ Asterisk is an Open Source PBX and telephony toolkit.
+ .
+ This package includes the debugging symbols useful for debugging
+ Asterisk. The debugging symbols are used for execution tracing and core 
+ dump analysis. 
+
+Package: asl-asterisk-sounds-main
+Architecture: all
+Recommends: asl-asterisk
+Replaces: asl-asterisk-sounds-extra, asterisk-sounds-main
+Provides: asterisk-sounds-main
+Conflicts: asterisk-sounds-main
+Section: comm
+Description: Core Sound files for Asterisk (English)
+ Asterisk is an Open Source PBX and telephony toolkit.
+ .
+ This package contains the default (core) sound files in English, useful for
+ the operation of Asterisk.
+
+Package: asl-asterisk-config
+Recommends: asl-asterisk
+Conflicts: asterisk-config-custom, asterisk-config
+Replaces: asterisk-config
+Provides: asterisk-config
+Architecture: all
+Section: comm
+Description: Configuration files for Asterisk
+ Asterisk is an Open Source PBX and telephony toolkit.
+ .
+ This package contains the default configuration files of Asterisk.
