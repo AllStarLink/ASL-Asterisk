@@ -1,3 +1,9 @@
+asl-asterisk (1:1.4.23-2) unstable; urgency=medium
+
+  * change asl-asterisk package deps to point to new asl-config package
+
+ -- Adam Paul <adamjpaul@gmail.com> Fri, 7 Aug 2020 16:15:04 -0400
+
 asl-asterisk (1:1.4.23-1) unstable; urgency=medium
 
   * change naming convention to asl-asterisk
