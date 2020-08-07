@@ -162,7 +162,7 @@ install-indep: build-indep
 	dh_lintian -i
 
 	# create a simple config
-	echo "; please read doc/manager.txt" > $(CURDIR)/debian/asterisk-config/etc/asterisk/manager.d/README.conf
+	echo "; please read doc/manager.txt" > $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/manager.d/README.conf
 
 # Build architecture-independent files here.
 binary-indep: install-indep
@@ -177,8 +177,8 @@ binary-indep: install-indep
 	dh_fixperms -i
 	# should follow dh_fixperms; asterisk configurations may contain
 	# sensitive information, such as passwords
-	chmod o-rwx $(CURDIR)/debian/asterisk-config/etc/asterisk/*
-	chmod o+rx  $(CURDIR)/debian/asterisk-config/etc/asterisk/manager.d
+	chmod o-rwx $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/*
+	chmod o+rx  $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/manager.d
 	dh_installdeb -i
 	dh_gencontrol -i
 	dh_md5sums -i
