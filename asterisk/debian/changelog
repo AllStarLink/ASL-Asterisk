@@ -3,7 +3,7 @@ asl-asterisk (1:1.4.23-3) unstable; urgency=medium
   * fix packaging problem prevening many components (including asterisk
     binary from being installed)
 
- -- Adam Paul <adamjpaul@gmail.com>  Fri, 07, 2020 21:42:37 -0400
+ -- Adam Paul <adamjpaul@gmail.com>  Fri, 07 2020 21:42:37 -0400
 
 asl-asterisk (1:1.4.23-2) unstable; urgency=medium
 
