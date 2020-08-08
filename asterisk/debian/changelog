@@ -2,7 +2,7 @@ asl-asterisk (1:1.4.23-2) unstable; urgency=medium
 
   * change asl-asterisk package deps to point to new asl-config package
 
- -- Adam Paul <adamjpaul@gmail.com> Fri, 7 Aug 2020 16:15:04 -0400
+ -- Adam Paul <adamjpaul@gmail.com>  Fri, 07 Aug 2020 16:15:04 -0400
 
 asl-asterisk (1:1.4.23-1) unstable; urgency=medium
 
@@ -10,7 +10,7 @@ asl-asterisk (1:1.4.23-1) unstable; urgency=medium
   * depend on new asl-dahdi packages
   * Compile with modern gcc
 
- -- Adam Paul <adamjpaul@gmail.com> Mon, 3 Aug 2020 02:03:52 -0400
+ -- Adam Paul <adamjpaul@gmail.com>  Mon, 03 Aug 2020 02:03:52 -0400
 
 asterisk (1:1.4.21.2~dfsg-2) unstable; urgency=low
 
