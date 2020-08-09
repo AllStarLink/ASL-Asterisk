@@ -1,0 +1,22 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Source: https://github.com/AllStarLink/Asterisk/tree/master/allstar
+#
+# Please double check copyright with the licensecheck(1) command.
+
+Files:     Makefile
+           post_install/asl-menu
+           post_install/astdb.php
+           post_install/astdn.sh
+           post_install/astres.sh
+           post_install/astup.sh
+           post_install/clear-log
+           post_install/first-time
+           post_install/flush-log
+           post_install/net-setup
+           post_install/node-setup
+           post_install/restore-node
+           post_install/save-node
+           post_install/set-host
+           post_install/setclock
+           post_install/wifi-setup
+           post_install/write-node-callsigns
