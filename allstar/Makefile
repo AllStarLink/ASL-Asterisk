@@ -1,23 +1,23 @@
 prefix = /usr
 
 install:
-	install -D post_install/asl-menu $(DESTDIR)$(prefix)/bin
-	install -D post_install/astdb.php $(DESTDIR)$(prefix)/bin
-	install -D post_install/astdn.sh $(DESTDIR)$(prefix)/bin
-	install -D post_install/astres.sh $(DESTDIR)$(prefix)/bin
-	install -D post_install/astup.sh $(DESTDIR)$(prefix)/bin
-	install -D post_install/clear-log $(DESTDIR)$(prefix)/bin
-	install -D post_install/first-time $(DESTDIR)$(prefix)/bin
-	install -D post_install/flush-log $(DESTDIR)$(prefix)/bin
-	install -D post_install/net-setup $(DESTDIR)$(prefix)/bin
-	install -D post_install/node-setup $(DESTDIR)$(prefix)/bin
-	install -D post_install/restore-node $(DESTDIR)$(prefix)/bin
-	install -D post_install/save-node $(DESTDIR)$(prefix)/bin
-	install -D post_install/setclock $(DESTDIR)$(prefix)/bin
-	install -D post_install/set-host $(DESTDIR)$(prefix)/bin
-	install -D post_install/termsize.py $(DESTDIR)$(prefix)/bin
-	install -D post_install/wifi-setup $(DESTDIR)$(prefix)/bin
-	install -D post_install/write-node-callsigns $(DESTDIR)$(prefix)/bin
+	install -D post_install/asl-menu $(DESTDIR)$(prefix)/bin/
+	install -D post_install/astdb.php $(DESTDIR)$(prefix)/bin/
+	install -D post_install/astdn.sh $(DESTDIR)$(prefix)/bin/
+	install -D post_install/astres.sh $(DESTDIR)$(prefix)/bin/
+	install -D post_install/astup.sh $(DESTDIR)$(prefix)/bin/
+	install -D post_install/clear-log $(DESTDIR)$(prefix)/bin/
+	install -D post_install/first-time $(DESTDIR)$(prefix)/bin/
+	install -D post_install/flush-log $(DESTDIR)$(prefix)/bin/
+	install -D post_install/net-setup $(DESTDIR)$(prefix)/bin/
+	install -D post_install/node-setup $(DESTDIR)$(prefix)/bin/
+	install -D post_install/restore-node $(DESTDIR)$(prefix)/bin/
+	install -D post_install/save-node $(DESTDIR)$(prefix)/bin/
+	install -D post_install/setclock $(DESTDIR)$(prefix)/bin/
+	install -D post_install/set-host $(DESTDIR)$(prefix)/bin/
+	install -D post_install/termsize.py $(DESTDIR)$(prefix)/bin/
+	install -D post_install/wifi-setup $(DESTDIR)$(prefix)/bin/
+	install -D post_install/write-node-callsigns $(DESTDIR)$(prefix)/bin/
 
 uninstall: 
 	-rm -f $(DESTDIR)$(prefix)/bin/asl-menu
