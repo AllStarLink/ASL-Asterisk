@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+# Hook for automatic backports at Buildserver.NET
+#
+# Target dist: Ubuntu Edgy
+
+# Replace libcurl4-openssl-dev with libcurl3-dev
+sed -i -e 's#^\(Build-Depends:.*\)libcurl4[^\ ]*-dev[^\ ]* \(.*\)$#\1libcurl3-dev \2#' debian/control
+
+# Replace libsnmp-dev with libsnmp9-dev
+sed -i -e 's#^\(Build-Depends:.*\)libsnmp-dev[^\ ]* \(.*\)$#\1libsnmp9-dev, \2#' debian/control
+
+# remove vpb-driver dependency
+sed -i -e 's#^\(Build-Depends:.*\), libvpb-dev#\1#' debian/control
+
+exit 0

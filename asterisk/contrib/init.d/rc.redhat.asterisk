@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: rc.redhat.asterisk 147386 2008-10-07 21:23:32Z jdixon $
+# $Id$
 #
 # asterisk    Starts, Stops and Reloads Asterisk.
 #
@@ -75,8 +75,6 @@ start() {
 		echo "Asterisk is already running."
 		exit 1
 	fi
-
-	/sbin/modprobe snd_pcm_oss > /dev/null 2>&1
 
 	# Start daemons.
 	echo -n $"Starting asterisk: "

@@ -213,8 +213,8 @@ Obviously, it is not valid to use *ANY* of the duplex=3 modes in a voted and/or 
  * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
-// ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
+// ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 
 #include <stdio.h>

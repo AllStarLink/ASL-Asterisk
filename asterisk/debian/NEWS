@@ -1,0 +1,36 @@
+asterisk (1:1.4.13~dfsg-1) unstable; urgency=medium
+
+  Since this version, ODBC and IMAP storage for Voicemail are provided.
+  As this could not be done as a runtime option, app_voicemail_odbc.so and
+  app_voicemail_imap.so are provided. However, these conflict app_voicemail.so
+  and each other.
+  If you use a modified modules.conf and you have autoload enabled, you *must*
+  add explicit noload entries for two of the three voicemail modules.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Mon, 03 Dec 2007 18:36:55 +0200
+
+asterisk (1:1.4.2~dfsg-5) unstable; urgency=low
+
+  There are significant configuration differences between
+  asterisk 1.2.x & 1.4.x, please refer to the file 
+  /usr/share/doc/asterisk/UPGRADE.txt.gz for details.
+
+ -- Mark Purcell <msp@debian.org>  Sat, 14 Apr 2007 16:44:18 +0100
+
+asterisk (1:1.2.10.dfsg-1) unstable; urgency=low
+
+  The iLBC codec library code has been removed from the Debian asterisk
+  package as it does not conform with the DFSG.
+
+ -- Mark Purcell <msp@debian.org>  Mon, 17 Jul 2006 21:15:50 +0100
+
+asterisk (1:1.0.7.dfsg.1-1) unstable; urgency=low
+
+  The Debian version of the upstream asterisk source has had the fpm Music on Hold
+  removed as this music has only been licenced for use within asterisk which is
+  incompatible with the Debian Free Software Guildlines 
+  <http://www.debian.org/social_contract#guidelines>. Please drop your alternative
+  Music on Hold into the directory /usr/share/asterisk/mohmp3/
+
+ -- Mark Purcell <msp@debian.org>  Sun, 20 Mar 2005 10:30:44 +0000
+

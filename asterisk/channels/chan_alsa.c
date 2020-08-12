@@ -33,7 +33,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 118974 $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <unistd.h>
 #include <fcntl.h>

@@ -1,0 +1,242 @@
+#! /bin/sh
+#
+# asterisk	start the asterisk PBX
+# (c) Mark Purcell <msp@debian.org>
+# (c) Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+# (c) Faidon Liambotis <paravoid@debian.org>
+
+#   This package is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+# Based on:
+#
+# skeleton	example file to build /etc/init.d/ scripts.
+#		This file should be used to construct scripts for /etc/init.d.
+#
+#		Written by Miquel van Smoorenburg <miquels@cistron.nl>.
+#		Modified for Debian GNU/Linux
+#		by Ian Murdock <imurdock@gnu.ai.mit.edu>.
+#
+# Version:	@(#)skeleton  1.9  26-Feb-2001  miquels@cistron.nl
+#
+
+### BEGIN INIT INFO
+# Provides:          asterisk
+# Required-Start:    $local_fs zaptel
+# Required-Stop:     $local_fs
+# Should-Start:      
+# Should-Stop:       
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Asterisk PBX
+# Description:       Controls the Asterisk PBX
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+NAME=asterisk
+USER=$NAME
+GROUP=$USER
+DAEMON=/usr/sbin/$NAME
+DESC="Asterisk PBX"
+PIDFILE="/var/run/asterisk/asterisk.pid"
+ASTSAFE_PIDFILE="/var/run/asterisk/asterisk_safe.pid"
+PIDFILE_DIR=`dirname $PIDFILE`
+UMASK=007 # by default
+#MAXFILES=1024 # (the system default)
+
+# by default: use real-time priority
+PARAMS=""
+CHDIR_PARM=""
+AST_REALTIME="yes"
+RUNASTERISK="yes"
+AST_DUMPCORE="no"
+AST_DUMPCORE_DIR="/var/spool/asterisk" # only used if AST_DUMPCORE != no
+# core_pattern. See: http://lxr.linux.no/source/Documentation/sysctl/kernel.txt
+#CORE_PATTERN=
+if [ -r /etc/default/$NAME ]; then . /etc/default/$NAME; fi
+
+if [ "$RUNASTERISK" != "yes" ];then
+	echo "Asterisk not yet configured. Edit /etc/default/asterisk first."
+	exit 0
+fi
+
+if [ "$AST_REALTIME" != "no" ]
+then
+  PARAMS="$PARAMS -p"
+fi
+
+if [ "$AST_DUMPCORE" != "no" ]
+then
+	PARAMS="$PARAMS -g"
+	if [ "$CORE_PATTERN" != '' ]
+	then
+		echo "$CORE_PATTERN" >/proc/sys/kernel/core_pattern
+	fi
+	if [ -d "$AST_DUMPCORE_DIR" ]
+	then
+		CHDIR_PARM="--chdir $AST_DUMPCORE_DIR"
+	fi
+fi
+
+if [ "x$USER" = "x" ]
+then
+  echo "Error: empty USER name"
+  exit 1
+fi
+if [ `id -u "$USER"` = 0 ]
+then
+  echo "Starting as root not supported."
+  exit 1
+fi
+PARAMS="$PARAMS -U $USER"
+
+if [ "x$AST_DEBUG_PARAMS" = x ] 
+then
+  AST_DEBUG_PARAMS=-cvvvvvddddd
+fi
+if [ "$RUNASTSAFE" = "yes" ];then
+	# The value of WRAPPER_DAEMON in can be set in /etc/default/asterisk
+	WRAPPER_DAEMON=${WRAPPER_DAEMON:-/usr/sbin/safe_asterisk}
+	REALDAEMON="$WRAPPER_DAEMON"
+else
+	REALDAEMON="$DAEMON"
+fi
+
+test -x $DAEMON || exit 0
+
+if [ ! -d "$PIDFILE_DIR" ];then
+	mkdir "$PIDFILE_DIR"
+	chown $USER:$GROUP "$PIDFILE_DIR"
+fi
+
+set -e
+
+if [ "$UMASK" != '' ]
+then
+	umask $UMASK
+fi
+
+# allow changing the per-process open files limit:
+if [ "$MAXFILES" != '' ]
+then
+	ulimit -n $MAXFILES
+fi
+
+status() {
+	plist=`ps ax | awk "{ if (\\$5 == \"$DAEMON\") print \\$1 }"`
+	if [ "$plist" = "" ]; then
+		echo "$DESC is stopped"
+		return 1
+	else
+		echo "$DESC is running: $plist"
+		return 0
+	fi
+}
+
+asterisk_rx() {
+	if ! status >/dev/null; then return 0; fi
+
+	# if $HOME is set, asterisk -rx writes a .asterisk_history there
+	(
+		unset HOME
+
+		$DAEMON -rx "$1"
+	)
+}
+
+case "$1" in
+  debug)
+	# we add too many special parameters that I don't want to skip
+	# accidentally. I'm afraid that skipping -U once may cause
+	# confusing results. I also want to maintain the user's choice
+	# of -p
+	echo "Debugging $DESC: "
+	$DAEMON $PARAMS $AST_DEBUG_PARAMS
+	exit 0
+	;;
+  start)
+	if status > /dev/null; then
+		echo "$DESC is already running. Use restart."
+		exit 0
+	fi
+	echo -n "Starting $DESC: "
+	if [ "$RUNASTSAFE" != "yes" ];then
+		# TODO: what if we cought the wrapper just as its asterisk
+		# was killed? status should check for the wrapper if we're in
+		# "safe mode"
+		if status > /dev/null; then
+			echo "$DESC is already running. Use restart."
+			exit 0
+		fi
+		start-stop-daemon --start --group $GROUP --pidfile "$PIDFILE" \
+			$CHDIR_PARM \
+			--exec $REALDAEMON -- $PARAMS
+	else
+		start-stop-daemon --start --group $GROUP \
+			--background --make-pidfile \
+			$CHDIR_PARM --pidfile "$ASTSAFE_PIDFILE" \
+			--exec $REALDAEMON -- $PARAMS
+	fi
+		
+	
+	echo "$NAME."
+	;;
+  stop)
+	echo -n "Stopping $DESC: $NAME"
+	# Try gracefully.
+	# this may hang in some cases. Specifically, when the asterisk
+	# processes is stopped. No bother to worry about cleanup: 
+	# it will either fail or die when asterisk dies.
+	( asterisk_rx 'stop now' > /dev/null 2>&1 & ) &
+	if [ "$RUNASTSAFE" = "yes" ];then
+		start-stop-daemon --stop --quiet --oknodo \
+				  --pidfile $ASTSAFE_PIDFILE
+		rm -f $ASTSAFE_PIDFILE
+	fi
+	# just making sure it's really, really dead. 
+	# KILL is necessary just in case there's an asterisk -r in the background
+	start-stop-daemon --stop --quiet --oknodo --retry=0/2/TERM/2/KILL/5 --exec $DAEMON
+	echo "."
+	;;
+  reload)
+	echo "Reloading $DESC configuration files."
+	asterisk_rx 'module reload'
+	;;
+  logger-reload)
+	asterisk_rx 'logger reload'
+	;;
+  extensions-reload|dialplan-reload)
+	echo "Reloading $DESC configuration files."
+	asterisk_rx 'dialplan reload'
+	;;
+  restart-convenient)
+	asterisk_rx 'restart when convenient'
+	;;
+  restart|force-reload)
+	$0 stop
+	$0 start
+	;;
+  status)
+	status
+	exit $?
+	;;
+  zaptel-fix) 	 
+	echo "Unloading and reloading loading Asterisk and Zaptel:" 	 
+	$0 stop 	 
+	/etc/init.d/zaptel unload 	 
+	# load modules from /etc/modules. This will break if you count on 	 
+	# discover/hotplug 	 
+	/etc/init.d/module-init-tools 	 
+	/etc/init.d/zaptel start 	 
+	$0 start 	 
+	;; 	 
+  *)
+	N=/etc/init.d/$NAME
+	echo "Usage: $N {start|stop|restart|reload|status|debug|logger-reload|extensions-reload|restart-convenient|force-reload}" >&2
+	exit 1
+	;;
+esac
+
+exit 0
