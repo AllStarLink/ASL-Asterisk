@@ -45,7 +45,7 @@
 /*! \file
  *
  * \brief Radio Repeater / Remote Base program
- *  version 0.330 12/07/2019
+ *  version 0.332 11/30/2019
  *
  * \author Jim Dixon, WB6NIL <jim@lambdatel.com>
  *
@@ -11888,7 +11888,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	ast_answer(l->pchan);
 	/* make a conference for the tx */
 	ci.chan = 0;
-	ci.confno = ((l->mode > 1) ? myrpt->txconf : myrpt->conf);
+	ci.confno = myrpt->conf;
 	ci.confmode = DAHDI_CONF_CONF | DAHDI_CONF_LISTENER | DAHDI_CONF_TALKER;
 	/* first put the channel on the conference in proper mode */
 	if (ioctl(l->pchan->fds[0], DAHDI_SETCONF, &ci) == -1)
@@ -21418,7 +21418,15 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			{
 				char buf[100];
 				int j;
-
+				/* if is a USRP device */
+				if (strncasecmp(myrpt->rxchannel->name,"usrp/", 5) == 0)
+				{
+					char *argv[4];
+					int argc = 4;
+					argv[2] = myrpt->name;
+					argv[3] = AST_FRAME_DATAP(f);	
+					rpt_do_sendall(0,argc,argv);
+				}
 				/* if is a USB device */
 				if ((strncasecmp(myrpt->rxchannel->name,"radio/", 6) == 0) || 
 				    (strncasecmp(myrpt->rxchannel->name,"simpleusb/", 10) == 0))

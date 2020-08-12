@@ -18,6 +18,9 @@ rxchannel = dahdi/pseudo	        ; No radio (hub)
 ; rxchannel = Dahdi/1			; PCI Quad card 
 ; rxchannel = Beagle/1			; BeagleBoard 
 ; rxchannel = USRP/127.0.0.1:34001:32001; GNU Radio interface USRP  
+					; 127.0.0.1 = IP of the target application (AB, DVSM, UC)
+					; 34001 = UDP port the target application is listening on
+					; 32001 = UDP port ASL is listening on
 
 duplex = 1                              ; 0 = Half duplex with no telemetry tones or hang time.
                                         ;     Special Case: Full duplex if linktolink is set to yes.
@@ -107,6 +110,9 @@ telemdefault = 1                        ; 0 = telemetry output off
 
 telemdynamic = 1                        ; 0 = disallow users to change the local telemetry setting with a COP command,
                                         ; 1 = Allow users to change the setting with a COP command. (default = 1)
+
+telemnomdb = 0                          ; Set the default telemetry level. (default = 0)
+telemduckdb = -9                        ; Reduct telemetry level when ducking (default = -9)
 
 ;beaconing = 0				; Send ID regardless of repeater activity (Required in the UK, but probably illegal in the US)
 
