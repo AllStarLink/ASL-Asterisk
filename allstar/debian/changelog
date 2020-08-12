@@ -1,3 +1,10 @@
+allstar-helpers (0.1-2) UNRELEASED; urgency=low
+
+  * Fixed file paths
+  * Included backup-server
+
+ -- Adam Paul <adamjpaul@gmail.com>  Tue, 11 Aug 2020 22:40:51 -0400
+
 allstar-helpers (0.1-1) UNRELEASED; urgency=low
 
   * Initial packaging release. 
