@@ -44,8 +44,8 @@
  * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180112 $")
-// ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
+// ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <stdio.h>
 #include <ctype.h>
@@ -689,6 +689,7 @@ struct chan_usbradio_pvt {
 
 	int	fever;
 
+	int     count_rssi_update;
 	char	newname;
 
 	struct {
@@ -722,6 +723,7 @@ struct chan_usbradio_pvt {
 	int32_t cur_gpios;
 	char *gpios[32];
 	char *pps[32];
+	int sendvoter;
 	ast_mutex_t usblock;
 };
 
@@ -3035,6 +3037,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 				TRACEO(1,("AST_CONTROL_RADIO_KEY text=%s\n",o->rxctcssfreq));
 	        }
 		ast_queue_frame(o->owner, &wf);
+		o->count_rssi_update=1;
 		if (o->duplex3)
 			setamixer(o->devicenum,MIXER_PARAM_MIC_PLAYBACK_SW,1,0);
 	}
@@ -3113,6 +3116,24 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
  	         wf.datalen = strlen(msg) + 1;
                  ast_queue_frame(o->owner, &wf);
          }
+	/* report channel rssi */
+	if(o->sendvoter && o->count_rssi_update && o->rxkeyed)
+	{
+		if(--o->count_rssi_update<=0)
+		{
+			struct ast_frame wf = { AST_FRAME_TEXT };
+			char msg[32];
+			sprintf(msg,"R %i", ((32767-o->pmrChan->rxRssi)*1000)/32767 );
+	        wf.data = msg;
+	        wf.datalen = strlen(msg) + 1;
+			ast_queue_frame(o->owner, &wf);
+			o->count_rssi_update=10;
+			if(o->debuglevel>3)
+				ast_log(LOG_NOTICE,"[%s] count_rssi_update %i\n",
+					o->name,((32767-o->pmrChan->rxRssi)*1000/32767));
+		}
+	}
+
 	return f;
 }
 
@@ -5285,6 +5306,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_UINT("area",o->area)
 			M_STR("ukey",o->ukey)
  			M_UINT("duplex3",o->duplex3)
+
         
             M_UINT("rxlpf",o->rxlpf)
             M_UINT("rxhpf",o->rxhpf)
@@ -5295,6 +5317,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 //            ast_log(LOG_NOTICE,"txlpf: %d\n",o->txlpf);
 //            ast_log(LOG_NOTICE,"txhpf: %d\n",o->txhpf);
         
+			M_UINT("sendvoter",o->sendvoter)
 			M_END(;
 			);
 			for(i = 0; i < 32; i++)

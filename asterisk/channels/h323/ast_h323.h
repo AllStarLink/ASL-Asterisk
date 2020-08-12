@@ -23,7 +23,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * Version Info: $Id: ast_h323.h 44684 2006-10-07 14:39:34Z pcadach $
+ * Version Info: $Id$
  */
 
 #ifndef AST_H323_H

@@ -1,0 +1,272 @@
+This package was debianized by Mark Purcell <msp@debian.org> on
+Fri Apr 19 19:58:40 EST 2002
+
+It is now maintained by the Debian VoIP Team
+<pkg-voip-maintainers@lists.alioth.debian.org>
+
+Asterisk was downloaded from http://www.asterisk.org/
+Bristuff was downloaded from http://www.junghanns.net/asterisk/
+
+Upstream Authors: Asterisk: Digium, Inc.
+		  Bristuff: Klaus-Peter Junghanns <kpj@junghanns.net> 
+
+Debian asterisk-xxx.dfsg.tar.gz
+===============================
+ * The Debian version of the upstream asterisk source has had the fpm Music
+on Hold removed as this music has only been licenced for use within 
+asterisk which is incompatible with the Debian Free Software Guildlines (DFSG)
+<http://www.debian.org/social_contract#guidelines>.
+
+ * The iLBC codec library code has been removed from the Debian asterisk
+package as it does not conform with the DFSG.
+
+ * The contrib/firmware/iax/iaxy.bin binary firmware without source has been
+ removed.
+
+Copyright
+=========
+
+Copyright (C) 2001-2004 Digium and others....
+
+   This package is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; version 2 dated June, 1991.
+
+   This package is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this package; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
+   MA 02110-1301, USA.
+
+   On Debian GNU/Linux systems, the complete text of the GNU General
+   Public License version 2 can be found in `/usr/share/common-licenses/GPL-2'.
+
+   Asterisk is distributed under GNU General Public License.  The GPL also
+   must apply to all loadable modules as well, except as defined below.
+
+   Digium, Inc. (formerly Linux Support Services) retains copyright to all
+   of the core Asterisk system, and therefore can grant, at its sole discretion,
+   the ability for companies, individuals, or organizations to create
+   proprietary or Open Source (but non-GPL'd) modules which may be dynamically
+   linked at runtime with the portions of Asterisk which fall under our
+   copyright umbrella, or are distributed under more flexible licenses than GPL
+
+   If you wish to use our code in other GPL programs, don't worry -- there
+   is no requirement that you provide the same exemption in your GPL'd
+   products (although if you've written a module for Asterisk we would
+   strongly encourage you to make the same excemption that we do).
+
+   Specific permission is also granted to OpenSSL and OpenH323 to link to
+   Asterisk.
+
+   If you have any questions, whatsoever, regarding our licensing policy,
+   please contact us.
+
+   The 'Asterisk' name and logos are trademarks owned by Digium, Inc.,
+   and use of them is subject to our trademark licensing policies. If you
+   wish to use these trademarks for purposes other than simple
+   redistribution of Asterisk source code obtained from Digium, you
+   should contact our licensing department to determine the necessary
+   steps you must take.
+
+   If you have any questions regarding our licensing policy, please
+   contact us:
+
+   +1.877.546.8963 (via telephone in the USA)
+   +1.256.428.6000 (via telephone outside the USA)
+   +1.256.864.0464 (via FAX inside or outside the USA)
+   IAX2/misery.digium.com/6000 (via IAX2)
+   licensing@digium.com (via email)
+
+   Digium, Inc.
+   150 West Park Loop
+   Suite 100
+   Huntsville, AL  35806
+   USA
+
+Other source code in Asterisk:
+
+  GSM source:
+
+    Copyright 1992, 1993, 1994 by Jutta Degener and Carsten Bormann,
+    Technische Universitaet Berlin
+
+    Any use of this software is permitted provided that this notice is not
+    removed and that neither the authors nor the Technische Universitaet Berlin
+    are deemed to have made any representations as to the suitability of this
+    software for any purpose nor are held responsible for any defects of
+    this software.  THERE IS ABSOLUTELY NO WARRANTY FOR THIS SOFTWARE.
+
+    As a matter of courtesy, the authors request to be informed about uses
+    this software has found, about bugs in this software, and about any
+    improvements that may be of general interest.
+
+    Berlin, 28.11.1994
+    Jutta Degener
+    Carsten Bormann
+
+  ADPCM source:
+
+    Copyright 1992 by Stichting Mathematisch Centrum, Amsterdam, The
+    Netherlands.
+
+                            All Rights Reserved
+
+    Permission to use, copy, modify, and distribute this software and its
+    documentation for any purpose and without fee is hereby granted,
+    provided that the above copyright notice appear in all copies and that
+    both that copyright notice and this permission notice appear in
+    supporting documentation, and that the names of Stichting Mathematisch
+    Centrum or CWI not be used in advertising or publicity pertaining to
+    distribution of the software without specific, written prior permission.
+
+    STICHTING MATHEMATISCH CENTRUM DISCLAIMS ALL WARRANTIES WITH REGARD TO
+    THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+    FITNESS, IN NO EVENT SHALL STICHTING MATHEMATISCH CENTRUM BE LIABLE
+    FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+    WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+    ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+    OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+ Bristuff:
+
+    Copyright (C) 2004, 2005 Junghanns.NET GmbH
+
+    Klaus-Peter Junghanns <kpj@junghanns.net>
+
+    This program is free software and may be modified and
+    distributed under the terms of the GNU General Public License.
+
+ The packaging Debian (debian/ directory) is:
+
+    Copyright (c) Kilian Krause <kilian@debian.org>
+    Copyright (c) Mark Purcell <msp@debian.org>
+    Copyright (c) Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+    Copyright (c) Faidon Liambotis <paravoid@debian.org>
+ 
+    This package is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+ 
+    This package is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+    along with this package; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
+    MA 02110-1301, USA.
+  
+    On Debian GNU/Linux systems, the complete text of the GNU General
+    Public License can be found in `/usr/share/common-licenses/GPL'.
+
+Other portions of code:
+
+aescrypt.c: Copyright (c) 2003, Dr Brian Gladman <brg@gladman.me.uk>,
+ Worcester, UK.
+aeskey.c: Copyright (c) 2003, Dr Brian Gladman <brg@gladman.me.uk>,
+ Worcester, UK.
+dlfcn.c:Copyright (c) 2002 Jorge Acereda  <jacereda@users.sourceforge.net> &
+                   Peter O'Gorman <ogorman@users.sourceforge.net>
+dns.c: * Copyright (C) 1999 - 2005 Thorsten Lockert
+dnsmgr.c: * Copyright (C) 2005, Kevin P. Fleming
+dsp.c:        Copyright (C) 2001  Steve Underwood <steveu@coppice.org>
+indications.c: * Copyright (C) 2002, Pauline Middelink
+jitterbuf.c: * Copyright (C) 2004-2005, Horizon Wimba, Inc.
+jitterbuf.h: * Copyright (C) 2004-2005, Horizon Wimba, Inc.
+md5.c: * written by Colin Plumb in 1993, no copyright is claimed.
+plc.c: * Copyright (C) 2004 Steve Underwood
+poll.c:		Copyright (c) 1995-2002 Brian M. Clapper
+slinfactory.c: * Copyright (C) 2005, Anthony Minessale II.
+apps/app_alarmreceiver.c: * Copyright (C)  2004 - 2005 Steve Rodgers
+apps/app_chanspy.c: * Copyright (C) 2005 Anthony Minessale II
+ (anthmct@yahoo.com)
+apps/app_controlplayback.c: * Copyright (C) 1999 - 2005, Digium, Inc.
+apps/app_curl.c: * Copyright (C)  2004 - 2005, Tilghman Lesher
+apps/app_cut.c: * Copyright (c) 2003 Tilghman Lesher.  
+apps/app_db.c: * Copyright (C) 2003, Jefferson Noxon
+apps/app_dictate.c: * Copyright (C) 2005, Anthony Minessale II
+apps/app_directed_pickup.c: * Copyright (C) 2005, Joshua Colp
+apps/app_dumpchan.c: * Copyright (C) 2004 - 2005, Anthony Minessale II.
+apps/app_eval.c: * Copyright (c) 2004 - 2005, Tilghman Lesher.
+apps/app_exec.c: * Copyright (c) 2004 - 2005, Tilghman Lesher.
+apps/app_festival.c: * Copyright (C) 2002, Christos Ricudis
+apps/app_forkcdr.c: * Copyright (C) 1999 - 2005, Anthony Minessale
+  anthmct@yahoo.com
+apps/app_hasnewvoicemail.c: * Changes Copyright (c) 2004 - 2005
+ Todd Freeman <freeman@andrews.edu>
+apps/app_hasnewvoicemail.c: * Copyright (c) 2003 Tilghman Lesher.
+apps/app_math.c: * Copyright (C) 2004 - 2005, Andy Powell 
+apps/app_md5.c: * Copyright (C) 2005, Olle E. Johansson, Edvina.net
+apps/app_mixmonitor.c: * Copyright (C) 2005, Anthony Minessale II
+apps/app_random.c: * Copyright (c) 2003 - 2005 Tilghman Lesher. 
+apps/app_rpt.c: * Copyright (C) 2002-2005, Jim Dixon, WB6NIL
+apps/app_sayunixtime.c: * Copyright (c) 2003 Tilghman Lesher.  
+apps/app_settransfercapability.c: * Copyright (C) 2005, Frank Sautter,
+ levigo holding gmbh, www.levigo.de
+apps/app_sms.c: * Copyright (C) 2004 - 2005, Adrian Kennard,
+apps/app_sql_postgres.c: * Copyright (C) 2002, Christos Ricudis
+apps/app_verbose.c: * Copyright (c) 2004 - 2005 Tilghman Lesher.  
+apps/app_while.c: * Copyright 2004 - 2005, Anthony Minessale <anthmct@yahoo.com>
+cdr/cdr_sqlite.c: * Copyright (C) 2004 - 2005, Holger Schurig
+cdr/cdr_tds.c:   Copyright (C) 1994, 1996, 1997, 2000, 2001 Free Software
+ Foundation, Inc.
+channels/chan_misdn.c: * Copyright (C) 2004, Christian Richter
+channels/chan_misdn_config.c: * Copyright (C) 2005, Christian Richter
+channels/chan_modem_bestdata.c: * Copyright (C) 1999, Mark Spencer and
+ 2001 Jim Dixon
+channels/chan_vpb.c: * Copyright (C) 2003, Paul Bagyenda
+channels/chan_vpb.c: * Copyright (C) 2004 - 2005, Ben Kramer
+channels/DialTone.h:  * Copyright (C) 1999, Mark Spencer
+channels/Makefile:# Copyright (C) 1999-2005, Mark Spencer
+doc/README.backtrace:Copyright 2004 Free Software Foundation, Inc.
+editline/: * Copyright (c) 1992, 1993
+ *      The Regents of the University of California.  
+editline/editline.3:.\" Copyright (c) 1997-1999 The NetBSD Foundation, Inc.
+editline/install-sh:# Copyright 1991 by the Massachusetts Institute of
+ Technology
+formats/format_au.c: * Copyright (C) 2005, Andriy Pylypenko
+formats/format_g726.c: * Copyright (c) 2004 - 2005, inAccess Networks
+formats/format_ogg_vorbis.c: * Copyright (C) 2005, Jeff Ollie
+formats/format_sln.c: * Copyright (C) 1999 - 2005, Anthony Minessale
+funcs/func_cdr.c: * Portions Copyright (C) 2005, Anthony Minessale II
+funcs/func_db.c: * Copyright (C) 2005, Russell Bryant <russelb@clemson.edu> 
+funcs/func_db.c: * Copyright (C) 2003, Jefferson Noxon <jeff@debian.org>
+funcs/func_logic.c: * Portions Copyright (C) 2005, Anthony Minessale II
+funcs/func_math.c: * Copyright (C) 2004 - 2005, Andy Powell 
+funcs/func_md5.c: * Copyright (C) 2005, Olle E. Johansson, Edvina.net
+funcs/func_md5.c: * Copyright (C) 2005, Russell Bryant <russelb@clemson.edu> 
+funcs/func_strings.c: * Portions Copyright (C) 2005, Tilghman Lesher.  
+funcs/func_strings.c: * Portions Copyright (C) 2005, Anthony Minessale II
+res/res_config_odbc.c: * Copyright (C) 2004 - 2005 Anthony Minessale II
+res/res_indications.c: * Copyright (C) 2002, Pauline Middelink
+res/res_odbc.c: * Copyright (C) 2004 - 2005 Anthony Minessale II
+utils/smsq.c: * Copyright (C) 2004 - 2005 Adrian Kennard
+utils/streamplayer.c:		fprintf(stderr, "Copyright (C) 2005
+ -- Russell Bryant -- Digium, Inc.\n\n");
+channels/misdn/: * Copyright (C) 2004, Christian Richter
+codecs/ilbc/:    Copyright (C) The Internet Society (2004). 
+contrib/scripts/managerproxy.pl:#  Copyright (c) 2004 David C. Troy 
+ <dave@popvox.com>
+contrib/scripts/retrieve_extensions_from_sql.pl:# Copyright:   
+ 2004 Peter Nixon <codemonkey@petenixon.net>
+db1-ast/*/*: * Copyright (c) 1990, 1993, 1994
+ *      The Regents of the University of California.  
+editline/np/: * Copyright (c) 1998 The NetBSD Foundation, Inc.
+editline/np/strlcat.c: * Copyright (c) 1998 Todd C. Miller
+ <Todd.Miller@courtesan.com>
+include/asterisk/aes.h: Copyright (c) 2003, Dr Brian Gladman <brg@gladman.me.uk>
+ , Worcester, UK.
+include/asterisk/dlfcn-compat.h:Copyright (c) 2002 Jorge Acereda
+  <jacereda@users.sourceforge.net> &
+  Peter O'Gorman <ogorman@users.sourceforge.net>
+include/asterisk/plc.h: * Copyright (C) 2004 Steve Underwood
+include/asterisk/poll-compat.h:		Copyright (c) 1995-2002 Brian M. Clapper
+include/asterisk/res_odbc.h: * Copyright (C) 2004 - 2005, Anthony Minessale II
+include/asterisk/slinfactory.h: * Copyright (C) 2005, Anthony Minessale II

@@ -9,7 +9,7 @@
 #
 # hide: true
 
-# $Id: rc.mandrake.zaptel 67061 2007-06-04 17:11:43Z tilghman $
+# $Id$
 
 # Source function library.
 . /etc/rc.d/init.d/functions

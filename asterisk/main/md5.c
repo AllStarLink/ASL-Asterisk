@@ -22,7 +22,7 @@
 
 #include "asterisk.h"
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 40722 $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <string.h>		/* for memcpy() */
 
