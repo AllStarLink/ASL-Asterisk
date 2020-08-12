@@ -16,7 +16,7 @@
 .PHONY: clean all uninstall
 
 # to get check_expr, add it to the ALL_UTILS list
-ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted radio-tune-menu simpleusb-tune-menu pi-tune-menu
+ALL_UTILS:=astman smsq stereorize streamplayer aelparse muted radio-tune-menu simpleusb-tune-menu pi-tune-menu asl-reg
 UTILS:=$(ALL_UTILS)
 
 include $(ASTTOPDIR)/Makefile.rules
@@ -126,6 +126,9 @@ streamplayer: streamplayer.o
 
 muted: muted.o
 muted: LIBS+=$(AUDIO_LIBS)
+
+asl-reg: asl-reg.o
+asl-reg: LIBS+=$(CURL_LIB)
 
 ifneq ($(wildcard .*.d),)
    include .*.d

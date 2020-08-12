@@ -533,7 +533,6 @@ enum{DAQ_TYPE_UCHAMELEON};
  * use the simple format YYMMDD (better for sort)
 */
 
-
 ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 // ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
