@@ -66,12 +66,12 @@ UPDATE_RCD=$(which update-rc.d)
 GLOBALIP=$(ip a | grep "scope global" | grep -Po '(?<=inet )[\d.]+')
 
 ASTERISK=/usr/sbin/asterisk
-ASTRES=/usr/local/sbin/astres.sh
-ASTUP=/usr/local/sbin/astup.sh
-ASTDN=/usr/local/sbin/astdn.sh
-SAVENODE=/usr/local/sbin/save-node
-RESTORENODE=/usr/local/sbin/restore-node
-FIRSTTIME=/usr/local/sbin/first-time
+ASTRES=/usr/sbin/astres.sh
+ASTUP=/usr/sbin/astup.sh
+ASTDN=/usr/sbin/astdn.sh
+SAVENODE=/usr/sbin/save-node
+RESTORENODE=/usr/sbin/restore-node
+FIRSTTIME=/usr/sbin/first-time
 
 MONTHDAY=$(date +%Y-%m-%d)
 DATEEXT=$(date +%Y-%m-%d.%H:%M)
@@ -337,13 +337,13 @@ echo "do_exit" >> $logfile
 do_run_firsttime() {
 echo "do_run_firsttime" >> $logfile
 touch /etc/asterisk/firsttime
-/usr/local/sbin/first-time
+/usr/sbin/first-time
 rm -f /etc/asterisk/firsttime
 }
 
 do_node_setup() {
 echo "do_node_setup" >> $logfile
-/usr/local/sbin/node-setup
+/usr/sbin/node-setup
 }
 
 do_radio_tune_menu() {
@@ -536,12 +536,12 @@ whiptail --msgbox "Uploading diagnostic file to ASL Admin team" 20 60 2
 
 do_sethost() {
 echo "do_sethost" >> $logfile
-/usr/local/sbin/set-host
+/usr/sbin/set-host
 }
 
 do_netsetup() {
 echo "do_netsetup" >> $logfile
-/usr/local/sbin/net-setup
+/usr/sbin/net-setup
 }
 
 
@@ -803,10 +803,10 @@ fi
 
 do_webserver_backup() {
 echo "do_webserver_backup" >> $logfile
-if [ -f /usr/local/bin/backup-server/router.php ]; then
+if [ -f /usr/bin/backup-server/router.php ]; then
         whiptail --msgbox "Open a web browser on separate computer and go to http://$GLOBALIP:8080 \n\nUse ctrl c to close the backup-server" 20 60 2
-        /usr/local/bin/backup-server/backup-server.sh
-#       cd /usr/local/sbin/backup-server && sudo -u nobody /usr/bin/php -S 0.0.0.0:8080 -t . router.php
+        /usr/bin/backup-server/backup-server.sh
+#       cd /usr/sbin/backup-server && sudo -u nobody /usr/bin/php -S 0.0.0.0:8080 -t . router.php
 else
         whiptail --msgbox "The backup-server software does not seem to be installed" 20 60 2
 fi
@@ -822,14 +822,14 @@ fi
 if [ "$ANSWER" = "0" ]; then
         cat /home/$REALID/.bashrc |grep asl-menu > /dev/null
         if [ $? = "1" ]; then
-        echo "sudo /usr/local/sbin/asl-menu" >> /home/$REALID/.bashrc
+        echo "sudo /usr/sbin/asl-menu" >> /home/$REALID/.bashrc
         whiptail --msgbox "asl-menu will start at login for user $REALID" 20 60 2
         else
         whiptail --msgbox "asl-menu already starts for user $REALID at login." 20 60 2
         fi
 else
         sed -i '/asl-menu/c\' /home/$REALID/.bashrc
-        whiptail --msgbox "the asl-menu autostart at login has been disabled\nYou may run the asl-menu script by typing sudo /usr/local/sbin/asl-menu" 20 60 2
+        whiptail --msgbox "the asl-menu autostart at login has been disabled\nYou may run the asl-menu script by typing sudo /usr/sbin/asl-menu" 20 60 2
 fi
 }
 
@@ -1500,6 +1500,7 @@ done
 
 ####################  Main body
 check_if_root
+echo "here"
 get_node_info
 check_config_files
 do_main_menu
