@@ -38,8 +38,8 @@
  * use the simple format YYMMDD
 */
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 180213 $")
-// ASTERISK_FILE_VERSION(__FILE__, "$"ASTERISK_VERSION" $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
+// ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <stdio.h>
 #include <ctype.h>

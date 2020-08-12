@@ -27,7 +27,7 @@
 
 #if defined(DEBUG_THREADLOCALS)
 
-ASTERISK_FILE_VERSION(__FILE__, "$Revision: 91208 $")
+ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #include <stdio.h>
 #include <stdlib.h>
