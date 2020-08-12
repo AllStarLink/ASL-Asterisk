@@ -2,13 +2,7 @@
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
-This is the Asterisk source package for AllStarLink and the files to build the ASL 1.01 distribution.
-
----------------------------------------------------------------------------------------------------------------------------------
-
-Updates: 
-asl-menu has received a few minor updates since the ASL 1.01 distribution was released.  
-Time for a few changes... Stay tuned
+This is the Asterisk source package for AllStarLink and the files to build the ASL 1.01+ distribution.
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -38,27 +32,29 @@ Asterisk, app_rpt and all associated code/files are licensed, released, and dist
 
 ## Prerequisites
 
-Install gcc 4.9 and g++ 4.9 on your system (4.8 will work too).  
+Install gcc and g++ on your system
 _Refer to your Linux distribution's documentation for information on how to do this_
 
 ## Compiling
 _Make sure the Asterisk 1.4 prerequisites are installed on your system before attempting to compile_
 
 <pre>
-git clone https://github.com/AllStarLink/Asterisk.git
-
-cd Asterisk/asterisk
-
-./configure CXX=g++-4.9 CC=gcc-4.9
-
+git clone https://github.com/ajpaul25/ASL-Asterisk.git
+cd ASL-Asterisk/asterisk
+./configure
 make
-
 make install
-
 </pre>
 
-If all goes well, you will have cloned, configured, compiled and installed the Astersisk 1.4.23pre and app_rpt suite of programs that comprise the ASL 1.01 release onto your system.
+If all goes well, you will have cloned, configured, compiled and installed the Astersisk 1.4.23pre and app_rpt suite of programs that comprise the ASL 1.01+ release onto your system.
 
+Packaging
+
+<pre>
+git clone https://github.com/ajpaul25/ASL-Asterisk.git
+cd ASL-Asterisk/asterisk
+debuild -b -us -uc
+</pre>
 ---------------------------------------------------------------------------------------------------------------------------------
 
 ## Help
