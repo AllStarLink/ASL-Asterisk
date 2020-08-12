@@ -18,6 +18,8 @@ install:
 	install -m 755 post_install/termsize.py $(DESTDIR)$(prefix)/sbin/
 	install -m 755 post_install/wifi-setup $(DESTDIR)$(prefix)/sbin/
 	install -m 755 post_install/write-node-callsigns $(DESTDIR)$(prefix)/sbin/
+	install -d $(DESTDIR)$(prefix)/bin/backup-server
+	install -m 755 backup-server/* $(DESTDIR)$(prefix)/bin/backup-server/
 
 uninstall: 
 	-rm -f $(DESTDIR)$(prefix)/sbin/asl-menu
@@ -37,5 +39,7 @@ uninstall:
 	-rm -f $(DESTDIR)$(prefix)/sbin/termsize.py
 	-rm -f $(DESTDIR)$(prefix)/sbin/wifi-setup
 	-rm -f $(DESTDIR)$(prefix)/sbin/write-node-callsigns
+	-rm -f $(DESTDIR)$(prefix)/bin/backup-server/*
+	-rmdir $(DESTDIR)$(prefix)/bin/backup-server
 
 .PHONY: install uninstall
