@@ -284,7 +284,7 @@
 
 /*** MODULEINFO
 	<depend>tonezone</depend>
-	<defaultenabled>no</defaultenabled>
+	<defaultenabled>yes</defaultenabled>
  ***/
 
 /* maximum digits in DTMF buffer, and seconds after * for DTMF command timeout */
