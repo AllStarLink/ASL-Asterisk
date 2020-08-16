@@ -249,8 +249,10 @@ END_CONFIG
 #define DEBUG 0
 /* Which device to use */
 
+#define DESIRED_RATE	8000
 #define FRAME_SIZE	160
 #define	QUEUE_SIZE	10
+#define PERIOD_FRAMES	80
 
 #define    FRAGS   ( ( (6 * 5) << 16 ) | 0x6 )
 
@@ -500,33 +502,20 @@ static int soundcard_writeframe(struct chan_alsa_pvt *o, short *data)
 	int res;
 	snd_pcm_state_t state;
 
-        state = snd_pcm_state(o->opcm_sounddev);
-        if (state == SND_PCM_STATE_XRUN)
-                snd_pcm_prepare(o->opcm_sounddev);
-        res = snd_pcm_writei(o->opcm_sounddev, sizbuf, len / 2);
-        if (res == -EPIPE) {
-#if DEBUG
-                ast_log(LOG_DEBUG, "XRUN write\n");
-#endif
-                snd_pcm_prepare(o->opcm_sounddev);
-                res = snd_pcm_writei(o->opcm_sounddev, sizbuf, len / 2);
-                if (res != len / 2) {
-                        ast_log(LOG_ERROR, "Write error: %s\n", snd_strerror(res));
-                        res = -1;
-                } else if (res < 0) {
-                        ast_log(LOG_ERROR, "Write error %s\n", snd_strerror(res));
-                        res = -1;
-                }
-        } else {
-                if (res == -ESTRPIPE)
-                        ast_log(LOG_ERROR, "You've got some big problems\n");
-                else if (res < 0)
-                        ast_log(LOG_NOTICE, "Error %d on write\n", res);
+        snd_pcm_prepare(o->opcm_sounddev);
+        res = snd_pcm_writei(o->opcm_sounddev, ((void *) data), FRAME_SIZE * 2);
+        if (res != FRAME_SIZE * 2) {
+                ast_log(LOG_ERROR, "Write error: %s\n", snd_strerror(res));
+                res = -1;
+        } else if (res < 0) {
+                ast_log(LOG_ERROR, "Write error %s\n", snd_strerror(res));
+                res = -1;
         }
 
         if (res > 0)
                 res = 0;
         return res;
+}
 
 /*
  * Handler for 'sound writable' events from the sound thread.
@@ -667,7 +656,7 @@ static void *alsa_card_init(struct chan_alsa_pvt *o, snd_pcm_stream_t stream)
 	if( stream == SND_PCM_STREAM_CAPTURE )
 		handle = o->ipcm_sounddev;
 	else
-		handle = o->opcmsounddev;
+		handle = o->opcm_sounddev;
 
 	unsigned int rate = DESIRED_RATE;
 #if 0
@@ -796,11 +785,12 @@ static void *alsa_card_init(struct chan_alsa_pvt *o, snd_pcm_stream_t stream)
  */
 static int setformat(struct chan_alsa_pvt *o, int mode)
 {
-	alsa_card_init(o, SND_PCM_STREAM_CAPTURE)
-	alsa_card_init(o, SND_PCM_STREAM_PLAYBACK)
-	if (!alsa.icard || !alsa.ocard) {
+	alsa_card_init(o, SND_PCM_STREAM_CAPTURE);
+	alsa_card_init(o, SND_PCM_STREAM_PLAYBACK);
+	if (!o->ipcm_sounddev || !o->opcm_sounddev) {
 		ast_log(LOG_ERROR, "Problem opening alsa I/O devices\n");
 		return -1;
+	}
 	return 0;
 }
 
@@ -947,6 +937,7 @@ static int alsa_write(struct ast_channel *c, struct ast_frame *f)
 static struct ast_frame *alsa_read(struct ast_channel *c)
 {
 	int res;
+	snd_pcm_state_t state;
 	struct chan_alsa_pvt *o = c->tech_pvt;
 	struct ast_frame *f = &o->read_f;
 
