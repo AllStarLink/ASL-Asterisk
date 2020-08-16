@@ -3,7 +3,10 @@
  *
  * Copyright (C) 1999 - 2005, Digium, Inc.
  *
- * By Matthew Fredrickson <creslin@digium.com>
+ * Mark Spencer <markster@digium.com>
+ *
+ * FreeBSD changes and multiple device support by Luigi Rizzo, 2005.05.25
+ * note-this code best seen with ts=8 (8-spaces tabs) in the editor
  *
  * See http://www.asterisk.org for more information about
  * the Asterisk project. Please do not directly contact
@@ -16,13 +19,15 @@
  * at the top of the source tree.
  */
 
-/*! \file 
- * \brief ALSA sound card channel driver 
+/*! \file
  *
- * \author Matthew Fredrickson <creslin@digium.com>
+ * \brief Channel driver for ALSA sound cards
+ *
+ * \author Mark Spencer <markster@digium.com>
+ * \author Luigi Rizzo
  *
  * \par See also
- * \arg Config_alsa
+ * \arg \ref Config_alsa
  *
  * \ingroup channel_drivers
  */
@@ -35,21 +40,27 @@
 
 ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <math.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <sys/time.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+#include <errno.h>
 
 #define ALSA_PCM_NEW_HW_PARAMS_API
 #define ALSA_PCM_NEW_SW_PARAMS_API
 #include <alsa/asoundlib.h>
 
+#include "asterisk/lock.h"
 #include "asterisk/frame.h"
 #include "asterisk/logger.h"
+#include "asterisk/callerid.h"
 #include "asterisk/channel.h"
 #include "asterisk/module.h"
 #include "asterisk/options.h"
@@ -63,41 +74,190 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include "asterisk/abstract_jb.h"
 #include "asterisk/musiconhold.h"
 
+/* ringtones we use */
 #include "busy.h"
 #include "ringtone.h"
 #include "ring10.h"
 #include "answer.h"
 
-#ifdef ALSA_MONITOR
-#include "alsa-monitor.h"
-#endif
 
 /*! Global jitterbuffer configuration - by default, jb is disabled */
-static struct ast_jb_conf default_jbconf = {
+static struct ast_jb_conf default_jbconf =
+{
 	.flags = 0,
 	.max_size = -1,
 	.resync_threshold = -1,
-	.impl = ""
+	.impl = "",
 };
 static struct ast_jb_conf global_jbconf;
 
+/*
+ * Basic mode of operation:
+ *
+ * we have one keyboard (which receives commands from the keyboard)
+ * and multiple headset's connected to audio cards.
+ * Cards/Headsets are named as the sections of alsa.conf.
+ * The section called [general] contains the default parameters.
+ *
+ * At any time, the keyboard is attached to one card, and you
+ * can switch among them using the command 'console foo'
+ * where 'foo' is the name of the card you want.
+ *
+ * alsa.conf parameters are
+START_CONFIG
+
+[general]
+    ; General config options, with default values shown.
+    ; You should use one section per device, with [general] being used
+    ; for the first device and also as a template for other devices.
+    ;
+    ; All but 'debug' can go also in the device-specific sections.
+    ;
+    ; debug = 0x0		; misc debug flags, default is 0
+
+    ; Set the device to use for I/O
+    ; device = /dev/dsp
+
+    ; Optional mixer command to run upon startup (e.g. to set
+    ; volume levels, mutes, etc.
+    ; mixer =
+
+    ; Software mic volume booster (or attenuator), useful for sound
+    ; cards or microphones with poor sensitivity. The volume level
+    ; is in dB, ranging from -20.0 to +20.0
+    ; boost = n			; mic volume boost in dB
+
+    ; Set the callerid for outgoing calls
+    ; callerid = John Doe <555-1234>
+
+    ; autoanswer = no		; no autoanswer on call
+    ; autohangup = yes		; hangup when other party closes
+    ; extension = s		; default extension to call
+    ; context = default		; default context for outgoing calls
+    ; language = ""		; default language
+
+    ; Default Music on Hold class to use when this channel is placed on hold in
+    ; the case that the music class is not set on the channel with
+    ; Set(CHANNEL(musicclass)=whatever) in the dialplan and the peer channel
+    ; putting this one on hold did not suggest a class to use.
+    ;
+    ; mohinterpret=default
+
+    ; If you set overridecontext to 'yes', then the whole dial string
+    ; will be interpreted as an extension, which is extremely useful
+    ; to dial SIP, IAX and other extensions which use the '@' character.
+    ; The default is 'no' just for backward compatibility, but the
+    ; suggestion is to change it.
+    ; overridecontext = no	; if 'no', the last @ will start the context
+				; if 'yes' the whole string is an extension.
+
+    ; low level device parameters in case you have problems with the
+    ; device driver on your operating system. You should not touch these
+    ; unless you know what you are doing.
+    ; queuesize = 10		; frames in device driver
+    ; frags = 8			; argument to SETFRAGMENT
+
+    ;------------------------------ JITTER BUFFER CONFIGURATION --------------------------
+    ; jbenable = yes              ; Enables the use of a jitterbuffer on the receiving side of an
+                                  ; ALSA channel. Defaults to "no". An enabled jitterbuffer will
+                                  ; be used only if the sending side can create and the receiving
+                                  ; side can not accept jitter. The ALSA channel can't accept jitter,
+                                  ; thus an enabled jitterbuffer on the receive ALSA side will always
+                                  ; be used if the sending side can create jitter.
+
+    ; jbmaxsize = 200             ; Max length of the jitterbuffer in milliseconds.
+
+    ; jbresyncthreshold = 1000    ; Jump in the frame timestamps over which the jitterbuffer is
+                                  ; resynchronized. Useful to improve the quality of the voice, with
+                                  ; big jumps in/broken timestamps, usualy sent from exotic devices
+                                  ; and programs. Defaults to 1000.
+
+    ; jbimpl = fixed              ; Jitterbuffer implementation, used on the receiving side of an ALSA 
+                                  ; channel. Two implementations are currenlty available - "fixed"
+                                  ; (with size always equals to jbmax-size) and "adaptive" (with
+                                  ; variable size, actually the new jb of IAX2). Defaults to fixed.
+
+    ; jblog = no                  ; Enables jitterbuffer frame logging. Defaults to "no".
+    ;-----------------------------------------------------------------------------------
+
+[card1]
+    ; device = /dev/dsp1	; alternate device
+
+END_CONFIG
+
+.. and so on for the other cards.
+
+ */
+
+/*
+ * Helper macros to parse config arguments. They will go in a common
+ * header file if their usage is globally accepted. In the meantime,
+ * we define them here. Typical usage is as below.
+ * Remember to open a block right before M_START (as it declares
+ * some variables) and use the M_* macros WITHOUT A SEMICOLON:
+ *
+ *	{
+ *		M_START(v->name, v->value) 
+ *
+ *		M_BOOL("dothis", x->flag1)
+ *		M_STR("name", x->somestring)
+ *		M_F("bar", some_c_code)
+ *		M_END(some_final_statement)
+ *		... other code in the block
+ *	}
+ *
+ * XXX NOTE these macros should NOT be replicated in other parts of asterisk. 
+ * Likely we will come up with a better way of doing config file parsing.
+ */
+#define M_START(var, val) \
+        char *__s = var; char *__val = val;
+#define M_END(x)   x;
+#define M_F(tag, f)			if (!strcasecmp((__s), tag)) { f; } else
+#define M_BOOL(tag, dst)	M_F(tag, (dst) = ast_true(__val) )
+#define M_UINT(tag, dst)	M_F(tag, (dst) = strtoul(__val, NULL, 0) )
+#define M_STR(tag, dst)		M_F(tag, ast_copy_string(dst, __val, sizeof(dst)))
+
+/*
+ * The following parameters are used in the driver:
+ *
+ *  FRAME_SIZE	the size of an audio frame, in samples.
+ *		160 is used almost universally, so you should not change it.
+ *
+ *  FRAGS	the argument for the SETFRAGMENT ioctl.
+ *		Overridden by the 'frags' parameter in alsa.conf
+ *
+ *		Bits 0-7 are the base-2 log of the device's block size,
+ *		bits 16-31 are the number of blocks in the driver's queue.
+ *		There are a lot of differences in the way this parameter
+ *		is supported by different drivers, so you may need to
+ *		experiment a bit with the value.
+ *		A good default for linux is 30 blocks of 64 bytes, which
+ *		results in 6 frames of 320 bytes (160 samples).
+ *		FreeBSD works decently with blocks of 256 or 512 bytes,
+ *		leaving the number unspecified.
+ *		Note that this only refers to the device buffer size,
+ *		this module will then try to keep the lenght of audio
+ *		buffered within small constraints.
+ *
+ *  QUEUE_SIZE	The max number of blocks actually allowed in the device
+ *		driver's buffer, irrespective of the available number.
+ *		Overridden by the 'queuesize' parameter in alsa.conf
+ *
+ *		Should be >=2, and at most as large as the hw queue above
+ *		(otherwise it will never be full).
+ */
 #define DEBUG 0
 /* Which device to use */
-#define ALSA_INDEV "default"
-#define ALSA_OUTDEV "default"
-#define DESIRED_RATE 8000
 
-/* Lets use 160 sample frames, just like GSM.  */
-#define FRAME_SIZE 160
-#define PERIOD_FRAMES 80		/* 80 Frames, at 2 bytes each */
+#define FRAME_SIZE	160
+#define	QUEUE_SIZE	10
+
+#define    FRAGS   ( ( (6 * 5) << 16 ) | 0x6 )
 
 /* When you set the frame size, you have to come up with
    the right buffer format as well. */
 /* 5 64-byte frames = one frame */
-#define BUFFER_FMT ((buffersize * 10) << 16) | (0x0006);
 
-/* Don't switch between read/write modes faster than every 300 ms */
-#define MIN_SWITCH_TIME 600
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 static snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
@@ -105,32 +265,40 @@ static snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
 static snd_pcm_format_t format = SND_PCM_FORMAT_S16_BE;
 #endif
 
-static char indevname[50] = ALSA_INDEV;
-static char outdevname[50] = ALSA_OUTDEV;
+
+/*
+ * XXX text message sizes are probably 256 chars, but i am
+ * not sure if there is a suitable definition anywhere.
+ */
+#define TEXT_SIZE	256
 
 #if 0
-static struct timeval lasttime;
+#define	TRYOPEN	1				/* try to open on startup */
 #endif
+#define	O_CLOSE	0x444			/* special 'close' mode for device */
 
 static int silencesuppression = 0;
 static int silencethreshold = 1000;
 
-AST_MUTEX_DEFINE_STATIC(alsalock);
+#ifndef MIN
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
 
-static const char tdesc[] = "ALSA Console Channel Driver";
-static const char config[] = "alsa.conf";
+static char *config = "alsa.conf";	/* default config file */
 
-static char context[AST_MAX_CONTEXT] = "default";
-static char language[MAX_LANGUAGE] = "";
-static char exten[AST_MAX_EXTENSION] = "s";
-static char mohinterpret[MAX_MUSICCLASS];
+static int alsa_debug;
 
-static int hookstate = 0;
-
-static short silence[FRAME_SIZE] = { 0, };
-
+/*
+ * Each sound is made of 'datalen' samples of sound, repeated as needed to
+ * generate 'samplen' samples of data, then followed by 'silencelen' samples
+ * of silence. The loop is repeated if 'repeat' is set.
+ */
 struct sound {
 	int ind;
+	char *desc;
 	short *data;
 	int datalen;
 	int samplen;
@@ -139,52 +307,111 @@ struct sound {
 };
 
 static struct sound sounds[] = {
-	{AST_CONTROL_RINGING, ringtone, sizeof(ringtone) / 2, 16000, 32000, 1},
-	{AST_CONTROL_BUSY, busy, sizeof(busy) / 2, 4000, 4000, 1},
-	{AST_CONTROL_CONGESTION, busy, sizeof(busy) / 2, 2000, 2000, 1},
-	{AST_CONTROL_RING, ring10, sizeof(ring10) / 2, 16000, 32000, 1},
-	{AST_CONTROL_ANSWER, answer, sizeof(answer) / 2, 2200, 0, 0},
+	{ AST_CONTROL_RINGING, "RINGING", ringtone, sizeof(ringtone)/2, 16000, 32000, 1 },
+	{ AST_CONTROL_BUSY, "BUSY", busy, sizeof(busy)/2, 4000, 4000, 1 },
+	{ AST_CONTROL_CONGESTION, "CONGESTION", busy, sizeof(busy)/2, 2000, 2000, 1 },
+	{ AST_CONTROL_RING, "RING10", ring10, sizeof(ring10)/2, 16000, 32000, 1 },
+	{ AST_CONTROL_ANSWER, "ANSWER", answer, sizeof(answer)/2, 2200, 0, 0 },
+	{ -1, NULL, 0, 0, 0, 0 },	/* end marker */
 };
 
-/* Sound command pipe */
-static int sndcmd[2];
 
-static struct chan_alsa_pvt {
-	/* We only have one ALSA structure -- near sighted perhaps, but it
-	   keeps this driver as simple as possible -- as it should be. */
+/*
+ * descriptor for one of our channels.
+ * There is one used for 'default' values (from the [general] entry in
+ * the configuration file), and then one instance for each device
+ * (the default is cloned from [general], others are only created
+ * if the relevant section exists).
+ */
+struct chan_alsa_pvt {
+	struct chan_alsa_pvt *next;
+
+	char *name;
+	/*
+	 * cursound indicates which in struct sound we play. -1 means nothing,
+	 * any other value is a valid sound, in which case sampsent indicates
+	 * the next sample to send in [0..samplen + silencelen]
+	 * nosound is set to disable the audio data from the channel
+	 * (so we can play the tones etc.).
+	 */
+	int sndcmd[2];				/* Sound command pipe */
+	int cursound;				/* index of sound to send */
+	int sampsent;				/* # of sound samples sent  */
+	int nosound;				/* set to block audio from the PBX */
+
+	int total_blocks;			/* total blocks in the output device */
+	int sounddev;
+	snd_pcm_t *pcm_sounddev;
+	enum { M_UNSET, M_FULL, M_READ, M_WRITE } duplex;
+	int autoanswer;
+	int autohangup;
+	int hookstate;
+	char *mixer_cmd;			/* initial command to issue to the mixer */
+	unsigned int queuesize;		/* max fragments in queue */
+	unsigned int frags;			/* parameter for SETFRAGMENT */
+
+	int warned;					/* various flags used for warnings */
+#define WARN_used_blocks	1
+#define WARN_speed		2
+#define WARN_frag		4
+	int w_errors;				/* overfull in the write path */
+	struct timeval lastopen;
+
+	int overridecontext;
+	int mute;
+
+	/* boost support. BOOST_SCALE * 10 ^(BOOST_MAX/20) must
+	 * be representable in 16 bits to avoid overflows.
+	 */
+#define	BOOST_SCALE	(1<<9)
+#define	BOOST_MAX	40			/* slightly less than 7 bits */
+	int boost;					/* input boost, scaled by BOOST_SCALE */
+	char device[64];			/* device to open */
+
+	pthread_t sthread;
+
 	struct ast_channel *owner;
-	char exten[AST_MAX_EXTENSION];
-	char context[AST_MAX_CONTEXT];
-#if 0
-	snd_pcm_t *card;
-#endif
-	snd_pcm_t *icard, *ocard;
+	char ext[AST_MAX_EXTENSION];
+	char ctx[AST_MAX_CONTEXT];
+	char language[MAX_LANGUAGE];
+	char cid_name[256];			/*XXX */
+	char cid_num[256];			/*XXX */
+	char mohinterpret[MAX_MUSICCLASS];
 
-} alsa;
+	/* buffers used in alsa_write */
+	char alsa_write_buf[FRAME_SIZE * 2];
+	int alsa_write_dst;
+	/* buffers used in alsa_read - AST_FRIENDLY_OFFSET space for headers
+	 * plus enough room for a full frame
+	 */
+	char alsa_read_buf[FRAME_SIZE * 2 + AST_FRIENDLY_OFFSET];
+	int readpos;				/* read position above */
+	struct ast_frame read_f;	/* returned by alsa_read */
+};
 
-/* Number of buffers...  Each is FRAMESIZE/8 ms long.  For example
-   with 160 sample frames, and a buffer size of 3, we have a 60ms buffer, 
-   usually plenty. */
+static struct chan_alsa_pvt alsa_default = {
+	.cursound = -1,
+	.sounddev = -1,
+	.duplex = M_UNSET,			/* XXX check this */
+	.autoanswer = 1,
+	.autohangup = 1,
+	.queuesize = QUEUE_SIZE,
+	.frags = FRAGS,
+	.ext = "s",
+	.ctx = "default",
+	.readpos = AST_FRIENDLY_OFFSET,	/* start here on reads */
+	.lastopen = { 0, 0 },
+	.boost = BOOST_SCALE,
+};
 
-pthread_t sthread;
+static char *alsa_active;	 /* the active device */
 
-#define MAX_BUFFER_SIZE 100
+static int setformat(struct chan_alsa_pvt *o, int mode);
 
-/* File descriptors for sound device */
-static int readdev = -1;
-static int writedev = -1;
-
-static int autoanswer = 1;
-
-static int cursound = -1;
-static int sampsent = 0;
-static int silencelen = 0;
-static int offset = 0;
-static int nosound = 0;
-
-/* ZZ */
-static struct ast_channel *alsa_request(const char *type, int format, void *data, int *cause);
-static int alsa_digit(struct ast_channel *c, char digit, unsigned int duration);
+static struct ast_channel *alsa_request(const char *type, int format, void *data
+, int *cause);
+static int alsa_digit_begin(struct ast_channel *c, char digit);
+static int alsa_digit_end(struct ast_channel *c, char digit, unsigned int duration);
 static int alsa_text(struct ast_channel *c, const char *text);
 static int alsa_hangup(struct ast_channel *c);
 static int alsa_answer(struct ast_channel *c);
@@ -193,13 +420,15 @@ static int alsa_call(struct ast_channel *c, char *dest, int timeout);
 static int alsa_write(struct ast_channel *chan, struct ast_frame *f);
 static int alsa_indicate(struct ast_channel *chan, int cond, const void *data, size_t datalen);
 static int alsa_fixup(struct ast_channel *oldchan, struct ast_channel *newchan);
+static char tdesc[] = "ALSA Console Channel Driver";
 
 static const struct ast_channel_tech alsa_tech = {
 	.type = "Console",
 	.description = tdesc,
 	.capabilities = AST_FORMAT_SLINEAR,
 	.requester = alsa_request,
-	.send_digit_end = alsa_digit,
+	.send_digit_begin = alsa_digit_begin,
+	.send_digit_end = alsa_digit_end,
 	.send_text = alsa_text,
 	.hangup = alsa_hangup,
 	.answer = alsa_answer,
@@ -210,761 +439,831 @@ static const struct ast_channel_tech alsa_tech = {
 	.fixup = alsa_fixup,
 };
 
-static int send_sound(void)
+/*
+ * returns a pointer to the descriptor with the given name
+ */
+static struct chan_alsa_pvt *find_desc(char *dev)
 {
-	short myframe[FRAME_SIZE];
-	int total = FRAME_SIZE;
-	short *frame = NULL;
-	int amt = 0, res, myoff;
+	struct chan_alsa_pvt *o = NULL;
+
+	if (!dev)
+		ast_log(LOG_WARNING, "null dev\n");
+
+	for (o = alsa_default.next; o && o->name && dev && strcmp(o->name, dev) != 0; o = o->next);
+
+	if (!o)
+		ast_log(LOG_WARNING, "could not find <%s>\n", dev ? dev : "--no-device--");
+
+	return o;
+}
+
+/*
+ * split a string in extension-context, returns pointers to malloc'ed
+ * strings.
+ * If we do not have 'overridecontext' then the last @ is considered as
+ * a context separator, and the context is overridden.
+ * This is usually not very necessary as you can play with the dialplan,
+ * and it is nice not to need it because you have '@' in SIP addresses.
+ * Return value is the buffer address.
+ */
+static char *ast_ext_ctx(const char *src, char **ext, char **ctx)
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+
+	if (ext == NULL || ctx == NULL)
+		return NULL;			/* error */
+
+	*ext = *ctx = NULL;
+
+	if (src && *src != '\0')
+		*ext = ast_strdup(src);
+
+	if (*ext == NULL)
+		return NULL;
+
+	if (!o->overridecontext) {
+		/* parse from the right */
+		*ctx = strrchr(*ext, '@');
+		if (*ctx)
+			*(*ctx)++ = '\0';
+	}
+
+	return *ext;
+}
+
+/*
+ * Returns the number of blocks used in the audio output channel
+ */
+static int used_blocks(struct chan_alsa_pvt *o)
+{
+	struct audio_buf_info info;
+
+	if (ioctl(o->sounddev, SNDCTL_DSP_GETOSPACE, &info)) {
+		if (!(o->warned & WARN_used_blocks)) {
+			ast_log(LOG_WARNING, "Error reading output space\n");
+			o->warned |= WARN_used_blocks;
+		}
+		return 1;
+	}
+
+	if (o->total_blocks == 0) {
+		if (0)					/* debugging */
+			ast_log(LOG_WARNING, "fragtotal %d size %d avail %d\n", info.fragstotal, info.fragsize, info.fragments);
+		o->total_blocks = info.fragments;
+	}
+
+	return o->total_blocks - info.fragments;
+}
+
+/* Write an exactly FRAME_SIZE sized frame */
+static int soundcard_writeframe(struct chan_alsa_pvt *o, short *data)
+{
+	int res;
 	snd_pcm_state_t state;
 
-	if (cursound == -1)
-		return 0;
-	
-	res = total;
-	if (sampsent < sounds[cursound].samplen) {
-		myoff = 0;
-		while (total) {
-			amt = total;
-			if (amt > (sounds[cursound].datalen - offset))
-				amt = sounds[cursound].datalen - offset;
-			memcpy(myframe + myoff, sounds[cursound].data + offset, amt * 2);
-			total -= amt;
-			offset += amt;
-			sampsent += amt;
-			myoff += amt;
-			if (offset >= sounds[cursound].datalen)
-				offset = 0;
-		}
-		/* Set it up for silence */
-		if (sampsent >= sounds[cursound].samplen)
-			silencelen = sounds[cursound].silencelen;
-		frame = myframe;
-	} else {
-		if (silencelen > 0) {
-			frame = silence;
-			silencelen -= res;
-		} else {
-			if (sounds[cursound].repeat) {
-				/* Start over */
-				sampsent = 0;
-				offset = 0;
-			} else {
-				cursound = -1;
-				nosound = 0;
+        state = snd_pcm_state(o->pcm_sounddev);
+        if (state == SND_PCM_STATE_XRUN)
+                snd_pcm_prepare(o->pcm_sounddev);
+        res = snd_pcm_writei(o->pcm_sounddev, sizbuf, len / 2);
+        if (res == -EPIPE) {
+#if DEBUG
+                ast_log(LOG_DEBUG, "XRUN write\n");
+#endif
+                snd_pcm_prepare(o->pcm_sounddev);
+                res = snd_pcm_writei(o->pcm_sounddev, sizbuf, len / 2);
+                if (res != len / 2) {
+                        ast_log(LOG_ERROR, "Write error: %s\n", snd_strerror(res));
+                        res = -1;
+                } else if (res < 0) {
+                        ast_log(LOG_ERROR, "Write error %s\n", snd_strerror(res));
+                        res = -1;
+                }
+        } else {
+                if (res == -ESTRPIPE)
+                        ast_log(LOG_ERROR, "You've got some big problems\n");
+                else if (res < 0)
+                        ast_log(LOG_NOTICE, "Error %d on write\n", res);
+        }
+
+        if (res > 0)
+                res = 0;
+        return res;
+
+/*
+ * Handler for 'sound writable' events from the sound thread.
+ * Builds a frame from the high level description of the sounds,
+ * and passes it to the audio device.
+ * The actual sound is made of 1 or more sequences of sound samples
+ * (s->datalen, repeated to make s->samplen samples) followed by
+ * s->silencelen samples of silence. The position in the sequence is stored
+ * in o->sampsent, which goes between 0 .. s->samplen+s->silencelen.
+ * In case we fail to write a frame, don't update o->sampsent.
+ */
+static void send_sound(struct chan_alsa_pvt *o)
+{
+	short myframe[FRAME_SIZE];
+	int ofs, l, start;
+	snd_pcm_state_t state;
+	int l_sampsent = o->sampsent;
+	struct sound *s;
+
+	if (o->cursound < 0)		/* no sound to send */
+		return;
+
+	s = &sounds[o->cursound];
+
+	for (ofs = 0; ofs < FRAME_SIZE; ofs += l) {
+		l = s->samplen - l_sampsent;	/* # of available samples */
+		if (l > 0) {
+			start = l_sampsent % s->datalen;	/* source offset */
+			if (l > FRAME_SIZE - ofs)	/* don't overflow the frame */
+				l = FRAME_SIZE - ofs;
+			if (l > s->datalen - start)	/* don't overflow the source */
+				l = s->datalen - start;
+			bcopy(s->data + start, myframe + ofs, l * 2);
+			if (0)
+				ast_log(LOG_WARNING, "send_sound sound %d/%d of %d into %d\n", l_sampsent, l, s->samplen, ofs);
+			l_sampsent += l;
+		} else {				/* end of samples, maybe some silence */
+			static const short silence[FRAME_SIZE] = { 0, };
+
+			l += s->silencelen;
+			if (l > 0) {
+				if (l > FRAME_SIZE - ofs)
+					l = FRAME_SIZE - ofs;
+				bcopy(silence, myframe + ofs, l * 2);
+				l_sampsent += l;
+			} else {			/* silence is over, restart sound if loop */
+				if (s->repeat == 0) {	/* last block */
+					o->cursound = -1;
+					o->nosound = 0;	/* allow audio data */
+					if (ofs < FRAME_SIZE)	/* pad with silence */
+						bcopy(silence, myframe + ofs, (FRAME_SIZE - ofs) * 2);
+				}
+				l_sampsent = 0;
 			}
-			return 0;
 		}
 	}
-	
-	if (res == 0 || !frame)
-		return 0;
 
-#ifdef ALSA_MONITOR
-	alsa_monitor_write((char *) frame, res * 2);
-#endif
-	state = snd_pcm_state(alsa.ocard);
+	state = snd_pcm_state(o->pcm_sounddev);
 	if (state == SND_PCM_STATE_XRUN)
-		snd_pcm_prepare(alsa.ocard);
-	res = snd_pcm_writei(alsa.ocard, frame, res);
-	if (res > 0)
+		snd_pcm_prepare(o->pcm_sounddev);
+	l = soundcard_writeframe(o, myframe);
+	if (l > 0)
+		o->sampsent = l_sampsent;	/* update status */
+}
+
+static void *sound_thread(void *arg)
+{
+	char ign[4096];
+	struct chan_alsa_pvt *o = (struct chan_alsa_pvt *) arg;
+
+	/*
+	 * Just in case, kick the driver by trying to read from it.
+	 * Ignore errors - this read is almost guaranteed to fail.
+	 */
+	read(o->sounddev, ign, sizeof(ign));
+	for (;;) {
+		fd_set rfds, wfds;
+		int maxfd, res;
+
+		FD_ZERO(&rfds);
+		FD_ZERO(&wfds);
+		FD_SET(o->sndcmd[0], &rfds);
+		maxfd = o->sndcmd[0];	/* pipe from the main process */
+		if (o->cursound > -1 && o->sounddev < 0)
+			setformat(o, O_RDWR);	/* need the channel, try to reopen */
+		else if (o->cursound == -1 && o->owner == NULL)
+			setformat(o, O_CLOSE);	/* can close */
+		if (o->sounddev > -1) {
+			if (!o->owner) {	/* no one owns the audio, so we must drain it */
+				FD_SET(o->sounddev, &rfds);
+				maxfd = MAX(o->sounddev, maxfd);
+			}
+			if (o->cursound > -1) {
+				FD_SET(o->sounddev, &wfds);
+				maxfd = MAX(o->sounddev, maxfd);
+			}
+
+		}
+		/* ast_select emulates linux behaviour in terms of timeout handling */
+		res = ast_select(maxfd + 1, &rfds, &wfds, NULL, NULL);
+		if (res < 1) {
+			ast_log(LOG_WARNING, "select failed: %s\n", strerror(errno));
+			sleep(1);
+			continue;
+		}
+		if (FD_ISSET(o->sndcmd[0], &rfds)) {
+			/* read which sound to play from the pipe */
+			int i, what = -1;
+
+			read(o->sndcmd[0], &what, sizeof(what));
+			for (i = 0; sounds[i].ind != -1; i++) {
+				if (sounds[i].ind == what) {
+					o->cursound = i;
+					o->sampsent = 0;
+					o->nosound = 1;	/* block audio from pbx */
+					break;
+				}
+			}
+			if (sounds[i].ind == -1)
+				ast_log(LOG_WARNING, "invalid sound index: %d\n", what);
+		}
+		if (o->sounddev > -1) {
+			if (FD_ISSET(o->sounddev, &rfds))	/* read and ignore errors */
+				read(o->sounddev, ign, sizeof(ign));
+			if (FD_ISSET(o->sounddev, &wfds))
+				send_sound(o);
+		}
+	}
+	return NULL;				/* Never reached */
+}
+
+/*
+ * reset and close the device if opened,
+ * then open and initialize it in the desired mode,
+ * trigger reads and writes so we can start using it.
+ */
+static int setformat(struct chan_alsa_pvt *o, int mode)
+{
+	int fmt, desired, res, fd;
+
+	if (o->sounddev >= 0) {
+		ioctl(o->sounddev, SNDCTL_DSP_RESET, 0);
+		close(o->sounddev);
+		o->duplex = M_UNSET;
+		o->sounddev = -1;
+	}
+	if (mode == O_CLOSE)		/* we are done */
 		return 0;
+	if (ast_tvdiff_ms(ast_tvnow(), o->lastopen) < 1000)
+		return -1;				/* don't open too often */
+	o->lastopen = ast_tvnow();
+	fd = o->sounddev = open(o->device, mode | O_NONBLOCK);
+	if (fd < 0) {
+		ast_log(LOG_WARNING, "Unable to re-open DSP device %s: %s\n", o->device, strerror(errno));
+		return -1;
+	}
+	if (o->owner)
+		o->owner->fds[0] = fd;
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+	fmt = AFMT_S16_LE;
+#else
+	fmt = AFMT_S16_BE;
+#endif
+	res = ioctl(fd, SNDCTL_DSP_SETFMT, &fmt);
+	if (res < 0) {
+		ast_log(LOG_WARNING, "Unable to set format to 16-bit signed\n");
+		return -1;
+	}
+	switch (mode) {
+		case O_RDWR:
+			res = ioctl(fd, SNDCTL_DSP_SETDUPLEX, 0);
+			/* Check to see if duplex set (FreeBSD Bug) */
+			res = ioctl(fd, SNDCTL_DSP_GETCAPS, &fmt);
+			if (res == 0 && (fmt & DSP_CAP_DUPLEX)) {
+				if (option_verbose > 1)
+					ast_verbose(VERBOSE_PREFIX_2 "Console is full duplex\n");
+				o->duplex = M_FULL;
+			};
+			break;
+		case O_WRONLY:
+			o->duplex = M_WRITE;
+			break;
+		case O_RDONLY:
+			o->duplex = M_READ;
+			break;
+	}
+
+	fmt = 0;
+	res = ioctl(fd, SNDCTL_DSP_STEREO, &fmt);
+	if (res < 0) {
+		ast_log(LOG_WARNING, "Failed to set audio device to mono\n");
+		return -1;
+	}
+	fmt = desired = DEFAULT_SAMPLE_RATE;	/* 8000 Hz desired */
+	res = ioctl(fd, SNDCTL_DSP_SPEED, &fmt);
+
+	if (res < 0) {
+		ast_log(LOG_WARNING, "Failed to set audio device to mono\n");
+		return -1;
+	}
+	if (fmt != desired) {
+		if (!(o->warned & WARN_speed)) {
+			ast_log(LOG_WARNING,
+			    "Requested %d Hz, got %d Hz -- sound may be choppy\n",
+			    desired, fmt);
+			o->warned |= WARN_speed;
+		}
+	}
+	/*
+	 * on Freebsd, SETFRAGMENT does not work very well on some cards.
+	 * Default to use 256 bytes, let the user override
+	 */
+	if (o->frags) {
+		fmt = o->frags;
+		res = ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &fmt);
+		if (res < 0) {
+			if (!(o->warned & WARN_frag)) {
+				ast_log(LOG_WARNING,
+					"Unable to set fragment size -- sound may be choppy\n");
+				o->warned |= WARN_frag;
+			}
+		}
+	}
+	/* on some cards, we need SNDCTL_DSP_SETTRIGGER to start outputting */
+	res = PCM_ENABLE_INPUT | PCM_ENABLE_OUTPUT;
+	res = ioctl(fd, SNDCTL_DSP_SETTRIGGER, &res);
+	/* it may fail if we are in half duplex, never mind */
 	return 0;
 }
 
-static void *sound_thread(void *unused)
+/*
+ * some of the standard methods supported by channels.
+ */
+static int alsa_digit_begin(struct ast_channel *c, char digit)
 {
-	fd_set rfds;
-	fd_set wfds;
-	int max, res;
-
-	for (;;) {
-		FD_ZERO(&rfds);
-		FD_ZERO(&wfds);
-		max = sndcmd[0];
-		FD_SET(sndcmd[0], &rfds);
-		if (cursound > -1) {
-			FD_SET(writedev, &wfds);
-			if (writedev > max)
-				max = writedev;
-		}
-#ifdef ALSA_MONITOR
-		if (!alsa.owner) {
-			FD_SET(readdev, &rfds);
-			if (readdev > max)
-				max = readdev;
-		}
-#endif
-		res = ast_select(max + 1, &rfds, &wfds, NULL, NULL);
-		if (res < 1) {
-			ast_log(LOG_WARNING, "select failed: %s\n", strerror(errno));
-			continue;
-		}
-#ifdef ALSA_MONITOR
-		if (FD_ISSET(readdev, &rfds)) {
-			/* Keep the pipe going with read audio */
-			snd_pcm_state_t state;
-			short buf[FRAME_SIZE];
-			int r;
-
-			state = snd_pcm_state(alsa.ocard);
-			if (state == SND_PCM_STATE_XRUN) {
-				snd_pcm_prepare(alsa.ocard);
-			}
-			r = snd_pcm_readi(alsa.icard, buf, FRAME_SIZE);
-			if (r == -EPIPE) {
-#if DEBUG
-				ast_log(LOG_ERROR, "XRUN read\n");
-#endif
-				snd_pcm_prepare(alsa.icard);
-			} else if (r == -ESTRPIPE) {
-				ast_log(LOG_ERROR, "-ESTRPIPE\n");
-				snd_pcm_prepare(alsa.icard);
-			} else if (r < 0) {
-				ast_log(LOG_ERROR, "Read error: %s\n", snd_strerror(r));
-			} else
-				alsa_monitor_read((char *) buf, r * 2);
-		}
-#endif
-		if (FD_ISSET(sndcmd[0], &rfds)) {
-			read(sndcmd[0], &cursound, sizeof(cursound));
-			silencelen = 0;
-			offset = 0;
-			sampsent = 0;
-		}
-		if (FD_ISSET(writedev, &wfds))
-			if (send_sound())
-				ast_log(LOG_WARNING, "Failed to write sound\n");
-	}
-	/* Never reached */
-	return NULL;
+	return 0;
 }
 
-static snd_pcm_t *alsa_card_init(char *dev, snd_pcm_stream_t stream)
+static int alsa_digit_end(struct ast_channel *c, char digit, unsigned int duration)
 {
-	int err;
-	int direction;
-	snd_pcm_t *handle = NULL;
-	snd_pcm_hw_params_t *hwparams = NULL;
-	snd_pcm_sw_params_t *swparams = NULL;
-	struct pollfd pfd;
-	snd_pcm_uframes_t period_size = PERIOD_FRAMES * 4;
-	/* int period_bytes = 0; */
-	snd_pcm_uframes_t buffer_size = 0;
-
-	unsigned int rate = DESIRED_RATE;
-#if 0
-	unsigned int per_min = 1;
-#endif
-	/* unsigned int per_max = 8; */
-	snd_pcm_uframes_t start_threshold, stop_threshold;
-
-	err = snd_pcm_open(&handle, dev, stream, SND_PCM_NONBLOCK);
-	if (err < 0) {
-		ast_log(LOG_ERROR, "snd_pcm_open failed: %s\n", snd_strerror(err));
-		return NULL;
-	} else
-		ast_log(LOG_DEBUG, "Opening device %s in %s mode\n", dev, (stream == SND_PCM_STREAM_CAPTURE) ? "read" : "write");
-
-	hwparams = alloca(snd_pcm_hw_params_sizeof());
-	memset(hwparams, 0, snd_pcm_hw_params_sizeof());
-	snd_pcm_hw_params_any(handle, hwparams);
-
-	err = snd_pcm_hw_params_set_access(handle, hwparams, SND_PCM_ACCESS_RW_INTERLEAVED);
-	if (err < 0)
-		ast_log(LOG_ERROR, "set_access failed: %s\n", snd_strerror(err));
-
-	err = snd_pcm_hw_params_set_format(handle, hwparams, format);
-	if (err < 0)
-		ast_log(LOG_ERROR, "set_format failed: %s\n", snd_strerror(err));
-
-	err = snd_pcm_hw_params_set_channels(handle, hwparams, 1);
-	if (err < 0)
-		ast_log(LOG_ERROR, "set_channels failed: %s\n", snd_strerror(err));
-
-	direction = 0;
-	err = snd_pcm_hw_params_set_rate_near(handle, hwparams, &rate, &direction);
-	if (rate != DESIRED_RATE)
-		ast_log(LOG_WARNING, "Rate not correct, requested %d, got %d\n", DESIRED_RATE, rate);
-
-	direction = 0;
-	err = snd_pcm_hw_params_set_period_size_near(handle, hwparams, &period_size, &direction);
-	if (err < 0)
-		ast_log(LOG_ERROR, "period_size(%ld frames) is bad: %s\n", period_size, snd_strerror(err));
-	else
-		ast_log(LOG_DEBUG, "Period size is %d\n", err);
-
-	buffer_size = 4096 * 2;		/* period_size * 16; */
-	err = snd_pcm_hw_params_set_buffer_size_near(handle, hwparams, &buffer_size);
-	if (err < 0)
-		ast_log(LOG_WARNING, "Problem setting buffer size of %ld: %s\n", buffer_size, snd_strerror(err));
-	else
-		ast_log(LOG_DEBUG, "Buffer size is set to %d frames\n", err);
-
-#if 0
-	direction = 0;
-	err = snd_pcm_hw_params_set_periods_min(handle, hwparams, &per_min, &direction);
-	if (err < 0)
-		ast_log(LOG_ERROR, "periods_min: %s\n", snd_strerror(err));
-
-	err = snd_pcm_hw_params_set_periods_max(handle, hwparams, &per_max, 0);
-	if (err < 0)
-		ast_log(LOG_ERROR, "periods_max: %s\n", snd_strerror(err));
-#endif
-
-	err = snd_pcm_hw_params(handle, hwparams);
-	if (err < 0)
-		ast_log(LOG_ERROR, "Couldn't set the new hw params: %s\n", snd_strerror(err));
-
-	swparams = alloca(snd_pcm_sw_params_sizeof());
-	memset(swparams, 0, snd_pcm_sw_params_sizeof());
-	snd_pcm_sw_params_current(handle, swparams);
-
-#if 1
-	if (stream == SND_PCM_STREAM_PLAYBACK)
-		start_threshold = period_size;
-	else
-		start_threshold = 1;
-
-	err = snd_pcm_sw_params_set_start_threshold(handle, swparams, start_threshold);
-	if (err < 0)
-		ast_log(LOG_ERROR, "start threshold: %s\n", snd_strerror(err));
-#endif
-
-#if 1
-	if (stream == SND_PCM_STREAM_PLAYBACK)
-		stop_threshold = buffer_size;
-	else
-		stop_threshold = buffer_size;
-
-	err = snd_pcm_sw_params_set_stop_threshold(handle, swparams, stop_threshold);
-	if (err < 0)
-		ast_log(LOG_ERROR, "stop threshold: %s\n", snd_strerror(err));
-#endif
-#if 0
-	err = snd_pcm_sw_params_set_xfer_align(handle, swparams, PERIOD_FRAMES);
-	if (err < 0)
-		ast_log(LOG_ERROR, "Unable to set xfer alignment: %s\n", snd_strerror(err));
-#endif
-
-#if 0
-	err = snd_pcm_sw_params_set_silence_threshold(handle, swparams, silencethreshold);
-	if (err < 0)
-		ast_log(LOG_ERROR, "Unable to set silence threshold: %s\n", snd_strerror(err));
-#endif
-	err = snd_pcm_sw_params(handle, swparams);
-	if (err < 0)
-		ast_log(LOG_ERROR, "sw_params: %s\n", snd_strerror(err));
-
-	err = snd_pcm_poll_descriptors_count(handle);
-	if (err <= 0)
-		ast_log(LOG_ERROR, "Unable to get a poll descriptors count, error is %s\n", snd_strerror(err));
-	if (err != 1)
-		ast_log(LOG_DEBUG, "Can't handle more than one device\n");
-
-	snd_pcm_poll_descriptors(handle, &pfd, err);
-	ast_log(LOG_DEBUG, "Acquired fd %d from the poll descriptor\n", pfd.fd);
-
-	if (stream == SND_PCM_STREAM_CAPTURE)
-		readdev = pfd.fd;
-	else
-		writedev = pfd.fd;
-
-	return handle;
-}
-
-static int soundcard_init(void)
-{
-	alsa.icard = alsa_card_init(indevname, SND_PCM_STREAM_CAPTURE);
-	alsa.ocard = alsa_card_init(outdevname, SND_PCM_STREAM_PLAYBACK);
-
-	if (!alsa.icard || !alsa.ocard) {
-		ast_log(LOG_ERROR, "Problem opening alsa I/O devices\n");
-		return -1;
-	}
-
-	return readdev;
-}
-
-static int alsa_digit(struct ast_channel *c, char digit, unsigned int duration)
-{
-	ast_mutex_lock(&alsalock);
+	/* no better use for received digits than print them */
 	ast_verbose(" << Console Received digit %c of duration %u ms >> \n", 
 		digit, duration);
-	ast_mutex_unlock(&alsalock);
 	return 0;
 }
 
 static int alsa_text(struct ast_channel *c, const char *text)
 {
-	ast_mutex_lock(&alsalock);
+	/* print received messages */
 	ast_verbose(" << Console Received text %s >> \n", text);
-	ast_mutex_unlock(&alsalock);
 	return 0;
 }
 
-static void grab_owner(void)
+/* Play ringtone 'x' on device 'o' */
+static void ring(struct chan_alsa_pvt *o, int x)
 {
-	while (alsa.owner && ast_mutex_trylock(&alsa.owner->lock)) {
-		DEADLOCK_AVOIDANCE(&alsalock);
-	}
+	write(o->sndcmd[1], &x, sizeof(x));
 }
 
+
+/*
+ * handler for incoming calls. Either autoanswer, or start ringing
+ */
 static int alsa_call(struct ast_channel *c, char *dest, int timeout)
 {
-	int res = 3;
-	struct ast_frame f = { AST_FRAME_CONTROL };
-	ast_mutex_lock(&alsalock);
-	ast_verbose(" << Call placed to '%s' on console >> \n", dest);
-	if (autoanswer) {
+	struct chan_alsa_pvt *o = c->tech_pvt;
+	struct ast_frame f = { 0, };
+
+	ast_verbose(" << Call to device '%s' dnid '%s' rdnis '%s' on console from '%s' <%s> >>\n", dest, c->cid.cid_dnid, c->cid.cid_rdnis, c->cid.cid_name, c->cid.cid_num);
+	if (o->autoanswer) {
 		ast_verbose(" << Auto-answered >> \n");
-		grab_owner();
-		if (alsa.owner) {
-			f.subclass = AST_CONTROL_ANSWER;
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
+		f.frametype = AST_FRAME_CONTROL;
+		f.subclass = AST_CONTROL_ANSWER;
+		ast_queue_frame(c, &f);
 	} else {
-		ast_verbose(" << Type 'answer' to answer, or use 'autoanswer' for future calls >> \n");
-		grab_owner();
-		if (alsa.owner) {
-			f.subclass = AST_CONTROL_RINGING;
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
-		write(sndcmd[1], &res, sizeof(res));
+		ast_verbose("<< Type 'answer' to answer, or use 'autoanswer' for future calls >> \n");
+		f.frametype = AST_FRAME_CONTROL;
+		f.subclass = AST_CONTROL_RINGING;
+		ast_queue_frame(c, &f);
+		ring(o, AST_CONTROL_RING);
 	}
-	snd_pcm_prepare(alsa.icard);
-	snd_pcm_start(alsa.icard);
-	ast_mutex_unlock(&alsalock);
+	snd_pcm_prepare(o->pcm_sounddev);
+	snd_pcm_start(o->pcm_sounddev);
 	return 0;
 }
 
-static void answer_sound(void)
-{
-	int res;
-	nosound = 1;
-	res = 4;
-	write(sndcmd[1], &res, sizeof(res));
-
-}
-
+/*
+ * remote side answered the phone
+ */
 static int alsa_answer(struct ast_channel *c)
 {
-	ast_mutex_lock(&alsalock);
+	struct chan_alsa_pvt *o = c->tech_pvt;
+
 	ast_verbose(" << Console call has been answered >> \n");
-	answer_sound();
+#if 0
+	/* play an answer tone (XXX do we really need it ?) */
+	ring(o, AST_CONTROL_ANSWER);
+#endif
 	ast_setstate(c, AST_STATE_UP);
-	cursound = -1;
-	snd_pcm_prepare(alsa.icard);
-	snd_pcm_start(alsa.icard);
-	ast_mutex_unlock(&alsalock);
+	o->cursound = -1;
+	o->nosound = 0;
+	snd_pcm_prepare(o->pcm_sounddev);
+	snd_pcm_start(o->pcm_sounddev);
 	return 0;
 }
 
 static int alsa_hangup(struct ast_channel *c)
 {
-	int res;
-	ast_mutex_lock(&alsalock);
-	cursound = -1;
+	struct chan_alsa_pvt *o = c->tech_pvt;
+
+	o->cursound = -1;
+	o->nosound = 0;
 	c->tech_pvt = NULL;
-	alsa.owner = NULL;
+	o->owner = NULL;
 	ast_verbose(" << Hangup on console >> \n");
 	ast_module_unref(ast_module_info->self);
-	if (hookstate) {
-		hookstate = 0;
-		if (!autoanswer) {
-			/* Congestion noise */
-			res = 2;
-			write(sndcmd[1], &res, sizeof(res));
+	if (o->hookstate) {
+		if (o->autoanswer || o->autohangup) {
+			/* Assume auto-hangup too */
+			o->hookstate = 0;
+			setformat(o, O_CLOSE);
+		} else {
+			/* Make congestion noise */
+			ring(o, AST_CONTROL_CONGESTION);
 		}
 	}
-	snd_pcm_drop(alsa.icard);
-	ast_mutex_unlock(&alsalock);
+	snd_pcm_drop(o->pcm_sounddev);
 	return 0;
 }
 
-static int alsa_write(struct ast_channel *chan, struct ast_frame *f)
+/* used for data coming from the network */
+static int alsa_write(struct ast_channel *c, struct ast_frame *f)
 {
-	static char sizbuf[8000];
-	static int sizpos = 0;
-	int len = sizpos;
-	int pos;
-	int res = 0;
-	/* size_t frames = 0; */
-	snd_pcm_state_t state;
+	int src;
+	struct chan_alsa_pvt *o = c->tech_pvt;
 
 	/* Immediately return if no sound is enabled */
-	if (nosound)
+	if (o->nosound)
 		return 0;
-
-	ast_mutex_lock(&alsalock);
 	/* Stop any currently playing sound */
-	if (cursound != -1) {
-		snd_pcm_drop(alsa.ocard);
-		snd_pcm_prepare(alsa.ocard);
-		cursound = -1;
-	}
+	snd_pcm_drop(o->pcm_sounddev);
+	snd_pcm_prepare(o->pcm_sounddev);
+	o->cursound = -1;
 
+	/*
+	 * we could receive a block which is not a multiple of our
+	 * FRAME_SIZE, so buffer it locally and write to the device
+	 * in FRAME_SIZE chunks.
+	 * Keep the residue stored for future use.
+	 */
+	src = 0;					/* read position into f->data */
+	while (src < f->datalen) {
+		/* Compute spare room in the buffer */
+		int l = sizeof(o->alsa_write_buf) - o->alsa_write_dst;
 
-	/* We have to digest the frame in 160-byte portions */
-	if (f->datalen > sizeof(sizbuf) - sizpos) {
-		ast_log(LOG_WARNING, "Frame too large\n");
-		res = -1;
-	} else {
-		memcpy(sizbuf + sizpos, f->data, f->datalen);
-		len += f->datalen;
-		pos = 0;
-#ifdef ALSA_MONITOR
-		alsa_monitor_write(sizbuf, len);
-#endif
-		state = snd_pcm_state(alsa.ocard);
-		if (state == SND_PCM_STATE_XRUN)
-			snd_pcm_prepare(alsa.ocard);
-		res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2);
-		if (res == -EPIPE) {
-#if DEBUG
-			ast_log(LOG_DEBUG, "XRUN write\n");
-#endif
-			snd_pcm_prepare(alsa.ocard);
-			res = snd_pcm_writei(alsa.ocard, sizbuf, len / 2);
-			if (res != len / 2) {
-				ast_log(LOG_ERROR, "Write error: %s\n", snd_strerror(res));
-				res = -1;
-			} else if (res < 0) {
-				ast_log(LOG_ERROR, "Write error %s\n", snd_strerror(res));
-				res = -1;
-			}
-		} else {
-			if (res == -ESTRPIPE)
-				ast_log(LOG_ERROR, "You've got some big problems\n");
-			else if (res < 0)
-				ast_log(LOG_NOTICE, "Error %d on write\n", res);
+		if (f->datalen - src >= l) {	/* enough to fill a frame */
+			memcpy(o->alsa_write_buf + o->alsa_write_dst, f->data + src, l);
+			soundcard_writeframe(o, (short *) o->alsa_write_buf);
+			src += l;
+			o->alsa_write_dst = 0;
+		} else {				/* copy residue */
+			l = f->datalen - src;
+			memcpy(o->alsa_write_buf + o->alsa_write_dst, f->data + src, l);
+			src += l;			/* but really, we are done */
+			o->alsa_write_dst += l;
 		}
 	}
-	ast_mutex_unlock(&alsalock);
-	if (res > 0)
-		res = 0;
-	return res;
+	return 0;
 }
 
-
-static struct ast_frame *alsa_read(struct ast_channel *chan)
+static struct ast_frame *alsa_read(struct ast_channel *c)
 {
-	static struct ast_frame f;
-	static short __buf[FRAME_SIZE + AST_FRIENDLY_OFFSET / 2];
-	short *buf;
-	static int readpos = 0;
-	static int left = FRAME_SIZE;
-	snd_pcm_state_t state;
-	int r = 0;
-	int off = 0;
+	int res;
+	struct chan_alsa_pvt *o = c->tech_pvt;
+	struct ast_frame *f = &o->read_f;
 
-	ast_mutex_lock(&alsalock);
-	/* Acknowledge any pending cmd */
-	f.frametype = AST_FRAME_NULL;
-	f.subclass = 0;
-	f.samples = 0;
-	f.datalen = 0;
-	f.data = NULL;
-	f.offset = 0;
-	f.src = "Console";
-	f.mallocd = 0;
-	f.delivery.tv_sec = 0;
-	f.delivery.tv_usec = 0;
-
-	state = snd_pcm_state(alsa.icard);
+	/* XXX can be simplified returning &ast_null_frame */
+	/* prepare a NULL frame in case we don't have enough data to return */
+	bzero(f, sizeof(struct ast_frame));
+	f->frametype = AST_FRAME_NULL;
+	f->src = alsa_tech.type;
+	state = snd_pcm_state(o->pcm_sounddev);
 	if ((state != SND_PCM_STATE_PREPARED) && (state != SND_PCM_STATE_RUNNING)) {
-		snd_pcm_prepare(alsa.icard);
+		snd_pcm_prepare(o->pcm_sounddev);
 	}
 
-	buf = __buf + AST_FRIENDLY_OFFSET / 2;
+	res = snd_pcm_readi(o->pcm_sounddev, o->alsa_read_buf + o->readpos, sizeof(o->alsa_read_buf) - o->readpos);
+	if (res < 0)				/* audio data not ready, return a NULL frame */
+		return f;
 
-	r = snd_pcm_readi(alsa.icard, buf + readpos, left);
-	if (r == -EPIPE) {
-#if DEBUG
-		ast_log(LOG_ERROR, "XRUN read\n");
-#endif
-		snd_pcm_prepare(alsa.icard);
-	} else if (r == -ESTRPIPE) {
-		ast_log(LOG_ERROR, "-ESTRPIPE\n");
-		snd_pcm_prepare(alsa.icard);
-	} else if (r < 0) {
-		ast_log(LOG_ERROR, "Read error: %s\n", snd_strerror(r));
-	} else if (r >= 0) {
-		off -= r;
-	}
-	/* Update positions */
-	readpos += r;
-	left -= r;
+	o->readpos += res;
+	if (o->readpos < sizeof(o->alsa_read_buf))	/* not enough samples */
+		return f;
 
-	if (readpos >= FRAME_SIZE) {
-		/* A real frame */
-		readpos = 0;
-		left = FRAME_SIZE;
-		if (chan->_state != AST_STATE_UP) {
-			/* Don't transmit unless it's up */
-			ast_mutex_unlock(&alsalock);
-			return &f;
+	if (o->mute)
+		return f;
+
+	o->readpos = AST_FRIENDLY_OFFSET;	/* reset read pointer for next frame */
+	if (c->_state != AST_STATE_UP)	/* drop data if frame is not up */
+		return f;
+	/* ok we can build and deliver the frame to the caller */
+	f->frametype = AST_FRAME_VOICE;
+	f->subclass = AST_FORMAT_SLINEAR;
+	f->samples = FRAME_SIZE;
+	f->datalen = FRAME_SIZE * 2;
+	f->data = o->alsa_read_buf + AST_FRIENDLY_OFFSET;
+	if (o->boost != BOOST_SCALE) {	/* scale and clip values */
+		int i, x;
+		int16_t *p = (int16_t *) f->data;
+		for (i = 0; i < f->samples; i++) {
+			x = (p[i] * o->boost) / BOOST_SCALE;
+			if (x > 32767)
+				x = 32767;
+			else if (x < -32768)
+				x = -32768;
+			p[i] = x;
 		}
-		f.frametype = AST_FRAME_VOICE;
-		f.subclass = AST_FORMAT_SLINEAR;
-		f.samples = FRAME_SIZE;
-		f.datalen = FRAME_SIZE * 2;
-		f.data = buf;
-		f.offset = AST_FRIENDLY_OFFSET;
-		f.src = "Console";
-		f.mallocd = 0;
-#ifdef ALSA_MONITOR
-		alsa_monitor_read((char *) buf, FRAME_SIZE * 2);
-#endif
-
 	}
-	ast_mutex_unlock(&alsalock);
-	return &f;
+
+	f->offset = AST_FRIENDLY_OFFSET;
+	return f;
 }
 
 static int alsa_fixup(struct ast_channel *oldchan, struct ast_channel *newchan)
 {
-	struct chan_alsa_pvt *p = newchan->tech_pvt;
-	ast_mutex_lock(&alsalock);
-	p->owner = newchan;
-	ast_mutex_unlock(&alsalock);
+	struct chan_alsa_pvt *o = newchan->tech_pvt;
+	o->owner = newchan;
 	return 0;
 }
 
-static int alsa_indicate(struct ast_channel *chan, int cond, const void *data, size_t datalen)
+static int alsa_indicate(struct ast_channel *c, int cond, const void *data, size_t datalen)
 {
-	int res = 0;
-
-	ast_mutex_lock(&alsalock);
+	struct chan_alsa_pvt *o = c->tech_pvt;
+	int res = -1;
 
 	switch (cond) {
 	case AST_CONTROL_BUSY:
-		res = 1;
-		break;
 	case AST_CONTROL_CONGESTION:
-		res = 2;
-		break;
 	case AST_CONTROL_RINGING:
-	case AST_CONTROL_PROGRESS:
-		break;
+			res = cond;
+			break;
+			
 	case -1:
-		res = -1;
-		break;
+		o->cursound = -1;
+		o->nosound = 0;		/* when cursound is -1 nosound must be 0 */
+		return 0;
+		
 	case AST_CONTROL_VIDUPDATE:
 		res = -1;
 		break;
 	case AST_CONTROL_HOLD:
 		ast_verbose(" << Console Has Been Placed on Hold >> \n");
-		ast_moh_start(chan, data, mohinterpret);
-		break;
+		ast_moh_start(c, data, o->mohinterpret);
+			break;
 	case AST_CONTROL_UNHOLD:
 		ast_verbose(" << Console Has Been Retrieved from Hold >> \n");
-		ast_moh_stop(chan);
+		ast_moh_stop(c);
 		break;
 	case AST_CONTROL_SRCUPDATE:
 		break;
 	default:
-		ast_log(LOG_WARNING, "Don't know how to display condition %d on %s\n", cond, chan->name);
-		res = -1;
+		ast_log(LOG_WARNING, "Don't know how to display condition %d on %s\n", cond, c->name);
+		return -1;
 	}
 
 	if (res > -1)
-		write(sndcmd[1], &res, sizeof(res));
+		ring(o, res);
 
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	return 0;
 }
 
-static struct ast_channel *alsa_new(struct chan_alsa_pvt *p, int state)
+/*
+ * allocate a new channel.
+ */
+static struct ast_channel *alsa_new(struct chan_alsa_pvt *o, char *ext, char *ctx, int state)
 {
-	struct ast_channel *tmp = NULL;
-	
-	if (!(tmp = ast_channel_alloc(1, state, 0, 0, "", p->exten, p->context, 0, "ALSA/%s", indevname)))
-		return NULL;
+	struct ast_channel *c;
 
-	tmp->tech = &alsa_tech;
-	tmp->fds[0] = readdev;
-	tmp->nativeformats = AST_FORMAT_SLINEAR;
-	tmp->readformat = AST_FORMAT_SLINEAR;
-	tmp->writeformat = AST_FORMAT_SLINEAR;
-	tmp->tech_pvt = p;
-	if (!ast_strlen_zero(p->context))
-		ast_copy_string(tmp->context, p->context, sizeof(tmp->context));
-	if (!ast_strlen_zero(p->exten))
-		ast_copy_string(tmp->exten, p->exten, sizeof(tmp->exten));
-	if (!ast_strlen_zero(language))
-		ast_string_field_set(tmp, language, language);
-	p->owner = tmp;
+	c = ast_channel_alloc(1, state, o->cid_num, o->cid_name, "", ext, ctx, 0, "Console/%s", o->device + 5);
+	if (c == NULL)
+		return NULL;
+	c->tech = &alsa_tech;
+	if (o->sounddev < 0)
+		setformat(o, O_RDWR);
+	c->fds[0] = o->sounddev;	/* -1 if device closed, override later */
+	c->nativeformats = AST_FORMAT_SLINEAR;
+	c->readformat = AST_FORMAT_SLINEAR;
+	c->writeformat = AST_FORMAT_SLINEAR;
+	c->tech_pvt = o;
+
+	if (!ast_strlen_zero(o->language))
+		ast_string_field_set(c, language, o->language);
+	/* Don't use ast_set_callerid() here because it will
+	 * generate a needless NewCallerID event */
+	c->cid.cid_ani = ast_strdup(o->cid_num);
+	if (!ast_strlen_zero(ext))
+		c->cid.cid_dnid = ast_strdup(ext);
+
+	o->owner = c;
 	ast_module_ref(ast_module_info->self);
-	ast_jb_configure(tmp, &global_jbconf);
+	ast_jb_configure(c, &global_jbconf);
 	if (state != AST_STATE_DOWN) {
-		if (ast_pbx_start(tmp)) {
-			ast_log(LOG_WARNING, "Unable to start PBX on %s\n", tmp->name);
-			ast_hangup(tmp);
-			tmp = NULL;
+		if (ast_pbx_start(c)) {
+			ast_log(LOG_WARNING, "Unable to start PBX on %s\n", c->name);
+			ast_hangup(c);
+			o->owner = c = NULL;
+			/* XXX what about the channel itself ? */
+			/* XXX what about usecnt ? */
 		}
 	}
 
-	return tmp;
+	return c;
 }
 
 static struct ast_channel *alsa_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat = format;
-	struct ast_channel *tmp = NULL;
+	struct ast_channel *c;
+	struct chan_alsa_pvt *o = find_desc(data);
 
-	format &= AST_FORMAT_SLINEAR;
-	if (!format) {
-		ast_log(LOG_NOTICE, "Asked to get a channel of format '%d'\n", oldformat);
+	ast_log(LOG_WARNING, "alsa_request ty <%s> data 0x%p <%s>\n", type, data, (char *) data);
+	if (o == NULL) {
+		ast_log(LOG_NOTICE, "Device %s not found\n", (char *) data);
+		/* XXX we could default to 'dsp' perhaps ? */
 		return NULL;
 	}
-
-	ast_mutex_lock(&alsalock);
-
-	if (alsa.owner) {
-		ast_log(LOG_NOTICE, "Already have a call on the ALSA channel\n");
+	if ((format & AST_FORMAT_SLINEAR) == 0) {
+		ast_log(LOG_NOTICE, "Format 0x%x unsupported\n", format);
+		return NULL;
+	}
+	if (o->owner) {
+		ast_log(LOG_NOTICE, "Already have a call (chan %p) on the ALSA channel\n", o->owner);
 		*cause = AST_CAUSE_BUSY;
-	} else if (!(tmp = alsa_new(&alsa, AST_STATE_DOWN)))
+		return NULL;
+	}
+	c = alsa_new(o, NULL, NULL, AST_STATE_DOWN);
+	if (c == NULL) {
 		ast_log(LOG_WARNING, "Unable to create new ALSA channel\n");
-
-	ast_mutex_unlock(&alsalock);
-
-	return tmp;
+		return NULL;
+	}
+	return c;
 }
 
 static int console_autoanswer_deprecated(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
-
-	if ((argc != 1) && (argc != 2))
-		return RESULT_SHOWUSAGE;
-
-	ast_mutex_lock(&alsalock);
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
 	if (argc == 1) {
-		ast_cli(fd, "Auto answer is %s.\n", autoanswer ? "on" : "off");
-	} else {
-		if (!strcasecmp(argv[1], "on"))
-			autoanswer = -1;
-		else if (!strcasecmp(argv[1], "off"))
-			autoanswer = 0;
-		else
-			res = RESULT_SHOWUSAGE;
+		ast_cli(fd, "Auto answer is %s.\n", o->autoanswer ? "on" : "off");
+		return RESULT_SUCCESS;
 	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	if (argc != 2)
+		return RESULT_SHOWUSAGE;
+	if (o == NULL) {
+		ast_log(LOG_WARNING, "Cannot find device %s (should not happen!)\n", alsa_active);
+		return RESULT_FAILURE;
+	}
+	if (!strcasecmp(argv[1], "on"))
+		o->autoanswer = -1;
+	else if (!strcasecmp(argv[1], "off"))
+		o->autoanswer = 0;
+	else
+		return RESULT_SHOWUSAGE;
+	return RESULT_SUCCESS;
 }
 
 static int console_autoanswer(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;;
-	if ((argc != 2) && (argc != 3))
-		return RESULT_SHOWUSAGE;
-	ast_mutex_lock(&alsalock);
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+
 	if (argc == 2) {
-		ast_cli(fd, "Auto answer is %s.\n", autoanswer ? "on" : "off");
-	} else {
-		if (!strcasecmp(argv[2], "on"))
-			autoanswer = -1;
-		else if (!strcasecmp(argv[2], "off"))
-			autoanswer = 0;
-		else
-			res = RESULT_SHOWUSAGE;
+		ast_cli(fd, "Auto answer is %s.\n", o->autoanswer ? "on" : "off");
+		return RESULT_SUCCESS;
 	}
-	ast_mutex_unlock(&alsalock);
-	return res;
+	if (argc != 3)
+		return RESULT_SHOWUSAGE;
+	if (o == NULL) {
+		ast_log(LOG_WARNING, "Cannot find device %s (should not happen!)\n",
+		    alsa_active);
+		return RESULT_FAILURE;
+	}
+	if (!strcasecmp(argv[2], "on"))
+		o->autoanswer = -1;
+	else if (!strcasecmp(argv[2], "off"))
+		o->autoanswer = 0;
+	else
+		return RESULT_SHOWUSAGE;
+	return RESULT_SUCCESS;
+}
+
+static char *autoanswer_complete_deprecated(const char *line, const char *word, int pos, int state)
+{
+	static char *choices[] = { "on", "off", NULL };
+
+	return (pos != 2) ? NULL : ast_cli_complete(word, choices, state);
 }
 
 static char *autoanswer_complete(const char *line, const char *word, int pos, int state)
 {
-#ifndef MIN
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-#endif
-	switch (state) {
-		case 0:
-			if (!ast_strlen_zero(word) && !strncasecmp(word, "on", MIN(strlen(word), 2)))
-				return ast_strdup("on");
-		case 1:
-			if (!ast_strlen_zero(word) && !strncasecmp(word, "off", MIN(strlen(word), 3)))
-				return ast_strdup("off");
-		default:
-			return NULL;
-	}
-	return NULL;
+	static char *choices[] = { "on", "off", NULL };
+
+	return (pos != 3) ? NULL : ast_cli_complete(word, choices, state);
 }
 
-static const char autoanswer_usage[] =
+static char autoanswer_usage[] =
 	"Usage: console autoanswer [on|off]\n"
 	"       Enables or disables autoanswer feature.  If used without\n"
 	"       argument, displays the current on/off status of autoanswer.\n"
 	"       The default value of autoanswer is in 'alsa.conf'.\n";
 
+/*
+ * answer command from the console
+ */
 static int console_answer_deprecated(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
+	struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_ANSWER };
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
 	if (argc != 1)
 		return RESULT_SHOWUSAGE;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner) {
+	if (!o->owner) {
 		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
-	} else {
-		hookstate = 1;
-		cursound = -1;
-		grab_owner();
-		if (alsa.owner) {
-			struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_ANSWER };
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
-		answer_sound();
+		return RESULT_FAILURE;
 	}
-
-	snd_pcm_prepare(alsa.icard);
-	snd_pcm_start(alsa.icard);
-
-	ast_mutex_unlock(&alsalock);
-
+	o->hookstate = 1;
+	o->cursound = -1;
+	o->nosound = 0;
+	ast_queue_frame(o->owner, &f);
+#if 0
+	/* XXX do we really need it ? considering we shut down immediately... */
+	ring(o, AST_CONTROL_ANSWER);
+#endif
+	snd_pcm_prepare(o->pcm_sounddev);
+	snd_pcm_start(o->pcm_sounddev);
 	return RESULT_SUCCESS;
 }
 
 static int console_answer(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
+	struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_ANSWER };
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
 	if (argc != 2)
 		return RESULT_SHOWUSAGE;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner) {
+	if (!o->owner) {
 		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
-	} else {
-		hookstate = 1;
-		cursound = -1;
-		grab_owner();
-		if (alsa.owner) {
-			struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_ANSWER };
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
-		answer_sound();
+		return RESULT_FAILURE;
 	}
+	o->hookstate = 1;
+	o->cursound = -1;
+	o->nosound = 0;
+	ast_queue_frame(o->owner, &f);
+#if 0
+	/* XXX do we really need it ? considering we shut down immediately... */
+	ring(o, AST_CONTROL_ANSWER);
+#endif
+	snd_pcm_prepare(o->pcm_sounddev);
+	snd_pcm_start(o->pcm_sounddev);
+	return RESULT_SUCCESS;
+}
 
-	snd_pcm_prepare(alsa.icard);
-	snd_pcm_start(alsa.icard);
+static char answer_usage[] =
+	"Usage: console answer\n"
+	"       Answers an incoming call on the console (ALSA) channel.\n";
 
-	ast_mutex_unlock(&alsalock);
+/*
+ * concatenate all arguments into a single string. argv is NULL-terminated
+ * so we can use it right away
+ */
+static int console_sendtext_deprecated(int fd, int argc, char *argv[])
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+	char buf[TEXT_SIZE];
 
+	if (argc < 2)
+		return RESULT_SHOWUSAGE;
+	if (!o->owner) {
+		ast_cli(fd, "Not in a call\n");
+		return RESULT_FAILURE;
+	}
+	ast_join(buf, sizeof(buf) - 1, argv + 2);
+	if (!ast_strlen_zero(buf)) {
+		struct ast_frame f = { 0, };
+		int i = strlen(buf);
+		buf[i] = '\n';
+		f.frametype = AST_FRAME_TEXT;
+		f.subclass = 0;
+		f.data = buf;
+		f.datalen = i + 1;
+		ast_queue_frame(o->owner, &f);
+	}
+	return RESULT_SUCCESS;
+}
+
+static int console_sendtext(int fd, int argc, char *argv[])
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+	char buf[TEXT_SIZE];
+
+	if (argc < 3)
+		return RESULT_SHOWUSAGE;
+	if (!o->owner) {
+		ast_cli(fd, "Not in a call\n");
+		return RESULT_FAILURE;
+	}
+	ast_join(buf, sizeof(buf) - 1, argv + 3);
+	if (!ast_strlen_zero(buf)) {
+		struct ast_frame f = { 0, };
+		int i = strlen(buf);
+		buf[i] = '\n';
+		f.frametype = AST_FRAME_TEXT;
+		f.subclass = 0;
+		f.data = buf;
+		f.datalen = i + 1;
+		ast_queue_frame(o->owner, &f);
+	}
 	return RESULT_SUCCESS;
 }
 
@@ -972,269 +1271,370 @@ static char sendtext_usage[] =
 	"Usage: console send text <message>\n"
 	"       Sends a text message for display on the remote terminal.\n";
 
-static int console_sendtext_deprecated(int fd, int argc, char *argv[])
-{
-	int tmparg = 2;
-	int res = RESULT_SUCCESS;
-
-	if (argc < 2)
-		return RESULT_SHOWUSAGE;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner) {
-		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
-	} else {
-		struct ast_frame f = { AST_FRAME_TEXT, 0 };
-		char text2send[256] = "";
-		text2send[0] = '\0';
-		while (tmparg < argc) {
-			strncat(text2send, argv[tmparg++], sizeof(text2send) - strlen(text2send) - 1);
-			strncat(text2send, " ", sizeof(text2send) - strlen(text2send) - 1);
-		}
-		text2send[strlen(text2send) - 1] = '\n';
-		f.data = text2send;
-		f.datalen = strlen(text2send) + 1;
-		grab_owner();
-		if (alsa.owner) {
-			ast_queue_frame(alsa.owner, &f);
-			f.frametype = AST_FRAME_CONTROL;
-			f.subclass = AST_CONTROL_ANSWER;
-			f.data = NULL;
-			f.datalen = 0;
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
-	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
-}
-
-static int console_sendtext(int fd, int argc, char *argv[])
-{
-	int tmparg = 3;
-	int res = RESULT_SUCCESS;
-
-	if (argc < 3)
-		return RESULT_SHOWUSAGE;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner) {
-		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
-	} else {
-		struct ast_frame f = { AST_FRAME_TEXT, 0 };
-		char text2send[256] = "";
-		text2send[0] = '\0';
-		while (tmparg < argc) {
-			strncat(text2send, argv[tmparg++], sizeof(text2send) - strlen(text2send) - 1);
-			strncat(text2send, " ", sizeof(text2send) - strlen(text2send) - 1);
-		}
-		text2send[strlen(text2send) - 1] = '\n';
-		f.data = text2send;
-		f.datalen = strlen(text2send) + 1;
-		grab_owner();
-		if (alsa.owner) {
-			ast_queue_frame(alsa.owner, &f);
-			f.frametype = AST_FRAME_CONTROL;
-			f.subclass = AST_CONTROL_ANSWER;
-			f.data = NULL;
-			f.datalen = 0;
-			ast_queue_frame(alsa.owner, &f);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
-	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
-}
-
-static char answer_usage[] =
-	"Usage: console answer\n"
-	"       Answers an incoming call on the console (ALSA) channel.\n";
-
 static int console_hangup_deprecated(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
 	if (argc != 1)
 		return RESULT_SHOWUSAGE;
-
-	cursound = -1;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner && !hookstate) {
-		ast_cli(fd, "No call to hangup up\n");
-		res = RESULT_FAILURE;
-	} else {
-		hookstate = 0;
-		grab_owner();
-		if (alsa.owner) {
-			ast_queue_hangup(alsa.owner);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
+	o->cursound = -1;
+	o->nosound = 0;
+	if (!o->owner && !o->hookstate) { /* XXX maybe only one ? */
+		ast_cli(fd, "No call to hang up\n");
+		return RESULT_FAILURE;
 	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	o->hookstate = 0;
+	if (o->owner)
+		ast_queue_hangup(o->owner);
+	setformat(o, O_CLOSE);
+	return RESULT_SUCCESS;
 }
 
 static int console_hangup(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
 	if (argc != 2)
 		return RESULT_SHOWUSAGE;
-
-	cursound = -1;
-
-	ast_mutex_lock(&alsalock);
-
-	if (!alsa.owner && !hookstate) {
-		ast_cli(fd, "No call to hangup up\n");
-		res = RESULT_FAILURE;
-	} else {
-		hookstate = 0;
-		grab_owner();
-		if (alsa.owner) {
-			ast_queue_hangup(alsa.owner);
-			ast_mutex_unlock(&alsa.owner->lock);
-		}
+	o->cursound = -1;
+	o->nosound = 0;
+	if (!o->owner && !o->hookstate) { /* XXX maybe only one ? */
+		ast_cli(fd, "No call to hang up\n");
+		return RESULT_FAILURE;
 	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	o->hookstate = 0;
+	if (o->owner)
+		ast_queue_hangup(o->owner);
+	setformat(o, O_CLOSE);
+	return RESULT_SUCCESS;
 }
 
 static char hangup_usage[] =
 	"Usage: console hangup\n"
 	"       Hangs up any call currently placed on the console.\n";
 
+static int console_flash_deprecated(int fd, int argc, char *argv[])
+{
+	struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_FLASH };
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+
+	if (argc != 1)
+		return RESULT_SHOWUSAGE;
+	o->cursound = -1;
+	o->nosound = 0; /* when cursound is -1 nosound must be 0 */
+	if (!o->owner) { /* XXX maybe !o->hookstate too ? */
+		ast_cli(fd, "No call to flash\n");
+		return RESULT_FAILURE;
+	}
+	o->hookstate = 0;
+	if (o->owner) /* XXX must be true, right ? */
+		ast_queue_frame(o->owner, &f);
+	return RESULT_SUCCESS;
+}
+
+static int console_flash(int fd, int argc, char *argv[])
+{
+	struct ast_frame f = { AST_FRAME_CONTROL, AST_CONTROL_FLASH };
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+
+	if (argc != 2)
+		return RESULT_SHOWUSAGE;
+	o->cursound = -1;
+	o->nosound = 0;				/* when cursound is -1 nosound must be 0 */
+	if (!o->owner) {			/* XXX maybe !o->hookstate too ? */
+		ast_cli(fd, "No call to flash\n");
+		return RESULT_FAILURE;
+	}
+	o->hookstate = 0;
+	if (o->owner)				/* XXX must be true, right ? */
+		ast_queue_frame(o->owner, &f);
+	return RESULT_SUCCESS;
+}
+
+static char flash_usage[] =
+	"Usage: console flash\n"
+	"       Flashes the call currently placed on the console.\n";
+
 static int console_dial_deprecated(int fd, int argc, char *argv[])
 {
-	char tmp[256], *tmp2;
-	char *mye, *myc;
-	char *d;
-	int res = RESULT_SUCCESS;
+	char *s = NULL, *mye = NULL, *myc = NULL;
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
-	if ((argc != 1) && (argc != 2))
+	if (argc != 1 && argc != 2)
 		return RESULT_SHOWUSAGE;
+	if (o->owner) { /* already in a call */
+		int i;
+		struct ast_frame f = { AST_FRAME_DTMF, 0 };
 
-	ast_mutex_lock(&alsalock);
-
-	if (alsa.owner) {
-		if (argc == 2) {
-			d = argv[1];
-			grab_owner();
-			if (alsa.owner) {
-				struct ast_frame f = { AST_FRAME_DTMF };
-				while (*d) {
-					f.subclass = *d;
-					ast_queue_frame(alsa.owner, &f);
-					d++;
-				}
-				ast_mutex_unlock(&alsa.owner->lock);
-			}
-		} else {
-			ast_cli(fd, "You're already in a call.  You can use this only to dial digits until you hangup\n");
-			res = RESULT_FAILURE;
+		if (argc == 1) { /* argument is mandatory here */
+			ast_cli(fd, "Already in a call. You can only dial digits until you hangup.\n");
+			return RESULT_FAILURE;
 		}
-	} else {
-		mye = exten;
-		myc = context;
-		if (argc == 2) {
-			char *stringp = NULL;
-			ast_copy_string(tmp, argv[1], sizeof(tmp));
-			stringp = tmp;
-			strsep(&stringp, "@");
-			tmp2 = strsep(&stringp, "@");
-			if (!ast_strlen_zero(tmp))
-				mye = tmp;
-			if (!ast_strlen_zero(tmp2))
-				myc = tmp2;
+		s = argv[1];
+		/* send the string one char at a time */
+		for (i = 0; i < strlen(s); i++) {
+			f.subclass = s[i];
+			ast_queue_frame(o->owner, &f);
 		}
-		if (ast_exists_extension(NULL, myc, mye, 1, NULL)) {
-			ast_copy_string(alsa.exten, mye, sizeof(alsa.exten));
-			ast_copy_string(alsa.context, myc, sizeof(alsa.context));
-			hookstate = 1;
-			alsa_new(&alsa, AST_STATE_RINGING);
-		} else
-			ast_cli(fd, "No such extension '%s' in context '%s'\n", mye, myc);
+		return RESULT_SUCCESS;
 	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	/* if we have an argument split it into extension and context */
+	if (argc == 2)
+		s = ast_ext_ctx(argv[1], &mye, &myc);
+	/* supply default values if needed */
+	if (mye == NULL)
+		mye = o->ext;
+	if (myc == NULL)
+		myc = o->ctx;
+	if (ast_exists_extension(NULL, myc, mye, 1, NULL)) {
+		o->hookstate = 1;
+		alsa_new(o, mye, myc, AST_STATE_RINGING);
+	} else
+		ast_cli(fd, "No such extension '%s' in context '%s'\n", mye, myc);
+	if (s)
+		free(s);
+	return RESULT_SUCCESS;
 }
 
 static int console_dial(int fd, int argc, char *argv[])
 {
-	char tmp[256], *tmp2;
-	char *mye, *myc;
-	char *d;
-	int res = RESULT_SUCCESS;
+	char *s = NULL, *mye = NULL, *myc = NULL;
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
 
-	if ((argc != 2) && (argc != 3))
+	if (argc != 2 && argc != 3)
 		return RESULT_SHOWUSAGE;
+	if (o->owner) {	/* already in a call */
+		int i;
+		struct ast_frame f = { AST_FRAME_DTMF, 0 };
 
-	ast_mutex_lock(&alsalock);
-
-	if (alsa.owner) {
-		if (argc == 3) {
-			d = argv[2];
-			grab_owner();
-			if (alsa.owner) {
-				struct ast_frame f = { AST_FRAME_DTMF };
-				while (*d) {
-					f.subclass = *d;
-					ast_queue_frame(alsa.owner, &f);
-					d++;
-				}
-				ast_mutex_unlock(&alsa.owner->lock);
-			}
-		} else {
-			ast_cli(fd, "You're already in a call.  You can use this only to dial digits until you hangup\n");
-			res = RESULT_FAILURE;
+		if (argc == 2) {	/* argument is mandatory here */
+			ast_cli(fd, "Already in a call. You can only dial digits until you hangup.\n");
+			return RESULT_FAILURE;
 		}
-	} else {
-		mye = exten;
-		myc = context;
-		if (argc == 3) {
-			char *stringp = NULL;
-			ast_copy_string(tmp, argv[2], sizeof(tmp));
-			stringp = tmp;
-			strsep(&stringp, "@");
-			tmp2 = strsep(&stringp, "@");
-			if (!ast_strlen_zero(tmp))
-				mye = tmp;
-			if (!ast_strlen_zero(tmp2))
-				myc = tmp2;
+		s = argv[2];
+		/* send the string one char at a time */
+		for (i = 0; i < strlen(s); i++) {
+			f.subclass = s[i];
+			ast_queue_frame(o->owner, &f);
 		}
-		if (ast_exists_extension(NULL, myc, mye, 1, NULL)) {
-			ast_copy_string(alsa.exten, mye, sizeof(alsa.exten));
-			ast_copy_string(alsa.context, myc, sizeof(alsa.context));
-			hookstate = 1;
-			alsa_new(&alsa, AST_STATE_RINGING);
-		} else
-			ast_cli(fd, "No such extension '%s' in context '%s'\n", mye, myc);
+		return RESULT_SUCCESS;
 	}
-
-	ast_mutex_unlock(&alsalock);
-
-	return res;
+	/* if we have an argument split it into extension and context */
+	if (argc == 3)
+		s = ast_ext_ctx(argv[2], &mye, &myc);
+	/* supply default values if needed */
+	if (mye == NULL)
+		mye = o->ext;
+	if (myc == NULL)
+		myc = o->ctx;
+	if (ast_exists_extension(NULL, myc, mye, 1, NULL)) {
+		o->hookstate = 1;
+		alsa_new(o, mye, myc, AST_STATE_RINGING);
+	} else
+		ast_cli(fd, "No such extension '%s' in context '%s'\n", mye, myc);
+	if (s)
+		free(s);
+	return RESULT_SUCCESS;
 }
 
 static char dial_usage[] =
 	"Usage: console dial [extension[@context]]\n"
 	"       Dials a given extension (and context if specified)\n";
+
+static int __console_mute_unmute(int mute)
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+	
+	o->mute = mute;
+	return RESULT_SUCCESS;
+}
+
+static int console_mute_deprecated(int fd, int argc, char *argv[])
+{
+	if (argc != 1)
+		return RESULT_SHOWUSAGE;
+
+	return __console_mute_unmute(1);
+}
+
+static int console_mute(int fd, int argc, char *argv[])
+{
+	if (argc != 2)
+		return RESULT_SHOWUSAGE;
+
+	return __console_mute_unmute(1);
+}
+
+static char mute_usage[] =
+	"Usage: console mute\nMutes the microphone\n";
+
+static int console_unmute_deprecated(int fd, int argc, char *argv[])
+{
+	if (argc != 1)
+		return RESULT_SHOWUSAGE;
+
+	return __console_mute_unmute(0);
+}
+
+static int console_unmute(int fd, int argc, char *argv[])
+{
+	if (argc != 2)
+		return RESULT_SHOWUSAGE;
+
+	return __console_mute_unmute(0);
+}
+
+static char unmute_usage[] =
+	"Usage: console unmute\nUnmutes the microphone\n";
+
+static int console_transfer_deprecated(int fd, int argc, char *argv[])
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+	struct ast_channel *b = NULL;
+	char *tmp, *ext, *ctx;
+
+	if (argc != 2)
+		return RESULT_SHOWUSAGE;
+	if (o == NULL)
+		return RESULT_FAILURE;
+	if (o->owner ==NULL || (b = ast_bridged_channel(o->owner)) == NULL) {
+		ast_cli(fd, "There is no call to transfer\n");
+		return RESULT_SUCCESS;
+	}
+
+	tmp = ast_ext_ctx(argv[1], &ext, &ctx);
+	if (ctx == NULL)		/* supply default context if needed */
+		ctx = o->owner->context;
+	if (!ast_exists_extension(b, ctx, ext, 1, b->cid.cid_num))
+		ast_cli(fd, "No such extension exists\n");
+	else {
+		ast_cli(fd, "Whee, transferring %s to %s@%s.\n",
+			b->name, ext, ctx);
+		if (ast_async_goto(b, ctx, ext, 1))
+			ast_cli(fd, "Failed to transfer :(\n");
+	}
+	if (tmp)
+		free(tmp);
+	return RESULT_SUCCESS;
+}
+
+static int console_transfer(int fd, int argc, char *argv[])
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+	struct ast_channel *b = NULL;
+	char *tmp, *ext, *ctx;
+
+	if (argc != 3)
+		return RESULT_SHOWUSAGE;
+	if (o == NULL)
+		return RESULT_FAILURE;
+	if (o->owner == NULL || (b = ast_bridged_channel(o->owner)) == NULL) {
+		ast_cli(fd, "There is no call to transfer\n");
+		return RESULT_SUCCESS;
+	}
+
+	tmp = ast_ext_ctx(argv[2], &ext, &ctx);
+	if (ctx == NULL)			/* supply default context if needed */
+		ctx = o->owner->context;
+	if (!ast_exists_extension(b, ctx, ext, 1, b->cid.cid_num))
+		ast_cli(fd, "No such extension exists\n");
+	else {
+		ast_cli(fd, "Whee, transferring %s to %s@%s.\n", b->name, ext, ctx);
+		if (ast_async_goto(b, ctx, ext, 1))
+			ast_cli(fd, "Failed to transfer :(\n");
+	}
+	if (tmp)
+		free(tmp);
+	return RESULT_SUCCESS;
+}
+
+static char transfer_usage[] =
+	"Usage: console transfer <extension>[@context]\n"
+	"       Transfers the currently connected call to the given extension (and\n"
+	"context if specified)\n";
+
+static int console_active_deprecated(int fd, int argc, char *argv[])
+{
+	if (argc == 1)
+		ast_cli(fd, "active console is [%s]\n", alsa_active);
+	else if (argc != 2)
+		return RESULT_SHOWUSAGE;
+	else {
+		struct chan_alsa_pvt *o;
+		if (strcmp(argv[1], "show") == 0) {
+			for (o = alsa_default.next; o; o = o->next)
+				ast_cli(fd, "device [%s] exists\n", o->name);
+			return RESULT_SUCCESS;
+		}
+		o = find_desc(argv[1]);
+		if (o == NULL)
+			ast_cli(fd, "No device [%s] exists\n", argv[1]);
+		else
+			alsa_active = o->name;
+	}
+	return RESULT_SUCCESS;
+}
+
+static int console_active(int fd, int argc, char *argv[])
+{
+	if (argc == 2)
+		ast_cli(fd, "active console is [%s]\n", alsa_active);
+	else if (argc != 3)
+		return RESULT_SHOWUSAGE;
+	else {
+		struct chan_alsa_pvt *o;
+		if (strcmp(argv[2], "show") == 0) {
+			for (o = alsa_default.next; o; o = o->next)
+				ast_cli(fd, "device [%s] exists\n", o->name);
+			return RESULT_SUCCESS;
+		}
+		o = find_desc(argv[2]);
+		if (o == NULL)
+			ast_cli(fd, "No device [%s] exists\n", argv[2]);
+		else
+			alsa_active = o->name;
+	}
+	return RESULT_SUCCESS;
+}
+
+static char active_usage[] =
+	"Usage: console active [device]\n"
+	"       If used without a parameter, displays which device is the current\n"
+	"console.  If a device is specified, the console sound device is changed to\n"
+	"the device specified.\n";
+
+/*
+ * store the boost factor
+ */
+static void store_boost(struct chan_alsa_pvt *o, char *s)
+{
+	double boost = 0;
+	if (sscanf(s, "%lf", &boost) != 1) {
+		ast_log(LOG_WARNING, "invalid boost <%s>\n", s);
+		return;
+	}
+	if (boost < -BOOST_MAX) {
+		ast_log(LOG_WARNING, "boost %s too small, using %d\n", s, -BOOST_MAX);
+		boost = -BOOST_MAX;
+	} else if (boost > BOOST_MAX) {
+		ast_log(LOG_WARNING, "boost %s too large, using %d\n", s, BOOST_MAX);
+		boost = BOOST_MAX;
+	}
+	boost = exp(log(10) * boost / 20) * BOOST_SCALE;
+	o->boost = boost;
+	ast_log(LOG_WARNING, "setting boost %s to %d\n", s, o->boost);
+}
+
+static int do_boost(int fd, int argc, char *argv[])
+{
+	struct chan_alsa_pvt *o = find_desc(alsa_active);
+
+	if (argc == 2)
+		ast_cli(fd, "boost currently %5.1f\n", 20 * log10(((double) o->boost / (double) BOOST_SCALE)));
+	else if (argc == 3)
+		store_boost(o, argv[2]);
+	return RESULT_SUCCESS;
+}
 
 static struct ast_cli_entry cli_alsa_answer_deprecated = {
 	{ "answer", NULL },
@@ -1246,20 +1646,50 @@ static struct ast_cli_entry cli_alsa_hangup_deprecated = {
 	console_hangup_deprecated, NULL,
 	NULL };
 
+static struct ast_cli_entry cli_alsa_flash_deprecated = {
+	{ "flash", NULL },
+	console_flash_deprecated, NULL,
+	NULL };
+
 static struct ast_cli_entry cli_alsa_dial_deprecated = {
 	{ "dial", NULL },
 	console_dial_deprecated, NULL,
-	NULL };
+        NULL };
+
+static struct ast_cli_entry cli_alsa_mute_deprecated = {
+	{ "mute", NULL },
+	console_mute_deprecated, NULL,
+        NULL };
+
+static struct ast_cli_entry cli_alsa_unmute_deprecated = {
+	{ "unmute", NULL },
+	console_unmute_deprecated, NULL,
+        NULL };
+
+static struct ast_cli_entry cli_alsa_transfer_deprecated = {
+	{ "transfer", NULL },
+	console_transfer_deprecated, NULL,
+        NULL };
 
 static struct ast_cli_entry cli_alsa_send_text_deprecated = {
 	{ "send", "text", NULL },
 	console_sendtext_deprecated, NULL,
-	NULL };
+        NULL };
 
 static struct ast_cli_entry cli_alsa_autoanswer_deprecated = {
 	{ "autoanswer", NULL },
 	console_autoanswer_deprecated, NULL,
-	NULL, autoanswer_complete };
+        NULL, autoanswer_complete_deprecated };
+
+static struct ast_cli_entry cli_alsa_boost_deprecated = {
+	{ "alsa", "boost", NULL },
+	do_boost, NULL,
+	NULL };
+
+static struct ast_cli_entry cli_alsa_active_deprecated = {
+	{ "console", NULL },
+	console_active_deprecated, NULL,
+        NULL };
 
 static struct ast_cli_entry cli_alsa[] = {
 	{ { "console", "answer", NULL },
@@ -1270,9 +1700,25 @@ static struct ast_cli_entry cli_alsa[] = {
 	console_hangup, "Hangup a call on the console",
 	hangup_usage, NULL, &cli_alsa_hangup_deprecated },
 
+	{ { "console", "flash", NULL },
+	console_flash, "Flash a call on the console",
+	flash_usage, NULL, &cli_alsa_flash_deprecated },
+
 	{ { "console", "dial", NULL },
 	console_dial, "Dial an extension on the console",
 	dial_usage, NULL, &cli_alsa_dial_deprecated },
+
+	{ { "console", "mute", NULL },
+	console_mute, "Disable mic input",
+	mute_usage, NULL, &cli_alsa_mute_deprecated },
+
+	{ { "console", "unmute", NULL },
+	console_unmute, "Enable mic input",
+	unmute_usage, NULL, &cli_alsa_unmute_deprecated },
+
+	{ { "console", "transfer", NULL },
+	console_transfer, "Transfer a call to a different extension",
+	transfer_usage, NULL, &cli_alsa_transfer_deprecated },
 
 	{ { "console", "send", "text", NULL },
 	console_sendtext, "Send text to the remote device",
@@ -1281,93 +1727,198 @@ static struct ast_cli_entry cli_alsa[] = {
 	{ { "console", "autoanswer", NULL },
 	console_autoanswer, "Sets/displays autoanswer",
 	autoanswer_usage, autoanswer_complete, &cli_alsa_autoanswer_deprecated },
+
+	{ { "console", "boost", NULL },
+	do_boost, "Sets/displays mic boost in dB",
+	NULL, NULL, &cli_alsa_boost_deprecated },
+
+	{ { "console", "active", NULL },
+	console_active, "Sets/displays active console",
+	active_usage, NULL, &cli_alsa_active_deprecated },
 };
+
+/*
+ * store the mixer argument from the config file, filtering palsaibly
+ * invalid or dangerous values (the string is used as argument for
+ * system("mixer %s")
+ */
+static void store_mixer(struct chan_alsa_pvt *o, char *s)
+{
+	int i;
+
+	for (i = 0; i < strlen(s); i++) {
+		if (!isalnum(s[i]) && index(" \t-/", s[i]) == NULL) {
+			ast_log(LOG_WARNING, "Suspect char %c in mixer cmd, ignoring:\n\t%s\n", s[i], s);
+			return;
+		}
+	}
+	if (o->mixer_cmd)
+		free(o->mixer_cmd);
+	o->mixer_cmd = ast_strdup(s);
+	ast_log(LOG_WARNING, "setting mixer %s\n", s);
+}
+
+/*
+ * store the callerid components
+ */
+static void store_callerid(struct chan_alsa_pvt *o, char *s)
+{
+	ast_callerid_split(s, o->cid_name, sizeof(o->cid_name), o->cid_num, sizeof(o->cid_num));
+}
+
+/*
+ * grab fields from the config file, init the descriptor and open the device.
+ */
+static struct chan_alsa_pvt *store_config(struct ast_config *cfg, char *ctg)
+{
+	struct ast_variable *v;
+	struct chan_alsa_pvt *o;
+
+	if (ctg == NULL) {
+		o = &alsa_default;
+		ctg = "general";
+	} else {
+		if (!(o = ast_calloc(1, sizeof(*o))))
+			return NULL;
+		*o = alsa_default;
+		/* "general" is also the default thing */
+		if (strcmp(ctg, "general") == 0) {
+			o->name = ast_strdup("dsp");
+			alsa_active = o->name;
+			goto openit;
+		}
+		o->name = ast_strdup(ctg);
+	}
+
+	strcpy(o->mohinterpret, "default");
+
+	o->lastopen = ast_tvnow();	/* don't leave it 0 or tvdiff may wrap */
+	/* fill other fields from configuration */
+	for (v = ast_variable_browse(cfg, ctg); v; v = v->next) {
+		M_START(v->name, v->value);
+
+		/* handle jb conf */
+		if (!ast_jb_read_conf(&global_jbconf, v->name, v->value))
+			continue;
+
+		M_BOOL("autoanswer", o->autoanswer)
+			M_BOOL("autohangup", o->autohangup)
+			M_BOOL("overridecontext", o->overridecontext)
+			M_STR("device", o->device)
+			M_UINT("frags", o->frags)
+			M_UINT("debug", alsa_debug)
+			M_UINT("queuesize", o->queuesize)
+			M_STR("context", o->ctx)
+			M_STR("language", o->language)
+			M_STR("mohinterpret", o->mohinterpret)
+			M_STR("extension", o->ext)
+			M_F("mixer", store_mixer(o, v->value))
+			M_F("callerid", store_callerid(o, v->value))
+			M_F("boost", store_boost(o, v->value))
+			M_END(;
+			);
+	}
+	if (ast_strlen_zero(o->device))
+		ast_copy_string(o->device, "default", sizeof(o->device));
+	if (o->mixer_cmd) {
+		char *cmd;
+
+		asprintf(&cmd, "mixer %s", o->mixer_cmd);
+		ast_log(LOG_WARNING, "running [%s]\n", cmd);
+		system(cmd);
+		free(cmd);
+	}
+	if (o == &alsa_default)		/* we are done with the default */
+		return NULL;
+
+  openit:
+#if TRYOPEN
+	if (setformat(o, O_RDWR) < 0) {	/* open device */
+		if (option_verbose > 0) {
+			ast_verbose(VERBOSE_PREFIX_2 "Device %s not detected\n", ctg);
+			ast_verbose(VERBOSE_PREFIX_2 "Turn off ALSA support by adding " "'noload=chan_alsa.so' in /etc/asterisk/modules.conf\n");
+		}
+		goto error;
+	}
+	if (o->duplex != M_FULL)
+		ast_log(LOG_WARNING, "XXX I don't work right with non " "full-duplex sound cards XXX\n");
+#endif /* TRYOPEN */
+	if (pipe(o->sndcmd) != 0) {
+		ast_log(LOG_ERROR, "Unable to create pipe\n");
+		goto error;
+	}
+	ast_pthread_create_background(&o->sthread, NULL, sound_thread, o);
+	/* link into list of devices */
+	if (o != &alsa_default) {
+		o->next = alsa_default.next;
+		alsa_default.next = o;
+	}
+	return o;
+
+  error:
+	if (o != &alsa_default)
+		free(o);
+	return NULL;
+}
 
 static int load_module(void)
 {
-	int res;
-	struct ast_config *cfg;
-	struct ast_variable *v;
+	struct ast_config *cfg = NULL;
+	char *ctg = NULL;
 
 	/* Copy the default jb config over global_jbconf */
 	memcpy(&global_jbconf, &default_jbconf, sizeof(struct ast_jb_conf));
 
-	strcpy(mohinterpret, "default");
-
-	if ((cfg = ast_config_load(config))) {
-		v = ast_variable_browse(cfg, "general");
-		for (; v; v = v->next) {
-			/* handle jb conf */
-			if (!ast_jb_read_conf(&global_jbconf, v->name, v->value))
-				continue;
-
-			if (!strcasecmp(v->name, "autoanswer"))
-				autoanswer = ast_true(v->value);
-			else if (!strcasecmp(v->name, "silencesuppression"))
-				silencesuppression = ast_true(v->value);
-			else if (!strcasecmp(v->name, "silencethreshold"))
-				silencethreshold = atoi(v->value);
-			else if (!strcasecmp(v->name, "context"))
-				ast_copy_string(context, v->value, sizeof(context));
-			else if (!strcasecmp(v->name, "language"))
-				ast_copy_string(language, v->value, sizeof(language));
-			else if (!strcasecmp(v->name, "extension"))
-				ast_copy_string(exten, v->value, sizeof(exten));
-			else if (!strcasecmp(v->name, "input_device"))
-				ast_copy_string(indevname, v->value, sizeof(indevname));
-			else if (!strcasecmp(v->name, "output_device"))
-				ast_copy_string(outdevname, v->value, sizeof(outdevname));
-			else if (!strcasecmp(v->name, "mohinterpret"))
-				ast_copy_string(mohinterpret, v->value, sizeof(mohinterpret));
-		}
-		ast_config_destroy(cfg);
-	}
-	res = pipe(sndcmd);
-	if (res) {
-		ast_log(LOG_ERROR, "Unable to create pipe\n");
-		return -1;
-	}
-	res = soundcard_init();
-	if (res < 0) {
-		if (option_verbose > 1) {
-			ast_verbose(VERBOSE_PREFIX_2 "No sound card detected -- console channel will be unavailable\n");
-			ast_verbose(VERBOSE_PREFIX_2 "Turn off ALSA support by adding 'noload=chan_alsa.so' in /etc/asterisk/modules.conf\n");
-		}
-		return 0;
+	/* load config file */
+	if (!(cfg = ast_config_load(config))) {
+		ast_log(LOG_NOTICE, "Unable to load config %s\n", config);
+		return AST_MODULE_LOAD_DECLINE;
 	}
 
-	res = ast_channel_register(&alsa_tech);
-	if (res < 0) {
-		ast_log(LOG_ERROR, "Unable to register channel class 'Console'\n");
-		return -1;
+	do {
+		store_config(cfg, ctg);
+	} while ( (ctg = ast_category_browse(cfg, ctg)) != NULL);
+
+	ast_config_destroy(cfg);
+
+	if (find_desc(alsa_active) == NULL) {
+		ast_log(LOG_NOTICE, "Device %s not found\n", alsa_active);
+		/* XXX we could default to 'dsp' perhaps ? */
+		/* XXX should cleanup allocated memory etc. */
+		return AST_MODULE_LOAD_FAILURE;
 	}
+
+	if (ast_channel_register(&alsa_tech)) {
+		ast_log(LOG_ERROR, "Unable to register channel type 'ALSA'\n");
+		return AST_MODULE_LOAD_FAILURE;
+	}
+
 	ast_cli_register_multiple(cli_alsa, sizeof(cli_alsa) / sizeof(struct ast_cli_entry));
 
-	ast_pthread_create_background(&sthread, NULL, sound_thread, NULL);
-#ifdef ALSA_MONITOR
-	if (alsa_monitor_start())
-		ast_log(LOG_ERROR, "Problem starting Monitoring\n");
-#endif
-	return 0;
+	return AST_MODULE_LOAD_SUCCESS;
 }
+
 
 static int unload_module(void)
 {
+	struct chan_alsa_pvt *o;
+
 	ast_channel_unregister(&alsa_tech);
 	ast_cli_unregister_multiple(cli_alsa, sizeof(cli_alsa) / sizeof(struct ast_cli_entry));
 
-	if (alsa.icard)
-		snd_pcm_close(alsa.icard);
-	if (alsa.ocard)
-		snd_pcm_close(alsa.ocard);
-	if (sndcmd[0] > 0) {
-		close(sndcmd[0]);
-		close(sndcmd[1]);
+	for (o = alsa_default.next; o; o = o->next) {
+		close(o->sounddev);
+		if (o->sndcmd[0] > 0) {
+			close(o->sndcmd[0]);
+			close(o->sndcmd[1]);
+		}
+		if (o->owner)
+			ast_softhangup(o->owner, AST_SOFTHANGUP_APPUNLOAD);
+		if (o->owner)			/* XXX how ??? */
+			return -1;
+		/* XXX what about the thread ? */
+		/* XXX what about the memory allocated ? */
 	}
-	if (alsa.owner)
-		ast_softhangup(alsa.owner, AST_SOFTHANGUP_APPUNLOAD);
-	if (alsa.owner)
-		return -1;
 	return 0;
 }
 
