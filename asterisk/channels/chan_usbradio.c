@@ -342,8 +342,10 @@ END_CONFIG
 #define DEBUG 0
 /* Which device to use */
 
+#define DESIRED_RATE    8000
 #define FRAME_SIZE	160
 #define	QUEUE_SIZE	2				
+#define PERIOD_FRAMES   80
 
 #define    FRAGS   ( ( (6 * 5) << 16 ) | 0x6 )
 
@@ -2100,7 +2102,7 @@ static char *ast_ext_ctx(const char *src, char **ext, char **ctx)
 /*
  * Returns the number of blocks used in the audio output channel
  */
-static int used_blocks(struct chan_usbradio_pvt *o)
+/*static int used_blocks(struct chan_usbradio_pvt *o)
 {
 	struct audio_buf_info info;
 
@@ -2113,13 +2115,14 @@ static int used_blocks(struct chan_usbradio_pvt *o)
 	}
 
 	if (o->total_blocks == 0) {
-		if (0)					/* debugging */
+		if (0)					// debugging
 			ast_log(LOG_WARNING, "fragtotal %d size %d avail %d\n", info.fragstotal, info.fragsize, info.fragments);
 		o->total_blocks = info.fragments;
 	}
 
 	return o->total_blocks - info.fragments;
 }
+*/
 
 /* Write an exactly FRAME_SIZE sized frame */
 static int soundcard_writeframe(struct chan_usbradio_pvt *o, short *data)
@@ -2143,16 +2146,16 @@ static int soundcard_writeframe(struct chan_usbradio_pvt *o, short *data)
 	 * XXX in some cases it might be useful to write anyways after
 	 * a number of failures, to restart the output chain.
 	 */
-	res = used_blocks(o);
-	if (res > o->queuesize) {	/* no room to write a block */
+	/*res = used_blocks(o);
+	if (res > o->queuesize) {	// no room to write a block
 	    // ast_log(LOG_WARNING, "sound device write buffer overflow\n");
 		if (o->w_errors++ == 0 && (usbradio_debug & 0x4))
 			ast_log(LOG_WARNING, "write: used %d blocks (%d)\n", res, o->w_errors);
 		return 0;
-	}
+	}*/
 	o->w_errors = 0;
 	snd_pcm_prepare(o->opcm_sounddev);
-	return snd_pcm_writei(o->opcm_sounddev, FRAME_SIZE * 2 * 12);
+	return snd_pcm_writei(o->opcm_sounddev, ((void *) data), FRAME_SIZE * 2 * 12);
 }
 
 #ifndef	NEW_ASTERISK
@@ -2218,6 +2221,7 @@ static void send_sound(struct chan_usbradio_pvt *o)
 
 static void *sound_thread(void *arg)
 {
+	char ign[4096];
 	struct chan_usbradio_pvt *o = (struct chan_usbradio_pvt *) arg;
 
 	for (;;) {
@@ -2269,7 +2273,7 @@ static void *sound_thread(void *arg)
 		}
 		if (o->isounddev > -1) {
 			if (FD_ISSET(o->isounddev, &rfds))	/* read and ignore errors */
-				read(o->isounddev, ign, sizeof(ign)); 
+				snd_pcm_readi(o->isounddev, ign, sizeof(ign)); 
 			if (FD_ISSET(o->isounddev, &wfds))
 				send_sound(o);
 		}
@@ -2278,7 +2282,7 @@ static void *sound_thread(void *arg)
 }
 #endif
 
-static void *alsa_card_init(struct chan_alsa_pvt *o, snd_pcm_stream_t stream)
+static void *alsa_card_init(struct chan_usbradio_pvt *o, snd_pcm_stream_t stream)
 {
 	int err;
 	int direction;
@@ -2302,12 +2306,12 @@ static void *alsa_card_init(struct chan_alsa_pvt *o, snd_pcm_stream_t stream)
 	/* unsigned int per_max = 8; */
 	snd_pcm_uframes_t start_threshold, stop_threshold;
 
-	err = snd_pcm_open(&handle, o->device, stream, SND_PCM_NONBLOCK);
+	err = snd_pcm_open(&handle, o->devstr, stream, SND_PCM_NONBLOCK);
 	if (err < 0) {
 		ast_log(LOG_ERROR, "snd_pcm_open failed: %s\n", snd_strerror(err));
 		return NULL;
 	} else
-		ast_log(LOG_DEBUG, "Opening device %s in %s mode\n", o->device, (stream == SND_PCM_STREAM_CAPTURE) ? "read" : "write");
+		ast_log(LOG_DEBUG, "Opening device %s in %s mode\n", o->devstr, (stream == SND_PCM_STREAM_CAPTURE) ? "read" : "write");
 
 	hwparams = alloca(snd_pcm_hw_params_sizeof());
 	memset(hwparams, 0, snd_pcm_hw_params_sizeof());
@@ -2426,13 +2430,13 @@ static int setformat(struct chan_usbradio_pvt *o, int mode)
 	char device[100];
 
 	if (o->osounddev >= 0) {
-		ioctl(o->osounddev, SNDCTL_DSP_RESET, 0);
+		snd_pcm_close(o->opcm_sounddev);
 		close(o->osounddev);
 		o->duplex = M_UNSET;
 		o->osounddev = -1;
 	}
 	if (o->isounddev >= 0) {
-		ioctl(o->isounddev, SNDCTL_DSP_RESET, 0);
+		snd_pcm_close(o->ipcm_sounddev);
 		close(o->isounddev);
 		o->duplex = M_UNSET;
 		o->isounddev = -1;
@@ -2444,7 +2448,6 @@ static int setformat(struct chan_usbradio_pvt *o, int mode)
 	if (o->owner)
 		o->owner->fds[0] = fd;
 
-	}
 	switch (mode) {
 		case O_RDWR:
 			alsa_card_init(o, SND_PCM_STREAM_CAPTURE);
@@ -5987,8 +5990,10 @@ static int unload_module(void)
 		if (ftxcaptrace) { fclose(ftxcaptrace); ftxcaptrace = NULL; }
 		if (ftxoutraw) { fclose(ftxoutraw); ftxoutraw = NULL; }
 		#endif
-
+		
+		snd_pcm_close(o->ipcm_sounddev);
 		close(o->isounddev);
+		snd_pcm_close(o->opcm_sounddev);
 		close(o->osounddev);
 #ifndef	NEW_ASTERISK
 		if (o->sndcmd[0] > 0) {
