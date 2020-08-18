@@ -32,7 +32,7 @@
  */
 
 /*** MODULEINFO
-	<depend>ossaudio</depend>
+	<depend>asound</depend>
         <depend>usb</depend>
         <defaultenabled>yes</defaultenabled>
  ***/
@@ -122,14 +122,6 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define traceusb2(a) {printf a;}
 #else
 #define traceusb2(a)
-#endif
-
-#ifdef __linux
-#include <linux/soundcard.h>
-#elif defined(__FreeBSD__)
-#include <sys/soundcard.h>
-#else
-#include <soundcard.h>
 #endif
 
 #include "asterisk/lock.h"
@@ -347,14 +339,23 @@ END_CONFIG
  *		Should be >=2, and at most as large as the hw queue above
  *		(otherwise it will never be full).
  */
+#define DEBUG 0
+/* Which device to use */
 
 #define FRAME_SIZE	160
 #define	QUEUE_SIZE	2				
 
-#if defined(__FreeBSD__)
-#define	FRAGS	0x8
+#define    FRAGS   ( ( (6 * 5) << 16 ) | 0x6 )
+
+/* When you set the frame size, you have to come up with
+   the right buffer format as well. */
+/* 5 64-byte frames = one frame */
+
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+static snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
 #else
-#define	FRAGS	( ( (6 * 5) << 16 ) | 0xc )
+static snd_pcm_format_t format = SND_PCM_FORMAT_S16_BE;
 #endif
 
 /*
@@ -367,12 +368,9 @@ END_CONFIG
 #define	TRYOPEN	1				/* try to open on startup */
 #endif
 #define	O_CLOSE	0x444			/* special 'close' mode for device */
-/* Which device to use */
-#if defined( __OpenBSD__ ) || defined( __NetBSD__ )
-#define DEV_DSP "/dev/audio"
-#else
-#define DEV_DSP "/dev/dsp"
-#endif
+
+static int silencesuppression = 0;
+static int silencethreshold = 1000;
 
 #ifndef MIN
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -482,7 +480,10 @@ struct chan_usbradio_pvt {
 	int devtype;				/* actual type of device */
 	int pttkick[2];
 	int total_blocks;			/* total blocks in the output device */
-	int sounddev;
+	int isounddev;
+	int osounddev;
+	snd_pcm_t *ipcm_sounddev;
+	snd_pcm_t *opcm_sounddev;
 	enum { M_UNSET, M_FULL, M_READ, M_WRITE } duplex;
 	i16 cdMethod;
 	int autoanswer;
@@ -732,7 +733,8 @@ static struct chan_usbradio_pvt usbradio_default = {
 #ifndef	NEW_ASTERISK
 	.cursound = -1,
 #endif
-	.sounddev = -1,
+	.isounddev = -1,
+	.osounddev = -1,
 	.duplex = M_UNSET,			/* XXX check this */
 	.autoanswer = 1,
 	.autohangup = 1,
@@ -2124,9 +2126,9 @@ static int soundcard_writeframe(struct chan_usbradio_pvt *o, short *data)
 {
 	int res;
 
-	if (o->sounddev < 0)
+	if (o->osounddev < 0)
 		setformat(o, O_RDWR);
-	if (o->sounddev < 0)
+	if (o->osounddev < 0)
 		return 0;				/* not fatal */
 	//  maw maw sph !!! may or may not be a good thing
 	//  drop the frame if not transmitting, this keeps from gradually
@@ -2149,8 +2151,8 @@ static int soundcard_writeframe(struct chan_usbradio_pvt *o, short *data)
 		return 0;
 	}
 	o->w_errors = 0;
-
-	return write(o->sounddev, ((void *) data), FRAME_SIZE * 2 * 12);
+	snd_pcm_prepare(o->opcm_sounddev);
+	return snd_pcm_writei(o->opcm_sounddev, FRAME_SIZE * 2 * 12);
 }
 
 #ifndef	NEW_ASTERISK
@@ -2216,14 +2218,8 @@ static void send_sound(struct chan_usbradio_pvt *o)
 
 static void *sound_thread(void *arg)
 {
-	char ign[4096];
 	struct chan_usbradio_pvt *o = (struct chan_usbradio_pvt *) arg;
 
-	/*
-	 * Just in case, kick the driver by trying to read from it.
-	 * Ignore errors - this read is almost guaranteed to fail.
-	 */
-	read(o->sounddev, ign, sizeof(ign));
 	for (;;) {
 		fd_set rfds, wfds;
 		int maxfd, res;
@@ -2232,20 +2228,20 @@ static void *sound_thread(void *arg)
 		FD_ZERO(&wfds);
 		FD_SET(o->sndcmd[0], &rfds);
 		maxfd = o->sndcmd[0];	/* pipe from the main process */
-		if (o->cursound > -1 && o->sounddev < 0)
+		if (o->cursound > -1 && o->isounddev < 0)
 			setformat(o, O_RDWR);	/* need the channel, try to reopen */
 		else if (o->cursound == -1 && o->owner == NULL)
 		{
 			setformat(o, O_CLOSE);	/* can close */
 		}
-		if (o->sounddev > -1) {
+		if (o->isounddev > -1) {
 			if (!o->owner) {	/* no one owns the audio, so we must drain it */
-				FD_SET(o->sounddev, &rfds);
-				maxfd = MAX(o->sounddev, maxfd);
+				FD_SET(o->isounddev, &rfds);
+				maxfd = MAX(o->isounddev, maxfd);
 			}
 			if (o->cursound > -1) {
-				FD_SET(o->sounddev, &wfds);
-				maxfd = MAX(o->sounddev, maxfd);
+				FD_SET(o->osounddev, &wfds);
+				maxfd = MAX(o->osounddev, maxfd);
 			}
 		}
 		/* ast_select emulates linux behaviour in terms of timeout handling */
@@ -2271,17 +2267,153 @@ static void *sound_thread(void *arg)
 			if (sounds[i].ind == -1)
 				ast_log(LOG_WARNING, "invalid sound index: %d\n", what);
 		}
-		if (o->sounddev > -1) {
-			if (FD_ISSET(o->sounddev, &rfds))	/* read and ignore errors */
-				read(o->sounddev, ign, sizeof(ign)); 
-			if (FD_ISSET(o->sounddev, &wfds))
+		if (o->isounddev > -1) {
+			if (FD_ISSET(o->isounddev, &rfds))	/* read and ignore errors */
+				read(o->isounddev, ign, sizeof(ign)); 
+			if (FD_ISSET(o->isounddev, &wfds))
 				send_sound(o);
 		}
 	}
 	return NULL;				/* Never reached */
 }
-
 #endif
+
+static void *alsa_card_init(struct chan_alsa_pvt *o, snd_pcm_stream_t stream)
+{
+	int err;
+	int direction;
+	snd_pcm_t *handle = NULL;
+	snd_pcm_hw_params_t *hwparams = NULL;
+	snd_pcm_sw_params_t *swparams = NULL;
+	struct pollfd pfd;
+	snd_pcm_uframes_t period_size = PERIOD_FRAMES * 4;
+	/* int period_bytes = 0; */
+	snd_pcm_uframes_t buffer_size = 0;
+
+	if( stream == SND_PCM_STREAM_CAPTURE )
+		handle = o->ipcm_sounddev;
+	else
+		handle = o->opcm_sounddev;
+
+	unsigned int rate = DESIRED_RATE;
+#if 0
+	unsigned int per_min = 1;
+#endif
+	/* unsigned int per_max = 8; */
+	snd_pcm_uframes_t start_threshold, stop_threshold;
+
+	err = snd_pcm_open(&handle, o->device, stream, SND_PCM_NONBLOCK);
+	if (err < 0) {
+		ast_log(LOG_ERROR, "snd_pcm_open failed: %s\n", snd_strerror(err));
+		return NULL;
+	} else
+		ast_log(LOG_DEBUG, "Opening device %s in %s mode\n", o->device, (stream == SND_PCM_STREAM_CAPTURE) ? "read" : "write");
+
+	hwparams = alloca(snd_pcm_hw_params_sizeof());
+	memset(hwparams, 0, snd_pcm_hw_params_sizeof());
+	snd_pcm_hw_params_any(handle, hwparams);
+
+	err = snd_pcm_hw_params_set_access(handle, hwparams, SND_PCM_ACCESS_RW_INTERLEAVED);
+	if (err < 0)
+		ast_log(LOG_ERROR, "set_access failed: %s\n", snd_strerror(err));
+
+	err = snd_pcm_hw_params_set_format(handle, hwparams, format);
+	if (err < 0)
+		ast_log(LOG_ERROR, "set_format failed: %s\n", snd_strerror(err));
+
+	err = snd_pcm_hw_params_set_channels(handle, hwparams, 1);
+	if (err < 0)
+		ast_log(LOG_ERROR, "set_channels failed: %s\n", snd_strerror(err));
+
+	direction = 0;
+	err = snd_pcm_hw_params_set_rate_near(handle, hwparams, &rate, &direction);
+	if (rate != DESIRED_RATE)
+		ast_log(LOG_WARNING, "Rate not correct, requested %d, got %d\n", DESIRED_RATE, rate);
+
+	direction = 0;
+	err = snd_pcm_hw_params_set_period_size_near(handle, hwparams, &period_size, &direction);
+	if (err < 0)
+		ast_log(LOG_ERROR, "period_size(%ld frames) is bad: %s\n", period_size, snd_strerror(err));
+	else
+		ast_log(LOG_DEBUG, "Period size is %d\n", err);
+
+	buffer_size = 4096 * 2;		/* period_size * 16; */
+	err = snd_pcm_hw_params_set_buffer_size_near(handle, hwparams, &buffer_size);
+	if (err < 0)
+		ast_log(LOG_WARNING, "Problem setting buffer size of %ld: %s\n", buffer_size, snd_strerror(err));
+	else
+		ast_log(LOG_DEBUG, "Buffer size is set to %d frames\n", err);
+
+#if 0
+	direction = 0;
+	err = snd_pcm_hw_params_set_periods_min(handle, hwparams, &per_min, &direction);
+	if (err < 0)
+		ast_log(LOG_ERROR, "periods_min: %s\n", snd_strerror(err));
+
+	err = snd_pcm_hw_params_set_periods_max(handle, hwparams, &per_max, 0);
+	if (err < 0)
+		ast_log(LOG_ERROR, "periods_max: %s\n", snd_strerror(err));
+#endif
+
+	err = snd_pcm_hw_params(handle, hwparams);
+	if (err < 0)
+		ast_log(LOG_ERROR, "Couldn't set the new hw params: %s\n", snd_strerror(err));
+
+	swparams = alloca(snd_pcm_sw_params_sizeof());
+	memset(swparams, 0, snd_pcm_sw_params_sizeof());
+	snd_pcm_sw_params_current(handle, swparams);
+
+#if 1
+	if (stream == SND_PCM_STREAM_PLAYBACK)
+		start_threshold = period_size;
+	else
+		start_threshold = 1;
+
+	err = snd_pcm_sw_params_set_start_threshold(handle, swparams, start_threshold);
+	if (err < 0)
+		ast_log(LOG_ERROR, "start threshold: %s\n", snd_strerror(err));
+#endif
+
+#if 1
+	if (stream == SND_PCM_STREAM_PLAYBACK)
+		stop_threshold = buffer_size;
+	else
+		stop_threshold = buffer_size;
+
+	err = snd_pcm_sw_params_set_stop_threshold(handle, swparams, stop_threshold);
+	if (err < 0)
+		ast_log(LOG_ERROR, "stop threshold: %s\n", snd_strerror(err));
+#endif
+#if 0
+	err = snd_pcm_sw_params_set_xfer_align(handle, swparams, PERIOD_FRAMES);
+	if (err < 0)
+		ast_log(LOG_ERROR, "Unable to set xfer alignment: %s\n", snd_strerror(err));
+#endif
+
+#if 0
+	err = snd_pcm_sw_params_set_silence_threshold(handle, swparams, silencethreshold);
+	if (err < 0)
+		ast_log(LOG_ERROR, "Unable to set silence threshold: %s\n", snd_strerror(err));
+#endif
+	err = snd_pcm_sw_params(handle, swparams);
+	if (err < 0)
+		ast_log(LOG_ERROR, "sw_params: %s\n", snd_strerror(err));
+
+	err = snd_pcm_poll_descriptors_count(handle);
+	if (err <= 0)
+		ast_log(LOG_ERROR, "Unable to get a poll descriptors count, error is %s\n", snd_strerror(err));
+	if (err != 1)
+		ast_log(LOG_DEBUG, "Can't handle more than one device\n");
+
+	snd_pcm_poll_descriptors(handle, &pfd, err);
+	ast_log(LOG_DEBUG, "Acquired fd %d from the poll descriptor\n", pfd.fd);
+
+	if (stream == SND_PCM_STREAM_CAPTURE)
+		o->isounddev = pfd.fd;
+	else
+		o->osounddev = pfd.fd;
+}
+
 
 /*
  * reset and close the device if opened,
@@ -2293,93 +2425,41 @@ static int setformat(struct chan_usbradio_pvt *o, int mode)
 	int fmt, desired, res, fd;
 	char device[100];
 
-	if (o->sounddev >= 0) {
-		ioctl(o->sounddev, SNDCTL_DSP_RESET, 0);
-		close(o->sounddev);
+	if (o->osounddev >= 0) {
+		ioctl(o->osounddev, SNDCTL_DSP_RESET, 0);
+		close(o->osounddev);
 		o->duplex = M_UNSET;
-		o->sounddev = -1;
+		o->osounddev = -1;
+	}
+	if (o->isounddev >= 0) {
+		ioctl(o->isounddev, SNDCTL_DSP_RESET, 0);
+		close(o->isounddev);
+		o->duplex = M_UNSET;
+		o->isounddev = -1;
 	}
 	if (mode == O_CLOSE)		/* we are done */
 		return 0;
 	o->lastopen = ast_tvnow();
-	strcpy(device,"/dev/dsp");
-	if (o->devicenum)
-		sprintf(device,"/dev/dsp%d",o->devicenum);
-	fd = o->sounddev = open(device, mode | O_NONBLOCK);
-	if (fd < 0) {
-		ast_log(LOG_WARNING, "Unable to re-open DSP device %d (%s): %s\n", o->devicenum, o->name, strerror(errno));
-		return -1;
-	}
+
 	if (o->owner)
 		o->owner->fds[0] = fd;
 
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-	fmt = AFMT_S16_LE;
-#else
-	fmt = AFMT_S16_BE;
-#endif
-	res = ioctl(fd, SNDCTL_DSP_SETFMT, &fmt);
-	if (res < 0) {
-		ast_log(LOG_WARNING, "Unable to set format to 16-bit signed\n");
-		return -1;
 	}
 	switch (mode) {
 		case O_RDWR:
-			res = ioctl(fd, SNDCTL_DSP_SETDUPLEX, 0);
-			/* Check to see if duplex set (FreeBSD Bug) */
-			res = ioctl(fd, SNDCTL_DSP_GETCAPS, &fmt);
-			if (res == 0 && (fmt & DSP_CAP_DUPLEX)) {
-				o->duplex = M_FULL;
-			};
+			alsa_card_init(o, SND_PCM_STREAM_CAPTURE);
+			alsa_card_init(o, SND_PCM_STREAM_PLAYBACK);
+			o->duplex = M_FULL;
 			break;
 		case O_WRONLY:
+			alsa_card_init(o, SND_PCM_STREAM_PLAYBACK);
 			o->duplex = M_WRITE;
 			break;
 		case O_RDONLY:
+			alsa_card_init(o, SND_PCM_STREAM_CAPTURE);
 			o->duplex = M_READ;
 			break;
 	}
-
-	fmt = 1;
-	res = ioctl(fd, SNDCTL_DSP_STEREO, &fmt);
-	if (res < 0) {
-		ast_log(LOG_WARNING, "Failed to set audio device to mono\n");
-		return -1;
-	}
-	fmt = desired = 48000;							/* 8000 Hz desired */
-	res = ioctl(fd, SNDCTL_DSP_SPEED, &fmt);
-
-	if (res < 0) {
-		ast_log(LOG_WARNING, "Failed to set audio device to mono\n");
-		return -1;
-	}
-	if (fmt != desired) {
-		if (!(o->warned & WARN_speed)) {
-			ast_log(LOG_WARNING,
-			    "Requested %d Hz, got %d Hz -- sound may be choppy\n",
-			    desired, fmt);
-			o->warned |= WARN_speed;
-		}
-	}
-	/*
-	 * on Freebsd, SETFRAGMENT does not work very well on some cards.
-	 * Default to use 256 bytes, let the user override
-	 */
-	if (o->frags) {
-		fmt = o->frags;
-		res = ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &fmt);
-		if (res < 0) {
-			if (!(o->warned & WARN_frag)) {
-				ast_log(LOG_WARNING,
-					"Unable to set fragment size -- sound may be choppy\n");
-				o->warned |= WARN_frag;
-			}
-		}
-	}
-	/* on some cards, we need SNDCTL_DSP_SETTRIGGER to start outputting */
-	res = PCM_ENABLE_INPUT | PCM_ENABLE_OUTPUT;
-	res = ioctl(fd, SNDCTL_DSP_SETTRIGGER, &res);
-	/* it may fail if we are in half duplex, never mind */
 	return 0;
 }
 
@@ -2717,8 +2797,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 		ast_mutex_unlock(&o->echolock);
 	}
 
-	res = read(o->sounddev, o->usbradio_read_buf + o->readpos, 
-		sizeof(o->usbradio_read_buf) - o->readpos);
+	res = snd_pcm_readi(o->ipcm_sounddev, o->usbradio_read_buf + o->readpos, sizeof(o->usbradio_read_buf) - o->readpos);
 	if (res < 0)				/* audio data not ready, return a NULL frame */
 	{
                 if (errno != EAGAIN)
@@ -3266,10 +3345,10 @@ static struct ast_channel *usbradio_new(struct chan_usbradio_pvt *o, char *ext, 
 		return NULL;
 	c->tech = &usbradio_tech;
 #if	 0
-	if (o->sounddev < 0)
+	if (o->isounddev < 0 || o->osounddev < 0)
 		setformat(o, O_RDWR);
 #endif
-	c->fds[0] = o->sounddev;	/* -1 if device closed, override later */
+	c->fds[0] = o->isounddev;	/* -1 if device closed, override later */
 	c->nativeformats = AST_FORMAT_SLINEAR;
 	c->readformat = AST_FORMAT_SLINEAR;
 	c->writeformat = AST_FORMAT_SLINEAR;
@@ -5909,7 +5988,8 @@ static int unload_module(void)
 		if (ftxoutraw) { fclose(ftxoutraw); ftxoutraw = NULL; }
 		#endif
 
-		close(o->sounddev);
+		close(o->isounddev);
+		close(o->osounddev);
 #ifndef	NEW_ASTERISK
 		if (o->sndcmd[0] > 0) {
 			close(o->sndcmd[0]);
