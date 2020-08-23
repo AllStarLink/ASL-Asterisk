@@ -7406,7 +7406,7 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 	struct ast_flags zeroflag = {0};
 #endif
 	if (ctg == NULL) {
-		traceusb1((" store_config() ctg == NULL\n"));
+		if(usbradio_debug)ast_log(LOG_NOTICE," ctg == NULL\n");
 		o = &usbradio_default;
 		ctg = "general";
 	} else {
@@ -7426,6 +7426,8 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 	}
 	ast_mutex_init(&o->eepromlock);
 	strcpy(o->mohinterpret, "default");
+	memset(o->devstr,0,STRLEN_MEDIUM);
+
 	/* fill other fields from configuration */
 	for (v = ast_variable_browse(cfg, ctg); v; v = v->next) {
 		M_START((char *)v->name, (char *)v->value);
@@ -7446,9 +7448,7 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 #endif
 			M_UINT("frags", o->frags)
 			M_UINT("queuesize",o->queuesize)
-#if 0
-			M_UINT("devicenum",o->devicenum)
-#endif
+			M_STR("devstr", o->devstr)
 			M_UINT("debug", usbradio_debug)
 			M_BOOL("rxcpusaver",o->rxcpusaver)
 			M_BOOL("txcpusaver",o->txcpusaver)
@@ -7461,7 +7461,12 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 			M_F("carrierfrom",store_rxcdtype(o,(char *)v->value))
 			M_F("ctcssfrom",store_rxsdtype(o,(char *)v->value))
 		        M_UINT("rxsqvox",o->rxsqvoxadj)
+			M_F("rxsdtype",store_rxsdtype(o,(char *)v->value))
 		        M_UINT("rxsqhyst",o->rxsqhyst)
+			M_UINT("rxsqvox",o->rxsqvoxadj)
+			M_UINT("rxsqvoxdis",o->rxsqvoxdis)
+			M_UINT("rxsqvoxhyst",o->rxsqvoxhyst)
+			M_UINT("rxsqvoxhtim",o->rxsqvoxhtim)
 		        M_UINT("rxnoisefiltype",o->rxnoisefiltype)
 		        M_UINT("rxsquelchdelay",o->rxsquelchdelay)
 			M_STR("txctcssdefault",o->txctcssdefault)
@@ -7494,8 +7499,13 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 			M_UINT("tracetype",o->tracetype)
 			M_UINT("tracelevel",o->tracelevel)
 			M_UINT("rxondelay",o->rxondelay);
+			M_UINT("debuglevel",o->debuglevel)
 			M_UINT("area",o->area)
 			M_STR("ukey",o->ukey)
+			M_BOOL("minsigproc",o->b.minsigproc)
+			M_BOOL("repeat",o->b.repeat)
+			M_UINT("repeatlevel",o->repeatlevel)
+			M_UINT("bufferblocks",o->bufferblocks)
  			M_UINT("duplex3",o->duplex3)
 
         
@@ -7543,8 +7553,10 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		ast_log(LOG_WARNING,"Invalid Configuration: Can not have A channel be Voice with B channel being Composite!!\n");
 	}
 
-	if (o == &usbradio_default)		/* we are done with the default */
+	if (o == &usbradio_default){		/* we are done with the default */
+		if(usbradio_debug>0)ast_log(LOG_NOTICE,"Done with default.\n");
 		return NULL;
+	}
 
 	for(i = 2; i <= 9; i++)
 	{
@@ -7556,6 +7568,17 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		if (!strcasecmp(o->pps[i],"out1")) pp_val |= (1 << (i - 2));
 		hasout = 1;
 	}
+
+	if(o->devstr[0])
+	{
+		o->usbass=1;
+		if(usbradio_debug>0)ast_log(LOG_NOTICE,"[%s] devstr=%s fixed usbass\n",o->name,o->devstr);
+	}
+	else
+	{
+		o->usbass=0;
+		if(usbradio_debug>0)ast_log(LOG_NOTICE,"[%s] no fixed USB Device\n",o->name);
+    	}
 
 	snprintf(fname,sizeof(fname) - 1,config1,o->name);
 #ifdef	NEW_ASTERISK
@@ -7588,7 +7611,12 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 			);
 		}
 		ast_config_destroy(cfg1);
-	} else ast_log(LOG_WARNING,"File %s not found, using default parameters.\n",fname);
+		if(o->devstr[0] && !o->usbass){
+			strncpy(o->devstr,o->devstr,STRLEN_MEDIUM);
+			o->usbass=1;
+			ast_log(LOG_NOTICE,"[%s] using devstr=%s from tuning file.\n",o->name,o->devstr);
+		}
+	} else ast_log(LOG_WARNING,"[%s] tuning file %s not found, using defaults.\n",o->name,fname);
 
 	if(o->wanteeprom)
 	{
@@ -7603,7 +7631,7 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		ast_mutex_unlock(&o->eepromlock);
 	}
 	o->lastopen = ast_tvnow();	/* don't leave it 0 or tvdiff may wrap */
-	o->dsp = ast_dsp_new();
+	o->dsp = ast_dsp_new();	/* This is Asterisk's DSP process not xpmr's */
 	if (o->dsp)
 	{
 #ifdef  NEW_ASTERISK
@@ -7638,6 +7666,10 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		tChan.rxCdType=o->rxcdtype;
 		tChan.rxCarrierHyst=o->rxsqhyst;
 		tChan.rxSqVoxAdj=o->rxsqvoxadj;
+		tChan.rxSqVoxDis=o->rxsqvoxdis;
+		tChan.rxSqVoxHyst=o->rxsqvoxhyst;
+		tChan.rxSqVoxHtim=o->rxsqvoxhtim;
+
 		tChan.rxSquelchDelay=o->rxsquelchdelay;
 
 		if (o->txlimonly) 
@@ -7661,8 +7693,14 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		tChan.b.lsdtxpolarity=o->b.lsdtxpolarity;
 
 		tChan.b.txboost=o->txboostset;
+		tChan.b.minsigproc=o->b.minsigproc;
+
+		//tChan.rxlpf=o->vxlpf;
+		//tChan.vxhpf=o->vxlpf;
+
 		tChan.tracetype=o->tracetype;
 		tChan.tracelevel=o->tracelevel;
+		tChan.parentDebugLevel=o->debuglevel;
 
 		tChan.rptnum=o->rptnum;
 		tChan.idleinterval=o->idleinterval;
@@ -7672,13 +7710,19 @@ static struct chan_usbradio_pvt *config_prep(struct ast_config *cfg, char *ctg)
 		tChan.name=o->name;
 		tChan.fever = o->fever;
 
-        tChan.rxhpf=o->rxhpf;
-        tChan.rxlpf=o->rxlpf;
-        tChan.txhpf=o->txhpf;
-        tChan.txlpf=o->txlpf;
-        
+		tChan.b.repeat=o->b.repeat;
+		tChan.txboostset=o->txboostset;
+
+		tChan.rxhpf=o->rxhpf;
+		tChan.rxlpf=o->rxlpf;
+		tChan.txhpf=o->txhpf;
+		tChan.txlpf=o->txlpf;
+
+		/* call xpmr create */
 		o->pmrChan=createPmrChannel(&tChan,FRAME_SIZE);
-									 
+
+		o->pmrChan->spsRx->source=o->rx_buffer;
+
 		o->pmrChan->radioDuplex=o->radioduplex;
 		o->pmrChan->b.loopback=0; 
 		o->pmrChan->b.radioactive=o->b.radioactive;
@@ -7766,10 +7810,12 @@ static struct chan_usbradio_pvt *find_desc(char *name)
 	}
 	return hit;
 }
-/*
- * grab fields from the config file, init the descriptor and open the device.
+/* ***************************************************************************
+ * Read radio node configuration and setup a channel.
+ * The actual usb device is initialized in the suthread when it is discovered
+ * on the usb bus.
  */
-static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg, int *indexp)
+static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg)
 {
 	struct chan_usbradio_pvt *o;
 
