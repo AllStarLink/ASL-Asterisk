@@ -3404,6 +3404,132 @@ static int setformat(struct chan_usbradio_pvt *o, int mode)
 	return 0;
 }
 
+/*! \brief  Link an USBRADIO to a radio channel and start its processes. */
+static int usbradio_link(struct chan_usbradio_pvt *o, struct usbradio *usbradio)
+{
+	unsigned char buf[4],bufsave[4];
+
+	struct usb_dev_handle *dev_handle=NULL;
+	int devnum;
+
+	if(o->verbosity)
+		ast_log(LOG_NOTICE,"[%s] start devnum=%i devstr=%s\n",o->name,usbradio->devnum,usbradio->devstr);
+
+	o->usbradio=usbradio;
+	usbradio->o=o;
+
+	devnum=usbradio->devnum;
+
+	o->count_rx = o->count_read = o->count_tx = o->count_write = 0;
+
+	dev_handle=usb_open(usbradio->device);
+
+	if(dev_handle>0)
+	{
+		usbradio->dev_handle = dev_handle;
+	}
+	else
+	{
+		ast_log(LOG_ERROR,"[%s] Can't get dev_handle for devnum=%i devstr=%s\n",o->name,usbradio->devnum,usbradio->devstr);
+		goto error;
+	}
+	if (usb_claim_interface(dev_handle,C108_HID_INTERFACE) < 0)
+	{
+	    if (usb_detach_kernel_driver_np(dev_handle,C108_HID_INTERFACE) < 0) {
+			ast_log(LOG_ERROR,"[%s] Not able to detach the USB device\n",o->name);
+		    goto error;
+		}
+		if (usb_claim_interface(dev_handle,C108_HID_INTERFACE) < 0) {
+		    ast_log(LOG_ERROR,"[%s] Not able to claim the USB device\n",o->name);
+			goto error;
+		}
+	}
+
+	if(o->debuglevel>=3)
+		ast_log(LOG_NOTICE,"[%s] Got handle and claimed devstr=%s devnum=%i\n",o->name,usbradio->devstr,usbradio->devnum );
+
+	amixer_type(usbradio);
+
+	o->micmax = amixer_max(usbradio,MIXER_PARAM_MIC_CAPTURE_VOL);
+	if(usbradio->arch)
+		o->spkrmax = amixer_max(usbradio,MIXER_PARAM_SPKR_PLAYBACK_VOL_NEW);
+	else
+		o->spkrmax = amixer_max(usbradio,MIXER_PARAM_SPKR_PLAYBACK_VOL);
+
+	o->lastopen = ast_tvnow();	/* don't leave it 0 or tvdiff may wrap */
+
+	hidhdwconfig(o);
+	memset(buf,0,sizeof(buf));
+	buf[2] = o->hid_gpio_ctl;
+	buf[1] = 0;
+	hid_set_outputs(dev_handle,buf);
+	memcpy(bufsave,buf,sizeof(buf));
+
+	asoundinit_rx(o);
+	asoundinit_tx(o);
+
+	if(o->debuglevel){
+		alsadump(o->hpcm_rx);
+		alsadump(o->hpcm_tx);
+	}
+
+	o->stopusbradio=0;
+
+	if(ast_pthread_create_background(&o->alsathread, NULL, usbradiothread, o))
+	{
+	    ast_log(LOG_ERROR,"[%s] ast_pthread_create_background alsathread fail.\n",o->name);
+	}
+
+	if (o->dsp)
+	{
+#ifdef  NEW_ASTERISK
+          ast_dsp_set_features(o->dsp,DSP_FEATURE_DIGIT_DETECT);
+          ast_dsp_set_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#else
+          ast_dsp_set_features(o->dsp,DSP_FEATURE_DTMF_DETECT);
+          ast_dsp_digitmode(o->dsp,DSP_DIGITMODE_DTMF | DSP_DIGITMODE_MUTECONF | DSP_DIGITMODE_RELAXDTMF);
+#endif
+	}
+
+	o->hasusb=1;
+	o->radiofail=0;
+
+	if(o->debuglevel || usbradio_debug)
+		ast_log(LOG_NOTICE,"[%s] devnum=%i devstr=%s connected.\n",o->name,usbradio->devnum,usbradio->devstr);
+	//ast_mutex_unlock(&usbradio_list_lock);
+
+	update_levels(o);
+
+	if(o->wanteeprom)o->eepromctl=1;
+
+	return 0;
+
+error:
+	/* error connecting to device so set everthing to try again next time */
+
+	ast_log(LOG_ERROR,"[%s] unable to assign devstr=%s  devnum=%i \n",o->name,o->devstr,usbradio->devnum);
+	//ast_mutex_unlock(&usbradio_list_lock);
+	o->usbradio=0;
+	o->hasusb=0;
+	usbradio->o=0;
+	return -1;
+
+	if(0 && o->usbradio->dev_handle>0)
+	{
+		usb_detach_kernel_driver_np(o->usbradio->dev_handle,C108_HID_INTERFACE);
+		if(o->usbradio>0 && o->usbradio->dev_handle>0)usb_close(o->usbradio->dev_handle);
+	}
+	o->usbradio->dev_handle=(struct usb_dev_handle *)-1;
+	o->usbradio->device=(struct usb_device *)-1;
+
+	if(o->pttkick[0]>1)close(o->pttkick[0]);
+	if(o->pttkick[1]>1)close(o->pttkick[1]);
+
+	//ast_mutex_unlock(&usbradio_list_lock);
+	return -1;
+}
+
+
 /*! \brief  USBRADIO Supervisory Control Thread. */
 /*
    Every 2 seconds, see if any usbradio instances lack a physical usbradio
