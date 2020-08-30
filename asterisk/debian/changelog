@@ -1,3 +1,16 @@
+asl-asterisk (1:1.4.23-4) unstable; urgency=medium
+
+  * make asterisk run as root until we can fix dependency problems
+  * include app_rpt in the build package
+  * merge in dvswitch master
+  * add backup-server to package
+  * merge in telemetry ducking
+  * merge in upstream alignment
+  * merge in simple voter
+  * merge in http registration
+
+ -- Adam Paul <adamjpaul@gmail.com>  Sat, 29 Aug 2020 20:54:54 -0400
+
 asl-asterisk (1:1.4.23-3) unstable; urgency=medium
 
   * fix packaging problem prevening many components (including asterisk
