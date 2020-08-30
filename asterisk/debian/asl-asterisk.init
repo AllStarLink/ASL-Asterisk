@@ -36,7 +36,7 @@
 
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 NAME=asterisk
-USER=$NAME
+USER=root
 GROUP=$USER
 DAEMON=/usr/sbin/$NAME
 DESC="Asterisk PBX"
@@ -85,12 +85,10 @@ then
   echo "Error: empty USER name"
   exit 1
 fi
-if [ `id -u "$USER"` = 0 ]
+if [ ! `id -u "$USER"` = 0 ]
 then
-  echo "Starting as root not supported."
-  exit 1
+  PARAMS="$PARAMS -U $USER"
 fi
-PARAMS="$PARAMS -U $USER"
 
 if [ "x$AST_DEBUG_PARAMS" = x ] 
 then
