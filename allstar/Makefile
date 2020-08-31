@@ -20,6 +20,7 @@ install:
 	install -m 755 post_install/write-node-callsigns $(DESTDIR)$(prefix)/sbin/
 	install -d $(DESTDIR)$(prefix)/bin/backup-server
 	install -m 755 backup-server/* $(DESTDIR)$(prefix)/bin/backup-server/
+	install -m 755 updatenodelist/rc.updatenodelist $(DESTDIR)$(prefix)/bin/
 
 uninstall: 
 	-rm -f $(DESTDIR)$(prefix)/sbin/asl-menu
@@ -41,5 +42,6 @@ uninstall:
 	-rm -f $(DESTDIR)$(prefix)/sbin/write-node-callsigns
 	-rm -f $(DESTDIR)$(prefix)/bin/backup-server/*
 	-rmdir $(DESTDIR)$(prefix)/bin/backup-server
+	-rm -f $(DESTDIR)$(prefix)/bin/rc.updatenodelist
 
 .PHONY: install uninstall

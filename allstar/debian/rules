@@ -2,3 +2,9 @@
 
 %:
 	dh $@  
+
+override_dh_installsystemd:
+	dh_installsystemd --name updatenodelist
+
+override_dh_systemdenable:
+	dh_systemd_enable --name updatenodelist
