@@ -2,11 +2,11 @@
 		<member name="CORE-SOUNDS-EN-WAV" displayname="English, WAV format">
 		</member>
 		<member name="CORE-SOUNDS-EN-ULAW" displayname="English, mu-Law format">
+			<defaultenabled>yes</defaultenabled>
 		</member>
 		<member name="CORE-SOUNDS-EN-ALAW" displayname="English, a-Law format">
 		</member>
 		<member name="CORE-SOUNDS-EN-GSM" displayname="English, GSM format" >
-			<defaultenabled>yes</defaultenabled>
 		</member>
 		<member name="CORE-SOUNDS-EN-G729" displayname="English, G.729 format">
 		</member>
@@ -39,7 +39,6 @@
 	</category>
 	<category name="MENUSELECT_MOH" displayname="Music On Hold File Packages" positive_output="yes">
 		<member name="MOH-FREEPLAY-WAV" displayname="FreePlay Music On Hold Files, WAV format" >
-			<defaultenabled>yes</defaultenabled>
 		</member>
 		<member name="MOH-FREEPLAY-ULAW" displayname="FreePlay Music On Hold Files, mu-Law format" >
 		</member>
@@ -68,6 +67,7 @@
 	</category>
         <category name="MENUSELECT_ASL_SOUNDS" displayname="AllStarLink Sound Packages" positive_output="yes">
                 <member name="ASL-SOUNDS-EN-ULAW" displayname="English, mu-Law format">
+			<defaultenabled>yes</defaultenabled>
                 </member>
         </category>
 

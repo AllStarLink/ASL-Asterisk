@@ -161,8 +161,8 @@ asterisk-extra-%.tar.gz: have_download
 asterisk-moh-%.tar.gz: have_download
 	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(SOUNDS_URL)/$@;fi
 
-asterisk-asl-en-ulaw.tar.gz: have_download
-	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(SOUNDS_URL)/$@;fi
+asterisk-asl-sounds-en-ulaw.tar.gz: have_download
+	@if test ! -f $@ ;then $(DOWNLOAD) $(WGET_ARGS) $(ASL_SOUNDS_URL)/$@;fi
 
 dist-clean:
 	rm -f *.tar.gz
