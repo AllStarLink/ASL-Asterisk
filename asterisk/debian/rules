@@ -28,7 +28,7 @@ BUILDFLAGS += NOISY_BUILD=yes
 
 # Force music files selection:
 BUILDFLAGS += MENUSELECT_MOH= \
-  ASTDATADIR=/usr/share/asterisk \
+  ASTDATADIR=/var/lib/asterisk \
   ASTVARRUNDIR=/var/run/asterisk \
 
 

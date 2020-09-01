@@ -1,5 +1,5 @@
 usr/lib/asterisk
 usr/sbin
-usr/share/asterisk/firmware
-usr/share/asterisk/keys
+var/lib/asterisk/firmware
+var/lib/asterisk/keys
 ../snd_pcm_oss.conf etc/modules-load.d/

@@ -1,2 +1,2 @@
-usr/share/asterisk/sounds
-usr/share/asterisk/moh
+var/lib/asterisk/sounds
+var/lib/asterisk/moh
