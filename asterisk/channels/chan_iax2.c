@@ -10167,6 +10167,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 {
 	CURL *curl;
 	struct MemoryStruct chunk;
+	struct curl_slist *hs = NULL;
 	char *request = (char*) malloc(MAX_HTTP_REQUEST_LENGTH);
 	char *response = (char*) malloc(MAX_HTTP_RESPONSE_LENGTH);
 	int *rescode;
@@ -10193,11 +10194,13 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 			sprintf(url, "%s://%s:%s/%s", proto, reg->hostname, reg->port, reg->path);
 		else
 			sprintf(url, "%s://%s/%s", proto, reg->hostname, reg->path);
+		hs = curl_slist_append(hs, "Content-Type: application/json");
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, -1L);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
 		curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
 		curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
 		curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -10274,6 +10277,8 @@ static int iax2_do_register(struct iax2_registry *reg)
 	regstate = iax2_do_http_register(reg, "https");
 	if( regstate != REG_STATE_REGISTERED)
 		regstate = iax2_do_http_register(reg, "http");
+	else
+		reg->regstate = regstate;
 	if( regstate != REG_STATE_REGISTERED){
 		memset(&ied, 0, sizeof(ied));
 		iax_ie_append_str(&ied, IAX_IE_USERNAME, reg->username);
