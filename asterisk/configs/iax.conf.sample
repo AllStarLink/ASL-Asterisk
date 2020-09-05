@@ -49,7 +49,7 @@ delayreject = yes
 ; iaxthreadcount = 30                                                              
 ; iaxmaxthreadcount = 150   
 
-; register = 1999:123456@register.allstarlink.org	; Please use http registration for ASL instead of this.
+; register = 1999:123456@register.allstarlink.org/register	; {node}:{secret}@{iax registration host -- or -- http(s) registration host}[:{optional port}][/{optional http(s) path}]
 
 
 ; Incoming radio connections
