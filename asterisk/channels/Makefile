@@ -104,6 +104,8 @@ chan_oss.o: busy.h ringtone.h
 
 $(if $(filter chan_iax2,$(EMBEDDED_MODS)),modules.link,chan_iax2.so): iax2-parser.o iax2-provision.o
 
+chan_iax2.so: LIBS+=-lcurl
+
 chan_alsa.o: busy.h ringtone.h
 
 ifeq ($(OSARCH),linux-gnu)

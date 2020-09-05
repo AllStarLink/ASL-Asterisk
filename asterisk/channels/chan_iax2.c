@@ -59,6 +59,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <regex.h>
+#include <curl/curl.h>
 
 #if defined(HAVE_ZAPTEL) || defined (HAVE_DAHDI)
 #include <sys/ioctl.h>
@@ -152,6 +153,9 @@ static int nochecksums = 0;
 #define DEBUG_SUPPORT
 
 #define MIN_REUSE_TIME		60	/* Don't reuse a call number within 60 seconds */
+
+#define MAX_HTTP_RESPONSE_LENGTH 8192
+#define MAX_HTTP_REQUEST_LENGTH 4096
 
 /* Sample over last 100 units to determine historic jitter */
 #define GAMMA (0.01)
@@ -452,6 +456,9 @@ enum iax_transfer_state {
 };
 
 struct iax2_registry {
+	char hostname[80];
+	char port[10];
+	char path[100];
 	struct sockaddr_in addr;		/*!< Who we connect to for registration purposes */
 	char username[80];
 	char secret[80];			/*!< Password or key name in []'s */
@@ -780,6 +787,11 @@ static struct ast_firmware_list {
 	struct iax_firmware *wares;
 	ast_mutex_t lock;
 } waresl;
+
+struct MemoryStruct {
+	char *memory;
+	size_t size;
+};
 
 /*! Extension exists */
 #define CACHE_FLAG_EXISTS		(1 << 0)
@@ -7315,6 +7327,8 @@ static int iax2_register(char *value, int lineno)
 	char *username, *hostname, *secret;
 	char *porta;
 	char *stringp=NULL;
+	char *port;
+	char *path;
 	
 	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG:IAX2 register called with %s\n",value);
 
@@ -7332,9 +7346,18 @@ static int iax2_register(char *value, int lineno)
 	username = strsep(&stringp, ":");
 	secret = strsep(&stringp, ":");
 	stringp=hostname;
+	hostname = strsep(&stringp, "/");
+	path = strsep(&stringp, "?");
+	stringp=hostname;
 	hostname = strsep(&stringp, ":");
 	porta = strsep(&stringp, ":");
-	
+
+	if(!porta)
+		port = hostname + strlen(hostname);
+	else
+		port = porta;
+	if(!path)
+		path = hostname + strlen(hostname);
 	if (porta && !atoi(porta)) {
 		ast_log(LOG_WARNING, "%s is not a valid port number at line %d\n", porta, lineno);
 		return -1;
@@ -7352,6 +7375,9 @@ static int iax2_register(char *value, int lineno)
 	reg->refresh = IAX_DEFAULT_REG_EXPIRE;
 	reg->addr.sin_family = AF_INET;
 	reg->addr.sin_port = porta ? htons(atoi(porta)) : htons(IAX_DEFAULT_PORTNO);
+	ast_copy_string(reg->hostname, hostname, sizeof(reg->hostname));
+	ast_copy_string(reg->port, port, sizeof(reg->port));
+	ast_copy_string(reg->path, path, sizeof(reg->path));
 	AST_LIST_LOCK(&registrations);
 	AST_LIST_INSERT_HEAD(&registrations, reg, entry);
 	AST_LIST_UNLOCK(&registrations);
@@ -10119,9 +10145,85 @@ static void *iax2_process_thread(void *data)
 	return NULL;
 }
 
+// callback function for curl
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+	size_t realsize = size * nmemb;
+	struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+
+	char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+	if(!ptr) {
+		return 0;
+	}
+
+	mem->memory = ptr;
+	memcpy(&(mem->memory[mem->size]), contents, realsize);
+	mem->size += realsize;
+	mem->memory[mem->size] = 0;
+
+	return realsize;
+}
+
+static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
+{
+	CURL *curl;
+	struct MemoryStruct chunk;
+	char *request = (char*) malloc(MAX_HTTP_REQUEST_LENGTH);
+	char *response = (char*) malloc(MAX_HTTP_RESPONSE_LENGTH);
+	int *rescode;
+	char url[100];
+	int regstate;
+
+	strncpy(request, "data={\"nodes\":{", MAX_HTTP_REQUEST_LENGTH - 1);
+	strncat(request, "\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, reg->username, MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, "\": {\"node\":\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, reg->username, MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, "\",\"passwd\":\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, reg->secret, MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, "\",\"remote\":", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, "0", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request, "}", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request,"}}", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+
+	curl = curl_easy_init();
+	if(curl) {
+		chunk.memory = malloc(1);
+		chunk.size=0;
+		if(strlen(reg->port)>0)
+			sprintf(url, "%s://%s:%s/%s", proto, reg->hostname, reg->port, reg->path);
+		else
+			sprintf(url, "%s://%s/%s", proto, reg->hostname, reg->path);
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, -1L);
+		curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
+		curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
+		curl_easy_setopt(curl, CURLOPT_POST, 1L);
+		curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+		if(strlen(chunk.memory)>MAX_HTTP_RESPONSE_LENGTH)
+			ast_log(LOG_WARNING, "buffer overflow while retrieving response from server\n");
+		curl_easy_cleanup(curl);
+		curl_global_cleanup();
+	}
+	chunk.memory[chunk.size]='\0';
+
+	if(strstr(chunk.memory,"successfuly registered"))
+		regstate = REG_STATE_REGISTERED;
+	else
+		regstate = REG_STATE_UNREGISTERED;
+	free(chunk.memory);
+	free(request);
+	return regstate;
+}
+
 static int iax2_do_register(struct iax2_registry *reg)
 {
 	struct iax_ie_data ied;
+	int regstate;
+
 	if (option_debug && iaxdebug)
 		ast_log(LOG_DEBUG, "Sending registration request for '%s'\n", reg->username);
 	if (option_verbose > 4) ast_log(LOG_WARNING, "REGISTER-LOG: Sending registration request for '%s'\n", reg->username);
@@ -10169,12 +10271,18 @@ static int iax2_do_register(struct iax2_registry *reg)
 	/* Setup the next registration a little early */
 	reg->expire  = iax2_sched_add(sched, (5 * reg->refresh / 6) * 1000, iax2_do_register_s, reg);
 	/* Send the request */
-	memset(&ied, 0, sizeof(ied));
-	iax_ie_append_str(&ied, IAX_IE_USERNAME, reg->username);
-	iax_ie_append_short(&ied, IAX_IE_REFRESH, reg->refresh);
-	add_empty_calltoken_ie(iaxs[reg->callno], &ied); /* this _MUST_ be the last ie added */
-	send_command(iaxs[reg->callno],AST_FRAME_IAX, IAX_COMMAND_REGREQ, 0, ied.buf, ied.pos, -1);
-	reg->regstate = REG_STATE_REGSENT;
+	regstate = iax2_do_http_register(reg, "https");
+	if( regstate != REG_STATE_REGISTERED)
+		regstate = iax2_do_http_register(reg, "http");
+	if( regstate != REG_STATE_REGISTERED){
+		memset(&ied, 0, sizeof(ied));
+		iax_ie_append_str(&ied, IAX_IE_USERNAME, reg->username);
+		iax_ie_append_short(&ied, IAX_IE_REFRESH, reg->refresh);
+		add_empty_calltoken_ie(iaxs[reg->callno], &ied); /* this _MUST_ be the last ie added */
+		send_command(iaxs[reg->callno],AST_FRAME_IAX, IAX_COMMAND_REGREQ, 0, ied.buf, ied.pos, -1);
+		reg->regstate = REG_STATE_REGSENT;
+	}else
+		reg->regstate=regstate;
 	return 0;
 }
 
