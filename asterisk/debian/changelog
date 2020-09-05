@@ -1,3 +1,11 @@
+asl-asterisk (1:1.4.23-5) unstable; urgency=medium
+
+  * fix ASTDATADIR location
+  * include allstar sounds
+  * implement http(s) registration
+
+ -- Adam Paul <adamjpaul@gmail.com>  Sat, 05 Sep 2020 00:45:34 -0400
+
 asl-asterisk (1:1.4.23-4) unstable; urgency=medium
 
   * make asterisk run as root until we can fix dependency problems
