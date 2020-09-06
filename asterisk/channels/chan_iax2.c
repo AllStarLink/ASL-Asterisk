@@ -459,6 +459,7 @@ struct iax2_registry {
 	char hostname[80];
 	char port[10];
 	char path[100];
+	char regport[10];
 	struct sockaddr_in addr;		/*!< Who we connect to for registration purposes */
 	char username[80];
 	char secret[80];			/*!< Password or key name in []'s */
@@ -7329,6 +7330,7 @@ static int iax2_register(char *value, int lineno)
 	char *stringp=NULL;
 	char *port;
 	char *path;
+	char *regport;
 	
 	if (option_verbose > 4) ast_log(LOG_WARNING,"REGISTER-LOG:IAX2 register called with %s\n",value);
 
@@ -7345,12 +7347,18 @@ static int iax2_register(char *value, int lineno)
 	stringp=username;
 	username = strsep(&stringp, ":");
 	secret = strsep(&stringp, ":");
+	stringp=username;
+	username = strsep(&stringp, "#");
+	regport = strsep(&stringp, "#");
 	stringp=hostname;
 	hostname = strsep(&stringp, "/");
 	path = strsep(&stringp, "?");
 	stringp=hostname;
 	hostname = strsep(&stringp, ":");
 	porta = strsep(&stringp, ":");
+
+	if(!regport)
+		regport = username + strlen(username);
 
 	if(!porta)
 		port = hostname + strlen(hostname);
@@ -7378,6 +7386,8 @@ static int iax2_register(char *value, int lineno)
 	ast_copy_string(reg->hostname, hostname, sizeof(reg->hostname));
 	ast_copy_string(reg->port, port, sizeof(reg->port));
 	ast_copy_string(reg->path, path, sizeof(reg->path));
+	ast_copy_string(reg->regport, regport, sizeof(reg->regport));
+	ast_log(LOG_DEBUG,"regport: %s\n",regport);
 	AST_LIST_LOCK(&registrations);
 	AST_LIST_INSERT_HEAD(&registrations, reg, entry);
 	AST_LIST_UNLOCK(&registrations);
@@ -10174,7 +10184,13 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	char url[100];
 	int regstate;
 
-	strncpy(request, "{\"data\":{\"nodes\":{", MAX_HTTP_REQUEST_LENGTH - 1);
+	strncpy(request, "{\"data\":{", MAX_HTTP_REQUEST_LENGTH - 1);
+	if(reg->regport){
+		strncat(request, "\"port\":", MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
+		strncat(request, reg->regport, MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
+		strncat(request, ",", MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
+	}
+	strncat(request, "\"nodes\":{", MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
 	strncat(request, "\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, reg->username, MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, "\": {\"node\":\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
