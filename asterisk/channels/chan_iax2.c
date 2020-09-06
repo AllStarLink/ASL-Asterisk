@@ -10174,7 +10174,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	char url[100];
 	int regstate;
 
-	strncpy(request, "data={\"nodes\":{", MAX_HTTP_REQUEST_LENGTH - 1);
+	strncpy(request, "{\"data\":{\"nodes\":{", MAX_HTTP_REQUEST_LENGTH - 1);
 	strncat(request, "\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, reg->username, MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, "\": {\"node\":\"", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
@@ -10184,7 +10184,8 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	strncat(request, "\",\"remote\":", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, "0", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
 	strncat(request, "}", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
-	strncat(request,"}}", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	strncat(request,"}}}", MAX_HTTP_REQUEST_LENGTH - strlen(request) - 1);
+	ast_log(LOG_DEBUG,"%s request: %s\n", proto, request);
 
 	curl = curl_easy_init();
 	if(curl) {
@@ -10194,7 +10195,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 			sprintf(url, "%s://%s:%s/%s", proto, reg->hostname, reg->port, reg->path);
 		else
 			sprintf(url, "%s://%s/%s", proto, reg->hostname, reg->path);
-		hs = curl_slist_append(hs, "Content-Type: application/json");
+		hs = curl_slist_append(hs, "Content-Type:application/json");
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
@@ -10212,6 +10213,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 		curl_global_cleanup();
 	}
 	chunk.memory[chunk.size]='\0';
+	ast_log(LOG_DEBUG, "%s response: %s\n", proto, chunk.memory);
 
 	if(strstr(chunk.memory,"successfuly registered"))
 		regstate = REG_STATE_REGISTERED;
