@@ -10185,7 +10185,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	int regstate;
 
 	strncpy(request, "{\"data\":{", MAX_HTTP_REQUEST_LENGTH - 1);
-	if(reg->regport){
+	if(strlen(reg->regport)){
 		strncat(request, "\"port\":", MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
 		strncat(request, reg->regport, MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
 		strncat(request, ",", MAX_HTTP_REQUEST_LENGTH - strlen(request)- 1);
@@ -10231,7 +10231,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	chunk.memory[chunk.size]='\0';
 	ast_log(LOG_DEBUG, "%s response: %s\n", proto, chunk.memory);
 
-	if(strstr(chunk.memory,"successfuly registered"))
+	if(strstr(chunk.memory,"successfully registered"))
 		regstate = REG_STATE_REGISTERED;
 	else
 		regstate = REG_STATE_UNREGISTERED;
