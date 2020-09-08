@@ -1,3 +1,11 @@
+asl-asterisk (1:1.4.23-6) unstable; urgency=medium
+
+  * refinements in http registration
+  * inclusion of systemd service file for updatenodelist
+  * implementation of console command rpt lookup
+
+ -- Adam Paul <adamjpaul@gmail.com>  Mon, 07 Sep 2020 23:15:43 -0400
+
 asl-asterisk (1:1.4.23-5) unstable; urgency=medium
 
   * fix ASTDATADIR location
