@@ -1909,6 +1909,7 @@ static int rpt_do_setvar(int fd, int argc, char *argv[]);
 static int rpt_do_showvars(int fd, int argc, char *argv[]);
 static int rpt_do_asl(int fd, int argc, char *argv[]);
 static int rpt_do_page(int fd, int argc, char *argv[]);
+static int rpt_do_lookup(int fd, int argc, char *argv[]);
 
 static char debug_usage[] =
 "Usage: rpt debug level {0-7}\n"
@@ -1987,6 +1988,10 @@ static char asl_usage[] =
 static char page_usage[] =
 "Usage: rpt page <nodename> <baud> <capcode> <[ANT]Text....>\n"
 "       Send an page to a user on a node, specifying capcode and type/text\n";
+
+static char lookup_usage[] = 
+"Usage rpt lookup <nodename>\n"
+"      Look up nodes on the allstar network\n";
 
 
 #ifndef	NEW_ASTERISK
@@ -2072,6 +2077,10 @@ static struct ast_cli_entry  cli_asl =
 static struct ast_cli_entry  cli_page =
         { { "rpt", "page" }, rpt_do_page,
 		"Page a user on a node", page_usage };
+
+static struct ast_cli_entry cli_lookup =
+	{ { "rpt", "lookup" }, rpt_do_lookup,
+		"Look up allstar nodes", lookup_usage };
 
 #endif
 
@@ -7917,6 +7926,20 @@ static int rpt_do_asl(int fd, int argc, char *argv[])
        return RESULT_SUCCESS;
 }
 
+static int rpt_do_lookup(int fd, int argc, char *argv[])
+{
+	struct rpt *myrpt;
+	char tmp[300]="";
+	int i;
+	if (argc != 3) return RESULT_SHOWUSAGE;
+	for( i=0; i<nrpts; i++){
+		myrpt = &rpt_vars[i];
+		node_lookup(myrpt,argv[2],tmp,sizeof(tmp) - 1,1);
+		if(strlen(tmp))
+			ast_cli(fd, "Node: %s\t Data: %s\n", myrpt->name, tmp);
+	}
+	return RESULT_SUCCESS;
+}
 
 static int play_tone_pair(struct ast_channel *chan, int f1, int f2, int duration, int amplitude)
 {
@@ -8182,6 +8205,20 @@ static char *handle_cli_asl(struct ast_cli_entry *e,
 	return res2cli(rpt_do_asl(a->fd,a->argc,a->argv));
 }
 
+static char *handle_cli_lookup(struct ast_cli_entry *e,
+	int cmd, struct ast_cli_args *a)
+{
+	switch (cmd) {
+	case CLI_INIT:
+		e->command = "rpt lookup";
+		e->usage = rpt_usage;
+		return NULL;
+	case CLI_GENERATE:
+		return NULL;
+	}
+	return res2cli(rpt_do_lookup(a->fd, a->argc, a->argv));
+}
+
 static char *handle_cli_localplay(struct ast_cli_entry *e,
 	int cmd, struct ast_cli_args *a)
 {
@@ -8258,7 +8295,8 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_sendall,"Send a Text message to all connected nodes"),
 	AST_CLI_DEFINE(handle_cli_sendtext,"Send a Text message to a specified nodes"),
 	AST_CLI_DEFINE(handle_cli_asl,"Do ASL stuff"),
-	AST_CLI_DEFINE(handle_cli_page,"Send a page to a user on a node")
+	AST_CLI_DEFINE(handle_cli_page,"Send a page to a user on a node"),
+	AST_CLI_DEFINE(handle_cli_lookup,"Lookup Allstar nodes")
 };
 
 #endif
@@ -25805,6 +25843,7 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_showvars);
 	ast_cli_unregister(&cli_asl);
 	ast_cli_unregister(&cli_page);
+	ast_cli_unregister(&cli_lookup);
 	res |= ast_cli_unregister(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
@@ -25883,6 +25922,7 @@ static int load_module(void)
 	ast_cli_register(&cli_showvars);
 	ast_cli_register(&cli_asl);
 	ast_cli_register(&cli_page);
+	ast_cli_register(&cli_lookup);
 	res = ast_cli_register(&cli_cmd);
 #endif
 #ifndef OLD_ASTERISK
