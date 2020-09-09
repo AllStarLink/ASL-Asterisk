@@ -7481,7 +7481,7 @@ static int rpt_do_local_nodes(int fd, int argc, char *argv[])
 {
 
     int i;
-    ast_cli(fd, "\nNode\n----\n");
+    ast_cli(fd, "                         \nNode\n----\n");
     for (i=0; i< nrpts; i++)
     {
 	if (rpt_vars[i].name[0])
@@ -7935,7 +7935,7 @@ static int rpt_do_lookup(int fd, int argc, char *argv[])
 		myrpt = &rpt_vars[i];
 		node_lookup(myrpt,argv[2],tmp,sizeof(tmp) - 1,1);
 		if(strlen(tmp))
-			ast_cli(fd, "Node: %s\t Data: %s\n", myrpt->name, tmp);
+			ast_cli(fd, "Node: %-10.10s Data: %-70.70s\n", myrpt->name, tmp);
 	}
 	return RESULT_SUCCESS;
 }
