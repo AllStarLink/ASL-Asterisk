@@ -180,16 +180,7 @@ startup_macro =
 
 ; *** Status Reporting ***
 
-; Uncomment either group following two statpost lines to report the status of your node to stats.allstarlink.org
-; depending on whether you are running ACID, Debian or Limey Linux.
-; The difference is simply where your wget is located.
-
-; ** For ACID and Debian ***
-;statpost_program = /usr/bin/wget,-q,--timeout=15,--tries=1,--output-document=/dev/null                       
-;statpost_url = http://stats.allstarlink.org/uhandler.php ; Status updates 
-
-; ** For Limey Linux **
-;statpost_program = /bin/wget,-q,--timeout=15,--tries=1,--output-document=/dev/null                       
+; Uncomment the following statpost line to report the status of your node to stats.allstarlink.org
 ;statpost_url = http://stats.allstarlink.org/uhandler.php ; Status updates 
 
 [functions]
