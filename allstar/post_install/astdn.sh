@@ -9,7 +9,7 @@ set -o errexit
 #                                               #
 #################################################
 
-if [ -e /var/run/asterisk.ctl ]
+if systemctl is-active --quiet asterisk
 then
 	echo "Stopping Asterisk..."
         echo "systemctl stop asterisk.service"
