@@ -284,6 +284,7 @@
 
 /*** MODULEINFO
 	<depend>tonezone</depend>
+	<depend>curl</depend>
 	<defaultenabled>yes</defaultenabled>
  ***/
 
@@ -557,6 +558,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fnmatch.h>
+#include <curl/curl.h>
 
 #include "asterisk/utils.h"
 #include "asterisk/lock.h"
@@ -5704,40 +5706,37 @@ int	i;
 
 static void statpost(struct rpt *myrpt,char *pairs)
 {
-char *str,*astr;
-char *astrs[100];
-int	n,pid;
-time_t	now;
-unsigned int seq;
+	char *str;
+	int	n,pid;
+	time_t	now;
+	unsigned int seq;
+	CURL *curl;
+	int *rescode;
 
 	if (!myrpt->p.statpost_url) return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
-	astr = ast_strdup(myrpt->p.statpost_program);
-	if ((!str) || (!astr)) return;
-	n = finddelim(astr,astrs,100);
-	if (n < 1)
-	{
-		ast_free(str);
-		ast_free(astr);
-		return;
-	}
 	ast_mutex_lock(&myrpt->statpost_lock);
 	seq = ++myrpt->statpost_seqno;
 	ast_mutex_unlock(&myrpt->statpost_lock);
-	astrs[n++] = str;
-	astrs[n] = NULL;
 	time(&now);
 	sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
 		myrpt->name,(unsigned int) now,seq);
 	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
 	if (!(pid = fork()))
 	{
-		execv(astrs[0],astrs);
-		ast_log(LOG_ERROR, "exec of %s failed.\n", astrs[0]);
+		curl = curl_easy_init();
+		if(curl) {
+			curl_easy_setopt(curl, CURLOPT_URL, str);
+			curl_easy_perform(curl);
+			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+			curl_easy_cleanup(curl);
+			curl_global_cleanup();
+		}
+		if(rescode == 200) exit(0);
+		ast_log(LOG_ERROR, "statpost failed\n");
 		perror("asterisk");
 		exit(0);
 	}
-	ast_free(astr);
 	ast_free(str);
 	return;
 }
