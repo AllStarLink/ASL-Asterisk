@@ -10221,6 +10221,8 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 		curl_easy_setopt(curl, CURLOPT_HEADER, 0L);
 		curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
 		curl_easy_setopt(curl, CURLOPT_POST, 1L);
+		curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 500L);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
 		curl_easy_perform(curl);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
 		if(strlen(chunk.memory)>MAX_HTTP_RESPONSE_LENGTH)
