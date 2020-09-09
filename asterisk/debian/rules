@@ -192,7 +192,7 @@ binary-arch: install-arch
 	dh_installdocs -a
 	dh_installman utils/*.1 doc/*.8 contrib/scripts/*.8
 	dh_installexamples -a
-	dh_installinit -a -- defaults 21
+	dh_installinit -a -- defaults-disabled
 	dh_strip -a --dbg-package=asl-asterisk-dbg
 	dh_link -a
 	dh_compress -a
