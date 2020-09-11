@@ -145,10 +145,6 @@ static const struct ast_channel_tech rtpdir_tech = {
 
 static int rtpdir_call(struct ast_channel *ast, char *dest, int timeout)
 {
-	struct rtpdir_pvt *p;
-
-	p = ast->tech_pvt;
-
 	if ((ast->_state != AST_STATE_DOWN) && (ast->_state != AST_STATE_RESERVED)) {
 		ast_log(LOG_WARNING, "rtpdir_call called on %s, neither down nor reserved\n", ast->name);
 		return -1;
@@ -321,7 +317,6 @@ static struct ast_frame  *rtpdir_xread(struct ast_channel *ast)
 	struct sockaddr_in si_them;
 	unsigned int themlen;
  	int n,i;
-	struct ast_frame fr;
         struct rtpdir_rxq *qp;
 
 	themlen = sizeof(struct sockaddr_in);
@@ -369,16 +364,6 @@ static struct ast_frame  *rtpdir_xread(struct ast_channel *ast)
 	      insque((struct qelem *) qp,(struct qelem *) p->rxq.qe_back);
 	   }
         }
-	fr.datalen = 0;
-	fr.samples = 0;
-	fr.frametype = 0;
-	fr.subclass = 0;
-	fr.data =  0;
-	fr.src = type;
-	fr.offset = 0;
-	fr.mallocd=0;
-	fr.delivery.tv_sec = 0;
-	fr.delivery.tv_usec = 0;
 
 	return &p->fr;
 }

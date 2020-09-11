@@ -803,7 +803,6 @@ static int moh_scan_files(struct mohclass *class) {
 	char filepath[PATH_MAX];
 	char *ext;
 	struct stat statbuf;
-	int dirnamelen;
 	int i;
 	
 	files_DIR = opendir(class->dir);
@@ -816,7 +815,6 @@ static int moh_scan_files(struct mohclass *class) {
 		free(class->filearray[i]);
 
 	class->total_files = 0;
-	dirnamelen = strlen(class->dir) + 2;
 	getcwd(path, sizeof(path));
 	chdir(class->dir);
 	while ((files_dirent = readdir(files_DIR))) {

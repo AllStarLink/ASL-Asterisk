@@ -102,7 +102,7 @@ static struct ast_variable *realtime_odbc(const char *database, const char *tabl
 	char coltitle[256];
 	char rowdata[2048];
 	char *op;
-	const char *newparam, *newval;
+	const char *newparam;
 	char *stringp;
 	char *chunk;
 	SQLSMALLINT collen;
@@ -136,7 +136,6 @@ static struct ast_variable *realtime_odbc(const char *database, const char *tabl
 		ast_odbc_release_obj(obj);
 		return NULL;
 	}
-	newval = va_arg(aq, const char *);
 	op = !strchr(newparam, ' ') ? " =" : "";
 	snprintf(sql, sizeof(sql), "SELECT * FROM %s WHERE %s%s ?%s", table, newparam, op,
 		strcasestr(newparam, "LIKE") && !ast_odbc_backslash_is_escape(obj) ? " ESCAPE '\\'" : "");
@@ -144,7 +143,6 @@ static struct ast_variable *realtime_odbc(const char *database, const char *tabl
 		op = !strchr(newparam, ' ') ? " =" : "";
 		snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), " AND %s%s ?%s", newparam, op,
 			strcasestr(newparam, "LIKE") && !ast_odbc_backslash_is_escape(obj) ? " ESCAPE '\\'" : "");
-		newval = va_arg(aq, const char *);
 	}
 	va_end(aq);
 

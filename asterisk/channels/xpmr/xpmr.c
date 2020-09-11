@@ -727,9 +727,9 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 			i16 n;
 			y=0;
 
-		    for(n=nx-1; n>0; n--)
-		       x[n] = x[n-1];
-		    x[0] = (input[i]*inputGain)/M_Q8;
+			for(n=nx-1; n>0; n--)
+				x[n] = x[n-1];
+			x[0] = (input[i]*inputGain)/M_Q8;
 
 			#if 0
 			--decimator;
@@ -742,10 +742,10 @@ i16 pmr_gp_fir(t_pmr_sps *mySps)
 				output[ii++]=y;
 			}
 		 	#else
-		    for(n=0; n<nx; n++)
-		        y += coef[n] * x[n];
+			for(n=0; n<nx; n++)
+		        	y += coef[n] * x[n];
 
-			y=((y/calcAdjust)*outputGain)/M_Q8;
+		    	y=((y/calcAdjust)*outputGain)/M_Q8;
 
 			if (y>32767)y=32767;		 			// overflow
 			else if(y<-32767)y=-32767;

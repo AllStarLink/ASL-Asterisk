@@ -3199,10 +3199,10 @@ static void gen_prios(struct ael_extension *exten, char *label, pval *statement,
 #ifdef OLD_RAND_ACTION
 	struct ael_priority *rand_test, *rand_end, *rand_skip;
 #endif
-	char buf1[2000];
+	char buf1[10000];
 	char buf2[2000];
 	char *strp, *strp2;
-	char new_label[2000];
+	char new_label[2020];
 	int default_exists;
 	int local_control_statement_count;
 	struct ael_priority *loop_break_save;

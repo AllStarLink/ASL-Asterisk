@@ -560,7 +560,6 @@ static int handle_controlstreamfile(struct ast_channel *chan, AGI *agi, int argc
 static int handle_streamfile(struct ast_channel *chan, AGI *agi, int argc, char *argv[])
 {
 	int res;
-	int vres;	
 	struct ast_filestream *fs;
 	struct ast_filestream *vfs;
 	long sample_offset = 0;
@@ -594,7 +593,7 @@ static int handle_streamfile(struct ast_channel *chan, AGI *agi, int argc, char 
 	ast_seekstream(fs, sample_offset, SEEK_SET);
 	res = ast_applystream(chan, fs);
 	if (vfs)
-		vres = ast_applystream(chan, vfs);
+		ast_applystream(chan, vfs);
 	ast_playstream(fs);
 	if (vfs)
 		ast_playstream(vfs);
@@ -616,7 +615,6 @@ static int handle_streamfile(struct ast_channel *chan, AGI *agi, int argc, char 
 static int handle_getoption(struct ast_channel *chan, AGI *agi, int argc, char *argv[])
 {
 	int res;
-	int vres;	
 	struct ast_filestream *fs;
 	struct ast_filestream *vfs;
 	long sample_offset = 0;
@@ -655,7 +653,7 @@ static int handle_getoption(struct ast_channel *chan, AGI *agi, int argc, char *
 	ast_seekstream(fs, sample_offset, SEEK_SET);
 	res = ast_applystream(chan, fs);
 	if (vfs)
-		vres = ast_applystream(chan, vfs);
+		ast_applystream(chan, vfs);
 	ast_playstream(fs);
 	if (vfs)
 		ast_playstream(vfs);

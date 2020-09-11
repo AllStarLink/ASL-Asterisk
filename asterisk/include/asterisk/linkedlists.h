@@ -497,7 +497,8 @@ struct {								\
 	     (var);									\
 	     __list_prev = __new_prev, (var) = __list_next,				\
 	     __new_prev = (var),							\
-	     __list_next = (var) ? (var)->field.next : NULL				\
+	     __list_next = (var) ? (var)->field.next : NULL,				\
+             (void) __list_prev /* To quiet compiler? */				\
 	    )
 
 #define AST_RWLIST_TRAVERSE_SAFE_BEGIN AST_LIST_TRAVERSE_SAFE_BEGIN

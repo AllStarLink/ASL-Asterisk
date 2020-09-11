@@ -263,7 +263,7 @@ static void rebuild_channels(newtComponent c)
 {
 	void *prev = NULL;
 	struct ast_chan *chan;
-	char tmpn[42];
+	char tmpn[122];
 	char tmp[256];
 	int x=0;
 	prev = newtListboxGetCurrent(c);
@@ -360,7 +360,7 @@ static int input_check(struct ast_mansession *s, struct message **mout)
 				}
 				if (process_message(s, &m))
 					break;
-				memset(&m, 0, sizeof(&m));
+				memset(&m, 0, sizeof(m));
 			} else if (m.hdrcount < MAX_HEADERS - 1)
 				m.hdrcount++;
 		} else if (res < 0) {
@@ -513,14 +513,15 @@ static void try_redirect(newtComponent c)
 	struct ast_chan *chan;
 	char dest[256];
 	struct message *m;
+	static const char tmp_prefix[] = "Enter new extension for ";
 	char channame[256];
-	char tmp[80];
+	char tmp[sizeof(tmp_prefix) + sizeof(channame)];
 	char *context;
 
 	chan = newtListboxGetCurrent(c);
 	if (chan) {
 		strncpy(channame, chan->name, sizeof(channame) - 1);
-		snprintf(tmp, sizeof(tmp), "Enter new extension for %s", channame);
+		snprintf(tmp, sizeof(tmp), "%s%s", tmp_prefix, channame);
 		if (get_user_input(tmp, dest, sizeof(dest))) 
 			return;
 		if ((context = strchr(dest, '@'))) {
@@ -707,7 +708,7 @@ static int login(char *hostname)
 					show_message("Login Failed", get_header(m, "Message"));
 				}
 			} else {
-				memset(m, 0, sizeof(m));
+				memset(m, 0, sizeof(*m));
 				manager_action("Login", 
 					"Username: %s\r\n"
 					"Secret: %s\r\n",

@@ -791,7 +791,6 @@ static int gtalk_create_candidates(struct gtalk *client, struct gtalk_pvt *p, ch
 	struct aji_client *c = client->connection;
 	struct gtalk_candidate *ours1 = NULL, *ours2 = NULL;
 	struct sockaddr_in sin;
-	struct sockaddr_in dest;
 	struct in_addr us;
 	iks *iq, *gtalk, *candidate, *transport;
 	char user[17], pass[17], preference[5], port[7];
@@ -859,8 +858,6 @@ static int gtalk_create_candidates(struct gtalk *client, struct gtalk_pvt *p, ch
 		ours2 = NULL;
 	}
 	ours1 = NULL;
-	dest.sin_addr = __ourip;
-	dest.sin_port = sin.sin_port;
 
 
 	for (tmp = p->ourcandidates; tmp; tmp = tmp->next) {
@@ -918,7 +915,7 @@ static struct gtalk_pvt *gtalk_alloc(struct gtalk *client, const char *us, const
 	struct gtalk_pvt *tmp = NULL;
 	struct aji_resource *resources = NULL;
 	struct aji_buddy *buddy;
-	char idroster[200];
+	char idroster[1024];
 	char *data, *exten = NULL;
 
 	if (option_debug)

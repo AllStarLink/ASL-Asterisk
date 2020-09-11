@@ -1270,7 +1270,7 @@ static struct ast_channel *ast_feature_request_and_dial(struct ast_channel *call
 	struct ast_channel *chan;
 	struct ast_channel *monitor_chans[2];
 	struct ast_channel *active_channel;
-	int res = 0, ready = 0;
+	int ready = 0;
 	
 	if ((chan = ast_request(type, format, data, &cause))) {
 		ast_set_callerid(chan, cid_num, cid_name, cid_num);
@@ -1321,7 +1321,6 @@ static struct ast_channel *ast_feature_request_and_dial(struct ast_channel *call
 					f = ast_read(chan);
 					if (f == NULL) { /*doh! where'd he go?*/
 						state = AST_CONTROL_HANGUP;
-						res = 0;
 						break;
 					}
 					
@@ -1361,7 +1360,6 @@ static struct ast_channel *ast_feature_request_and_dial(struct ast_channel *call
 							break;
 						}
 						state = AST_CONTROL_HANGUP;
-						res = 0;
 						break;
 					}
 					
@@ -1404,13 +1402,9 @@ static struct ast_channel *ast_feature_request_and_dial(struct ast_channel *call
 	if (chan && ready) {
 		if (chan->_state == AST_STATE_UP) 
 			state = AST_CONTROL_ANSWER;
-		res = 0;
 	} else if(chan) {
-		res = -1;
 		ast_hangup(chan);
 		chan = NULL;
-	} else {
-		res = -1;
 	}
 	
 	if (outstate)
@@ -1449,7 +1443,6 @@ int ast_bridge_call(struct ast_channel *chan,struct ast_channel *peer,struct ast
 	struct ast_option_header *aoh;
 	struct ast_bridge_config backup_config;
 	struct ast_cdr *bridge_cdr = NULL;
-	struct ast_cdr *orig_peer_cdr = NULL;
 	struct ast_cdr *chan_cdr = pick_unlocked_cdr(chan->cdr); /* the proper chan cdr, if there are forked cdrs */
 	struct ast_cdr *peer_cdr = pick_unlocked_cdr(peer->cdr); /* the proper chan cdr, if there are forked cdrs */
 	struct ast_cdr *new_chan_cdr = NULL; /* the proper chan cdr, if there are forked cdrs */
@@ -1491,7 +1484,6 @@ int ast_bridge_call(struct ast_channel *chan,struct ast_channel *peer,struct ast
 
 	ast_copy_string(orig_channame,chan->name,sizeof(orig_channame));
 	ast_copy_string(orig_peername,peer->name,sizeof(orig_peername));
-	orig_peer_cdr = peer_cdr;
 	
 	if (!chan_cdr || (chan_cdr && !ast_test_flag(chan_cdr, AST_CDR_FLAG_POST_DISABLED))) {
 			

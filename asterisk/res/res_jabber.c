@@ -1428,13 +1428,12 @@ static void aji_handle_subscribe(struct aji_client *client, ikspak *pak)
  */
 int ast_aji_send(struct aji_client *client, const char *address, const char *message)
 {
-	int res = 0;
 	iks *message_packet = NULL;
 	if (client->state == AJI_CONNECTED) {
 		message_packet = iks_make_msg(IKS_TYPE_CHAT, address, message);
 		if (message_packet) {
 			iks_insert_attrib(message_packet, "from", client->jid->full);
-			res = iks_send(client->p, message_packet);
+			iks_send(client->p, message_packet);
 		} else {
 			ast_log(LOG_ERROR, "Out of memory.\n");
 		}
@@ -1691,7 +1690,6 @@ void ast_aji_increment_mid(char *mid)
  */
 static void aji_pruneregister(struct aji_client *client)
 {
-	int res = 0;
 	iks *removeiq = iks_new("iq");
 	iks *removequery = iks_new("query");
 	iks *removeitem = iks_new("item");
@@ -1705,10 +1703,10 @@ static void aji_pruneregister(struct aji_client *client)
 			/* For an aji_buddy, both AUTOPRUNE and AUTOREGISTER will never
 			 * be called at the same time */
 			if (ast_test_flag(iterator, AJI_AUTOPRUNE)) {
-				res = iks_send(client->p, iks_make_s10n(IKS_TYPE_UNSUBSCRIBE, iterator->name,
+				iks_send(client->p, iks_make_s10n(IKS_TYPE_UNSUBSCRIBE, iterator->name,
 						"GoodBye your status is no longer needed by Asterisk the Open Source PBX"
 						" so I am no longer subscribing to your presence.\n"));
-				res = iks_send(client->p, iks_make_s10n(IKS_TYPE_UNSUBSCRIBED, iterator->name,
+				iks_send(client->p, iks_make_s10n(IKS_TYPE_UNSUBSCRIBED, iterator->name,
 						"GoodBye you are no longer in the asterisk config file so I am removing"
 						" your access to my presence.\n"));
 				iks_insert_attrib(removeiq, "from", client->jid->full); 
@@ -1716,9 +1714,9 @@ static void aji_pruneregister(struct aji_client *client)
 				iks_insert_attrib(removequery, "xmlns", "jabber:iq:roster");
 				iks_insert_attrib(removeitem, "jid", iterator->name);
 				iks_insert_attrib(removeitem, "subscription", "remove");
-				res = iks_send(client->p, removeiq);
+				iks_send(client->p, removeiq);
 			} else if (ast_test_flag(iterator, AJI_AUTOREGISTER)) {
-				res = iks_send(client->p, iks_make_s10n(IKS_TYPE_SUBSCRIBE, iterator->name, 
+				iks_send(client->p, iks_make_s10n(IKS_TYPE_SUBSCRIBE, iterator->name, 
 						"Greetings I am the Asterisk Open Source PBX and I want to subscribe to your presence\n"));
 				ast_clear_flag(iterator, AJI_AUTOREGISTER);
 			}
@@ -1942,7 +1940,6 @@ int ast_aji_disconnect(struct aji_client *client)
  */
 static void aji_set_presence(struct aji_client *client, char *to, char *from, int level, char *desc)
 {
-	int res = 0;
 	iks *presence = iks_make_pres(level, desc);
 	iks *cnode = iks_new("c");
 	iks *priority = iks_new("priority");
@@ -1958,7 +1955,7 @@ static void aji_set_presence(struct aji_client *client, char *to, char *from, in
 		iks_insert_attrib(cnode, "ext", "voice-v1");
 		iks_insert_attrib(cnode, "xmlns", "http://jabber.org/protocol/caps");
 		iks_insert_node(presence, cnode);
-		res = iks_send(client->p, presence);
+		iks_send(client->p, presence);
 	} else
 		ast_log(LOG_ERROR, "Out of memory.\n");
 	if (cnode)

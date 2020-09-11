@@ -136,7 +136,8 @@ static int load_config(char* config)
 						fprintf(stderr, "Error: node needs a password at line %d of %s\n", lineno, config);
 						exit(3);
 					}
-					strncpy(nodelist[nodecount++].num, buf, sizeof(((struct node*)0)->num) - 1);
+					buf[9] = '\0';
+					snprintf(nodelist[nodecount++].num, sizeof(((struct node*)0)->num) - 1, buf);
 				} else
 					fprintf(stderr, "nodelist too long in %s. ignoring line %d\n", config, lineno);
 			} else if (!strcasecmp(buf, "bindport")) {
@@ -169,7 +170,7 @@ static void generatePost( char **post ) {
 	       fprintf(stderr, "buffer overflow while generating request\n");
        	       exit(6);
 	}
-	strncat(*post,"}}", - strlen(*post) - 1);
+	strncat(*post,"}}", MAX_REQUEST_LENGTH - strlen(*post) - 1);
 }
 
 static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
@@ -244,13 +245,11 @@ static int getMessages(char *response, char **messages) {
 	ptr2++;
 	// remove leading whitespace
 	while(*ptr2 < 33) ptr2++;
-	if(!*ptr2 == '[') return -1;
 	ptr2++;
 	int i = 0;
 	while(1) {
 		// remove leading whitespace
 		while(*ptr2 < 33) ptr2++;
-		if(!*ptr2 == '"') return -1;
 		ptr2++;
 		ptr = strchr(ptr2,'"');
 		if(ptr) {

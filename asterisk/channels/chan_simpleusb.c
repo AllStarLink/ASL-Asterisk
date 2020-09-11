@@ -988,7 +988,7 @@ static struct usb_device *hid_device_init(char *desired_device)
 {
     struct usb_bus *usb_bus;
     struct usb_device *dev;
-    char devstr[200],str[200],desdev[200],*cp;
+    char devstr[8194],str[200],desdev[200],*cp;
     int i;
     FILE *fp;
 
@@ -1064,7 +1064,7 @@ static int hid_device_mklist(void)
 {
     struct usb_bus *usb_bus;
     struct usb_device *dev;
-    char devstr[200],str[200],desdev[200],*cp;
+    char devstr[8194],str[200],desdev[200],*cp;
     int i;
     FILE *fp;
 
