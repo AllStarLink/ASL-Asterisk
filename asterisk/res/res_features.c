@@ -2433,7 +2433,7 @@ int ast_pickup_call(struct ast_channel *chan)
 static void park_add_hints(char *context, int start, int stop)
 {
 	int numext;
-	char device[AST_MAX_EXTENSION];
+	char device[AST_MAX_EXTENSION+15];
 	char exten[10];
 
 	for (numext = start; numext <= stop; numext++) {

@@ -295,8 +295,8 @@ int ast_monitor_stop(struct ast_channel *chan, int need_lock)
 		}
 
 		if (chan->monitor->joinfiles && !ast_strlen_zero(chan->monitor->filename_base)) {
-			char tmp[1024];
-			char tmp2[1024];
+			char tmp[30000];
+			char tmp2[40000];
 			const char *format = !strcasecmp(chan->monitor->format,"wav49") ? "WAV" : chan->monitor->format;
 			char *name = chan->monitor->filename_base;
 			int directory = strchr(name, '/') ? 1 : 0;
@@ -377,7 +377,7 @@ int ast_monitor_change_fname(struct ast_channel *chan, const char *fname_base, i
 	if (chan->monitor) {
 		int directory = strchr(fname_base, '/') ? 1 : 0;
 		const char *absolute = *fname_base == '/' ? "" : "/";
-		char tmpstring[sizeof(chan->monitor->filename_base)] = "";
+		char tmpstring[sizeof(chan->monitor->filename_base)+20] = "";
 
 		/* before continuing, see if we're trying to rename the file to itself... */
 		snprintf(tmpstring, sizeof(tmpstring), "%s%s%s", directory ? "" : ast_config_AST_MONITOR_DIR, absolute, fname_base);

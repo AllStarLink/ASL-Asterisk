@@ -80,7 +80,7 @@ static struct ast_variable *realtime_pgsql(const char *database, const char *tab
 {
 	PGresult *result = NULL;
 	int num_rows = 0, pgerror;
-	char sql[256], escapebuf[513];
+	char sql[600], escapebuf[513];
 	char *stringp;
 	char *chunk;
 	char *op;
@@ -217,7 +217,7 @@ static struct ast_config *realtime_multi_pgsql(const char *database, const char 
 {
 	PGresult *result = NULL;
 	int num_rows = 0, pgerror;
-	char sql[256], escapebuf[513];
+	char sql[600], escapebuf[513];
 	const char *initfield = NULL;
 	char *stringp;
 	char *chunk;
@@ -381,7 +381,7 @@ static int update_pgsql(const char *database, const char *table, const char *key
 {
 	PGresult *result = NULL;
 	int numrows = 0, pgerror;
-	char sql[256], escapebuf[513];
+	char sql[540], escapebuf[513];
 	const char *newparam, *newval;
 
 	if (!table) {

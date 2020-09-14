@@ -239,7 +239,7 @@ static enum agi_result launch_netscript(char *agiurl, char *argv[], int *fds, in
 
 static enum agi_result launch_script(char *script, char *argv[], int *fds, int *efd, int *opid)
 {
-	char tmp[256];
+	char tmp[4097];
 	int pid;
 	int toast[2];
 	int fromast[2];

@@ -152,7 +152,7 @@ static struct ast_key *try_load_key (char *dir, char *fname, int ifd, int ofd, i
 {
 	int ktype = 0;
 	char *c = NULL;
-	char ffname[384];
+	char ffname[4097];
 	unsigned char digest[16];
 	FILE *f;
 	struct MD5Context md5;

@@ -36,7 +36,7 @@ struct ast_channel_monitor {
 	struct ast_filestream *write_stream;
 	char read_filename[FILENAME_MAX];
 	char write_filename[FILENAME_MAX];
-	char filename_base[FILENAME_MAX];
+	char filename_base[FILENAME_MAX-4];
 	int filename_changed;
 	char *format;
 	int joinfiles;

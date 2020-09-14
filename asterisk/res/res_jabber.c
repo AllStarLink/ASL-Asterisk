@@ -342,7 +342,7 @@ static iks *jabber_make_auth(iksid * id, const char *pass, const char *sid)
 	iks_insert_cdata(iks_insert(y, "resource"), id->resource, 0);
 	if (sid) {
 		char buf[41];
-		char sidpass[100];
+		char sidpass[160];
 		snprintf(sidpass, sizeof(sidpass), "%s%s", sid, pass);
 		ast_sha1_hash(buf, sidpass);
 		iks_insert_cdata(iks_insert(y, "digest"), buf, 0);
