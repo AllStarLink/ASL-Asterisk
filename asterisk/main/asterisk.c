@@ -1979,7 +1979,7 @@ static char *cli_prompt(EditLine *el)
 				ast_copy_string(prompt + sizeof(prompt) - strlen(term_code) - 1, term_code, strlen(term_code) + 1);
 			} else {
 				/* This looks wrong, but we've already checked the length of term_code to ensure it's safe */
-				strncat(p, term_code, sizeof(term_code));
+				strncat(p, term_code, sizeof(*p));
 			}
 		}
 	} else if (remotehostname)
@@ -2452,7 +2452,7 @@ static void ast_readconfig(void)
 	ast_copy_string(ast_config_AST_CONFIG_DIR, AST_CONFIG_DIR, sizeof(ast_config_AST_CONFIG_DIR));
 	ast_copy_string(ast_config_AST_SPOOL_DIR, AST_SPOOL_DIR, sizeof(ast_config_AST_SPOOL_DIR));
 	ast_copy_string(ast_config_AST_MODULE_DIR, AST_MODULE_DIR, sizeof(ast_config_AST_MODULE_DIR));
- 	snprintf(ast_config_AST_MONITOR_DIR, sizeof(ast_config_AST_MONITOR_DIR) - 1, "%s/monitor", ast_config_AST_SPOOL_DIR);
+ 	snprintf(ast_config_AST_MONITOR_DIR, sizeof(ast_config_AST_MONITOR_DIR) - 1, "%.4086s/monitor", ast_config_AST_SPOOL_DIR);
 	ast_copy_string(ast_config_AST_VAR_DIR, AST_VAR_DIR, sizeof(ast_config_AST_VAR_DIR));
 	ast_copy_string(ast_config_AST_DATA_DIR, AST_DATA_DIR, sizeof(ast_config_AST_DATA_DIR));
 	ast_copy_string(ast_config_AST_LOG_DIR, AST_LOG_DIR, sizeof(ast_config_AST_LOG_DIR));
@@ -2498,7 +2498,7 @@ static void ast_readconfig(void)
 			ast_copy_string(ast_config_AST_AGI_DIR, v->value, sizeof(ast_config_AST_AGI_DIR));
 		} else if (!strcasecmp(v->name, "astrundir")) {
 			snprintf(ast_config_AST_PID, sizeof(ast_config_AST_PID), "%s/%s", v->value, "asterisk.pid");
-			snprintf(ast_config_AST_SOCKET, sizeof(ast_config_AST_SOCKET), "%s/%s", v->value, ast_config_AST_CTL);
+			snprintf(ast_config_AST_SOCKET, sizeof(ast_config_AST_SOCKET), "%.2000s/%.2000s", v->value, ast_config_AST_CTL);
 			ast_copy_string(ast_config_AST_RUN_DIR, v->value, sizeof(ast_config_AST_RUN_DIR));
 		} else if (!strcasecmp(v->name, "astmoddir")) {
 			ast_copy_string(ast_config_AST_MODULE_DIR, v->value, sizeof(ast_config_AST_MODULE_DIR));

@@ -60,7 +60,6 @@ static int function_enum(struct ast_channel *chan, char *cmd, char *data,
 		AST_APP_ARG(record);
 		AST_APP_ARG(zone);
 	);
-	int res = 0;
 	char tech[80];
 	char dest[256] = "", tmp[2] = "", num[AST_MAX_EXTENSION] = "";
 	struct ast_module_user *u;
@@ -103,7 +102,7 @@ static int function_enum(struct ast_channel *chan, char *cmd, char *data,
 
 	}
 
-	res = ast_get_enum(chan, num, dest, sizeof(dest), tech, sizeof(tech), args.zone,
+	ast_get_enum(chan, num, dest, sizeof(dest), tech, sizeof(tech), args.zone,
 			   args.options, record);
 
 	p = strchr(dest, ':');
@@ -135,7 +134,6 @@ static struct ast_custom_function enum_function = {
 static int function_txtcidname(struct ast_channel *chan, char *cmd,
 			       char *data, char *buf, size_t len)
 {
-	int res;
 	char tech[80];
 	char txt[256] = "";
 	char dest[80];
@@ -151,7 +149,7 @@ static int function_txtcidname(struct ast_channel *chan, char *cmd,
 
 	u = ast_module_user_add(chan);
 
-	res = ast_get_txt(chan, data, dest, sizeof(dest), tech, sizeof(tech), txt,
+	ast_get_txt(chan, data, dest, sizeof(dest), tech, sizeof(tech), txt,
 			  sizeof(txt));
 
 	if (!ast_strlen_zero(txt))

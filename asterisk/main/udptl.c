@@ -186,7 +186,6 @@ static int decode_open_type(uint8_t *buf, int limit, int *len, const uint8_t **p
 	int octet_cnt;
 	int octet_idx;
 	int stat;
-	int i;
 	const uint8_t **pbuf;
 
 	for (octet_idx = 0, *p_num_octets = 0; ; octet_idx += octet_cnt) {
@@ -196,7 +195,6 @@ static int decode_open_type(uint8_t *buf, int limit, int *len, const uint8_t **p
 			*p_num_octets += octet_cnt;
 
 			pbuf = &p_object[octet_idx];
-			i = 0;
 			/* Make sure the buffer contains at least the number of bits requested */
 			if ((*len + octet_cnt) > limit)
 				return -1;
@@ -624,7 +622,6 @@ struct ast_frame *ast_udptl_read(struct ast_udptl *udptl)
 	struct sockaddr_in sin;
 	socklen_t len;
 	uint16_t seqno = 0;
-	uint16_t *udptlheader;
 
 	len = sizeof(sin);
 	
@@ -635,7 +632,6 @@ struct ast_frame *ast_udptl_read(struct ast_udptl *udptl)
 			0,
 			(struct sockaddr *) &sin,
 			&len);
-	udptlheader = (uint16_t *)(udptl->rawdata + AST_FRIENDLY_OFFSET);
 	if (res < 0) {
 		if (errno != EAGAIN)
 			ast_log(LOG_WARNING, "UDPTL read error: %s\n", strerror(errno));

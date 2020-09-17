@@ -191,7 +191,7 @@ static int parkandannounce_exec(struct ast_channel *chan, void *data)
 		} else {
 			if(option_verbose > 3)
 				ast_verbose(VERBOSE_PREFIX_4 "Channel %s was never answered.\n", dchan->name);
-        			ast_log(LOG_WARNING, "PARK: Channel %s was never answered for the announce.\n", dchan->name);
+        		ast_log(LOG_WARNING, "PARK: Channel %s was never answered for the announce.\n", dchan->name);
 			ast_hangup(dchan);
 			ast_module_user_remove(u);
 			return -1;

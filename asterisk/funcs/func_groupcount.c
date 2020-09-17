@@ -175,7 +175,7 @@ static int group_list_function_read(struct ast_channel *chan, char *cmd,
 				    char *data, char *buf, size_t len)
 {
 	struct ast_group_info *gi = NULL;
-	char tmp1[1024] = "";
+	char tmp1[2048] = "";
 	char tmp2[1024] = "";
 
 	if (!chan)

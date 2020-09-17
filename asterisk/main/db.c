@@ -395,9 +395,9 @@ static int database_showkey(int fd, int argc, char *argv[])
 
 struct ast_db_entry *ast_db_gettree(const char *family, const char *keytree)
 {
-	char prefix[256];
+	char prefix[4097];
 	DBT key, data;
-	char *keys, *values;
+	char *keys, *values, *tmp;
 	int values_len;
 	int res;
 	int pass;
@@ -407,7 +407,8 @@ struct ast_db_entry *ast_db_gettree(const char *family, const char *keytree)
 	if (!ast_strlen_zero(family)) {
 		if (!ast_strlen_zero(keytree)) {
 			/* Family and key tree */
-			snprintf(prefix, sizeof(prefix), "/%s/%s", family, prefix);
+			tmp = prefix;
+			snprintf(prefix, sizeof(prefix), "/%s/%.256s", family, tmp);
 		} else {
 			/* Family only */
 			snprintf(prefix, sizeof(prefix), "/%s", family);

@@ -1342,7 +1342,7 @@ static int adsi_process(struct adsi_script *state, char *buf, char *script, int 
 static struct adsi_script *compile_script(char *script)
 {
 	FILE *f;
-	char fn[256];
+	char fn[4097];
 	char buf[256];
 	char *c;
 	int lineno=0;

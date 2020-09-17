@@ -637,7 +637,7 @@ static void sms_log (sms_t * h, char status)
 	if (*h->oa || *h->da) {
 		int o = open (log_file, O_CREAT | O_APPEND | O_WRONLY, 0666);
 		if (o >= 0) {
-			char line[1000], mrs[3] = "", *p;
+			char line[1000], mrs[5] = "", *p;
 			unsigned char n;
 
 			if (h->mr >= 0)
@@ -1528,8 +1528,8 @@ static int load_module(void)
 			wavea[p] = AST_LIN2A (wave[p]);
 	}
 #endif
-	snprintf (log_file, sizeof (log_file), "%s/sms", ast_config_AST_LOG_DIR);
-	snprintf (spool_dir, sizeof (spool_dir), "%s/sms", ast_config_AST_SPOOL_DIR);
+	snprintf (log_file, sizeof (log_file), "%.250s/sms", ast_config_AST_LOG_DIR);
+	snprintf (spool_dir, sizeof (spool_dir), "%.250s/sms", ast_config_AST_SPOOL_DIR);
 	return ast_register_application (app, sms_exec, synopsis, descrip);
 }
 

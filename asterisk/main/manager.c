@@ -1796,7 +1796,7 @@ static void *fast_originate(void *data)
 	}
 
 	if (!chan)
-		snprintf(requested_channel, AST_CHANNEL_NAME, "%s/%s", in->tech, in->data);	
+		snprintf(requested_channel, AST_CHANNEL_NAME, "%.20s/%.58s", in->tech, in->data);	
 	/* Tell the manager what happened with the channel */
 	manager_event(EVENT_FLAG_CALL, "OriginateResponse",
 		"%s"

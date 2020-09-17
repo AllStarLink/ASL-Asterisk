@@ -687,11 +687,8 @@ void ast_cdr_merge(struct ast_cdr *to, struct ast_cdr *from)
 
 void ast_cdr_start(struct ast_cdr *cdr)
 {
-	char *chan; 
-
 	for (; cdr; cdr = cdr->next) {
 		if (!ast_test_flag(cdr, AST_CDR_FLAG_LOCKED)) {
-			chan = S_OR(cdr->channel, "<unknown>");
 			check_post(cdr);
 			cdr->start = ast_tvnow();
 		}
@@ -827,11 +824,9 @@ int ast_cdr_setcid(struct ast_cdr *cdr, struct ast_channel *c)
 
 int ast_cdr_init(struct ast_cdr *cdr, struct ast_channel *c)
 {
-	char *chan;
 
 	for ( ; cdr ; cdr = cdr->next) {
 		if (!ast_test_flag(cdr, AST_CDR_FLAG_LOCKED)) {
-			chan = S_OR(cdr->channel, "<unknown>");
 			ast_copy_string(cdr->channel, c->name, sizeof(cdr->channel));
 			set_one_cid(cdr, c);
 

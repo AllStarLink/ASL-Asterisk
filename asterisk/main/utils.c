@@ -230,16 +230,16 @@ struct hostent *ast_gethostbyname(const char *host, struct ast_hostent *hp)
 
 
 
-AST_MUTEX_DEFINE_STATIC(test_lock);
-AST_MUTEX_DEFINE_STATIC(test_lock2);
-static pthread_t test_thread; 
-static int lock_count = 0;
-static int test_errors = 0;
+//AST_MUTEX_DEFINE_STATIC(test_lock);
+//AST_MUTEX_DEFINE_STATIC(test_lock2);
+//static pthread_t test_thread; 
+//static int lock_count = 0;
+//static int test_errors = 0;
 
 /*! \brief This is a regression test for recursive mutexes.
    test_for_thread_safety() will return 0 if recursive mutex locks are
    working properly, and non-zero if they are not working properly. */
-static void *test_thread_body(void *data) 
+/*static void *test_thread_body(void *data) 
 { 
 	ast_mutex_lock(&test_lock);
 	lock_count += 10;
@@ -260,7 +260,7 @@ static void *test_thread_body(void *data)
 	if (lock_count != 0) 
 		test_errors++;
 	return NULL;
-} 
+} */
 
 int test_for_thread_safety(void)
 {

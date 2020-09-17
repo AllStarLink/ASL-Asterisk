@@ -141,7 +141,7 @@ int ast_dnsmgr_lookup(const char *name, struct in_addr *result, struct ast_dnsmg
 
 	/* do a lookup now but add a manager so it will automagically get updated in the background */
 	if ((hp = ast_gethostbyname(name, &ahp)))
-		memcpy(result, hp->h_addr, sizeof(result));
+		memcpy(result, hp->h_addr, sizeof(*result));
 	
 	/* if dnsmgr is not enable don't bother adding an entry */
 	if (!enabled)
@@ -177,7 +177,7 @@ static int dnsmgr_refresh(struct ast_dnsmgr_entry *entry, int verbose)
 			ast_copy_string(iabuf2, ast_inet_ntoa(tmp), sizeof(iabuf2));
 			ast_log(LOG_NOTICE, "host '%s' changed from %s to %s\n", 
 				entry->name, iabuf, iabuf2);
-			memcpy(entry->result, hp->h_addr, sizeof(entry->result));
+			memcpy(entry->result, hp->h_addr, sizeof(*entry->result));
 			memcpy(&entry->last, hp->h_addr, sizeof(entry->last));
 			changed = entry->changed = 1;
 		} 

@@ -102,7 +102,6 @@ static void isAnsweringMachine(struct ast_channel *chan, void *data)
 	int iTotalTime = 0;
 	int iWordsCount = 0;
 	int currentState = STATE_IN_WORD;
-	int previousState = STATE_IN_SILENCE;
 	int consecutiveVoiceDuration = 0;
 	char amdCause[256] = "", amdStatus[256] = "";
 	char *parse = ast_strdupa(data);
@@ -242,7 +241,6 @@ static void isAnsweringMachine(struct ast_channel *chan, void *data)
 				
 				if (silenceDuration >= betweenWordsSilence) {
 					if (currentState != STATE_IN_SILENCE ) {
-						previousState = currentState;
 						if (option_verbose > 2)
 							ast_verbose(VERBOSE_PREFIX_3 "AMD: Changed state to STATE_IN_SILENCE\n");
 					}
@@ -282,7 +280,6 @@ static void isAnsweringMachine(struct ast_channel *chan, void *data)
 					iWordsCount++;
 					if (option_verbose > 2)
 						ast_verbose(VERBOSE_PREFIX_3 "AMD: Word detected. iWordsCount:%d\n", iWordsCount);
-					previousState = currentState;
 					currentState = STATE_IN_WORD;
 				}
 				

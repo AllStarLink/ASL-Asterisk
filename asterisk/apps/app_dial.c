@@ -853,7 +853,7 @@ static int dial_exec_full(struct ast_channel *chan, void *data, struct ast_flags
 	const char *outbound_group = NULL;
 	int result = 0;
 	time_t start_time;
-	char privintro[1024];
+	char privintro[5100];
 	char privcid[256];
 	char *parse;
 	int opermode = 0;
@@ -998,7 +998,7 @@ static int dial_exec_full(struct ast_channel *chan, void *data, struct ast_flags
 	if (ast_test_flag(&opts, OPT_PRIVACY) && ast_strlen_zero(opt_args[OPT_ARG_PRIVACY]))
 		opt_args[OPT_ARG_PRIVACY] = ast_strdupa(chan->exten);
 	if (ast_test_flag(&opts, OPT_PRIVACY) || ast_test_flag(&opts, OPT_SCREENING)) {
-		char callerid[60];
+		char callerid[100];
 		char *l = chan->cid.cid_num;	/* XXX watch out, we are overwriting it */
 		if (!ast_strlen_zero(l)) {
 			ast_shrink_phone_number(l);

@@ -161,7 +161,7 @@ static int background_detect_exec(struct ast_channel *chan, void *data)
 								if (ms < 0)
 									ms = 0;
 								if ((ms > min) && ((max < 0) || (ms < max))) {
-									char ms_str[10];
+									char ms_str[12];
 									ast_log(LOG_DEBUG, "Found qualified token of %d ms\n", ms);
 
 									/* Save detected talk time (in milliseconds) */ 

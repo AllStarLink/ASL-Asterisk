@@ -170,7 +170,6 @@ struct gtalk_container {
 	ASTOBJ_CONTAINER_COMPONENTS(struct gtalk);
 };
 
-static const char desc[] = "Gtalk Channel";
 
 static int global_capability = AST_FORMAT_ULAW | AST_FORMAT_ALAW | AST_FORMAT_GSM | AST_FORMAT_H263;
 

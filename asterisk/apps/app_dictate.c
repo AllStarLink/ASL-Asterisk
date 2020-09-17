@@ -84,7 +84,7 @@ static int dictate_exec(struct ast_channel *chan, void *data)
 		AST_APP_ARG(base);
 		AST_APP_ARG(filename);
 	);
-	char dftbase[256];
+	char dftbase[5010];
 	char *base;
 	struct ast_flags flags = {0};
 	struct ast_filestream *fs;

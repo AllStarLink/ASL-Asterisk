@@ -537,7 +537,7 @@ includes	{ STORE_POS; return KW_INCLUDES;}
 	}
 
 \#include[ \t]+\"[^\"]+\" {
-		char fnamebuf[1024],*p1,*p2;
+		char fnamebuf[8192],*p1,*p2;
 		int glob_ret;
 		glob_t globbuf;        /* the current globbuf */
 		int globbuf_pos = -1;   /* where we are in the current globbuf */

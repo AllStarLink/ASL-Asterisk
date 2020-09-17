@@ -346,7 +346,7 @@ static struct ast_generator linearstream =
 int ast_linear_stream(struct ast_channel *chan, const char *filename, int fd, int allowoverride)
 {
 	struct linear_state *lin;
-	char tmpf[256];
+	char tmpf[6000];
 	int res = -1;
 	int autoclose = 0;
 	if (fd < 0) {

@@ -3433,7 +3433,7 @@ int ast_do_masquerade(struct ast_channel *original)
 	/* Save the new name */
 	ast_copy_string(newn, clone->name, sizeof(newn));
 	/* Create the masq name */
-	snprintf(masqn, sizeof(masqn), "%s<MASQ>", newn);
+	snprintf(masqn, sizeof(masqn), "%.90s<MASQ>", newn);
 		
 	/* Copy the name from the clone channel */
 	ast_string_field_set(original, name, newn);
@@ -3526,7 +3526,7 @@ int ast_do_masquerade(struct ast_channel *original)
 		return -1;
 	}
 	
-	snprintf(zombn, sizeof(zombn), "%s<ZOMBIE>", orig);
+	snprintf(zombn, sizeof(zombn), "%.90s<ZOMBIE>", orig);
 	/* Mangle the name of the clone channel */
 	ast_string_field_set(clone, name, zombn);
 	manager_event(EVENT_FLAG_CALL, "Rename", "Oldname: %s\r\nNewname: %s\r\nUniqueid: %s\r\n", masqn, zombn, clone->uniqueid);

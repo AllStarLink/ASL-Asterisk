@@ -267,7 +267,7 @@ static int writefile(char *s, char *acc)
 		ast_log(LOG_WARNING, "Account code '%s' insecure for writing file\n", acc);
 		return -1;
 	}
-	snprintf(tmp, sizeof(tmp), "%s/%s/%s.csv", (char *)ast_config_AST_LOG_DIR,CSV_LOG_DIR, acc);
+	snprintf(tmp, sizeof(tmp), "%.1000s/%s/%s.csv", (char *)ast_config_AST_LOG_DIR,CSV_LOG_DIR, acc);
 
 	ast_mutex_lock(&acf_lock);
 	f = fopen(tmp, "a");
@@ -291,7 +291,7 @@ static int csv_log(struct ast_cdr *cdr)
 	/* Make sure we have a big enough buf */
 	char buf[1024];
 	char csvmaster[PATH_MAX];
-	snprintf(csvmaster, sizeof(csvmaster),"%s/%s/%s", ast_config_AST_LOG_DIR, CSV_LOG_DIR, CSV_MASTER);
+	snprintf(csvmaster, sizeof(csvmaster),"%.1000s/%s/%s", ast_config_AST_LOG_DIR, CSV_LOG_DIR, CSV_MASTER);
 #if 0
 	printf("[CDR] %s ('%s' -> '%s') Dur: %ds Bill: %ds Disp: %s Flags: %s Account: [%s]\n", cdr->channel, cdr->src, cdr->dst, cdr->duration, cdr->billsec, ast_cdr_disp2str(cdr->disposition), ast_cdr_flags2str(cdr->amaflags), cdr->accountcode);
 #endif

@@ -1201,20 +1201,17 @@ static int beagle_fixup(struct ast_channel *oldchan, struct ast_channel *newchan
 static int beagle_indicate(struct ast_channel *c, int cond, const void *data, size_t datalen)
 {
 	struct chan_beagle_pvt *o = c->tech_pvt;
-	int res = -1;
 
 	switch (cond) {
 		case AST_CONTROL_BUSY:
 		case AST_CONTROL_CONGESTION:
 		case AST_CONTROL_RINGING:
-			res = cond;
 			break;
 
 		case -1:
 			return 0;
 
 		case AST_CONTROL_VIDUPDATE:
-			res = -1;
 			break;
 		case AST_CONTROL_HOLD:
 			ast_verbose(" << Chan_beagle Has Been Placed on Hold >> \n");

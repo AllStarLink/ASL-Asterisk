@@ -283,7 +283,7 @@ static int play_mailbox_owner(struct ast_channel *chan, char *context,
 {
 	int res = 0;
 	int loop;
-	char fn[256];
+	char fn[5000];
 
 	/* Check for the VoiceMail2 greeting first */
 	snprintf(fn, sizeof(fn), "%s/voicemail/%s/%s/greet",

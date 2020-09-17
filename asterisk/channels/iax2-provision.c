@@ -116,7 +116,6 @@ static unsigned int iax_str2flags(const char *buf)
 {
 	int x;
 	int len;
-	int found;
 	unsigned int flags = 0;
 	char *e;
 	while(buf && *buf) {
@@ -125,7 +124,6 @@ static unsigned int iax_str2flags(const char *buf)
 			len = e - buf;
 		else
 			len = 0;
-		found = 0;
 		for (x=0;x<sizeof(iax_flags) / sizeof(iax_flags[0]); x++) {
 			if ((len && !strncasecmp(iax_flags[x].name, buf, len)) ||
 			    (!len && !strcasecmp(iax_flags[x].name, buf))) {

@@ -253,7 +253,6 @@ static int app_exec(struct ast_channel *chan, void *data)
 	int gen_active = 0;
 	int pid;
 	char *argv[32];
-	int argc = 1;
 	char *buf, *command;
 	FILE *child_commands = NULL;
 	FILE *child_errors = NULL;
@@ -281,7 +280,7 @@ static int app_exec(struct ast_channel *chan, void *data)
 
 	buf = ast_strdupa(data);
 
-	argc = ast_app_separate_args(buf, '|', argv, sizeof(argv) / sizeof(argv[0]));
+	ast_app_separate_args(buf, '|', argv, sizeof(argv) / sizeof(argv[0]));
 
 	if (pipe(child_stdin)) {
 		ast_chan_log(LOG_WARNING, chan, "Could not create pipe for child input: %s\n", strerror(errno));

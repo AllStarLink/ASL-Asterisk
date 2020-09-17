@@ -2699,11 +2699,10 @@ static int try_calling(struct queue_ent *qe, const char *options, char *announce
 	struct ast_bridge_config bridge_config;
 	char nondataquality = 1;
 	char *agiexec = NULL;
-	int ret = 0;
 	const char *monitorfilename;
 	const char *monitor_exec;
 	const char *monitor_options;
-	char tmpid[256], tmpid2[256];
+	char tmpid[256], tmpid2[600];
 	char meid[1024], meid2[1024];
 	char mixmonargs[1512];
 	struct ast_app *mixmonapp = NULL;
@@ -3087,7 +3086,7 @@ static int try_calling(struct queue_ent *qe, const char *options, char *announce
 					/* We purposely lock the CDR so that pbx_exec does not update the application data */
 					if (qe->chan->cdr)
 						ast_set_flag(qe->chan->cdr, AST_CDR_FLAG_LOCKED);
-					ret = pbx_exec(qe->chan, mixmonapp, mixmonargs);
+					pbx_exec(qe->chan, mixmonapp, mixmonargs);
 					if (qe->chan->cdr)
 						ast_clear_flag(qe->chan->cdr, AST_CDR_FLAG_LOCKED);
 
@@ -3109,7 +3108,7 @@ static int try_calling(struct queue_ent *qe, const char *options, char *announce
 			app = pbx_findapp("agi");
 			if (app) {
 				agiexec = ast_strdupa(agi);
-				ret = pbx_exec(qe->chan, app, agiexec);
+				pbx_exec(qe->chan, app, agiexec);
 			} else
 				ast_log(LOG_WARNING, "Asked to execute an AGI on this channel, but could not find application (agi)!\n");
 		}
@@ -4899,7 +4898,7 @@ static char *complete_queue_add_member(const char *line, const char *word, int p
 	case 7:
 		if (state < 100) {	/* 0-99 */
 			char *num;
-			if ((num = ast_malloc(3))) {
+			if ((num = ast_malloc(12))) {
 				sprintf(num, "%d", state);
 			}
 			return num;
