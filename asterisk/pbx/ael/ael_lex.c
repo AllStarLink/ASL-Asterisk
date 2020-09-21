@@ -3320,7 +3320,7 @@ static void setup_filestack(char *fnamebuf2, int fnamebuf_siz, glob_t *globbuf, 
 	if ( !error ) {	/* valid file name */
 		/* relative vs. absolute */
 		if (fnamebuf[0] != '/')
-			snprintf(fnamebuf2, fnamebuf_siz, "%s/%s", ast_config_AST_CONFIG_DIR, fnamebuf);
+			snprintf(fnamebuf2, fnamebuf_siz, "%.1023s/%.1023s", ast_config_AST_CONFIG_DIR, fnamebuf);
 		else
 #if defined(STANDALONE) || defined(LOW_MEMORY) || defined(STANDALONE_AEL)
 			strncpy(fnamebuf2, fnamebuf, fnamebuf_siz);
