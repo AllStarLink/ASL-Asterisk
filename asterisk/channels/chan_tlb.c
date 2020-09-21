@@ -1035,8 +1035,8 @@ static int TLB_digit_end(struct ast_channel *ast, char digit, unsigned int durat
 
 static int TLB_text(struct ast_channel *ast, const char *text)
 {
-	char buf[200],*arg1 = NULL,*arg2 = NULL;
-	char *arg3 = NULL, *arg4 = NULL,*ptr,*saveptr;
+	char buf[200];
+	char *arg4 = NULL,*ptr,*saveptr;
 	char delim = ' ',*cmd;
 
 	strncpy(buf,text,sizeof(buf) - 1);
@@ -1051,9 +1051,9 @@ static int TLB_text(struct ast_channel *ast, const char *text)
 		return 0;
 	}
 
-	arg1 = strtok_r(NULL, &delim, &saveptr);
-	arg2 = strtok_r(NULL, &delim, &saveptr);
-	arg3 = strtok_r(NULL, &delim, &saveptr);
+	strtok_r(NULL, &delim, &saveptr);
+	strtok_r(NULL, &delim, &saveptr);
+	strtok_r(NULL, &delim, &saveptr);
 	arg4 = strtok_r(NULL, &delim, &saveptr);
 
 	if (!strcasecmp(cmd,"D"))

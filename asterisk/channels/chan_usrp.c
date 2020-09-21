@@ -158,23 +158,11 @@ static int handle_usrp_show(int fd, int argc, char *argv[])
 {
 	char s[256];
 	struct usrp_pvt *p;
-	struct ast_channel *chan;
 	int i;
-	int ci, di;
 	// ast_cli(fd, "handle_usrp_show\n");
 	for (i=0; i<MAX_CHANS; i++) {
 		p = usrp_channels[i];
 		if (p) {
-			chan = p->owner;
-			ci = 0;
-			di = 0;
-			if (chan) {
-				ci = 1;
-				if (AST_LIST_EMPTY(&chan->readq))
-					di = 1;
-				else
-					di = 2;
-			}
 			sprintf(s, "%s txkey %-3s rxkey %d read %lu write %lu", p->stream, (p->txkey) ? "yes" : "no", p->rxkey, p->readct, p->writect);
 			ast_cli(fd, "%s\n", s);
 		}
@@ -189,10 +177,6 @@ static struct ast_cli_entry cli_usrp_show = {
 
 static int usrp_call(struct ast_channel *ast, char *dest, int timeout)
 {
-	struct usrp_pvt *p;
-
-	p = ast->tech_pvt;
-
 	if ((ast->_state != AST_STATE_DOWN) && (ast->_state != AST_STATE_RESERVED)) {
 		ast_log(LOG_WARNING, "usrp_call called on %s, neither down nor reserved\n", ast->name);
 		return -1;

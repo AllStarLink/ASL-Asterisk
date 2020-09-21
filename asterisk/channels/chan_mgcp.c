@@ -2139,12 +2139,8 @@ static int transmit_modify_with_sdp(struct mgcp_subchannel *sub, struct ast_rtp 
 	char local[256];
 	char tmp[80];
 	int x;
-	int capability;
 	struct mgcp_endpoint *p = sub->parent;
 
-	capability = p->capability;
-	if (codecs)
-		capability = codecs;
 	if (ast_strlen_zero(sub->cxident) && rtp) {
 		/* We don't have a CXident yet, store the destination and
 		   wait a bit */
@@ -2637,7 +2633,7 @@ static void start_rtp(struct mgcp_subchannel *sub)
 	ast_rtp_set_data(p->rtp, p);
 #endif		
 	/* Make a call*ID */
-        snprintf(sub->callid, sizeof(sub->callid), "%08lx%s", ast_random(), sub->txident);
+        snprintf(sub->callid, sizeof(sub->callid), "%08lx%.70s", ast_random(), sub->txident);
 	/* Transmit the connection create */
 	transmit_connect_with_sdp(sub, NULL);
 	ast_mutex_unlock(&sub->lock);
@@ -3552,13 +3548,11 @@ static int restart_monitor(void)
 
 static struct ast_channel *mgcp_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat;
 	struct mgcp_subchannel *sub;
 	struct ast_channel *tmpc = NULL;
 	char tmp[256];
 	char *dest = data;
 
-	oldformat = format;
 	format &= capability;
 	if (!format) {
 		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", format);

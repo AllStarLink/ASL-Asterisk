@@ -443,7 +443,7 @@ static void *scan_thread(void *unused)
 	struct stat st;
 	DIR *dir;
 	struct dirent *de;
-	char fn[256];
+	char fn[512];
 	int res;
 	time_t last = 0, next = 0, now;
 	for(;;) {
@@ -502,12 +502,12 @@ static int load_module(void)
 	pthread_t thread;
 	pthread_attr_t attr;
 	int ret;
-	snprintf(qdir, sizeof(qdir), "%s/%s", ast_config_AST_SPOOL_DIR, "outgoing");
+	snprintf(qdir, sizeof(qdir), "%.240s/%s", ast_config_AST_SPOOL_DIR, "outgoing");
 	if (mkdir(qdir, 0700) && (errno != EEXIST)) {
 		ast_log(LOG_WARNING, "Unable to create queue directory %s -- outgoing spool disabled\n", qdir);
 		return 0;
 	}
-	snprintf(qdonedir, sizeof(qdir), "%s/%s", ast_config_AST_SPOOL_DIR, "outgoing_done");
+	snprintf(qdonedir, sizeof(qdir), "%.240s/%s", ast_config_AST_SPOOL_DIR, "outgoing_done");
 	pthread_attr_init(&attr);
  	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	if ((ret = ast_pthread_create_background(&thread,&attr,scan_thread, NULL)) != 0) {

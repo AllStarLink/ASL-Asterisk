@@ -445,7 +445,7 @@ static void clear_caller(struct findme_user *tmpuser)
 		if (outbound->cdr) {
 			char tmp[256];
 
-			snprintf(tmp, sizeof(tmp), "%s/%s", "Local", tmpuser->dialarg);
+			snprintf(tmp, sizeof(tmp), "%s/%.249s", "Local", tmpuser->dialarg);
 			ast_cdr_setapp(outbound->cdr, "FollowMe", tmp);
 			ast_cdr_update(outbound);
 			ast_cdr_start(outbound->cdr);
@@ -781,7 +781,6 @@ static void findmeexec(struct fm_args *tpargs)
 	char *rest, *number;
 	struct findme_user *tmpuser;
 	struct findme_user *fmuser;
-	struct findme_user *headuser;
 	struct findme_user_listptr *findme_user_list;
 	int status;
 
@@ -851,7 +850,7 @@ static void findmeexec(struct fm_args *tpargs)
 							char tmp[256];
 
 							ast_cdr_init(outbound->cdr, outbound);
-							snprintf(tmp, sizeof(tmp), "%s/%s", "Local", dialarg);
+							snprintf(tmp, sizeof(tmp), "%s/%.249s", "Local", dialarg);
 							ast_cdr_setapp(outbound->cdr, "FollowMe", tmp);
 							ast_cdr_update(outbound);
 							ast_cdr_start(outbound->cdr);
@@ -887,7 +886,6 @@ static void findmeexec(struct fm_args *tpargs)
 		AST_LIST_TRAVERSE_SAFE_END
 		fmuser = NULL;
 		tmpuser = NULL;
-		headuser = NULL;	
 		if (winner)
 			break;
 
@@ -925,7 +923,7 @@ static int app_exec(struct ast_channel *chan, void *data)
 	int res = 0;
 	struct ast_module_user *u;
 	char *argstr;
-	char namerecloc[255];
+	char namerecloc[10000];
 	char *fname = NULL;
 	int duration = 0;
 	struct ast_channel *caller;

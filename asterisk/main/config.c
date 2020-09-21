@@ -737,7 +737,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat, 
 				   We create a tmp file, then we #include it, then we delete it. */
 				if (do_exec) { 
 					snprintf(exec_file, sizeof(exec_file), "/var/tmp/exec.%d.%ld", (int)time(NULL), (long)pthread_self());
-					snprintf(cmd, sizeof(cmd), "%s > %s 2>&1", cur, exec_file);
+					snprintf(cmd, sizeof(cmd), "%.200s > %.50s 2>&1", cur, exec_file);
 					ast_safe_system(cmd);
 					cur = exec_file;
 				} else
@@ -839,7 +839,7 @@ static struct ast_config *config_text_file_load(const char *database, const char
 	if (filename[0] == '/') {
 		ast_copy_string(fn, filename, sizeof(fn));
 	} else {
-		snprintf(fn, sizeof(fn), "%s/%s", (char *)ast_config_AST_CONFIG_DIR, filename);
+		snprintf(fn, sizeof(fn), "%.200s/%.50s", (char *)ast_config_AST_CONFIG_DIR, filename);
 	}
 
 	if (withcomments) {
@@ -1021,8 +1021,8 @@ int config_text_file_save(const char *configfile, const struct ast_config *cfg, 
 		snprintf(fntmp, sizeof(fntmp), "%s.XXXXXX", configfile);
 		ast_copy_string(fn, configfile, sizeof(fn));
 	} else {
-		snprintf(fntmp, sizeof(fntmp), "%s/%s.XXXXXX", ast_config_AST_CONFIG_DIR, configfile);
-		snprintf(fn, sizeof(fn), "%s/%s", ast_config_AST_CONFIG_DIR, configfile);
+		snprintf(fntmp, sizeof(fntmp), "%.200s/%.45s.XXXXXX", ast_config_AST_CONFIG_DIR, configfile);
+		snprintf(fn, sizeof(fn), "%.200s/%.45s", ast_config_AST_CONFIG_DIR, configfile);
 	}
 	time(&t);
 	ast_copy_string(date, ctime(&t), sizeof(date));

@@ -216,11 +216,11 @@ static int _while_exec(struct ast_channel *chan, void *data, int end)
 		
 	}
 	
-	snprintf(varname, VAR_SIZE, "%s_%s", prefix, label);
+	snprintf(varname, VAR_SIZE, "%.25s_%.25s", prefix, label);
 	while_pri = pbx_builtin_getvar_helper(chan, varname);
 	
 	if ((while_pri = pbx_builtin_getvar_helper(chan, varname)) && !end) {
-		snprintf(end_varname,VAR_SIZE,"END_%s",varname);
+		snprintf(end_varname,VAR_SIZE,"END_%.59s",varname);
 	}
 	
 
@@ -229,7 +229,7 @@ static int _while_exec(struct ast_channel *chan, void *data, int end)
 		const char *goto_str;
 		pbx_builtin_setvar_helper(chan, varname, NULL);
 		pbx_builtin_setvar_helper(chan, my_name, NULL);
-		snprintf(end_varname,VAR_SIZE,"END_%s",varname);
+		snprintf(end_varname,VAR_SIZE,"END_%.59s",varname);
 		if ((goto_str=pbx_builtin_getvar_helper(chan, end_varname))) {
 			ast_parseable_goto(chan, goto_str);
 			pbx_builtin_setvar_helper(chan, end_varname, NULL);
@@ -257,7 +257,7 @@ static int _while_exec(struct ast_channel *chan, void *data, int end)
 
 	else if (end && while_pri) {
 		/* END of loop */
-		snprintf(end_varname, VAR_SIZE, "END_%s", varname);
+		snprintf(end_varname, VAR_SIZE, "END_%.59s", varname);
 		if (! pbx_builtin_getvar_helper(chan, end_varname)) {
 			char *goto_str;
 			size = strlen(chan->context) + strlen(chan->exten) + 32;

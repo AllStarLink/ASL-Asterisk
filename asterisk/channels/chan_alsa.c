@@ -589,7 +589,6 @@ static int alsa_write(struct ast_channel *chan, struct ast_frame *f)
 	static char sizbuf[8000];
 	static int sizpos = 0;
 	int len = sizpos;
-	int pos;
 	int res = 0;
 	/* size_t frames = 0; */
 	snd_pcm_state_t state;
@@ -614,7 +613,6 @@ static int alsa_write(struct ast_channel *chan, struct ast_frame *f)
 	} else {
 		memcpy(sizbuf + sizpos, f->data, f->datalen);
 		len += f->datalen;
-		pos = 0;
 #ifdef ALSA_MONITOR
 		alsa_monitor_write(sizbuf, len);
 #endif
@@ -906,8 +904,6 @@ static const char autoanswer_usage[] =
 
 static int console_answer_deprecated(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
-
 	if (argc != 1)
 		return RESULT_SHOWUSAGE;
 
@@ -915,7 +911,6 @@ static int console_answer_deprecated(int fd, int argc, char *argv[])
 
 	if (!alsa.owner) {
 		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
 	} else {
 		hookstate = 1;
 		cursound = -1;
@@ -938,8 +933,6 @@ static int console_answer_deprecated(int fd, int argc, char *argv[])
 
 static int console_answer(int fd, int argc, char *argv[])
 {
-	int res = RESULT_SUCCESS;
-
 	if (argc != 2)
 		return RESULT_SHOWUSAGE;
 
@@ -947,7 +940,6 @@ static int console_answer(int fd, int argc, char *argv[])
 
 	if (!alsa.owner) {
 		ast_cli(fd, "No one is calling us\n");
-		res = RESULT_FAILURE;
 	} else {
 		hookstate = 1;
 		cursound = -1;

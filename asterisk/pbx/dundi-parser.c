@@ -210,12 +210,12 @@ static void dump_cause(char *output, int maxlen, void *value, int len)
 	memcpy(tmp2, value + 1, mlen);
 	if (cause < sizeof(causes) / sizeof(causes[0])) {
 		if (len > 1)
-			snprintf(tmp, sizeof(tmp), "%s: %s", causes[cause], tmp2);
+			snprintf(tmp, sizeof(tmp), "%s: %.240s", causes[cause], tmp2);
 		else
 			snprintf(tmp, sizeof(tmp), "%s", causes[cause]);
 	} else {
 		if (len > 1)
-			snprintf(tmp, sizeof(tmp), "%d: %s", cause, tmp2);
+			snprintf(tmp, sizeof(tmp), "%d: %.240s", cause, tmp2);
 		else
 			snprintf(tmp, sizeof(tmp), "%d", cause);
 	}
@@ -422,14 +422,14 @@ static void dump_ies(unsigned char *iedata, int spaces, int len)
 			if (ies[x].ie == ie) {
 				if (ies[x].dump) {
 					ies[x].dump(interp, (int)sizeof(interp), iedata + 2, ielen);
-					snprintf(tmp, (int)sizeof(tmp), "   %s%-15.15s : %s\n", (spaces ? "     " : "" ), ies[x].name, interp);
+					snprintf(tmp, (int)sizeof(tmp), "   %s%-15.15s : %.900s\n", (spaces ? "     " : "" ), ies[x].name, interp);
 					outputf(tmp);
 				} else {
 					if (ielen)
 						snprintf(interp, (int)sizeof(interp), "%d bytes", ielen);
 					else
 						strcpy(interp, "Present");
-					snprintf(tmp, (int)sizeof(tmp), "   %s%-15.15s : %s\n", (spaces ? "     " : "" ), ies[x].name, interp);
+					snprintf(tmp, (int)sizeof(tmp), "   %s%-15.15s : %.900s\n", (spaces ? "     " : "" ), ies[x].name, interp);
 					outputf(tmp);
 				}
 				found++;

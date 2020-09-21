@@ -1083,7 +1083,7 @@ static struct usb_device *hid_device_init(char *desired_device)
 {
     struct usb_bus *usb_bus;
     struct usb_device *dev;
-    char devstr[200],str[200],desdev[200],*cp;
+    char devstr[10000],str[200],desdev[200],*cp;
     int i;
     FILE *fp;
 
@@ -1159,7 +1159,7 @@ static int hid_device_mklist(void)
 {
     struct usb_bus *usb_bus;
     struct usb_device *dev;
-    char devstr[200],str[200],desdev[200],*cp;
+    char devstr[10000],str[200],desdev[200],*cp;
     int i;
     FILE *fp;
 
@@ -3104,7 +3104,7 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
                  char msg[32];
                  memset(msg,0,32);
 
-                 sprintf(msg,"cstx=%s",o->pmrChan->txctcssfreq);
+                 sprintf(msg,"cstx=%.26s",o->pmrChan->txctcssfreq);
                  if(o->debuglevel)
 		 {
                          ast_log(LOG_NOTICE,

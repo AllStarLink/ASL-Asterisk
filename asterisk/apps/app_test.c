@@ -180,9 +180,9 @@ static int testclient_exec(struct ast_channel *chan, void *data)
 
 	if ((res >=0) && (!ast_strlen_zero(testid))) {
 		/* Make the directory to hold the test results in case it's not there */
-		snprintf(fn, sizeof(fn), "%s/testresults", ast_config_AST_LOG_DIR);
+		snprintf(fn, sizeof(fn), "%.50s/testresults", ast_config_AST_LOG_DIR);
 		mkdir(fn, 0777);
-		snprintf(fn, sizeof(fn), "%s/testresults/%s-client.txt", ast_config_AST_LOG_DIR, testid);
+		snprintf(fn, sizeof(fn), "%.50s/testresults/%.5s-client.txt", ast_config_AST_LOG_DIR, testid);
 		if ((f = fopen(fn, "w+"))) {
 			setlinebuf(f);
 			fprintf(f, "CLIENTCHAN:    %s\n", chan->name);
@@ -355,9 +355,9 @@ static int testserver_exec(struct ast_channel *chan, void *data)
 	if ((res >=0) && (!ast_strlen_zero(testid))) {
 		/* Got a Test ID!  Whoo hoo! */
 		/* Make the directory to hold the test results in case it's not there */
-		snprintf(fn, sizeof(fn), "%s/testresults", ast_config_AST_LOG_DIR);
+		snprintf(fn, sizeof(fn), "%.50s/testresults", ast_config_AST_LOG_DIR);
 		mkdir(fn, 0777);
-		snprintf(fn, sizeof(fn), "%s/testresults/%s-server.txt", ast_config_AST_LOG_DIR, testid);
+		snprintf(fn, sizeof(fn), "%.50s/testresults/%.5s-server.txt", ast_config_AST_LOG_DIR, testid);
 		if ((f = fopen(fn, "w+"))) {
 			setlinebuf(f);
 			fprintf(f, "SERVERCHAN:    %s\n", chan->name);
