@@ -1198,7 +1198,7 @@ static int cache_lookup_internal(time_t now, struct dundi_request *req, char *ke
 
 static int cache_lookup(struct dundi_request *req, dundi_eid *peer_eid, unsigned long crc32, int *lowexpiration)
 {
-	char key[256];
+	char key[1024];
 	char eid_str[20];
 	char eidroot_str[20];
 	time_t now;
@@ -2450,7 +2450,6 @@ static int dundi_show_peer(int fd, int argc, char *argv[])
 {
 	struct dundi_peer *peer;
 	struct permission *p;
-	char *order;
 	char eid_str[20];
 	int x, cnt;
 	
@@ -2462,22 +2461,6 @@ static int dundi_show_peer(int fd, int argc, char *argv[])
 			break;
 	}
 	if (peer) {
-		switch(peer->order) {
-		case 0:
-			order = "Primary";
-			break;
-		case 1:
-			order = "Secondary";
-			break;
-		case 2:
-			order = "Tertiary";
-			break;
-		case 3:
-			order = "Quartiary";
-			break;
-		default:
-			order = "Unknown";
-		}
 		ast_cli(fd, "Peer:    %s\n", dundi_eid_to_str(eid_str, sizeof(eid_str), &peer->eid));
 		ast_cli(fd, "Model:   %s\n", model2str(peer->model));
 		ast_cli(fd, "Host:    %s\n", peer->addr.sin_addr.s_addr ? ast_inet_ntoa(peer->addr.sin_addr) : "<Unspecified>");

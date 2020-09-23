@@ -1478,10 +1478,10 @@ static struct ast_rtp_protocol *get_proto(struct ast_channel *chan)
 int ast_rtp_early_bridge(struct ast_channel *dest, struct ast_channel *src)
 {
 	struct ast_rtp *destp = NULL, *srcp = NULL;		/* Audio RTP Channels */
-	struct ast_rtp *vdestp = NULL, *vsrcp = NULL;		/* Video RTP channels */
+	struct ast_rtp *vsrcp = NULL;		/* Video RTP channels */
 	struct ast_rtp_protocol *destpr = NULL, *srcpr = NULL;
-	enum ast_rtp_get_result audio_dest_res = AST_RTP_GET_FAILED, video_dest_res = AST_RTP_GET_FAILED;
-	enum ast_rtp_get_result audio_src_res = AST_RTP_GET_FAILED, video_src_res = AST_RTP_GET_FAILED;
+	enum ast_rtp_get_result audio_dest_res = AST_RTP_GET_FAILED;
+	enum ast_rtp_get_result audio_src_res = AST_RTP_GET_FAILED;
 	int srccodec, destcodec, nat_active = 0;
 
 	/* Lock channels */
@@ -1517,10 +1517,8 @@ int ast_rtp_early_bridge(struct ast_channel *dest, struct ast_channel *src)
 
 	/* Get audio and video interface (if native bridge is possible) */
 	audio_dest_res = destpr->get_rtp_info(dest, &destp);
-	video_dest_res = destpr->get_vrtp_info ? destpr->get_vrtp_info(dest, &vdestp) : AST_RTP_GET_FAILED;
 	if (srcpr) {
 		audio_src_res = srcpr->get_rtp_info(src, &srcp);
-		video_src_res = srcpr->get_vrtp_info ? srcpr->get_vrtp_info(src, &vsrcp) : AST_RTP_GET_FAILED;
 	}
 
 	/* Check if bridge is still possible (In SIP canreinvite=no stops this, like NAT) */
@@ -1568,8 +1566,8 @@ int ast_rtp_make_compatible(struct ast_channel *dest, struct ast_channel *src, i
 	struct ast_rtp *destp = NULL, *srcp = NULL;		/* Audio RTP Channels */
 	struct ast_rtp *vdestp = NULL, *vsrcp = NULL;		/* Video RTP channels */
 	struct ast_rtp_protocol *destpr = NULL, *srcpr = NULL;
-	enum ast_rtp_get_result audio_dest_res = AST_RTP_GET_FAILED, video_dest_res = AST_RTP_GET_FAILED;
-	enum ast_rtp_get_result audio_src_res = AST_RTP_GET_FAILED, video_src_res = AST_RTP_GET_FAILED; 
+	enum ast_rtp_get_result audio_dest_res = AST_RTP_GET_FAILED;
+	enum ast_rtp_get_result audio_src_res = AST_RTP_GET_FAILED;
 	int srccodec, destcodec;
 
 	/* Lock channels */
@@ -1598,9 +1596,7 @@ int ast_rtp_make_compatible(struct ast_channel *dest, struct ast_channel *src, i
 
 	/* Get audio and video interface (if native bridge is possible) */
 	audio_dest_res = destpr->get_rtp_info(dest, &destp);
-	video_dest_res = destpr->get_vrtp_info ? destpr->get_vrtp_info(dest, &vdestp) : AST_RTP_GET_FAILED;
 	audio_src_res = srcpr->get_rtp_info(src, &srcp);
-	video_src_res = srcpr->get_vrtp_info ? srcpr->get_vrtp_info(src, &vsrcp) : AST_RTP_GET_FAILED;
 
 	/* Ensure we have at least one matching codec */
 	if (srcpr->get_codec)

@@ -744,7 +744,7 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 	} else if (pos == 3) { /* 'remove extension EXT _X_' (priority) */
 		char *exten = NULL, *context, *cid, *p;
 		struct ast_context *c;
-		int le, lc, lcid, len;
+		int le, lc, len;
 		const char *s = skip_words(line, 2); /* skip 'remove' 'extension' */
 		int i = split_ec(s, &exten, &context, &cid);	/* parse ext@context */
 
@@ -756,7 +756,6 @@ static char *complete_context_remove_extension_deprecated(const char *line, cons
 			*p = '\0';
 		le = strlen(exten);
 		lc = strlen(context);
-		lcid = strlen(cid);
 		len = strlen(word);
 		if (le == 0 || lc == 0)
 			goto error3;
@@ -887,7 +886,7 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 	} else if (pos == 4) { /* 'dialplan remove extension EXT _X_' (priority) */
 		char *exten = NULL, *context, *cid, *p;
 		struct ast_context *c;
-		int le, lc, lcid, len;
+		int le, lc, len;
 		const char *s = skip_words(line, 3); /* skip 'dialplan' 'remove' 'extension' */
 		int i = split_ec(s, &exten, &context, &cid);	/* parse ext@context */
 
@@ -899,7 +898,6 @@ static char *complete_context_remove_extension(const char *line, const char *wor
 			*p = '\0';
 		le = strlen(exten);
 		lc = strlen(context);
-		lcid = cid ? strlen(cid) : -1;
 		len = strlen(word);
 		if (le == 0 || lc == 0)
 			goto error3;
@@ -1244,7 +1242,7 @@ static int handle_save_dialplan(int fd, int argc, char *argv[])
 	int incomplete = 0; /* incomplete config write? */
 	FILE *output;
 
-	const char *base, *slash, *file;
+	const char *base, *slash;
 
 	if (! (static_config && !write_protect_config)) {
 		ast_cli(fd,
@@ -1269,16 +1267,13 @@ static int handle_save_dialplan(int fd, int argc, char *argv[])
 		if (!strstr(argv[2], ".conf")) { /*no, this is assumed to be a pathname */
 			/* if filename ends with '/', do not add one */
 			slash = (*(argv[2] + strlen(argv[2]) -1) == '/') ? "/" : "";
-			file = config;	/* default: 'extensions.conf' */
 		} else {	/* yes, complete file name */
 			slash = "";
-			file = "";
 		}
 	} else {
 		/* no config file, default one */
 		base = ast_config_AST_CONFIG_DIR;
 		slash = "/";
-		file = config;
 	}
 	snprintf(filename, sizeof(filename), "%s%s%s", base, slash, config);
 
@@ -2416,7 +2411,6 @@ static void pbx_load_users(void)
 	char iface[256];
 	char zapcopy[256];
 	char *c;
-	int len;
 	int hasvoicemail;
 	int start, finish, x;
 	struct ast_context *con = NULL;
@@ -2429,7 +2423,6 @@ static void pbx_load_users(void)
 		if (!strcasecmp(cat, "general"))
 			continue;
 		iface[0] = '\0';
-		len = sizeof(iface);
 		if (ast_true(ast_config_option(cfg, cat, "hassip"))) {
 			snprintf(tmp, sizeof(tmp), "SIP/%s", cat);
 			append_interface(iface, sizeof(iface), tmp);
