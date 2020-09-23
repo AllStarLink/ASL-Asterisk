@@ -2528,7 +2528,10 @@ static struct ast_channel *vpb_new(struct vpb_pvt *me, enum ast_channel_state st
 		else
 			strcpy(tmp->exten, "s");
 		if (!ast_strlen_zero(me->language))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
 			ast_string_field_set(tmp, language, me->language);
+#pragma GCC diagnostic pop
 
 		me->owner = tmp;
 
