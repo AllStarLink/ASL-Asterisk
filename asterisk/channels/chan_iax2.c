@@ -2896,12 +2896,12 @@ static void reload_firmware(int unload)
 
 	/* Now that we've freed them, load the new ones */
 	if (!unload) {
-		snprintf(dir, sizeof(dir), "%s/firmware/iax", (char *)ast_config_AST_DATA_DIR);
+		snprintf(dir, sizeof(dir), "%.200s/firmware/iax", (char *)ast_config_AST_DATA_DIR);
 		fwd = opendir(dir);
 		if (fwd) {
 			while((de = readdir(fwd))) {
 				if (de->d_name[0] != '.') {
-					snprintf(fn, sizeof(fn), "%s/%s", dir, de->d_name);
+					snprintf(fn, sizeof(fn), "%.100s/%.100s", dir, de->d_name);
 					if (!try_firmware(fn)) {
 						if (option_verbose > 1)
 							ast_verbose(VERBOSE_PREFIX_2 "Loaded firmware '%s'\n", de->d_name);
@@ -3905,7 +3905,7 @@ static struct iax2_user *realtime_user(const char *username, struct sockaddr_in 
 				if (!strcasecmp(tmp->name, "host")) {
 					struct ast_hostent ahp;
 					struct hostent *hp;
-					if (!(hp = ast_gethostbyname(tmp->value, &ahp)) || (memcmp(hp->h_addr, &sin->sin_addr, sizeof(hp->h_addr)))) {
+					if (!(hp = ast_gethostbyname(tmp->value, &ahp)) || (memcmp(hp->h_addr, &sin->sin_addr, sizeof(struct in_addr)))) {
 						/* No match */
 						ast_variables_destroy(var);
 						var = NULL;
@@ -8116,7 +8116,6 @@ static void *iax_park_thread(void *stuff)
 	struct iax_dual *d;
 	struct ast_frame *f;
 	int ext;
-	int res;
 	d = stuff;
 	chan1 = d->chan1;
 	chan2 = d->chan2;
@@ -8124,7 +8123,7 @@ static void *iax_park_thread(void *stuff)
 	f = ast_read(chan1);
 	if (f)
 		ast_frfree(f);
-	res = ast_park_call(chan1, chan2, 0, &ext);
+	ast_park_call(chan1, chan2, 0, &ext);
 	ast_hangup(chan2);
 	ast_log(LOG_NOTICE, "Parked on extension '%d'\n", ext);
 	return NULL;
@@ -10179,7 +10178,6 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	struct MemoryStruct chunk;
 	struct curl_slist *hs = NULL;
 	char *request = (char*) malloc(MAX_HTTP_REQUEST_LENGTH);
-	char *response = (char*) malloc(MAX_HTTP_RESPONSE_LENGTH);
 	int *rescode;
 	char url[100];
 	int regstate;
@@ -10208,9 +10206,9 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 		chunk.memory = malloc(1);
 		chunk.size=0;
 		if(strlen(reg->port)>0)
-			sprintf(url, "%s://%s:%s/%s", proto, reg->hostname, reg->port, reg->path);
+			sprintf(url, "%.8s://%.30s:%.5s/%.50s", proto, reg->hostname, reg->port, reg->path);
 		else
-			sprintf(url, "%s://%s/%s", proto, reg->hostname, reg->path);
+			sprintf(url, "%.8s://%.30s/%.50s", proto, reg->hostname, reg->path);
 		hs = curl_slist_append(hs, "Content-Type:application/json");
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
@@ -12256,9 +12254,9 @@ static int iax2_exec(struct ast_channel *chan, const char *context, const char *
 			if (ncontext) {
 				*ncontext = '\0';
 				ncontext++;
-				snprintf(req, sizeof(req), "IAX2/%s/%s@%s", odata, exten, ncontext);
+				snprintf(req, sizeof(req), "IAX2/%.200s/%.20s@%.20s", odata, exten, ncontext);
 			} else {
-				snprintf(req, sizeof(req), "IAX2/%s/%s", odata, exten);
+				snprintf(req, sizeof(req), "IAX2/%.200s/%.20s", odata, exten);
 			}
 			if (option_verbose > 2)
 				ast_verbose(VERBOSE_PREFIX_3 "Executing Dial('%s')\n", req);

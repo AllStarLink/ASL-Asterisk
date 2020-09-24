@@ -165,16 +165,16 @@ int ast_monitor_start(	struct ast_channel *chan, const char *format_spec,
 				free(name);
 				ast_safe_system(tmp);
 			}
-			snprintf(monitor->read_filename, FILENAME_MAX, "%s%s%s-in",
+			snprintf(monitor->read_filename, FILENAME_MAX, "%.500s%s%s-in",
 						directory ? "" : ast_config_AST_MONITOR_DIR, absolute, fname_base);
-			snprintf(monitor->write_filename, FILENAME_MAX, "%s%s%s-out",
+			snprintf(monitor->write_filename, FILENAME_MAX, "%.500s%s%s-out",
 						directory ? "" : ast_config_AST_MONITOR_DIR, absolute, fname_base);
 			ast_copy_string(monitor->filename_base, fname_base, sizeof(monitor->filename_base));
 		} else {
 			ast_mutex_lock(&monitorlock);
-			snprintf(monitor->read_filename, FILENAME_MAX, "%s/audio-in-%ld",
+			snprintf(monitor->read_filename, FILENAME_MAX, "%.3000s/audio-in-%ld",
 						ast_config_AST_MONITOR_DIR, seq);
-			snprintf(monitor->write_filename, FILENAME_MAX, "%s/audio-out-%ld",
+			snprintf(monitor->write_filename, FILENAME_MAX, "%.3000s/audio-out-%ld",
 						ast_config_AST_MONITOR_DIR, seq);
 			seq++;
 			ast_mutex_unlock(&monitorlock);
@@ -183,7 +183,7 @@ int ast_monitor_start(	struct ast_channel *chan, const char *format_spec,
 			while ((p = strchr(channel_name, '/'))) {
 				*p = '-';
 			}
-			snprintf(monitor->filename_base, FILENAME_MAX, "%s/%d-%s",
+			snprintf(monitor->filename_base, FILENAME_MAX, "%.2000s/%d-%s",
 					 ast_config_AST_MONITOR_DIR, (int)time(NULL), channel_name);
 			monitor->filename_changed = 1;
 		}

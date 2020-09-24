@@ -142,6 +142,7 @@ z - WinAPRS
 #include <sys/time.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -427,9 +428,8 @@ static int report_aprs(char *ctg,char *lat,char *lon)
 
 struct ast_config *cfg = NULL;
 char *call,*comment,icon;
-char power,height,gain,dir,*val,basecall[300],buf[300],*cp;
+char power,height,gain,dir,*val,basecall[300],buf[350],*cp;
 time_t t;
-struct tm *tm;
 
 #ifdef  NEW_ASTERISK
         struct ast_flags zeroflag = {0};
@@ -490,7 +490,6 @@ struct tm *tm;
 	sprintf(buf,"%s>APRS,qAR,%s-VS:=%s/%s%cPHG%d%d%d%d/%s\n",
 		call,basecall,lat,lon,icon,power,height,gain,dir,comment);
 	time(&t);
-	tm = gmtime(&t);
 	ast_mutex_lock(&gps_lock);
 	if (sockfd == -1)
 	{
@@ -592,7 +591,7 @@ int	res,i,n,fd,has_comport = 0;
 float	mylat,lata,latb,latd;
 float	mylon,lona,lonb,lond;
 FILE	*fp;
-time_t	t,lastupdate;
+time_t	t;
 struct termios mode;
 
 
@@ -636,7 +635,6 @@ struct termios mode;
 		}
 	}
 	usleep(100000);
-	lastupdate = 0;
 
 	while(run_forever)
 	{
@@ -745,7 +743,7 @@ static void *gps_sub_thread(void *data)
 {
 struct ast_config *cfg = NULL;
 char *ctg = (char *)data,gotfiledata;
-char *val,*deflat,*deflon,*defelev,latc,lonc;
+char *val,*deflat,*deflon,latc,lonc;
 char fname[200],lat[300],lon[300];
 FILE *fp;
 unsigned int u;
@@ -770,7 +768,6 @@ time_t	now,was,lastupdate;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"lon");	
 	if (val) deflon = ast_strdup(val); else deflon = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"elev");	
-	if (val) defelev = ast_strdup(val); else defelev = NULL;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"interval");	
 	if (val) interval = atoi(val); else interval = GPS_UPDATE_SECS;
 	val = (char *) ast_variable_retrieve(cfg,ctg,"ehlert");	

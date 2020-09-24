@@ -266,9 +266,9 @@ static struct logchannel *make_logchannel(char *channel, char *components, int l
 		}		  
 		
 		if(!ast_strlen_zero(hostname)) {
-			snprintf(chan->filename, sizeof(chan->filename), "%s/%s.%s",(char *)ast_config_AST_LOG_DIR, channel, hostname);
+			snprintf(chan->filename, sizeof(chan->filename), "%.100s/%.100s.%.50s",(char *)ast_config_AST_LOG_DIR, channel, hostname);
 		} else {
-			snprintf(chan->filename, sizeof(chan->filename), "%s/%s", (char *)ast_config_AST_LOG_DIR, channel);
+			snprintf(chan->filename, sizeof(chan->filename), "%.100s/%.100s", (char *)ast_config_AST_LOG_DIR, channel);
 		}
 		chan->fileptr = fopen(chan->filename, "a");
 		if (!chan->fileptr) {
@@ -422,10 +422,10 @@ int reload_logger(int rotate)
 	init_logger_chain();
 
 	if (logfiles.event_log) {
-		snprintf(old, sizeof(old), "%s/%s", (char *)ast_config_AST_LOG_DIR, EVENTLOG);
+		snprintf(old, sizeof(old), "%.2000s/%.2000s", (char *)ast_config_AST_LOG_DIR, EVENTLOG);
 		if (event_rotate) {
 			for (x=0;;x++) {
-				snprintf(new, sizeof(new), "%s/%s.%d", (char *)ast_config_AST_LOG_DIR, EVENTLOG,x);
+				snprintf(new, sizeof(new), "%.2000s/%.2000s.%d", (char *)ast_config_AST_LOG_DIR, EVENTLOG,x);
 				myf = fopen((char *)new, "r");
 				if (myf) 	/* File exists */
 					fclose(myf);
@@ -450,10 +450,10 @@ int reload_logger(int rotate)
 	}
 
 	if (logfiles.queue_log) {
-		snprintf(old, sizeof(old), "%s/%s", (char *)ast_config_AST_LOG_DIR, QUEUELOG);
+		snprintf(old, sizeof(old), "%.2000s/%.2000s", (char *)ast_config_AST_LOG_DIR, QUEUELOG);
 		if (queue_rotate) {
 			for (x = 0; ; x++) {
-				snprintf(new, sizeof(new), "%s/%s.%d", (char *)ast_config_AST_LOG_DIR, QUEUELOG, x);
+				snprintf(new, sizeof(new), "%.2000s/%.2000s.%d", (char *)ast_config_AST_LOG_DIR, QUEUELOG, x);
 				myf = fopen((char *)new, "r");
 				if (myf) 	/* File exists */
 					fclose(myf);
@@ -588,7 +588,7 @@ static int handle_SIGXFSZ(int sig)
 
 int init_logger(void)
 {
-	char tmp[256];
+	char tmp[4096];
 	int res = 0;
 
 	/* auto rotate if sig SIGXFSZ comes a-knockin */
@@ -605,7 +605,7 @@ int init_logger(void)
 	/* create the eventlog */
 	if (logfiles.event_log) {
 		mkdir((char *)ast_config_AST_LOG_DIR, 0755);
-		snprintf(tmp, sizeof(tmp), "%s/%s", (char *)ast_config_AST_LOG_DIR, EVENTLOG);
+		snprintf(tmp, sizeof(tmp), "%.2000s/%.2000s", (char *)ast_config_AST_LOG_DIR, EVENTLOG);
 		eventlog = fopen((char *)tmp, "a");
 		if (eventlog) {
 			ast_log(LOG_EVENT, "Started Asterisk Event Logger\n");
@@ -618,7 +618,7 @@ int init_logger(void)
 	}
 
 	if (logfiles.queue_log) {
-		snprintf(tmp, sizeof(tmp), "%s/%s", (char *)ast_config_AST_LOG_DIR, QUEUELOG);
+		snprintf(tmp, sizeof(tmp), "%.2000s/%.2000s", (char *)ast_config_AST_LOG_DIR, QUEUELOG);
 		qlog = fopen(tmp, "a");
 		ast_queue_log("NONE", "NONE", "NONE", "QUEUESTART", "%s", "");
 	}

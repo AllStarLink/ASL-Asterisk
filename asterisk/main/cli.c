@@ -605,7 +605,7 @@ static int handle_modlist(int fd, int argc, char *argv[])
 static int handle_chanlist_deprecated(int fd, int argc, char *argv[])
 {
 	struct ast_channel *c = NULL;
-	char durbuf[10] = "-";
+	char durbuf[16] = "-";
 	char locbuf[40];
 	char appdata[40];
 	int duration;
@@ -658,7 +658,7 @@ static int handle_chanlist_deprecated(int fd, int argc, char *argv[])
 				bc ? bc->name : "(None)");
 		} else {
 			if (!ast_strlen_zero(c->context) && !ast_strlen_zero(c->exten)) 
-				snprintf(locbuf, sizeof(locbuf), "%s@%s:%d", c->exten, c->context, c->priority);
+				snprintf(locbuf, sizeof(locbuf), "%.15s@%.10s:%d", c->exten, c->context, c->priority);
 			else
 				strcpy(locbuf, "(None)");
 			if (c->appl)
@@ -685,7 +685,7 @@ static int handle_chanlist_deprecated(int fd, int argc, char *argv[])
 static int handle_chanlist(int fd, int argc, char *argv[])
 {
 	struct ast_channel *c = NULL;
-	char durbuf[10] = "-";
+	char durbuf[16] = "-";
 	char locbuf[40];
 	char appdata[40];
 	int duration;
@@ -738,7 +738,7 @@ static int handle_chanlist(int fd, int argc, char *argv[])
 				bc ? bc->name : "(None)");
 		} else {
 			if (!ast_strlen_zero(c->context) && !ast_strlen_zero(c->exten)) 
-				snprintf(locbuf, sizeof(locbuf), "%s@%s:%d", c->exten, c->context, c->priority);
+				snprintf(locbuf, sizeof(locbuf), "%.15s@%.10s:%d", c->exten, c->context, c->priority);
 			else
 				strcpy(locbuf, "(None)");
 			if (c->appl)
@@ -1257,7 +1257,7 @@ static char *complete_fn_2(const char *line, const char *word, int pos, int stat
 	if (word[0] == '/')
 		ast_copy_string(filename, word, sizeof(filename));
 	else
-		snprintf(filename, sizeof(filename), "%s/%s", ast_config_AST_MODULE_DIR, word);
+		snprintf(filename, sizeof(filename), "%.3000s/%s", ast_config_AST_MODULE_DIR, word);
 	
 	c = d = filename_completion_function(filename, state);
 	
@@ -1281,7 +1281,7 @@ static char *complete_fn_3(const char *line, const char *word, int pos, int stat
 	if (word[0] == '/')
 		ast_copy_string(filename, word, sizeof(filename));
 	else
-		snprintf(filename, sizeof(filename), "%s/%s", ast_config_AST_MODULE_DIR, word);
+		snprintf(filename, sizeof(filename), "%.3000s/%s", ast_config_AST_MODULE_DIR, word);
 	
 	c = d = filename_completion_function(filename, state);
 	
