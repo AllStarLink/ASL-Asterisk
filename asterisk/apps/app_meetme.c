@@ -1396,7 +1396,6 @@ static int conf_run(struct ast_channel *chan, struct ast_conference *conf, int c
 	int menu_active = 0;
 	int using_pseudo = 0;
 	int duration=20;
-	int hr, min, sec;
 	int sent_event = 0;
 	time_t now;
 	struct ast_dsp *dsp=NULL;
@@ -1406,7 +1405,7 @@ static int conf_run(struct ast_channel *chan, struct ast_conference *conf, int c
 	char meetmesecs[30] = "";
 	char exitcontext[AST_MAX_CONTEXT] = "";
 	char recordingtmp[AST_MAX_EXTENSION] = "";
-	char members[10] = "";
+	char members[12] = "";
 	int dtmf, opt_waitmarked_timeout = 0;
 	time_t timeout = 0;
 	struct dahdi_bufferinfo bi;
@@ -1429,7 +1428,7 @@ static int conf_run(struct ast_channel *chan, struct ast_conference *conf, int c
 		if (!conf->recordingfilename) {
 			conf->recordingfilename = pbx_builtin_getvar_helper(chan, "MEETME_RECORDINGFILE");
 			if (!conf->recordingfilename) {
-				snprintf(recordingtmp, sizeof(recordingtmp), "meetme-conf-rec-%s-%s", conf->confno, chan->uniqueid);
+				snprintf(recordingtmp, sizeof(recordingtmp), "meetme-conf-rec-%.30s-%.30s", conf->confno, chan->uniqueid);
 				conf->recordingfilename = ast_strdupa(recordingtmp);
 			}
 			conf->recordingformat = pbx_builtin_getvar_helper(chan, "MEETME_RECORDINGFORMAT");
@@ -1490,7 +1489,7 @@ static int conf_run(struct ast_channel *chan, struct ast_conference *conf, int c
 	if (!(confflags & CONFFLAG_QUIET) && ((confflags & CONFFLAG_INTROUSER) || (confflags & CONFFLAG_INTROUSERNOREVIEW))) {
 		char destdir[PATH_MAX];
 
-		snprintf(destdir, sizeof(destdir), "%s/meetme", ast_config_AST_SPOOL_DIR);
+		snprintf(destdir, sizeof(destdir), "%.4000s/meetme", ast_config_AST_SPOOL_DIR);
 
 		if (mkdir(destdir, 0777) && errno != EEXIST) {
 			ast_log(LOG_WARNING, "mkdir '%s' failed: %s\n", destdir, strerror(errno));
@@ -1498,7 +1497,7 @@ static int conf_run(struct ast_channel *chan, struct ast_conference *conf, int c
 		}
 
 		snprintf(user->namerecloc, sizeof(user->namerecloc),
-			 "%s/meetme-username-%s-%d", destdir,
+			 "%.3500s/meetme-username-%.30s-%d", destdir,
 			 conf->confno, user->user_no);
 		if (confflags & CONFFLAG_INTROUSERNOREVIEW)
 			res = ast_play_and_record(chan, "vm-rec-name", user->namerecloc, 10, "sln", &duration, 128, 0, NULL);
@@ -2285,9 +2284,6 @@ bailoutandtrynormal:
 	
 	if (user->user_no) { /* Only cleanup users who really joined! */
 		now = time(NULL);
-		hr = (now - user->jointime) / 3600;
-		min = ((now - user->jointime) % 3600) / 60;
-		sec = (now - user->jointime) % 60;
 
 		if (sent_event) {
 			manager_event(EVENT_FLAG_CALL, "MeetmeLeave",
@@ -4477,7 +4473,7 @@ static void destroy_station(struct sla_station *station)
 			char exten[AST_MAX_EXTENSION];
 			char hint[AST_MAX_APP];
 			snprintf(exten, sizeof(exten), "%s_%s", station->name, trunk_ref->trunk->name);
-			snprintf(hint, sizeof(hint), "SLA:%s", exten);
+			snprintf(hint, sizeof(hint), "SLA:%.20s", exten);
 			ast_context_remove_extension(station->autocontext, exten, 
 				1, sla_registrar);
 			ast_context_remove_extension(station->autocontext, hint, 
@@ -4749,7 +4745,7 @@ static int sla_build_station(struct ast_config *cfg, const char *cat)
 			char exten[AST_MAX_EXTENSION];
 			char hint[AST_MAX_APP];
 			snprintf(exten, sizeof(exten), "%s_%s", station->name, trunk_ref->trunk->name);
-			snprintf(hint, sizeof(hint), "SLA:%s", exten);
+			snprintf(hint, sizeof(hint), "SLA:%.20s", exten);
 			/* Extension for this line button 
 			 * exten => station1_line1,1,SLAStation(station1_line1) */
 			if (ast_add_extension2(context, 0 /* don't replace */, exten, 1,

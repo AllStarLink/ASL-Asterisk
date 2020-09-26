@@ -8296,7 +8296,7 @@ static void *do_idle_thread(void *vchan)
 	int newms, ms = 30000;
 	if (option_verbose > 2) 
 		ast_verbose(VERBOSE_PREFIX_3 "Initiating idle call on channel %s\n", chan->name);
-	snprintf(ex, sizeof(ex), "%d/%s", pvt->channel, pvt->pri->idledial);
+	snprintf(ex, sizeof(ex), "%d/%.50s", pvt->channel, pvt->pri->idledial);
 	if (ast_call(chan, ex, 0)) {
 		ast_log(LOG_WARNING, "Idle dial failed on '%s' to '%s'\n", chan->name, ex);
 		ast_hangup(chan);
@@ -8482,22 +8482,22 @@ static void apply_plan_to_number(char *buf, size_t size, const struct dahdi_pri 
 {
 	switch (plan) {
 	case PRI_INTERNATIONAL_ISDN:		/* Q.931 dialplan == 0x11 international dialplan => prepend international prefix digits */
-		snprintf(buf, size, "%s%s", pri->internationalprefix, number);
+		snprintf(buf, size, "%.20s%.50s", pri->internationalprefix, number);
 		break;
 	case PRI_NATIONAL_ISDN:			/* Q.931 dialplan == 0x21 national dialplan => prepend national prefix digits */
-		snprintf(buf, size, "%s%s", pri->nationalprefix, number);
+		snprintf(buf, size, "%.20s%.50s", pri->nationalprefix, number);
 		break;
 	case PRI_LOCAL_ISDN:			/* Q.931 dialplan == 0x41 local dialplan => prepend local prefix digits */
-		snprintf(buf, size, "%s%s", pri->localprefix, number);
+		snprintf(buf, size, "%.20s%.50s", pri->localprefix, number);
 		break;
 	case PRI_PRIVATE:			/* Q.931 dialplan == 0x49 private dialplan => prepend private prefix digits */
-		snprintf(buf, size, "%s%s", pri->privateprefix, number);
+		snprintf(buf, size, "%.20s%.50s", pri->privateprefix, number);
 		break;
 	case PRI_UNKNOWN:			/* Q.931 dialplan == 0x00 unknown dialplan => prepend unknown prefix digits */
-		snprintf(buf, size, "%s%s", pri->unknownprefix, number);
+		snprintf(buf, size, "%.20s%.50s", pri->unknownprefix, number);
 		break;
 	default:				/* other Q.931 dialplan => don't twiddle with callingnum */
-		snprintf(buf, size, "%s", number);
+		snprintf(buf, size, "%.50s", number);
 		break;
 	}
 }
@@ -8537,7 +8537,7 @@ static void *pri_dchannel(void *vpri)
 	struct dahdi_pvt *crv;
 	pthread_t threadid;
 	pthread_attr_t attr;
-	char ani2str[6];
+	char ani2str[11];
 	char plancallingnum[256];
 	char plancallingani[256];
 	char calledtonstr[10];
@@ -8604,7 +8604,7 @@ static void *pri_dchannel(void *vpri)
 			if (nextidle > -1) {
 				if (ast_tvdiff_ms(ast_tvnow(), lastidle) > 1000) {
 					/* Don't create a new idle call more than once per second */
-					snprintf(idlen, sizeof(idlen), "%d/%s", pri->pvts[nextidle]->channel, pri->idledial);
+					snprintf(idlen, sizeof(idlen), "%d/%.50s", pri->pvts[nextidle]->channel, pri->idledial);
 					idle = dahdi_request(dahdi_chan_name, AST_FORMAT_ULAW, idlen, &cause);
 					if (idle) {
 						pri->pvts[nextidle]->isidlecall = 1;
@@ -9038,7 +9038,7 @@ static void *pri_dchannel(void *vpri)
 								pbx_builtin_setvar_helper(c, "CALLINGSUBADDR", e->ring.callingsubaddr);
 							}
 							if (e->ring.ani2 >= 0) {
-								snprintf(ani2str, 5, "%.2d", e->ring.ani2);
+								snprintf(ani2str, 11, "%.2d", e->ring.ani2);
 								pbx_builtin_setvar_helper(c, "ANI2", ani2str);
 							}
 
@@ -9084,7 +9084,7 @@ static void *pri_dchannel(void *vpri)
 								ast_mutex_unlock(&pri->pvts[chanpos]->lock);
 
 								if (e->ring.ani2 >= 0) {
-									snprintf(ani2str, 5, "%d", e->ring.ani2);
+									snprintf(ani2str, 11, "%d", e->ring.ani2);
 									pbx_builtin_setvar_helper(c, "ANI2", ani2str);
 								}
 

@@ -2462,7 +2462,7 @@ static void *skinny_ss(void *data)
 			}
 			return NULL;
 		} else if (!ast_canmatch_extension(c, c->context, d->exten, 1, c->cid.cid_num) &&
-			   ((d->exten[0] != '*') || (!ast_strlen_zero(d->exten) > 2))) {
+			   ((d->exten[0] != '*') || !(ast_strlen_zero(d->exten) > 2))) {
 			ast_log(LOG_WARNING, "Can't match [%s] from '%s' in context %s\n", d->exten, c->cid.cid_num ? c->cid.cid_num : "<Unknown Caller>", c->context);
 			memset(d->exten, 0, sizeof(d->exten));
 			transmit_tone(s, SKINNY_REORDER, l->instance, sub->callid);
@@ -2489,7 +2489,6 @@ static void *skinny_ss(void *data)
 static int skinny_call(struct ast_channel *ast, char *dest, int timeout)
 {
 	int res = 0;
-	int tone = 0;
 	struct skinny_subchannel *sub = ast->tech_pvt;
 	struct skinny_line *l = sub->parent;
 	struct skinny_device *d = l->parent;
@@ -2515,10 +2514,8 @@ static int skinny_call(struct ast_channel *ast, char *dest, int timeout)
 
 	switch (l->hookstate) {
 	case SKINNY_OFFHOOK:
-		tone = SKINNY_CALLWAITTONE;
 		break;
 	case SKINNY_ONHOOK:
-		tone = SKINNY_ALERT;
 		break;
 	default:
 		ast_log(LOG_ERROR, "Don't know how to deal with hookstate %d\n", l->hookstate);
@@ -3408,11 +3405,6 @@ static int handle_offhook_message(struct skinny_req *req, struct skinnysession *
 	struct skinny_subchannel *sub;
 	struct ast_channel *c;
 	pthread_t t;
-	int unknown1;
-	int unknown2;
-
-	unknown1 = letohl(req->data.offhook.unknown1);
-	unknown2 = letohl(req->data.offhook.unknown2);
 
 	sub = find_subchannel_by_instance_reference(d, d->lastlineinstance, d->lastcallreference);
 
@@ -3475,11 +3467,6 @@ static int handle_onhook_message(struct skinny_req *req, struct skinnysession *s
 	struct skinny_device *d = s->device;
 	struct skinny_line *l;
 	struct skinny_subchannel *sub;
-	int unknown1;
-	int unknown2;
-
-	unknown1 = letohl(req->data.onhook.unknown1);
-	unknown2 = letohl(req->data.onhook.unknown2);
 
 	sub = find_subchannel_by_instance_reference(d, d->lastlineinstance, d->lastcallreference);
 
@@ -4670,15 +4657,11 @@ static int restart_monitor(void)
 
 static struct ast_channel *skinny_request(const char *type, int format, void *data, int *cause)
 {
-	int oldformat;
-	
 	struct skinny_line *l;
 	struct ast_channel *tmpc = NULL;
 	char tmp[256];
 	char *dest = data;
 
-	oldformat = format;
-	
 	if (!(format &= ((AST_FORMAT_MAX_AUDIO << 1) - 1))) {
 		ast_log(LOG_NOTICE, "Asked to get a channel of unsupported format '%d'\n", format);
 		return NULL;	

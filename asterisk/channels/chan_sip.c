@@ -2934,7 +2934,7 @@ static int create_addr(struct sip_pvt *dialog, const char *opeer)
 		int tportno;
 		int ret;
 
-		snprintf(service, sizeof(service), "_sip._udp.%s", peer);
+		snprintf(service, sizeof(service), "_sip._udp.%.40s", peer);
 		ret = ast_get_srv(NULL, host, sizeof(host), &tportno, service);
 		if (ret > 0) {
 			hostn = host;
@@ -5057,7 +5057,6 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 	int udptlportno = -1;
 	int peert38capability = 0;
 	char s[256];
-	int old = 0;
 
 	/* Peer capability is the capability in the SDP, non codec is RFC2833 DTMF (101) */	
 	int peercapability = 0, peernoncodeccapability = 0;
@@ -5082,7 +5081,6 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 	int numberofmediastreams = 0;
 	int debug = sip_debug_test_pvt(p);
 		
-	int found_rtpmap_codecs[SDP_MAX_RTPMAP_CODECS];
 	int last_rtpmap_codec=0;
 
 	if (!p->rtp) {
@@ -5244,7 +5242,7 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 				struct sockaddr_in peer;
 				ast_rtp_get_peer(p->rtp, &peer);
 				if (peer.sin_addr.s_addr) {
-					memcpy(&sin.sin_addr, &peer.sin_addr, sizeof(&sin.sin_addr));
+					memcpy(&sin.sin_addr, &peer.sin_addr, sizeof(sin.sin_addr));
 					if (debug) {
 						ast_log(LOG_DEBUG, "Peer T.38 UDPTL is set behind NAT and with destination, destination address now %s\n", ast_inet_ntoa(sin.sin_addr));
 					}
@@ -5375,7 +5373,6 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 							   ast_test_flag(&p->flags[0], SIP_G726_NONSTANDARD) ? AST_RTP_OPT_G726_NONSTANDARD : 0) != -1) {
 					if (debug)
 						ast_verbose("Found audio description format %s for ID %d\n", mimeSubtype, codec);
-					found_rtpmap_codecs[last_rtpmap_codec] = codec;
 					last_rtpmap_codec++;
 					found = TRUE;
 					
@@ -5383,7 +5380,6 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 					if(ast_rtp_set_rtpmap_type(newvideortp, codec, "video", mimeSubtype, 0) != -1) {
 						if (debug)
 							ast_verbose("Found video description format %s for ID %d\n", mimeSubtype, codec);
-						found_rtpmap_codecs[last_rtpmap_codec] = codec;
 						last_rtpmap_codec++;
 						found = TRUE;
 					}
@@ -5407,8 +5403,6 @@ static int process_sdp(struct sip_pvt *p, struct sip_request *req)
 	
 	if (udptlportno != -1) {
 		int found = 0, x;
-		
-		old = 0;
 		
 		/* Scan trough the a= lines for T38 attributes and set apropriate fileds */
 		iterator = req->sdp_start;
@@ -5748,7 +5742,7 @@ static int copy_via_headers(struct sip_pvt *p, struct sip_request *req, const st
 	int start = 0;
 
 	for (;;) {
-		char new[512];
+		char new[1024];
 		const char *oh = __get_header(orig, field, &start);
 
 		if (ast_strlen_zero(oh))
@@ -7558,7 +7552,6 @@ static int sip_reg_timeout(const void *data)
 	/* if we are here, our registration timed out, so we'll just do it over */
 	struct sip_registry *r = ASTOBJ_REF((struct sip_registry *) data);
 	struct sip_pvt *p;
-	int res;
 
 	/* if we couldn't get a reference to the registry object, punt */
 	if (!r)
@@ -7588,7 +7581,7 @@ static int sip_reg_timeout(const void *data)
 	} else {
 		r->regstate = REG_STATE_UNREGISTERED;
 		r->timeout = -1;
-		res=transmit_register(r, SIP_REGISTER, NULL, NULL);
+		transmit_register(r, SIP_REGISTER, NULL, NULL);
 	}
 	manager_event(EVENT_FLAG_SYSTEM, "Registry", "ChannelDriver: SIP\r\nUsername: %s\r\nDomain: %s\r\nStatus: %s\r\n", r->username, r->hostname, regstate2str(r->regstate));
 	ASTOBJ_UNREF(r, sip_registry_destroy);
@@ -7825,8 +7818,6 @@ static int transmit_refer(struct sip_pvt *p, const char *dest)
 	const char *of;
 	char *c;
 	char referto[256];
-	char *ttag, *ftag;
-	char *theirtag = ast_strdupa(p->theirtag);
 
 	if (option_debug || sipdebug)
 		ast_log(LOG_DEBUG, "SIP transfer of %s to %s\n", p->callid, dest);
@@ -7834,12 +7825,8 @@ static int transmit_refer(struct sip_pvt *p, const char *dest)
 	/* Are we transfering an inbound or outbound call ? */
 	if (ast_test_flag(&p->flags[0], SIP_OUTGOING))  {
 		of = get_header(&p->initreq, "To");
-		ttag = theirtag;
-		ftag = p->tag;
 	} else {
 		of = get_header(&p->initreq, "From");
-		ftag = theirtag;
-		ttag = p->tag;
 	}
 
 	ast_copy_string(from, of, sizeof(from));
@@ -8111,7 +8098,7 @@ static int __set_address_from_contact(const char *fullcontact, struct sockaddr_i
 	struct hostent *hp;
 	struct ast_hostent ahp;
 	int port;
-	char *c, *host, *pt;
+	char *host, *pt;
 	char contact_buf[256];
 	char *contact;
 
@@ -8132,7 +8119,6 @@ static int __set_address_from_contact(const char *fullcontact, struct sockaddr_i
 	host = strchr(contact, '@');
 	if (!host) {	/* No username part */
 		host = contact;
-		c = NULL;
 	} else {
 		*host++ = '\0';
 	}
@@ -8605,7 +8591,7 @@ static enum check_auth_result check_auth(struct sip_pvt *p, struct sip_request *
 	{
 		char a2[256];
 		char a2_hash[256];
-		char resp[256];
+		char resp[1024];
 
 		snprintf(a2, sizeof(a2), "%s:%s", sip_methods[sipmethod].text,
 				S_OR(keys[K_URI].s, uri));
@@ -11689,10 +11675,10 @@ static int reply_digest(struct sip_pvt *p, struct sip_request *req, char *header
 static int build_reply_digest(struct sip_pvt *p, int method, char* digest, int digest_len)
 {
 	char a1[256];
-	char a2[256];
+	char a2[257];
 	char a1_hash[256];
 	char a2_hash[256];
-	char resp[256];
+	char resp[1024];
 	char resp_hash[256];
 	char uri[256];
 	char opaque[256] = "";
@@ -12798,7 +12784,6 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 {
 	struct ast_channel *owner;
 	int sipmethod;
-	int res = 1;
 	const char *c = get_header(req, "Cseq");
 	/* GCC 4.2 complains if I try to cast c as a char * when passing it to ast_skip_nonblanks, so make a copy of it */
 	char *c_copy = ast_strdupa(c);
@@ -12882,7 +12867,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 					}
 				}
 			} else if (sipmethod == SIP_REGISTER) 
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else if (sipmethod == SIP_BYE) {		/* Ok, we're ready to go */
 				ast_set_flag(&p->flags[0], SIP_NEEDDESTROY);
 				ast_clear_flag(&p->flags[1], SIP_PAGE2_DIALOG_ESTABLISHED);
@@ -12899,7 +12884,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 			else if (sipmethod == SIP_REFER)
 				handle_response_refer(p, resp, rest, req, seqno);
 			else if (p->registry && sipmethod == SIP_REGISTER)
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else if (sipmethod == SIP_BYE) {
 				if (ast_strlen_zero(p->authname)) {
 					ast_log(LOG_WARNING, "Asked to authenticate %s, to %s:%d but we have no matching peer!\n",
@@ -12920,7 +12905,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 			if (sipmethod == SIP_INVITE)
 				handle_response_invite(p, resp, rest, req, seqno);
 			else if (p->registry && sipmethod == SIP_REGISTER) 
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else {
 				ast_log(LOG_WARNING, "Forbidden - maybe wrong password on authentication for %s\n", msg);
 				ast_set_flag(&p->flags[0], SIP_NEEDDESTROY);	
@@ -12928,7 +12913,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 			break;
 		case 404: /* Not found */
 			if (p->registry && sipmethod == SIP_REGISTER)
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else if (sipmethod == SIP_INVITE)
 				handle_response_invite(p, resp, rest, req, seqno);
 			else if (owner)
@@ -12940,7 +12925,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 			else if (sipmethod == SIP_REFER)
 				handle_response_refer(p, resp, rest, req, seqno);
 			else if (p->registry && sipmethod == SIP_REGISTER)
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else if (sipmethod == SIP_BYE) {
 				if (ast_strlen_zero(p->authname)) {
 					ast_log(LOG_WARNING, "Asked to authenticate %s, to %s:%d but we have no matching peer!\n",
@@ -12958,7 +12943,7 @@ static void handle_response(struct sip_pvt *p, int resp, char *rest, struct sip_
 			if (sipmethod == SIP_INVITE)
 				handle_response_invite(p, resp, rest, req, seqno);
 			else if (sipmethod == SIP_REGISTER) 
-				res = handle_response_register(p, resp, rest, req, ignore, seqno);
+				handle_response_register(p, resp, rest, req, ignore, seqno);
 			else if (sipmethod == SIP_BYE) {
 				ast_set_flag(&p->flags[0], SIP_NEEDDESTROY); 
 				if (option_debug)
@@ -13507,12 +13492,10 @@ static int handle_request_notify(struct sip_pvt *p, struct sip_request *req, str
 	/* Mostly created to return proper answers on notifications on outbound REFER's */
 	int res = 0;
 	const char *event = get_header(req, "Event");
-	char *eventid = NULL;
 	char *sep;
 
 	if( (sep = strchr(event, ';')) ) {	/* XXX bug here - overwriting string ? */
 		*sep++ = '\0';
-		eventid = sep;
 	}
 	
 	if (option_debug > 1 && sipdebug)
@@ -15026,7 +15009,7 @@ static int handle_request_refer(struct sip_pvt *p, struct sip_request *req, int 
 	/* Generate a Replaces string to be used in the INVITE during attended transfer */
 	if (p->refer->replaces_callid && !ast_strlen_zero(p->refer->replaces_callid)) {
 		char tempheader[SIPBUFSIZE];
-		snprintf(tempheader, sizeof(tempheader), "%s%s%s%s%s", p->refer->replaces_callid, 
+		snprintf(tempheader, sizeof(tempheader), "%.100s%.100s%.100s%.100s%.100s", p->refer->replaces_callid, 
 				p->refer->replaces_callid_totag ? ";to-tag=" : "", 
 				p->refer->replaces_callid_totag, 
 				p->refer->replaces_callid_fromtag ? ";from-tag=" : "",
