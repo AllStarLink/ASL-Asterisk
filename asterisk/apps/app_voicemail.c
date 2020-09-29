@@ -890,7 +890,7 @@ static void vm_change_password(struct ast_vm_user *vmu, const char *newpassword)
 static void vm_change_password_shell(struct ast_vm_user *vmu, char *newpassword)
 {
 	char buf[255];
-	snprintf(buf,255,"%s %s %s %s",ext_pass_cmd,vmu->context,vmu->mailbox,newpassword);
+	snprintf(buf,255,"%.60s %.60s %.60s %.60s",ext_pass_cmd,vmu->context,vmu->mailbox,newpassword);
 	if (!ast_safe_system(buf)) {
 		ast_copy_string(vmu->password, newpassword, sizeof(vmu->password));
 		/* Reset the password in memory, too */
@@ -900,12 +900,12 @@ static void vm_change_password_shell(struct ast_vm_user *vmu, char *newpassword)
 
 static int make_dir(char *dest, int len, const char *context, const char *ext, const char *folder)
 {
-	return snprintf(dest, len, "%s%s/%s/%s", VM_SPOOL_DIR, context, ext, folder);
+	return snprintf(dest, len, "%.1000s%.1000s/%.1000s/%.1000s", VM_SPOOL_DIR, context, ext, folder);
 }
 
 static int make_file(char *dest, const int len, const char *dir, const int num)
 {
-	return snprintf(dest, len, "%s/msg%04d", dir, num);
+	return snprintf(dest, len, "%.3000s/msg%04d", dir, num);
 }
 
 /* same as mkstemp, but return a FILE * */
@@ -2672,8 +2672,8 @@ static void rename_file(char *sfn, char *dfn)
 	char stxt[PATH_MAX];
 	char dtxt[PATH_MAX];
 	ast_filerename(sfn,dfn,NULL);
-	snprintf(stxt, sizeof(stxt), "%s.txt", sfn);
-	snprintf(dtxt, sizeof(dtxt), "%s.txt", dfn);
+	snprintf(stxt, sizeof(stxt), "%s.txt", strndup(sfn, PATH_MAX-4));
+	snprintf(dtxt, sizeof(dtxt), "%s.txt", strndup(dfn, PATH_MAX-4));
 	rename(stxt, dtxt);
 }
 #endif
@@ -3128,14 +3128,14 @@ static void make_email_file(FILE *p, char *srcemail, struct ast_vm_user *vmu, in
 	
 		if (vmu->volgain < -.001 || vmu->volgain > .001) {
 			create_dirpath(tmpdir, sizeof(tmpdir), vmu->context, vmu->mailbox, "tmp");
-			snprintf(newtmp, sizeof(newtmp), "%s/XXXXXX", tmpdir);
+			snprintf(newtmp, sizeof(newtmp), "%s/XXXXXX", strndup(tmpdir,PATH_MAX-7));
 			tmpfd = mkstemp(newtmp);
 			chmod(newtmp, VOICEMAIL_FILE_MODE & ~my_umask);
 			if (option_debug > 2)
 				ast_log(LOG_DEBUG, "newtmp: %s\n", newtmp);
 			if (tmpfd > -1) {
 				int soxstatus;
-				snprintf(tmpcmd, sizeof(tmpcmd), "sox -v %.4f %s.%s %s.%s", vmu->volgain, attach, format, newtmp, format);
+				snprintf(tmpcmd, sizeof(tmpcmd), "sox -v %.4f %.30s.%.30s %.30s.%.30s", vmu->volgain, attach, format, newtmp, format);
 				if ((soxstatus = ast_safe_system(tmpcmd)) == 0) {
 					attach = newtmp;
 					if (option_debug > 2) {
@@ -3186,7 +3186,7 @@ static int sendmail(char *srcemail, struct ast_vm_user *vmu, int msgnum, char *c
 	} else {
 		make_email_file(p, srcemail, vmu, msgnum, context, mailbox, cidnum, cidname, attach, format, duration, attach_user_voicemail, chan, category, 0);
 		fclose(p);
-		snprintf(tmp2, sizeof(tmp2), "( %s < %s ; rm -f %s ) &", mailcmd, tmp, tmp);
+		snprintf(tmp2, sizeof(tmp2), "( %.30s < %.100s ; rm -f %.100s ) &", mailcmd, tmp, tmp);
 		ast_safe_system(tmp2);
 		if (option_debug > 2)
 			ast_log(LOG_DEBUG, "Sent mail to %s with command '%s'\n", vmu->email, mailcmd);
@@ -3322,7 +3322,7 @@ static int invent_message(struct ast_channel *chan, struct ast_vm_user *vmu, cha
 	char fn[PATH_MAX];
 	char dest[PATH_MAX];
 
-	snprintf(fn, sizeof(fn), "%s%s/%s/greet", VM_SPOOL_DIR, vmu->context, ext);
+	snprintf(fn, sizeof(fn), "%.1000s%.1000s/%.1000s/greet", VM_SPOOL_DIR, vmu->context, ext);
 
 	if ((res = create_dirpath(dest, sizeof(dest), vmu->context, ext, "greet"))) {
 		ast_log(LOG_WARNING, "Failed to make directory(%s)\n", fn);
@@ -3571,7 +3571,7 @@ static int __has_voicemail(const char *context, const char *mailbox, const char 
 		return 0;
 	if (!context)
 		context = "default";
-	snprintf(fn, sizeof(fn), "%s%s/%s/%s", VM_SPOOL_DIR, context, mailbox, folder);
+	snprintf(fn, sizeof(fn), "%.50s%.50s/%.50s/%.50s", VM_SPOOL_DIR, context, mailbox, folder);
 	dir = opendir(fn);
 	if (!dir)
 		return 0;
@@ -3757,17 +3757,17 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 	}
 	/* Setup pre-file if appropriate */
 	if (strcmp(vmu->context, "default"))
-		snprintf(ext_context, sizeof(ext_context), "%s@%s", ext, vmu->context);
+		snprintf(ext_context, sizeof(ext_context), "%.120s@%.120s", ext, vmu->context);
 	else
 		ast_copy_string(ext_context, vmu->mailbox, sizeof(ext_context));
 	if (ast_test_flag(options, OPT_BUSY_GREETING)) {
 		res = create_dirpath(dest, sizeof(dest), vmu->context, ext, "busy");
-		snprintf(prefile, sizeof(prefile), "%s%s/%s/busy", VM_SPOOL_DIR, vmu->context, ext);
+		snprintf(prefile, sizeof(prefile), "%.1000s%.1000s/%.1000s/busy", VM_SPOOL_DIR, vmu->context, ext);
 	} else if (ast_test_flag(options, OPT_UNAVAIL_GREETING)) {
 		res = create_dirpath(dest, sizeof(dest), vmu->context, ext, "unavail");
-		snprintf(prefile, sizeof(prefile), "%s%s/%s/unavail", VM_SPOOL_DIR, vmu->context, ext);
+		snprintf(prefile, sizeof(prefile), "%.1000s%.1000s/%.1000s/unavail", VM_SPOOL_DIR, vmu->context, ext);
 	}
-	snprintf(tempfile, sizeof(tempfile), "%s%s/%s/temp", VM_SPOOL_DIR, vmu->context, ext);
+	snprintf(tempfile, sizeof(tempfile), "%.1000s%.1000s/%.1000s/temp", VM_SPOOL_DIR, vmu->context, ext);
 	if ((res = create_dirpath(dest, sizeof(dest), vmu->context, ext, "temp"))) {
 		ast_log(LOG_WARNING, "Failed to make directory (%s)\n", tempfile);
 		return -1;
@@ -3943,7 +3943,7 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 		}
 
 #endif
-		snprintf(tmptxtfile, sizeof(tmptxtfile), "%s/XXXXXX", tmpdir);
+		snprintf(tmptxtfile, sizeof(tmptxtfile), "%s/XXXXXX", strndup(tmpdir,PATH_MAX-7));
 		txtdes = mkstemp(tmptxtfile);
 		chmod(tmptxtfile, VOICEMAIL_FILE_MODE & ~my_umask);
 		if (txtdes < 0) {
@@ -4028,7 +4028,7 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 					pbx_builtin_setvar_helper(chan, "VM_MESSAGEFILE", "IMAP_STORAGE");
 #endif
 
-					snprintf(txtfile, sizeof(txtfile), "%s.txt", fn);
+					snprintf(txtfile, sizeof(txtfile), "%s.txt", strndup(fn,PATH_MAX-4));
 					ast_filerename(tmptxtfile, fn, NULL);
 					rename(tmptxtfile, txtfile);
 
@@ -4424,7 +4424,7 @@ static void adsi_message(struct ast_channel *chan, struct vm_state *vms)
 		return;
 
 	/* Retrieve important info */
-	snprintf(fn2, sizeof(fn2), "%s.txt", vms->fn);
+	snprintf(fn2, sizeof(fn2), "%.252s.txt", vms->fn);
 	f = fopen(fn2, "r");
 	if (f) {
 		while (!feof(f)) {	
@@ -5216,7 +5216,7 @@ static int play_message_callerid(struct ast_channel *chan, struct vm_state *vms,
 		}
 		if (i != MAX_NUM_CID_CONTEXTS){ /* internal context? */
 			if (!res) {
-				snprintf(prefile, sizeof(prefile), "%s%s/%s/greet", VM_SPOOL_DIR, context, callerid);
+				snprintf(prefile, sizeof(prefile), "%.1000s%.1000s/%.1000s/greet", VM_SPOOL_DIR, context, callerid);
 				if (!ast_strlen_zero(prefile)) {
 				/* See if we can find a recorded name for this person instead of their extension number */
 					if (ast_fileexists(prefile, NULL, NULL) > 0) {
@@ -5382,7 +5382,7 @@ static int play_message(struct ast_channel *chan, struct ast_vm_user *vmu, struc
 
 	/* Retrieve info from VM attribute file */
 	make_file(vms->fn2, sizeof(vms->fn2), vms->curdir, vms->curmsg);
-	snprintf(filename, sizeof(filename), "%s.txt", vms->fn2);
+	snprintf(filename, sizeof(filename), "%.251s.txt", vms->fn2);
 	RETRIEVE(vms->curdir, vms->curmsg, vmu);
 	msg_cfg = ast_config_load(filename);
 	if (!msg_cfg) {
@@ -6490,7 +6490,7 @@ static int vm_intro(struct ast_channel *chan, struct ast_vm_user *vmu, struct vm
 	char prefile[256];
 	
 	/* Notify the user that the temp greeting is set and give them the option to remove it */
-	snprintf(prefile, sizeof(prefile), "%s%s/%s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
+	snprintf(prefile, sizeof(prefile), "%.50s%.50s/%.50s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
 	if (ast_test_flag(vmu, VM_TEMPGREETWARN)) {
 		if (ast_fileexists(prefile, NULL, NULL) > 0)
 			ast_play_and_wait(chan, "vm-tempgreetactive");
@@ -6639,7 +6639,7 @@ static int vm_newuser(struct ast_channel *chan, struct ast_vm_user *vmu, struct 
 
 	/* If forcename is set, have the user record their name */	
 	if (ast_test_flag(vmu, VM_FORCENAME)) {
-		snprintf(prefile,sizeof(prefile), "%s%s/%s/greet", VM_SPOOL_DIR, vmu->context, vms->username);
+		snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/greet", VM_SPOOL_DIR, vmu->context, vms->username);
 		if (ast_fileexists(prefile, NULL, NULL) < 1) {
 			cmd = play_record_review(chan, "vm-rec-name", prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			if (cmd < 0 || cmd == 't' || cmd == '#')
@@ -6649,14 +6649,14 @@ static int vm_newuser(struct ast_channel *chan, struct ast_vm_user *vmu, struct 
 
 	/* If forcegreetings is set, have the user record their greetings */
 	if (ast_test_flag(vmu, VM_FORCEGREET)) {
-		snprintf(prefile,sizeof(prefile), "%s%s/%s/unavail", VM_SPOOL_DIR, vmu->context, vms->username);
+		snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/unavail", VM_SPOOL_DIR, vmu->context, vms->username);
 		if (ast_fileexists(prefile, NULL, NULL) < 1) {
 			cmd = play_record_review(chan, "vm-rec-unv", prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			if (cmd < 0 || cmd == 't' || cmd == '#')
 				return cmd;
 		}
 
-		snprintf(prefile,sizeof(prefile), "%s%s/%s/busy", VM_SPOOL_DIR, vmu->context, vms->username);
+		snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/busy", VM_SPOOL_DIR, vmu->context, vms->username);
 		if (ast_fileexists(prefile, NULL, NULL) < 1) {
 			cmd = play_record_review(chan, "vm-rec-busy", prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			if (cmd < 0 || cmd == 't' || cmd == '#')
@@ -6692,15 +6692,15 @@ static int vm_options(struct ast_channel *chan, struct ast_vm_user *vmu, struct 
 			retries = 0;
 		switch (cmd) {
 		case '1':
-			snprintf(prefile,sizeof(prefile), "%s%s/%s/unavail", VM_SPOOL_DIR, vmu->context, vms->username);
+			snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/unavail", VM_SPOOL_DIR, vmu->context, vms->username);
 			cmd = play_record_review(chan,"vm-rec-unv",prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			break;
 		case '2': 
-			snprintf(prefile,sizeof(prefile), "%s%s/%s/busy", VM_SPOOL_DIR, vmu->context, vms->username);
+			snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/busy", VM_SPOOL_DIR, vmu->context, vms->username);
 			cmd = play_record_review(chan,"vm-rec-busy",prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			break;
 		case '3': 
-			snprintf(prefile,sizeof(prefile), "%s%s/%s/greet", VM_SPOOL_DIR, vmu->context, vms->username);
+			snprintf(prefile,sizeof(prefile), "%.1000s%.1000s/%.1000s/greet", VM_SPOOL_DIR, vmu->context, vms->username);
 			cmd = play_record_review(chan,"vm-rec-name",prefile, maxgreet, fmtc, 0, vmu, &duration, NULL, record_gain, vms);
 			break;
 		case '4': 
@@ -6752,7 +6752,7 @@ static int vm_options(struct ast_channel *chan, struct ast_vm_user *vmu, struct 
 			break;
 		default: 
 			cmd = 0;
-			snprintf(prefile, sizeof(prefile), "%s%s/%s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
+			snprintf(prefile, sizeof(prefile), "%.1000s%.1000s/%.1000s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
 			if (ast_fileexists(prefile, NULL, NULL))
 				cmd = ast_play_and_wait(chan, "vm-tmpexists");
 			if (!cmd)
@@ -6790,7 +6790,7 @@ static int vm_tempgreeting(struct ast_channel *chan, struct ast_vm_user *vmu, st
 		ast_adsi_transmit_message(chan, buf, bytes, ADSI_MSG_DISPLAY);
 	}
 
-	snprintf(prefile, sizeof(prefile), "%s%s/%s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
+	snprintf(prefile, sizeof(prefile), "%.1000s%.1000s/%.1000s/temp", VM_SPOOL_DIR, vmu->context, vms->username);
 	if ((res = create_dirpath(dest, sizeof(dest), vmu->context, vms->username, "temp"))) {
 		ast_log(LOG_WARNING, "Failed to create directory (%s).\n", prefile);
 		return -1;
@@ -8634,7 +8634,7 @@ static int load_module(void)
 	ast_cli_register_multiple(cli_voicemail, sizeof(cli_voicemail) / sizeof(struct ast_cli_entry));
 
 	/* compute the location of the voicemail spool directory */
-	snprintf(VM_SPOOL_DIR, sizeof(VM_SPOOL_DIR), "%s/voicemail/", ast_config_AST_SPOOL_DIR);
+	snprintf(VM_SPOOL_DIR, sizeof(VM_SPOOL_DIR), "%s/voicemail/", strndup(ast_config_AST_SPOOL_DIR,sizeof(VM_SPOOL_DIR)-11));
 
 	ast_install_vm_functions(has_voicemail, inboxcount, messagecount);
 
@@ -8716,7 +8716,7 @@ static int advanced_options(struct ast_channel *chan, struct ast_vm_user *vmu, s
 
 	/* Retrieve info from VM attribute file */
 	make_file(vms->fn2, sizeof(vms->fn2), vms->curdir, vms->curmsg);
-	snprintf(filename,sizeof(filename), "%s.txt", vms->fn2);
+	snprintf(filename,sizeof(filename), "%s.txt", strndup(vms->fn2, PATH_MAX-4));
 	RETRIEVE(vms->curdir, vms->curmsg, vmu);
 	msg_cfg = ast_config_load(filename);
 	DISPOSE(vms->curdir, vms->curmsg);
