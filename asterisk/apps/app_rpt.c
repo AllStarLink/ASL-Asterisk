@@ -8245,7 +8245,6 @@ static struct ast_cli_entry rpt_cli[] = {
 	AST_CLI_DEFINE(handle_cli_localplay,"Playback an audio file (local)"),
 	AST_CLI_DEFINE(handle_cli_sendall,"Send a Text message to all connected nodes"),
 	AST_CLI_DEFINE(handle_cli_sendtext,"Send a Text message to a specified nodes"),
-	AST_CLI_DEFINE(handle_cli_asl,"Do ASL stuff"),
 	AST_CLI_DEFINE(handle_cli_page,"Send a page to a user on a node"),
 	AST_CLI_DEFINE(handle_cli_lookup,"Lookup Allstar nodes")
 };
@@ -10048,7 +10047,6 @@ treataslocal:
 			res = ast_streamfile(mychannel, "rpt/invalid-freq", mychannel->language);
 		break;
 	    case REMMODE:
-		cp = 0;
 		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
 		switch(myrpt->remmode)
 		{
@@ -25760,7 +25758,6 @@ static int unload_module(void)
 	ast_cli_unregister(&cli_fun1);
 	ast_cli_unregister(&cli_setvar);
 	ast_cli_unregister(&cli_showvars);
-	ast_cli_unregister(&cli_asl);
 	ast_cli_unregister(&cli_page);
 	ast_cli_unregister(&cli_lookup);
 	res |= ast_cli_unregister(&cli_cmd);
@@ -25839,7 +25836,6 @@ static int load_module(void)
 	ast_cli_register(&cli_fun1);
 	ast_cli_register(&cli_setvar);
 	ast_cli_register(&cli_showvars);
-	ast_cli_register(&cli_asl);
 	ast_cli_register(&cli_page);
 	ast_cli_register(&cli_lookup);
 	res = ast_cli_register(&cli_cmd);
