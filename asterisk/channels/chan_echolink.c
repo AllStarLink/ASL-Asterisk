@@ -104,6 +104,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <sys/time.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -606,7 +607,7 @@ static struct eldb *el_db_find_nodenum(char *nodenum)
 struct eldb **found_key = NULL,key;
 
 	memset(&key,0,sizeof(key));
-	strncpy(key.nodenum,nodenum,sizeof(key.nodenum) - 1);
+	strncpy(key.nodenum,strndup(nodenum,ELDB_NODENUMLEN),sizeof(key.nodenum) - 1);
 	found_key = (struct eldb **)tfind(&key,&el_db_nodenum,compare_eldb_nodenum);
 	if (found_key) return(*found_key);
 	return NULL;
@@ -617,7 +618,7 @@ static struct eldb *el_db_find_callsign(char *callsign)
 struct eldb **found_key = NULL,key;
 
 	memset(&key,0,sizeof(key));
-	strncpy(key.callsign,callsign,sizeof(key.callsign) - 1);
+	strncpy(key.callsign,strndup(callsign,ELDB_CALLSIGNLEN),sizeof(key.callsign) - 1);
 	found_key = (struct eldb **)tfind(&key,&el_db_callsign,compare_eldb_callsign);
 	if (found_key) return(*found_key);
 	return NULL;
@@ -628,7 +629,7 @@ static struct eldb *el_db_find_ipaddr(char *ipaddr)
 struct eldb **found_key = NULL,key;
 
 	memset(&key,0,sizeof(key));
-	strncpy(key.ipaddr,ipaddr,sizeof(key.ipaddr) - 1);
+	strncpy(key.ipaddr,strndup(ipaddr,ELDB_IPADDRLEN),sizeof(key.ipaddr) - 1);
 	found_key = (struct eldb **)tfind(&key,&el_db_ipaddr,compare_eldb_ipaddr);
 	if (found_key) return(*found_key);
 	return NULL;
@@ -667,9 +668,9 @@ struct eldb *node,*mynode;
 		return NULL;
 	}
 	memset(node,0,sizeof(struct eldb));
-	strncpy(node->nodenum,nodenum,ELDB_NODENUMLEN - 1);
-	strncpy(node->ipaddr,ipaddr,ELDB_IPADDRLEN - 1);
-	strncpy(node->callsign,callsign,ELDB_CALLSIGNLEN - 1);
+	strncpy(node->nodenum,strndup(nodenum, ELDB_NODENUMLEN),ELDB_NODENUMLEN - 1);
+	strncpy(node->ipaddr,strndup(ipaddr, ELDB_IPADDRLEN),ELDB_IPADDRLEN - 1);
+	strncpy(node->callsign,strndup(callsign, ELDB_CALLSIGNLEN),ELDB_CALLSIGNLEN - 1);
 	mynode = el_db_find_nodenum(node->nodenum);
 	if (mynode) el_db_delete(mynode);
 	mynode = el_db_find_ipaddr(node->ipaddr);
@@ -1160,8 +1161,8 @@ static int el_text(struct ast_channel *ast, const char *text)
 #define	MAXLINKSTRS 200
 
 	struct el_pvt *p = ast->tech_pvt;
-	char *cmd = NULL,*arg1 = NULL,*arg2 = NULL;
-	char *arg3 = NULL,delim = ' ',*saveptr,*cp,*pkt;
+	char *cmd = NULL,*arg1 = NULL;
+	char delim = ' ',*saveptr,*cp,*pkt;
 	char buf[200],*ptr,str[200],*arg4 = NULL,*strs[MAXLINKSTRS];
 	int i,j,k,x;
 
@@ -1260,8 +1261,8 @@ static int el_text(struct ast_channel *ast, const char *text)
 	}
 
 	arg1 = strtok_r(NULL, &delim, &saveptr);
-	arg2 = strtok_r(NULL, &delim, &saveptr);
-	arg3 = strtok_r(NULL, &delim, &saveptr);
+	strtok_r(NULL, &delim, &saveptr);
+	strtok_r(NULL, &delim, &saveptr);
 	arg4 = strtok_r(NULL, &delim, &saveptr);
 
 	if (!strcasecmp(cmd,"D"))
@@ -1429,8 +1430,8 @@ static void send_heartbeat(const void *nodep, const VISIT which, const int depth
          (*(struct el_node **)nodep)->countdown --;
   
       if ((*(struct el_node **)nodep)->countdown < 0) {
-         strncpy(instp->el_node_test.ip,(*(struct el_node **)nodep)->ip,EL_IP_SIZE);
-         strncpy(instp->el_node_test.call,(*(struct el_node **)nodep)->call,EL_CALL_SIZE);
+         strncpy(instp->el_node_test.ip,(*(struct el_node **)nodep)->ip,EL_IP_SIZE+1);
+         strncpy(instp->el_node_test.call,(*(struct el_node **)nodep)->call,EL_CALL_SIZE+1);
          ast_log(LOG_WARNING,"countdown for %s(%s) negative\n",instp->el_node_test.call,instp->el_node_test.ip);
       }
       memset(sdes_packet,0,sizeof(sdes_packet));
@@ -1469,8 +1470,6 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
 {
    char *cmd = NULL;
    char *arg1 = NULL;
-   char *arg2 = NULL;
-   char *arg3 = NULL;
 
    char delim = ' ';
    char *saveptr;
@@ -1520,8 +1519,8 @@ static void process_cmd(char *buf, char *fromip,struct el_instance *instp)
 
    /* This version:  up to 3 parameters */
    arg1 = strtok_r(NULL, &delim, &saveptr);
-   arg2 = strtok_r(NULL, &delim, &saveptr);
-   arg3 = strtok_r(NULL, &delim, &saveptr);
+   strtok_r(NULL, &delim, &saveptr);
+   strtok_r(NULL, &delim, &saveptr);
 
    if ((strcmp(cmd, "o.conip") == 0) ||
        (strcmp(cmd, "o.dconip") == 0)) {
@@ -1728,7 +1727,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
               remque((struct qelem *)qpel);
 
               memcpy(instp->audio_all_but_one.data,qpel->buf,BLOCKING_FACTOR * GSM_FRAME_SIZE);
-              strncpy(instp->el_node_test.ip, qpel->fromip, EL_IP_SIZE);
+              strncpy(instp->el_node_test.ip, qpel->fromip, EL_IP_SIZE+1);
 
               ast_free(qpel);
 	      ast_mutex_lock(&instp->lock);
@@ -2221,7 +2220,7 @@ static int el_net_read(int sock,unsigned char *buf1,int buf1len,
 	int compressed,struct z_stream_s *z)
 {
 unsigned char buf[512];
-int	n,i,r;
+int	n,r;
 
 	for(;;)
 	{
@@ -2239,8 +2238,6 @@ int	n,i,r;
 		z->avail_in = n;
 		z->next_out = buf1;
 		z->avail_out = buf1len;
-		i = Z_NO_FLUSH;
-		if (n < 1) i = Z_FINISH;
 		r = inflate(z,Z_NO_FLUSH);
 		if ((r != Z_OK) && (r != Z_STREAM_END))
 		{
@@ -2287,8 +2284,8 @@ static int do_el_directory(char *hostname)
 struct ast_hostent ah;
 struct hostent *host;
 struct sockaddr_in dirserver;
-char	str[200],ipaddr[50],nodenum[50];
-char	call[50],*pp,*cc;
+char	str[200],ipaddr[200],nodenum[200];
+char	call[200],*pp,*cc;
 int	n = 0,rep_lines,delmode;
 int	dir_compressed,dir_partial;
 struct	z_stream_s z;
@@ -2429,7 +2426,7 @@ int	sock;
 		}			
 		if (str[strlen(str) - 1] == '\n')
 			str[strlen(str) - 1] = 0;
-		strncpy(call,str,sizeof(call) - 1);
+		strncpy(call,str,sizeof(call));
 		if (dir_partial)
 		{
 			el_zapcall(call);
@@ -2453,7 +2450,7 @@ int	sock;
 		}
 		if (str[strlen(str) - 1] == '\n')
 			str[strlen(str) - 1] = 0;
-		strncpy(nodenum,str,sizeof(nodenum) - 1);
+		strncpy(nodenum,str,sizeof(nodenum));
 		if (el_net_get_line(sock,str,sizeof(str) - 1,dir_compressed,&z) < 1)
 		{
 			ast_log(LOG_ERROR,"Error in directory download on %s\n",hostname);
@@ -2464,7 +2461,7 @@ int	sock;
 		}
 		if (str[strlen(str) - 1] == '\n')
 			str[strlen(str) - 1] = 0;
-		strncpy(ipaddr,str,sizeof(ipaddr) - 1);
+		strncpy(ipaddr,str,sizeof(ipaddr));
 		if (!(n % 10)) usleep(2000); /* To get to dry land */
 		ast_mutex_lock(&el_db_lock);
 		el_db_put(nodenum,ipaddr,call);
@@ -2577,7 +2574,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 	{
 		memset(el_node_key,0,sizeof(struct el_node));
 		strncpy(el_node_key->call,call,EL_CALL_SIZE);
-		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE);
+		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE+1);
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
 		
 		mynode = el_db_find_ipaddr(el_node_key->ip);
@@ -2612,7 +2609,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 						return -1;
 					}	
 					el_node_key->p = p;
-					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE);
+					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
 					el_node_key->chan = el_new(el_node_key->p,
 						AST_STATE_RINGING,el_node_key->nodenum);
 					if (!el_node_key->chan)
@@ -2629,7 +2626,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 				else
 				{
 					el_node_key->p = p;
-					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE);
+					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
 					el_node_key->chan = p->owner;
 					el_node_key->outbound = 1;
 					ast_mutex_lock(&instp->lock);
@@ -2696,7 +2693,7 @@ static void *el_reader(void *data)
 		time(&now);
 		if (instp->aprstime <= now)
 		{
-			char aprsstr[256],aprscall[256],latc,lonc;
+			char aprsstr[512],aprscall[256],latc,lonc;
  			unsigned char sdes_packet[256];
 			unsigned int u;
 			float lata,lona,latb,lonb,latd,lond,lat,lon,mylat,mylon;
@@ -2850,7 +2847,7 @@ static void *el_reader(void *data)
 						{
 							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Call changed from %s to %s\n",
 								(*found_key)->call,call);
-							strncpy((*found_key)->call,call,EL_CALL_SIZE);
+							strncpy((*found_key)->call,strndup(call, EL_CALL_SIZE),EL_CALL_SIZE);
 						}
 						if (strncmp((*found_key)->name, name, EL_NAME_SIZE) != 0) 
 						{
@@ -3049,7 +3046,7 @@ static void *el_reader(void *data)
 							{
 								memcpy(qpel->buf,((struct gsmVoice_t *)buf)->data,
 									BLOCKING_FACTOR * GSM_FRAME_SIZE);
-								strncpy(qpel->fromip,instp->el_node_test.ip,EL_IP_SIZE);
+								strncpy(qpel->fromip,strndup(instp->el_node_test.ip, EL_IP_SIZE),EL_IP_SIZE);
 								insque((struct qelem *)qpel,(struct qelem *)
 									p->rxqel.qe_back);
 							}
