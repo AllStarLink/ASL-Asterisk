@@ -459,10 +459,10 @@ static int __agent_start_monitoring(struct ast_channel *ast, struct agent_pvt *p
 		/* substitute . for - */
 		if ((pointer = strchr(filename, '.')))
 			*pointer = '-';
-		snprintf(tmp, sizeof(tmp), "%s%s", savecallsin, filename);
+		snprintf(tmp, sizeof(tmp), "%.120s%.120s", savecallsin, filename);
 		ast_monitor_start(ast, recordformat, tmp, needlock);
 		ast_monitor_setjoinfiles(ast, 1);
-		snprintf(tmp2, sizeof(tmp2), "%s%s.%s", urlprefix, filename, recordformatext);
+		snprintf(tmp2, sizeof(tmp2), "%.60s%.120s.%.50s", urlprefix, filename, recordformatext);
 #if 0
 		ast_verbose("name is %s, link is %s\n",tmp, tmp2);
 #endif
@@ -1393,7 +1393,7 @@ static int allow_multiple_login(char *chan, char *context)
 	if(!chan) 
 		return 0;
 
-	snprintf(loginchan, sizeof(loginchan), "%s@%s", chan, S_OR(context, "default"));
+	snprintf(loginchan, sizeof(loginchan), "%.35s@%.40s", chan, S_OR(context, "default"));
 	
 	AST_LIST_TRAVERSE(&agents, p, list) {
 		if(!strcasecmp(chan, p->loginchan))
@@ -1601,7 +1601,7 @@ static void agent_logoff_maintenance(struct agent_pvt *p, char *loginchan, long 
 	else
 		tmp = ast_strdupa("");
 
-	snprintf(agent, sizeof(agent), "Agent/%s", p->agent);
+	snprintf(agent, sizeof(agent), "Agent/%.73s", p->agent);
 
 	if (!ast_strlen_zero(uniqueid)) {
 		manager_event(EVENT_FLAG_AGENT, "Agentcallbacklogoff",
@@ -1736,7 +1736,7 @@ static char *complete_agent_logoff_cmd(const char *line, const char *word, int p
 
 		AST_LIST_LOCK(&agents);
 		AST_LIST_TRAVERSE(&agents, p, list) {
-			snprintf(name, sizeof(name), "Agent/%s", p->agent);
+			snprintf(name, sizeof(name), "Agent/%.73s", p->agent);
 			if (!strncasecmp(word, name, len) && ++which > state) {
 				ret = ast_strdup(name);
 				break;
@@ -2073,7 +2073,7 @@ static int __login_exec(struct ast_channel *chan, void *data, int callbackmode)
 				if (!p->chan) {
 					char last_loginchan[80] = "";
 					long logintime;
-					snprintf(agent, sizeof(agent), "Agent/%s", p->agent);
+					snprintf(agent, sizeof(agent), "Agent/%.73s", p->agent);
 
 					if (callbackmode) {
 						int pos = 0;
@@ -2116,7 +2116,7 @@ static int __login_exec(struct ast_channel *chan, void *data, int callbackmode)
 						if (!res) {
 							set_agentbycallerid(p->logincallerid, NULL);
 							if (!ast_strlen_zero(context) && !ast_strlen_zero(tmpchan))
-								snprintf(p->loginchan, sizeof(p->loginchan), "%s@%s", tmpchan, context);
+								snprintf(p->loginchan, sizeof(p->loginchan), "%.35s@%.40s", tmpchan, context);
 							else {
 								ast_copy_string(last_loginchan, p->loginchan, sizeof(last_loginchan));
 								ast_copy_string(p->loginchan, tmpchan, sizeof(p->loginchan));
@@ -2134,7 +2134,7 @@ static int __login_exec(struct ast_channel *chan, void *data, int callbackmode)
 							}
 
 							if(update_cdr && chan->cdr)
-								snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%s", p->agent);
+								snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%.73s", p->agent);
 
 						}
 					} else {
@@ -2203,7 +2203,7 @@ static int __login_exec(struct ast_channel *chan, void *data, int callbackmode)
 							      "Uniqueid: %s\r\n",
 							      p->agent, chan->name, chan->uniqueid);
 						if (update_cdr && chan->cdr)
-							snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%s", p->agent);
+							snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%.73s", p->agent);
 						ast_queue_log("NONE", chan->uniqueid, agent, "AGENTLOGIN", "%s", chan->name);
 						if (option_verbose > 1)
 							ast_verbose(VERBOSE_PREFIX_2 "Agent '%s' logged in (format %s/%s)\n", p->agent,
@@ -2520,7 +2520,7 @@ static int agentmonitoroutgoing_exec(struct ast_channel *chan, void *data)
 			AST_LIST_LOCK(&agents);
 			AST_LIST_TRAVERSE(&agents, p, list) {
 				if (!strcasecmp(p->agent, tmp)) {
-					if (changeoutgoing) snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%s", p->agent);
+					if (changeoutgoing) snprintf(chan->cdr->channel, sizeof(chan->cdr->channel), "Agent/%.73s", p->agent);
 					__agent_start_monitoring(chan, p, 1);
 					break;
 				}
@@ -2636,7 +2636,6 @@ static int agent_devicestate(void *data)
 	char *s;
 	ast_group_t groupmatch;
 	int groupoff;
-	int waitforagent=0;
 	int res = AST_DEVICE_INVALID;
 	
 	s = data;
@@ -2644,7 +2643,6 @@ static int agent_devicestate(void *data)
 		groupmatch = (1 << groupoff);
 	else if ((s[0] == ':') && (sscanf(s + 1, "%d", &groupoff) == 1)) {
 		groupmatch = (1 << groupoff);
-		waitforagent = 1;
 	} else 
 		groupmatch = 0;
 
