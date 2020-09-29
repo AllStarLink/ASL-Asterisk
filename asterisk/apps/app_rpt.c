@@ -2771,7 +2771,7 @@ static int uchameleon_pin_init(struct daq_entry_tag *t)
 
 		/* Parse alarm entry */
 
-		strncpy(s,var->value,sizeof(s));
+		strlcpy(s,var->value,sizeof(s)-1);
 
 		if(explode_string(s, argv, 6, ',', 0) != 6){
 			ast_log(LOG_WARNING,"Alarm arguments must be 6 for %s\n", var->name);
@@ -3503,7 +3503,7 @@ static struct daq_entry_tag *daq_open(int type, char *name, char *dev)
 
 
 	/* Save the name*/
-	strncpy(t->name, name, MAX_DAQ_NAME);
+	strlcpy(t->name, name, MAX_DAQ_NAME);
 	t->dev[MAX_DAQ_NAME - 1] = 0;
 
 
@@ -3635,7 +3635,7 @@ static void daq_init(struct ast_config *cfg)
 			ast_log(LOG_WARNING,"Error in daq_entries stanza on line %d\n", var->lineno);
 			break;
 		}
-		strncpy(s,var->value,sizeof(s)); /* Make copy of device entry */
+		strlcpy(s,var->value,sizeof(s)-1); /* Make copy of device entry */
 		if(!(p = (char *) ast_variable_retrieve(cfg,s,"hwtype"))){
 			ast_log(LOG_WARNING,"hwtype variable required for %s stanza\n", s);
 			break;
@@ -4410,7 +4410,7 @@ static int FindBestRssi(struct rpt *myrpt)
  */
 static int retrieve_memory(struct rpt *myrpt, char *memory)
 {
-	char tmp[30], *s, *s1, *s2, *val;
+	char tmp[15], *s, *s1, *s2, *val;
 
 	if (debug)ast_log(LOG_NOTICE, "memory=%s block=%s\n",memory,myrpt->p.memory);
 
@@ -4432,9 +4432,9 @@ static int retrieve_memory(struct rpt *myrpt, char *memory)
 	s2 = strchr(s1,',');
 	if (!s2) s2 = s1;
 	else *s2++ = 0;
-	strncpy(myrpt->freq, tmp, sizeof(myrpt->freq) - 1);
-	strncpy(myrpt->rxpl, s, sizeof(myrpt->rxpl) - 1);
-	strncpy(myrpt->txpl, s, sizeof(myrpt->rxpl) - 1);
+	strlcpy(myrpt->freq, tmp, sizeof(myrpt->freq) - 1);
+	strlcpy(myrpt->rxpl, s, sizeof(myrpt->rxpl) - 1);
+	strlcpy(myrpt->txpl, s, sizeof(myrpt->rxpl) - 1);
 	myrpt->remmode = REM_MODE_FM;
 	myrpt->offset = REM_SIMPLEX;
 	myrpt->powerlevel = REM_MEDPWR;
@@ -5186,7 +5186,7 @@ FILE	*tf;
 
 static int elink_db_get(char *lookup, char c, char *nodenum,char *callsign, char *ipaddr)
 {
-char	str[100],str1[100],*strs[5];
+char	str[512],str1[100],*strs[5];
 int	n;
 
 	snprintf(str,sizeof(str) - 1,"echolink dbget %c %s",c,lookup);
@@ -5519,10 +5519,10 @@ struct ast_var_t *newvariable;
 				myrpt->cmdAction.functionNumber = thisAction;
 				myrpt->cmdAction.param[0] = 0;
 				if (argc > 1)
-					strncpy(myrpt->cmdAction.param, argv[1], MAXDTMF);
+					strlcpy(myrpt->cmdAction.param, argv[1], MAXDTMF-1);
 				myrpt->cmdAction.digits[0] = 0;
 				if (argc > 2)
-					strncpy(myrpt->cmdAction.digits, argv[2], MAXDTMF);
+					strlcpy(myrpt->cmdAction.digits, argv[2], MAXDTMF-1);
 				myrpt->cmdAction.command_source = SOURCE_RPT;
 				myrpt->cmdAction.state = CMD_STATE_READY;
 			} 
@@ -7123,7 +7123,7 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 					return RESULT_FAILURE;
 				}
 				memset(s, 0, sizeof(struct rpt_lstat));
-				strncpy(s->name, l->name, MAXREMSTR - 1);
+				strlcpy(s->name, l->name, MAXNODESTR - 1);
 				if (l->chan) pbx_substitute_variables_helper(l->chan, "${IAXPEER(CURRENTCHANNEL)}", s->peer, MAXPEERSTR - 1);
 				else strcpy(s->peer,"(none)");
 				s->mode = l->mode;
@@ -7316,7 +7316,7 @@ static int rpt_do_xnode(int fd, int argc, char *argv[])
 					return RESULT_FAILURE;
 				}
 				memset(s, 0, sizeof(struct rpt_lstat));
-				strncpy(s->name, l->name, MAXREMSTR - 1);
+				strlcpy(s->name, l->name, MAXNODESTR - 1);
 				if (l->chan) pbx_substitute_variables_helper(l->chan, "${IAXPEER(CURRENTCHANNEL)}", s->peer, MAXPEERSTR - 1);
 				else strcpy(s->peer,"(none)");
 				s->mode = l->mode;
