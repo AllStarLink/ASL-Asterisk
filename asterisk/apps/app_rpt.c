@@ -1909,7 +1909,6 @@ static int rpt_do_fun1(int fd, int argc, char *argv[]);
 static int rpt_do_cmd(int fd, int argc, char *argv[]);
 static int rpt_do_setvar(int fd, int argc, char *argv[]);
 static int rpt_do_showvars(int fd, int argc, char *argv[]);
-static int rpt_do_asl(int fd, int argc, char *argv[]);
 static int rpt_do_page(int fd, int argc, char *argv[]);
 static int rpt_do_lookup(int fd, int argc, char *argv[]);
 
@@ -1982,10 +1981,6 @@ static char setvar_usage[] =
 static char showvars_usage[] =
 "Usage: rpt showvars <nodename>\n"
 "       Display all the Asterisk channel variables for a node.\n";
-
-static char asl_usage[] =
-"Usage: asl [Unused value]\n"
-"       Do ASL Stuff\n";
 
 static char page_usage[] =
 "Usage: rpt page <nodename> <baud> <capcode> <[ANT]Text....>\n"
@@ -2071,10 +2066,6 @@ static struct ast_cli_entry  cli_setvar =
 static struct ast_cli_entry  cli_showvars =
         { { "rpt", "showvars" }, rpt_do_showvars,
 		"Display Asterisk channel variables", showvars_usage };
-
-static struct ast_cli_entry  cli_asl =
-        { { "asl" }, rpt_do_asl,
-               "Do ASL stuff", asl_usage };
 
 static struct ast_cli_entry  cli_page =
         { { "rpt", "page" }, rpt_do_page,
@@ -2635,7 +2626,7 @@ static int uchameleon_connect(struct daq_entry_tag *t)
         }
 	if(debug >= 3)
         	ast_log(LOG_NOTICE,"count = %d, rxbuf = %s\n",count,rxbuf);
-	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(expect)))){
+	if((count != 13)||(strncmp(expect, rxbuf+4, sizeof(&expect)))){
 		ast_log(LOG_WARNING, "%s is not a uchameleon device\n", t->name);
 		close(t->fd);
 		t->fd = -1;
@@ -4097,7 +4088,7 @@ static int function_userout(struct rpt *myrpt, char *param, char *digitbuf, int 
 	if (myrpt->remote)
 		return DC_ERROR;
 
-		ast_log(LOG_NOTICE, "userout param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
+	ast_log(LOG_NOTICE, "userout param = %s, digitbuf = %s\n", (param)? param : "(null)", digitbuf);
 	
 	rpt_telem_select(myrpt,command_source,mylink);
 	rpt_telemetry(myrpt,USEROUT,param);
@@ -4327,10 +4318,8 @@ struct	ast_frame *f1;
 static int linkcount(struct rpt *myrpt)
 {
 	struct	rpt_link *l;
-	char *reverse_patch_state;
  	int numoflinks;
 
-	reverse_patch_state = "DOWN";
 	numoflinks = 0;
 	l = myrpt->links.next;
 	while(l && (l != &myrpt->links)){
@@ -4340,7 +4329,6 @@ static int linkcount(struct rpt *myrpt)
 			break;
 		}
 		//if (l->name[0] == '0'){ /* Skip '0' nodes */
-		//	reverse_patch_state = "UP";
 		//	l = l->next;
 		//	continue;
 		//}
@@ -4360,18 +4348,18 @@ static int FindBestRssi(struct rpt *myrpt)
 	struct	rpt_link *bl;
 	int maxrssi;
  	int numoflinks;
-    char newboss;
+	char newboss;
 
 	bl=NULL;
 	maxrssi=0;
 	numoflinks=0;
-    newboss=0;
+	newboss=0;
 
-    myrpt->voted_rssi=0;
-    if(myrpt->votewinner&&myrpt->rxchankeyed)
-        myrpt->voted_rssi=myrpt->rxrssi;
-    else if(myrpt->voted_link!=NULL && myrpt->voted_link->lastrealrx)
-        myrpt->voted_rssi=myrpt->voted_link->rssi;
+	myrpt->voted_rssi=0;
+	if(myrpt->votewinner&&myrpt->rxchankeyed)
+		myrpt->voted_rssi=myrpt->rxrssi;
+	else if(myrpt->voted_link!=NULL && myrpt->voted_link->lastrealrx)
+		myrpt->voted_rssi=myrpt->voted_link->rssi;
 
 	if(myrpt->rxchankeyed)
 		maxrssi=myrpt->rxrssi;
@@ -4936,7 +4924,7 @@ struct	mdcparams *mdcp;
 		ast_log(LOG_ERROR,"Cannot alloc!!\n");
 		return;
 	}
-	memset(mdcp,0,sizeof(mdcp));
+	memset(mdcp,0,sizeof(&mdcp));
 	mdcp->type[0] = 'A';
 	mdcp->UnitID = UnitID;
 	rpt_telemetry(myrpt,MDC1200,(void *)mdcp);
@@ -5707,7 +5695,7 @@ int	i;
 static void statpost(struct rpt *myrpt,char *pairs)
 {
 	char *str;
-	int	n,pid;
+	int	pid;
 	time_t	now;
 	unsigned int seq;
 	CURL *curl;
@@ -5732,7 +5720,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 			curl_easy_cleanup(curl);
 			curl_global_cleanup();
 		}
-		if(rescode == 200) exit(0);
+		if(*rescode == 200) return;
 		ast_log(LOG_ERROR, "statpost failed\n");
 		perror("asterisk");
 		exit(0);
@@ -7103,7 +7091,7 @@ static int rpt_do_stats(int fd, int argc, char *argv[])
 
 static int rpt_do_lstats(int fd, int argc, char *argv[])
 {
-	int i,j;
+	int i;
 	char *connstate;
 	struct rpt *myrpt;
 	struct rpt_link *l;
@@ -7123,7 +7111,6 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 			myrpt = &rpt_vars[i];
 			rpt_mutex_lock(&myrpt->lock); /* LOCK */
 			/* Traverse the list of connected nodes */
-			j = 0;
 			l = myrpt->links.next;
 			while(l && (l != &myrpt->links)){
 				if (l->name[0] == '0'){ /* Skip '0' nodes */
@@ -7904,27 +7891,6 @@ static int rpt_do_showvars(int fd, int argc, char *argv[])
 	return(0);
 }
 
-/*
-* Do ASL Stuff
-*/
-
-
-static int rpt_do_asl(int fd, int argc, char *argv[])
-{
-       double warpone = 75139293848.398696166028333356763;
-       double warpfactor = 1.0;
-
-       if (argc > 2) return RESULT_SHOWUSAGE;
-       if ((argc > 1) && (sscanf(argv[1],"%lf",&warpfactor) != 1))
-                return RESULT_SHOWUSAGE;
-
-       ast_cli(fd, "This command doe not do anything\n");
-       ast_cli(fd, "73 Steve N4IRS\n",
-               warpfactor * warpfactor * warpfactor * warpone,warpfactor);
-       ast_cli(fd,"Replace a command that does nothing but waste space. RIP WB6NIL\n");
-       return RESULT_SUCCESS;
-}
-
 static int rpt_do_lookup(int fd, int argc, char *argv[])
 {
 	struct rpt *myrpt;
@@ -8188,20 +8154,6 @@ static char *handle_cli_showvars(struct ast_cli_entry *e,
                 return NULL;
 	}
 	return res2cli(rpt_do_showvars(a->fd,a->argc,a->argv));
-}
-
-static char *handle_cli_asl(struct ast_cli_entry *e,
-	int cmd, struct ast_cli_args *a)
-{
-        switch (cmd) {
-        case CLI_INIT:
-                e->command = "asl";
-                e->usage = asl_usage;
-                return NULL;
-        case CLI_GENERATE:
-                return NULL;
-	}
-	return res2cli(rpt_do_asl(a->fd,a->argc,a->argv));
 }
 
 static char *handle_cli_lookup(struct ast_cli_entry *e,
@@ -9193,7 +9145,7 @@ struct	rpt *myrpt;
 struct	rpt_link *l,*l1,linkbase;
 struct	ast_channel *mychannel;
 int id_malloc, vmajor, vminor, m;
-char *p,*ct,*ct_copy,*ident, *nodename,*cp;
+char *p,*ct,*ct_copy,*ident, *nodename;
 time_t t,t1,was;
 #ifdef	NEW_ASTERISK
 struct ast_tm localtm;
@@ -10914,7 +10866,7 @@ struct rpt_tele *tele;
 struct rpt_link *mylink = NULL;
 int res,vmajor,vminor,i,ns;
 pthread_attr_t attr;
-char *v1, *v2,mystr[300],*p,haslink,lat[100],lon[100],elev[100];
+char *v1, *v2,mystr[1024],*p,haslink,lat[100],lon[100],elev[100];
 char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
 time_t	t,was;
 unsigned int k;
@@ -11376,8 +11328,8 @@ struct ast_channel *mychannel,*genchannel,*c;
 		res = ast_safe_sleep(mychannel, MSWAIT);
 		if (res < 0)
 		{
-		    if(debug)
-		    	ast_log(LOG_NOTICE, "ast_safe_sleep=%i\n", res);
+			if(debug)
+		    		ast_log(LOG_NOTICE, "ast_safe_sleep=%i\n", res);
 			ast_hangup(mychannel);
 			ast_hangup(genchannel);
 			rpt_mutex_lock(&myrpt->lock);
@@ -11692,7 +11644,7 @@ static void send_old_newkey(struct ast_channel *chan)
 
 static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 {
-	char *s, *s1, *s2, *tele,*cp;
+	char *s, *s1, *tele,*cp;
 	char lstr[MAXLINKLIST],*strs[MAXLINKLIST];
 	char tmp[300], deststr[300] = "",modechange = 0;
 	char sx[320],*sy;
@@ -11757,7 +11709,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 			sprintf(sx,"%s:4569/%s",s1,sy + 1);
 			s1 = sx;
 		}
-		s2 = strsep(&s,",");
+		strsep(&s,",");
         }
 	if(s && strcmp(s,"VOTE")==0)
 	{
@@ -11845,7 +11797,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 	if ((strncasecmp(s1,"iax2/", 5) == 0) || (strncasecmp(s1,"echolink/",9) == 0) ||
 		(strncasecmp(s1,"tlb/",4) == 0))
 #endif
-        	strncpy(deststr, s1, sizeof(deststr));
+        	strlcpy(deststr, s1, sizeof(deststr)-1);
 	else
 	        snprintf(deststr, sizeof(deststr), "IAX2/%s", s1);
 	tele = strchr(deststr, '/');
@@ -11901,7 +11853,7 @@ static int connect_link(struct rpt *myrpt, char* node, int mode, int perma)
 				deststr,tele);
 		if (myrpt->p.archivedir)
 		{
-			char str[100];
+			char str[512];
 			sprintf(str,"LINKFAIL,%s/%s",deststr,tele);
 			donodelog(myrpt,str);
 		}
@@ -12010,7 +11962,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 					rpt_mutex_unlock(&myrpt->lock);
 					return DC_COMPLETE;
 				}
-				strncpy(myrpt->lastlinknode,digitbuf,MAXNODESTR - 1);
+				strlcpy(myrpt->lastlinknode,digitbuf,MAXNODESTR - 1);
 				l->retries = l->max_retries + 1;
 				l->disced = 1;
 				l->hasconnected = 1;
@@ -12115,7 +12067,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 			}
 			rpt_mutex_lock(&myrpt->lock);
 			strcpy(myrpt->lastlinknode,digitbuf);
-			strncpy(myrpt->cmdnode, digitbuf, sizeof(myrpt->cmdnode) - 1);
+			strlcpy(myrpt->cmdnode, digitbuf, sizeof(myrpt->cmdnode) - 1);
 			rpt_mutex_unlock(&myrpt->lock);
 			rpt_telem_select(myrpt,command_source,mylink);
 			rpt_telemetry(myrpt, REMGO, NULL);	
@@ -12149,7 +12101,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 				else if (l->mode > 1) c1 = 'L';
 				else c1 = 'M';
 				/* Make a string of disconnected nodes for possible restoration */
-				sprintf(tmp,"%c%c%s",c1,(l->perma) ? 'P':'T',l->name);
+				sprintf(tmp,"%c%c%.290s",c1,(l->perma) ? 'P':'T',l->name);
 				if(strlen(tmp) + strlen(myrpt->savednodes) + 1 < MAXNODESTR){ 
 					if(myrpt->savednodes[0])
 						strcat(myrpt->savednodes, ",");
@@ -12202,7 +12154,7 @@ static int function_ilink(struct rpt *myrpt, char *param, char *digits, int comm
 					else if (l->mode > 1) c1 = 'L';
 					else c1 = 'M';
 					/* Make a string of disconnected nodes for possible restoration */
-					sprintf(tmp,"%c%c%s",c1,(l->perma) ? 'P':'T',l->name);
+					sprintf(tmp,"%c%c%.290s",c1,(l->perma) ? 'P':'T',l->name);
 					if(strlen(tmp) + strlen(myrpt->savednodes) + 1 < MAXNODESTR){ 
 						if(myrpt->savednodes[0])
 							strcat(myrpt->savednodes, ",");
@@ -12359,7 +12311,7 @@ static int function_autopatchup(struct rpt *myrpt, char *param, char *digitbuf, 
 		myrpt->patchfarenddisconnect = 0;
 		myrpt->patchquiet = 0;
 		myrpt->patchvoxalways = 0;
-		strncpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT);
+		strlcpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT-1);
 		memset(myrpt->patchexten, 0, sizeof(myrpt->patchexten));
 
 	}
@@ -13192,7 +13144,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			if (argc < 3) break;
 			mdcp = ast_calloc(1,sizeof(struct mdcparams));
 			if (!mdcp) return DC_ERROR;
-			memset(mdcp,0,sizeof(mdcp));
+			memset(mdcp,0,sizeof(*mdcp));
 			if (*argv[1] == 'C')
 			{
 				if (argc < 5) return DC_ERROR;
@@ -13366,7 +13318,7 @@ static int collect_function_digits(struct rpt *myrpt, char *digits,
 static void handle_link_data(struct rpt *myrpt, struct rpt_link *mylink,
 	char *str)
 {
-char	tmp[512],tmp1[512],cmd[300] = "",dest[300],src[300],c;
+char	tmp[512],tmp1[512],cmd[300] = "",dest[300],src[30],c;
 int	i,seq, res, ts, rest;
 struct rpt_link *l;
 struct	ast_frame wf;
@@ -13582,7 +13534,7 @@ struct	ast_frame wf;
 		}
 		/* if is from me, ignore */
 		if (!strcmp(src,myrpt->name)) return;
-		sprintf(cmd,"TXTONE %s",dest);
+		sprintf(cmd,"TXTONE %.290s",dest);
 		if (IS_XPMR(myrpt)) send_usb_txt(myrpt,cmd);
 		return;
 	}
@@ -13688,7 +13640,7 @@ struct	ast_frame wf;
 		}
 		if (i < TOPKEYN)
 		{
-			strncpy(myrpt->topkey[i].node,src,TOPKEYMAXSTR - 1);
+			strlcpy(myrpt->topkey[i].node,src,TOPKEYMAXSTR - 1);
 			myrpt->topkey[i].timesince = ts;
 			myrpt->topkey[i].keyed = seq;
 		}
@@ -13779,7 +13731,7 @@ struct	ast_frame wf;
 	}
 	if (myrpt->p.archivedir)
 	{
-		char str[100];
+		char str[512];
 
 		sprintf(str,"DTMF,%s,%c",mylink->name,c);
 		donodelog(myrpt,str);
@@ -13942,7 +13894,7 @@ int	res;
 
 	if (myrpt->p.archivedir)
 	{
-		char str[100];
+		char str[512];
 
 		sprintf(str,"DTMF(P),%s,%c",mylink->name,c);
 		donodelog(myrpt,str);
@@ -14984,7 +14936,7 @@ int powers[] = {2,1,0};
 	}
 	sprintf(offset,"%06d000",mysplit);
 	strcpy(freq,"000000");
-	strncpy(freq,decimals,strlen(decimals));
+	strlcpy(freq,decimals,strlen(freq)-1);
 	myrxpl = myrpt->rxplon;
 	if (IS_XPMR(myrpt)) myrxpl = 0;
 	step = 0;
@@ -15027,7 +14979,7 @@ int band;
 	}
 	sprintf(offset,"%06d000",mysplit);
 	strcpy(freq,"000000");
-	strncpy(freq,decimals,strlen(decimals));
+	strlcpy(freq,decimals,strlen(freq)-1);
 	step = 0;
 	if ((decimals[3] != '0') || (decimals[4] != '0')) step = 1;
 	myrxpl = myrpt->rxplon;
@@ -15062,7 +15014,7 @@ int powers[] = {2,1,0};
 
 	split_freq(mhz, decimals, myrpt->freq);
 	strcpy(freq,"000000");
-	strncpy(freq,decimals,strlen(decimals));
+	strlcpy(freq,decimals,strlen(freq)-1);
 
 	if (!myrpt->splitkhz)
 		mysplit = myrpt->p.default_split_2m;
@@ -15094,7 +15046,7 @@ int	band,txoffset = 0,txpower = 0,rxpl;
 	/* must have rbi hardware */
 	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
 	if (setrbi_check(myrpt) == -1) return(-1);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	strlcpy(tmp, myrpt->freq, sizeof(tmp) - 1);
 	s = strchr(tmp,'.');
 	/* if no decimal, is invalid */
 	
@@ -15178,7 +15130,7 @@ int	band,txoffset = 0,txpower = 0,rxpl;
 static int setrtx(struct rpt *myrpt)
 {
 char tmp[MAXREMSTR] = "",*s,rigstr[200],pwr,res = 0;
-int	band,txoffset = 0,txpower = 0,rxpl,txpl,mysplit;
+int	band,rxpl,txpl,mysplit;
 float ofac;
 double txfreq;
 
@@ -15189,7 +15141,7 @@ double txfreq;
 	if (!ISRIG_RTX(myrpt->remoterig)) return(0);
 	/* must be a usbradio interface type */
 	if (!IS_XPMR(myrpt)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	strlcpy(tmp, myrpt->freq, sizeof(tmp) - 1);
 	s = strchr(tmp,'.');
 	/* if no decimal, is invalid */
 	
@@ -15242,31 +15194,6 @@ double txfreq;
 	 	return -1;
 	}
 	
-	switch(myrpt->offset)
-	{
-	    case REM_MINUS:
-		txoffset = 0;
-		break;
-	    case REM_PLUS:
-		txoffset = 0x10;
-		break;
-	    case REM_SIMPLEX:
-		txoffset = 0x20;
-		break;
-	}
-	switch(myrpt->powerlevel)
-	{
-	    case REM_LOWPWR:
-		txpower = 0;
-		break;
-	    case REM_MEDPWR:
-		txpower = 0x20;
-		break;
-	    case REM_HIPWR:
-		txpower = 0x10;
-		break;
-	}
-
 	res = setrtx_check(myrpt);
 	if (res < 0) return res;
 	mysplit = myrpt->splitkhz;
@@ -15352,7 +15279,7 @@ int	band,txpl;
 	if (!myrpt->remote) return(0);
 	/* must have rbi hardware */
 	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	strlcpy(tmp, myrpt->freq, sizeof(tmp) - 1);
 	s = strchr(tmp,'.');
 	/* if no decimal, is invalid */
 	
@@ -15407,7 +15334,7 @@ int	band,txpl,rxpl;
 	if (!myrpt->remote) return(0);
 	/* must have rbi hardware */
 	if (strncmp(myrpt->remoterig,remote_rig_rbi,3)) return(0);
-	strncpy(tmp, myrpt->freq, sizeof(tmp) - 1);
+	strlcpy(tmp, myrpt->freq, sizeof(tmp) - 1);
 	s = strchr(tmp,'.');
 	/* if no decimal, is invalid */
 	
@@ -15610,12 +15537,13 @@ static int split_freq(char *mhz, char *decimals, char *freq)
 	char freq_copy[MAXREMSTR];
 	char *decp;
 
-	decp = strchr(strncpy(freq_copy, freq, MAXREMSTR),'.');
+	strlcpy(freq_copy, freq, MAXREMSTR-1);
+	decp = strchr(freq_copy, '.');
 	if(decp){
 		*decp++ = 0;
 		strncpy(mhz, freq_copy, MAXREMSTR);
 		strcpy(decimals, "00000");
-		strncpy(decimals, decp, strlen(decp));
+		strlcpy(decimals, decp, strlen(decimals)-1);
 		decimals[5] = 0;
 		return 0;
 	}
@@ -15633,11 +15561,11 @@ static int split_ctcss_freq(char *hertz, char *decimal, char *freq)
 	char freq_copy[MAXREMSTR];
 	char *decp;
 
-	decp = strchr(strncpy(freq_copy, freq, MAXREMSTR),'.');
+	decp = strchr(strncpy(freq_copy, freq, MAXREMSTR-1),'.');
 	if(decp){
 		*decp++ = 0;
-		strncpy(hertz, freq_copy, MAXREMSTR);
-		strncpy(decimal, decp, strlen(decp));
+		strlcpy(hertz, freq_copy, MAXREMSTR);
+		strlcpy(decimal, decp, strlen(decp));
 		decimal[strlen(decp)] = '\0';
 		return 0;
 	}
@@ -15747,11 +15675,10 @@ static int check_freq_ft897(int m, int d, int *defmode)
 static int set_freq_ft897(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
-	int fd,m,d;
+	int m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -16147,11 +16074,10 @@ static int check_freq_ft100(int m, int d, int *defmode)
 static int set_freq_ft100(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[5];
-	int fd,m,d;
+	int m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -16451,11 +16377,10 @@ static int check_freq_ft950(int m, int d, int *defmode)
 static int set_freq_ft950(struct rpt *myrpt, char *newfreq)
 {
 	char cmdstr[20];
-	int fd,m,d;
+	int m,d;
 	char mhz[MAXREMSTR];
 	char decimals[MAXREMSTR];
 
-	fd = 0;
 	if(debug) 
 		printf("New frequency: %s\n",newfreq);
 
@@ -16551,7 +16476,7 @@ static int set_ctcss_mode_ft950(struct rpt *myrpt, char txplon, char rxplon)
 
 static int set_ctcss_freq_ft950(struct rpt *myrpt, char *txtone, char *rxtone)
 {
-	char cmdstr[10];
+	char cmdstr[16];
 	int c;
 
 	c = ft950_pltocode(txtone);
@@ -16989,9 +16914,8 @@ static int set_freq_ic706(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
-	int fd,m,d;
+	int m,d;
 
-	fd = 0;
 	if(debug) 
 		ast_log(LOG_NOTICE,"newfreq:%s\n",newfreq); 			
 
@@ -17418,9 +17342,8 @@ static int set_freq_xcat(struct rpt *myrpt, char *newfreq)
 {
 	unsigned char cmdstr[20];
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
-	int fd,m,d;
+	int m,d;
 
-	fd = 0;
 	if(debug) 
 		ast_log(LOG_NOTICE,"newfreq:%s\n",newfreq); 			
 
@@ -17815,8 +17738,8 @@ static char check_tx_freq(struct rpt *myrpt)
 		char *r,*s;
 		strncpy(range, limit_ranges[i], 40);
 		range[39] = 0;
-        if(debug > 3) 
-        	ast_log(LOG_NOTICE, "Check %s within %s\n", myrpt->freq, range);
+        	if(debug > 3) 
+        		ast_log(LOG_NOTICE, "Check %s within %s\n", myrpt->freq, range);
 	
 		r = strchr(range, '-');
 		if(!r){
@@ -17877,9 +17800,9 @@ static char check_tx_freq(struct rpt *myrpt)
 			}
 			else /* CASE 3: TX freq within a multi-Mhz band and ok */
 				if(debug > 3)
-						ast_log(LOG_NOTICE, "Valid TX freq within a multi-Mhz band and ok.\n");
-				rv=1;
-				break;
+					ast_log(LOG_NOTICE, "Valid TX freq within a multi-Mhz band and ok.\n");
+			rv=1;
+			break;
 		}
 	}
 	if(debug > 3)  
@@ -18057,7 +17980,7 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 	int i,j,p,r,ht,k,l,ls2,m,d,offset,offsave, modesave, defmode;
 	char multimode = 0;
 	char oc,*cp,*cp1,*cp2;
-	char tmp[20], freq[20] = "", savestr[20] = "";
+	char tmp[15], freq[15] = "", savestr[15] = "";
 	char mhz[MAXREMSTR], decimals[MAXREMSTR];
 	union {
 		int i;
@@ -18223,15 +18146,15 @@ static int function_remote(struct rpt *myrpt, char *param, char *digitbuf, int c
 			}	
 			offsave = myrpt->offset;
 			modesave = myrpt->remmode;
-			strncpy(savestr, myrpt->freq, sizeof(savestr) - 1);
-			strncpy(myrpt->freq, freq, sizeof(myrpt->freq) - 1);
+			strlcpy(savestr, myrpt->freq, sizeof(savestr) - 1);
+			strlcpy(myrpt->freq, freq, sizeof(myrpt->freq) - 1);
 			myrpt->offset = offset;
 			myrpt->remmode = defmode;
 
 			if (setrem(myrpt) == -1){
 				myrpt->offset = offsave;
 				myrpt->remmode = modesave;
-				strncpy(myrpt->freq, savestr, sizeof(myrpt->freq) - 1);
+				strlcpy(myrpt->freq, savestr, sizeof(myrpt->freq) - 1);
 				goto invalid_freq;
 			}
 			if (strcmp(myrpt->remoterig, remote_rig_tm271) &&
@@ -18271,15 +18194,15 @@ invalid_freq:
 			s = strchr(tmp,'*');
 			if(s)
 				*s = '.';
-			strncpy(savestr, myrpt->rxpl, sizeof(savestr) - 1);
-			strncpy(myrpt->rxpl, tmp, sizeof(myrpt->rxpl) - 1);
+			strlcpy(savestr, myrpt->rxpl, sizeof(savestr) - 1);
+			strlcpy(myrpt->rxpl, tmp, sizeof(myrpt->rxpl) - 1);
 			if ((!strcmp(myrpt->remoterig, remote_rig_rbi)) ||
 			  (!strcmp(myrpt->remoterig, remote_rig_ft100)))
 			{
-				strncpy(myrpt->txpl, tmp, sizeof(myrpt->txpl) - 1);
+				strlcpy(myrpt->txpl, tmp, sizeof(myrpt->txpl) - 1);
 			}
 			if (setrem(myrpt) == -1){
-				strncpy(myrpt->rxpl, savestr, sizeof(myrpt->rxpl) - 1);
+				strlcpy(myrpt->rxpl, savestr, sizeof(myrpt->rxpl) - 1);
 				return DC_ERROR;
 			}
 			return DC_COMPLETE;
@@ -18329,11 +18252,11 @@ invalid_freq:
 			s = strchr(tmp,'*');
 			if(s)
 				*s = '.';
-			strncpy(savestr, myrpt->txpl, sizeof(savestr) - 1);
-			strncpy(myrpt->txpl, tmp, sizeof(myrpt->txpl) - 1);
+			strlcpy(savestr, myrpt->txpl, sizeof(savestr) - 1);
+			strlcpy(myrpt->txpl, tmp, sizeof(myrpt->txpl) - 1);
 			
 			if (setrem(myrpt) == -1){
-				strncpy(myrpt->txpl, savestr, sizeof(myrpt->txpl) - 1);
+				strlcpy(myrpt->txpl, savestr, sizeof(myrpt->txpl) - 1);
 				return DC_ERROR;
 			}
 			return DC_COMPLETE;
@@ -18398,7 +18321,7 @@ invalid_freq:
 					strncpy(myrpt->loginlevel,cp2 + 1,
 						sizeof(myrpt->loginlevel) - 1);
 				}
-				strncpy(myrpt->loginuser,cp1 + 1,sizeof(myrpt->loginuser));
+				strlcpy(myrpt->loginuser,cp1 + 1,sizeof(myrpt->loginuser)-1);
 				ast_mutex_unlock(&myrpt->lock);
 				if (myrpt->p.archivedir)
 				{
@@ -18793,7 +18716,7 @@ int	res;
 
 static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 {
-	char *s, *s1, *s2, *tele;
+	char *s, *s1, *tele;
 	char tmp[300], deststr[300] = "";
 	char sx[320],*sy;
 	struct ast_frame *f1;
@@ -18821,7 +18744,7 @@ static int attempt_reconnect(struct rpt *myrpt, struct rpt_link *l)
 		sprintf(sx,"%s:4569/%s",s1,sy + 1);
 		s1 = sx;
 	}
-	s2 = strsep(&s,",");
+	strsep(&s,",");
 	snprintf(deststr, sizeof(deststr), "IAX2/%s", s1);
 	tele = strchr(deststr, '/');
 	if (!tele) {
@@ -18924,7 +18847,7 @@ char	cmd[MAXDTMF+1] = "",c,tone[10];
 				char overlay,aprscall[100],fname[100];
 				FILE *fp;
 
-				snprintf(cmd, sizeof(cmd) - 1,"A%s", myrpt->dtmfbuf);
+				snprintf(cmd, sizeof(cmd),"A%s", myrpt->dtmfbuf);
 				overlay = aprstt_xlat(cmd,aprscall);
 				if (overlay)
 				{
@@ -19057,7 +18980,7 @@ char	cmd[MAXDTMF+1] = "",c,tone[10];
 			myrpt->patchquiet = 0;
 			myrpt->patchfarenddisconnect = 0;
 			myrpt->patchdialtime = 0;
-			strncpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT);
+			strlcpy(myrpt->patchcontext, myrpt->p.ourcontext, MAXPATCHCONTEXT-1);
 			myrpt->cidx = 0;
 			myrpt->exten[myrpt->cidx] = 0;
 			rpt_mutex_unlock(&myrpt->lock);
@@ -19319,7 +19242,7 @@ struct dahdi_confinfo ci;  /* conference info */
 time_t	t,was;
 struct rpt_link *l,*m;
 struct rpt_tele *telem;
-char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
+char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 
 	if (myrpt->p.archivedir) mkdir(myrpt->p.archivedir,0600);
@@ -20281,7 +20204,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (myrpt->p.elke && (myrpt->elketimer > myrpt->p.elke)) totx = 0;
 		if (totx && (!lasttx))
 		{
-			char mydate[100],myfname[100];
+			char mydate[100],myfname[512];
 			time_t myt;
 
 			if (myrpt->monstream) ast_closestream(myrpt->monstream);
@@ -20547,7 +20470,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				{
 					if (myrpt->p.archivedir)
 					{
-						char str[100];
+						char str[512];
 							sprintf(str,"RXUNKEY,%s",l->name);
 						donodelog(myrpt,str);
 					}
@@ -20638,7 +20561,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						if (myrpt->p.archivedir)
 						{
-							char str[100];
+							char str[512];
 	
 							sprintf(str,"RXUNKEY(T),%s",l->name);
 							donodelog(myrpt,str);
@@ -20722,7 +20645,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (l->hasconnected) rpt_update_links(myrpt);
 				if (myrpt->p.archivedir)
 				{
-					char str[100];
+					char str[512];
 
 					if (!l->hasconnected)
 						sprintf(str,"LINKFAIL,%s",l->name);
@@ -20753,7 +20676,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		rpt_update_links(myrpt);
 		if (myrpt->p.archivedir)
 		{
-			char str[100];
+			char str[512];
 			sprintf(str,"LINKDISC,%s",l->name);
 			donodelog(myrpt,str);
 		}
@@ -20939,12 +20862,11 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		}			
 		if (myrpt->cmdAction.state == CMD_STATE_READY)
 		{ /* there is a command waiting to be processed */
-			int status;
 			myrpt->cmdAction.state = CMD_STATE_EXECUTING;
 			// lose the lock
 			rpt_mutex_unlock(&myrpt->lock);
 			// do the function
-			status = (*function_table[myrpt->cmdAction.functionNumber].function)(myrpt,myrpt->cmdAction.param, myrpt->cmdAction.digits, myrpt->cmdAction.command_source, NULL);
+			(*function_table[myrpt->cmdAction.functionNumber].function)(myrpt,myrpt->cmdAction.param, myrpt->cmdAction.digits, myrpt->cmdAction.command_source, NULL);
 			// get the lock again
 			rpt_mutex_lock(&myrpt->lock);
 			myrpt->cmdAction.state = CMD_STATE_IDLE;
@@ -21078,7 +21000,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 					unsigned char op,arg;
 					unsigned short unitID;
-					char ustr[10];
+					char ustr[16];
 
 					mdc_decoder_get_packet(myrpt->mdc,&op,&arg,&unitID);
 					if (option_verbose)
@@ -21240,8 +21162,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					if ((myrpt->p.duplex < 2) && myrpt->keyed &&
 					    myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
 					{
-						int bs;
-						bs = write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f1),f1->datalen);
+						write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f1),f1->datalen);
 					}
 				}
 			}
@@ -21323,7 +21244,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					{
 						if (myrpt->p.duplex < 2)
 						{
-							char myfname[100],mydate[100];
+							char myfname[512],mydate[100];
 							long blocksleft;
 							time_t myt;
 
@@ -21717,7 +21638,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					}
 					if (myrpt->p.archivedir)
 					{
-						char str[100];
+						char str[512];
 
 						if (totx)
 							sprintf(str,"TXKEY,%s",l->name);
@@ -21786,7 +21707,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 					if (l->hasconnected) rpt_update_links(myrpt);
 					if (myrpt->p.archivedir)
 					{
-						char str[100];
+						char str[512];
 
 						if (!l->hasconnected)
 							sprintf(str,"LINKFAIL,%s",l->name);
@@ -21860,7 +21781,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						{
 							if (myrpt->p.archivedir)
 							{
-								char str[100];
+								char str[512];
 
 								sprintf(str,"RXKEY,%s",l->name);
 								donodelog(myrpt,str);
@@ -22025,7 +21946,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 							rpt_telemetry(myrpt,CONNECTED,l);
 							if (myrpt->p.archivedir)
 							{
-								char str[100];
+								char str[512];
 
 								if (l->mode == 1)
 									sprintf(str,"LINKTRX,%s",l->name);
@@ -22051,7 +21972,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						{
 							if (myrpt->p.archivedir)
 							{
-								char str[100];
+								char str[512];
 
 								sprintf(str,"RXKEY,%s",l->name);
 								donodelog(myrpt,str);
@@ -22072,7 +21993,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						{
 							if (myrpt->p.archivedir)
 							{
-								char str[100];
+								char str[512];
 
 								sprintf(str,"RXUNKEY,%s",l->name);
 								donodelog(myrpt,str);
@@ -22137,7 +22058,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 						if (l->hasconnected) rpt_update_links(myrpt);
 						if (myrpt->p.archivedir)
 						{
-							char str[100];
+							char str[512];
 
 							if (!l->hasconnected)
 								sprintf(str,"LINKFAIL,%s",l->name);
@@ -22246,8 +22167,7 @@ char tmpstr[300],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 				if (((myrpt->p.duplex >= 2) || (!myrpt->keyed)) &&
 					myrpt->p.outstreamcmd && (myrpt->outstreampipe[1] > 0))
 				{
-					int bs;
-					bs = write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f),f->datalen);
+					write(myrpt->outstreampipe[1],AST_FRAME_DATAP(f),f->datalen);
 				}
 				fs = ast_frdup(f);
 				fac = 1.0;
@@ -22698,7 +22618,7 @@ char *this,*val;
 		for(;;)
 		{
 			struct nodelog *nodep;
-			char *space,datestr[100],fname[300];
+			char *space,datestr[100],fname[1024];
 			int fd;
 
 			ast_mutex_lock(&nodeloglock);
@@ -22830,7 +22750,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 
 	if (myrpt == NULL)
 	{
-		char *val,*myadr,*mypfx,sx[320],*sy,*s,*s1,*s2,*s3,dstr[100];
+		char *val,*myadr,*mypfx,sx[320],*sy,*s,*s1,*s2,*s3,dstr[1024];
 		char xstr[100],hisip[100],nodeip[100],tmp1[100];
 		struct ast_config *cfg;
 	        struct ast_hostent ahp;
@@ -22999,7 +22919,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			}
 			if (!strcmp(myadr,s2)) /* if we have it.. */
 			{
-				char tmp2[100];
+				char tmp2[512];
 
 				strcpy(tmp2,tmp);
 				if (options && callstr) snprintf(tmp2,sizeof(tmp2) - 1,"0%s%s",callstr,tmp);
@@ -23552,7 +23472,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		rpt_update_links(myrpt);
 		if (myrpt->p.archivedir)
 		{
-			char str[100];
+			char str[512];
 
 			if (l->phonemode)
 				sprintf(str,"LINK(P),%s",l->name);
@@ -23981,7 +23901,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		b1 = b;
 	if (myrpt->p.archivedir)
 	{
-		char mycmd[100],mydate[100];
+		char mycmd[512],mydate[100];
 		time_t myt;
 		long blocksleft;
 
@@ -25025,7 +24945,7 @@ static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m,
 					return -1;
 				}
 				memset(s, 0, sizeof(struct rpt_lstat));
-				strncpy(s->name, l->name, MAXREMSTR - 1);
+				strlcpy(s->name, l->name, MAXNODESTR - 1);
 				if (l->chan) pbx_substitute_variables_helper(l->chan, "${IAXPEER(CURRENTCHANNEL)}", s->peer, MAXPEERSTR - 1);
 				else strcpy(s->peer,"(none)");
 				s->mode = l->mode;
@@ -25651,7 +25571,7 @@ static void * mdcgen_alloc(struct ast_channel *chan, void *params)
 	}
 	else if (p->type[0] == 'K') // kill a unit W9CR
 	{
-		mdc_encoder_set_packet(ps->mdc,0x22b,0x00,p->UnitID);
+		mdc_encoder_set_packet(ps->mdc,(unsigned char)0x22b,0x00,p->UnitID);
 	}
 	else if (p->type[0] == 'U') // UnKill a unit W9CR
 	{
@@ -25711,7 +25631,7 @@ static int mdc1200gen_start(struct ast_channel *chan, char *type, short UnitID, 
 	struct mdcparams p;
 
 	memset(&p,0,sizeof(p));
-	strncpy(p.type, type, sizeof(p.type) - 1);
+	strlcpy(p.type, type, sizeof(p.type));
 	p.UnitID = UnitID;
 	p.DestID = destID;
 	p.subcode = subcode;
