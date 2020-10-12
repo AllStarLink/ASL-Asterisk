@@ -32,6 +32,9 @@
 /*** MODULEINFO
 	<use>dahdi</use>
         <depend>res_features</depend>
+	<depend>curl</depend>
+	<depend>jansson</depend>
+	<defaultenabled>yes</defaultenabled>
  ***/
 
 #include "asterisk.h"
@@ -60,6 +63,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <sys/stat.h>
 #include <regex.h>
 #include <curl/curl.h>
+#include <jansson.h>
 
 #if defined(HAVE_ZAPTEL) || defined (HAVE_DAHDI)
 #include <sys/ioctl.h>
@@ -10181,6 +10185,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	int *rescode;
 	char url[100];
 	int regstate;
+	json_t root;
 
 	strncpy(request, "{\"data\":{", MAX_HTTP_REQUEST_LENGTH - 1);
 	if(strlen(reg->regport)){
@@ -10231,9 +10236,11 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	}
 	chunk.memory[chunk.size]='\0';
 	ast_log(LOG_DEBUG, "%s response: %s\n", proto, chunk.memory);
+	//{"ipaddr":"96.233.132.232","port":1234,"refresh":120,"data":["40376 successfully registered."]}
 
-	if(strstr(chunk.memory,"successfully registered"))
+	if(strstr(chunk.memory,"successfully registered")){
 		regstate = REG_STATE_REGISTERED;
+	}
 	else
 		regstate = REG_STATE_UNREGISTERED;
 	free(chunk.memory);

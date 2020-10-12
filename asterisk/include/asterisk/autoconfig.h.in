@@ -218,6 +218,9 @@
 /* Define to 1 if you have the ISDN4Linux Library library. */
 #undef HAVE_ISDNNET
 
+/* Define to 1 if you have the Jansson JSON library library. */
+#undef HAVE_JANSSON
+
 /* Define to 1 if you have the KDE library. */
 #undef HAVE_KDE
 

@@ -247,6 +247,7 @@ AST_EXT_LIB_SETUP([IKSEMEL], [Iksemel Jabber Library], [iksemel])
 AST_EXT_LIB_SETUP([IMAP_TK], [UW IMAP Toolkit], [imap])
 AST_EXT_LIB_SETUP([ISDNNET], [ISDN4Linux Library], [isdnnet])
 AST_EXT_LIB_SETUP([KDE], [KDE], [kde])
+AST_EXT_LIB_SETUP([JANSSON], [Jansson JSON library], [jansson])
 AST_LIBCURL_CHECK_CONFIG([], [7.10.1])
 AST_EXT_LIB_SETUP([LTDL], [libtool], [ltdl])
 AST_EXT_LIB_SETUP([MISDN], [mISDN User Library], [misdn])
@@ -292,6 +293,13 @@ AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_HEADER_SYS_WAIT
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h libintl.h limits.h locale.h malloc.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h strings.h sys/file.h sys/ioctl.h sys/param.h sys/socket.h sys/time.h syslog.h termios.h unistd.h utime.h arpa/nameser.h sys/io.h])
+AST_EXT_LIB_CHECK([JANSSON], [jansson], [json_dumps], [jansson.h])
+
+if test "${PBX_JANSSON}" != 1; then
+	AC_MSG_NOTICE(*** Asterisk requires libjansson and no system copy was found.)
+	AC_MSG_NOTICE(*** Please install the 'libjansson' development package)
+	exit 1
+fi
 
 AC_CHECK_HEADER([sys/poll.h],
 	 [],
