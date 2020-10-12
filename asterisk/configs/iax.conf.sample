@@ -30,9 +30,17 @@ bindport = 4569			; bindport and bindaddr may be specified
 
 disallow = all			; The permitted codecs for outgoing connections 
 				; Audio Quality	Bandwidth
-allow = ulaw			; best		87 kbps
-allow = adpcm			; good		55 kbps
-allow = gsm			; medicore	36 kbps
+;allow = ulaw			; best		87 kbps
+;allow = adpcm			; good		55 kbps
+;allow = gsm			; medicore	36 kbps
+
+allow = ulaw
+allow = adpcm
+allow = g722
+allow = g726aal2
+allow = gsm
+allow = ilbc
+
 
 jitterbuffer = yes                                                                
 forcejitterbuffer = yes                                                           
@@ -49,8 +57,8 @@ delayreject = yes
 ; iaxthreadcount = 30                                                              
 ; iaxmaxthreadcount = 150   
 
-; register = 1999:123456@register.allstarlink.org/register	; {node}:{secret}@{iax registration host -- or -- http(s) registration host}[:{optional port}][/{optional http(s) path}]
-
+; register = 1999:123456@register.allstarlink.org	; This must be changed to your node number, password 
+                                                	; remove the leading ";"
 
 ; Incoming radio connections
 
@@ -59,8 +67,11 @@ type = user
 disallow = all
 allow = ulaw
 allow = adpcm
+allow = g722
+allow = g726aal2
 allow = gsm
 allow = ilbc
+
 
 codecpriority = host
 context = radio-secure

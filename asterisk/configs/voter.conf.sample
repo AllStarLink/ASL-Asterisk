@@ -1,5 +1,5 @@
 [general]
-port = 667			;			
+port = 667			;
 buflen = 220			; specifies the receiver buffer length in milliseconds.
 				; This parameter should be set to the maximum expected network latency,
 				; plus a little padding (100 milliseconds of padding is a good amount).
@@ -10,7 +10,7 @@ buflen = 220			; specifies the receiver buffer length in milliseconds.
 password = secret_password	; password common to all clients
 utos = y			; Turn on IP TOS for Ubiquiti
 
-[1998]			
+[1999]
 Main = secret,transmit		; master,transmit,adpcm,nulaw,nodeemp,buflen=value,gpsid[=value]
 				; master - this client is the Master Timing source
 				; secret - password unique to this client
@@ -36,7 +36,7 @@ thresholds = 255,110=5		;
 
 ; NORTH = password_1,transmit
 ; SOUTH = Password_2,master,transmit
-; EAST = password_3,nodeemp                   ; bypass filter in RTCM  
+; EAST = password_3,nodeemp                   ; bypass filter in RTCM
 ; WEST = Password_4,transmit,noplfilter       ; bypass filter in RTCM
 
 ; streams = 67.215.233.178:1667

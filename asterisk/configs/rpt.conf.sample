@@ -5,23 +5,21 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-[1999]					; Change this to your assigned node number 
+[1999]					; Change this to your assigned node number
 
                                         ; Must also be enabled in modules.conf
 					; Rx audio/signalling channel. Choose ONLY 1 per node stanza
 
 					; Enable the selected channel driver in modules.conf !!!
 rxchannel = dahdi/pseudo	        ; No radio (hub)
-; rxchannel = SimpleUSB/usb_1999	; SimpleUSB 
-; rxchannel = Pi/1                      ; Raspberry Pi PiTA 
-; rxchannel = Radio/usb_1999		; USBRadio (DSP) 
-; rxchannel = Dahdi/1			; PCI Quad card 
-; rxchannel = Beagle/1			; BeagleBoard 
-; rxchannel = USRP/127.0.0.1:34001:32001; GNU Radio interface USRP  
-					; 127.0.0.1 = IP of the target application (AB, DVSM, UC)
-					; 34001 = UDP port the target application is listening on
-					; 32001 = UDP port ASL is listening on
-; rxchannel = Voter/1999		; RTCM/Voter Board
+; rxchannel = SimpleUSB/usb_1999	; SimpleUSB
+; rxchannel = Pi/1                      ; Raspberry Pi PiTA
+; rxchannel = Radio/usb_1999		; USBRadio (DSP)
+; rxchannel = Dahdi/1			; PCI Quad card
+; rxchannel = Beagle/1			; BeagleBoard
+; rxchannel = USRP/127.0.0.1:34001:32001; GNU Radio interface USRP
+; rxchannel = Voter/1999                ; RTCM device
+
 
 duplex = 1                              ; 0 = Half duplex with no telemetry tones or hang time.
                                         ;     Special Case: Full duplex if linktolink is set to yes.
@@ -81,11 +79,11 @@ linkunkeyct = ct8			; sent when a transmission received over the link unkeys
 ;nolocallinkct = 0			; Send unlinkedct instead if another local node is connected to this node (hosted on the same PC).
 
 ;connpgm = yourconnectprogram		; Disabled. Execute a program you specify on connect. (default)
-					; passes 2 command line arguments to your program: 
+					; passes 2 command line arguments to your program:
 					; 1. node number in this stanza (us)
 					; 2. node number being connected to us (them)
 ;discpgm = yourdisconnectprogram	; Disabled. Execute a program you specify on disconnect. (default)
-					; passes 2 command line arguments to your program: 
+					; passes 2 command line arguments to your program:
 					; 1. node number in this stanza (us)
 					; 2. node number being disconnected from us (them)
 
@@ -98,7 +96,7 @@ linkunkeyct = ct8			; sent when a transmission received over the link unkeys
 ;remote_inact_timeout =			; Specifies the amount of time without keying from the link. Set to 0 to disable timeout. (15 * 60)
 ;remote_timeout =			; Session time out for remote base. Set to 0 to disable. (60 * 60)
 ;remote_timeout_warning_freq =		; 30
-;remote_timeout_warning =		; (3 * 60) 
+;remote_timeout_warning =		; (3 * 60)
 
 ;nounkeyct = 0				; Set to a 1 to eliminate courtesy tones and associated delays.
 
@@ -112,9 +110,6 @@ telemdefault = 1                        ; 0 = telemetry output off
 telemdynamic = 1                        ; 0 = disallow users to change the local telemetry setting with a COP command,
                                         ; 1 = Allow users to change the setting with a COP command. (default = 1)
 
-telemnomdb = 0                          ; Set the default telemetry level. (default = 0)
-telemduckdb = -9                        ; Reduct telemetry level when ducking (default = -9)
-
 ;beaconing = 0				; Send ID regardless of repeater activity (Required in the UK, but probably illegal in the US)
 
 parrotmode = 0				; 0 = Parrot Off (default = 0)
@@ -122,14 +117,14 @@ parrotmode = 0				; 0 = Parrot Off (default = 0)
 					; 2 = Parrot Always
 					; 3 = Parrot Once by Command
 
-parrottime = 1000			; Set the amount of time in milliseconds 
+parrottime = 1000			; Set the amount of time in milliseconds
 					; to wait before parroting what was received
 
 ;rxnotch=1065,40                        ; (Optional) Notch a particular frequency for a specified
                                         ; b/w. app_rpt must have been compiled with
                                         ; the notch option
 
-startup_macro = 
+startup_macro =
 
 ; nodenames = /var/lib/asterisk/sounds/rpt/nodenames.callsign	; Point to alternate nodename sound directory
 
@@ -138,7 +133,7 @@ startup_macro =
 
 ;extnodes = extnodes-different	; section in extnodefile containing dynamic node information (optional)
 ;extnodefile = /foo/nodes	; Points to nodelist file containing dynamic node info default = /var/lib/asterisk/rpt_extnodes (optional)
-;extnodefile2 =			; Is this a list of node files? Possible a list of private nodes or a list of static IPs for known nodes???? 
+;extnodefile2 =			; Is this a list of node files? Possible a list of private nodes or a list of static IPs for known nodes????
 ;nodenames = /foo/names         ; locaton of node sound files default = /var/lib/asterisk/sounds/rpt/nodenames
 ;archivedir = /tmp              ; defines and enables activity recording into specified directory (optional)
 ;monminblocks = 2048            ; Min 1K blocks to be left on partition (will not save monitor output if disk too full)
@@ -167,7 +162,7 @@ startup_macro =
 ; parrot
 ; propagate_phonedtmf
 ; rptnode
-; rptinactmacro  Macro to execute when inactivity timer expires 
+; rptinactmacro  Macro to execute when inactivity timer expires
 ; rptinacttime   Inactivity timer time in seconds  (0 seconds disables feature)
 ; rxnotch	Optional Audio notch
 ; simplexphonedelay
@@ -224,7 +219,7 @@ startup_macro =
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Autopatch Commands
-; Note, This may be a good place for other 2 digit frequently used commands  
+; Note, This may be a good place for other 2 digit frequently used commands
 
 61 = autopatchup,noct = 1,farenddisconnect = 1,dialtime = 20000  ; Autopatch up
 62 = autopatchdn                                                 ; Autopatch down
@@ -299,7 +294,7 @@ startup_macro =
 
 ; Control operator (cop) functions. Change these to something other than these codes listed below!
 
-901 = cop,1				; System warm boot 
+901 = cop,1				; System warm boot
 902 = cop,2				; System enable
 903 = cop,3				; System disable
 
@@ -358,7 +353,7 @@ startup_macro =
 
 945 = cop,45				; Link Activity timer enable
 945 = cop,46				; Link Activity timer disable
-947 = cop,47				; Reset "Link Config Changed" Flag 
+947 = cop,47				; Reset "Link Config Changed" Flag
 
 948 = cop,48				; Send Page Tone (Tone specs separated by parenthesis)
 
@@ -449,7 +444,7 @@ startup_macro =
 ; Single frequencies are created by setting freq1 or freq2 to zero.
 ;
 ; |m - Morse escape sequence
-; 
+;
 ; Sends Morse code at the telemetry amplitude and telemetry frequency as defined in the
 ; [morse] section.
 ;
@@ -467,8 +462,8 @@ startup_macro =
 ; Example: idrecording = rpt/nodenames/1999
 
 ct1 = |t(350,0,100,2048)(500,0,100,2048)(660,0,100,2048)
-ct2 = |t(660,880,150,2048)  
-ct3 = |t(440,0,150,4096) 
+ct2 = |t(660,880,150,2048)
+ct3 = |t(440,0,150,4096)
 ct4 = |t(550,0,150,2048)
 ct5 = |t(660,0,150,2048)
 ct6 = |t(880,0,150,2048)
@@ -501,7 +496,7 @@ patchdown = rpt/callterminated
 speed = 20				; Approximate speed in WPM
 frequency = 800				; Morse Telemetry Frequency
 amplitude = 4096			; Morse Telemetry Amplitude
-idfrequency = 1065			; Morse ID Frequency	
+idfrequency = 1065			; Morse ID Frequency
 idamplitude = 1024			; Morse ID Amplitude
 
 ;
@@ -509,7 +504,7 @@ idamplitude = 1024			; Morse ID Amplitude
 ; A section for wait times can be defined for every repeater
 ;
 
-[wait-times]                                                                                                 
+[wait-times]
 telemwait = 2000                        ; Time to wait before sending most telemetry
 idwait = 500                            ; Time to wait before starting ID
 unkeywait = 2000                        ; Time to wait after unkey before sending CT's and link telemetry
@@ -622,18 +617,18 @@ calltermwait = 2000                     ; Time to wait before announcing "call t
 ; Control states
 ; Allow several control operator functions to be changed at once using one command (good for scheduling)
 ;
-;[controlstates]                                                          
-;statenum = copcmd,[copcmd]...                                                  
-;0 = rptena,lnkena,apena,totena,ufena,noicd  ; Normal operation                                  
-;1 = rptena,lnkena,apdis,totdis,ufena,noice  ; Net and news operation                                             
+;[controlstates]
+;statenum = copcmd,[copcmd]...
+;0 = rptena,lnkena,apena,totena,ufena,noicd  ; Normal operation
+;1 = rptena,lnkena,apdis,totdis,ufena,noice  ; Net and news operation
 ;2 = rptena,lnkdis,apdis,totena,ufdis,noice  ; Repeater only operation
 
 ; Scheduler - execute a macro at a given time
 
-[schedule]                                                                      
-;dtmf_function =  m h dom mon dow  ; ala cron, star is implied                                                  
-;2 = 00 00 * * *   ; at midnight, execute macro 2.       
+[schedule]
+;dtmf_function =  m h dom mon dow  ; ala cron, star is implied
+;2 = 00 00 * * *   ; at midnight, execute macro 2.
 
 #includeifexists custom/rpt.conf
 
-       
+

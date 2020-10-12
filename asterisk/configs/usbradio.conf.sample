@@ -99,6 +99,24 @@ txmixb = no			; Right channel output: no,voice,tone,composite, auxvoice
                         	; composite - voice and tone
                         	; auxvoice - auxiliary voice output at headphone level for monitoring
 
+; Audio filters - requires version newer than ASL_1.01
+rxlpf = 0                       ; Receiver Audio Low Pass Filter 0,1 2
+                                ; 0 - 3.0 kHz cutoff (Default) value for reduced noise and increased intelligibility.
+                                ; 1 - 3.3 kHz cutoff for increased high end, sibilance and brightness.
+                                ; 2 - 3.5 kHz cutoff for even more high end, sibilance and brightness.
+rxhpf = 0                       ; Receiver Audio High Pass Filter 0,1
+                                ; 0 - 300 Hz cutoff. (Default) value to reduce sub-audible signals for retransmission and in the receiver speaker.
+                                ; 1 - 250 Hz cutoff for additional received and retransmitted bass response.
+                                ; recommend using this filter with a CTCSS tone no higher than 186.2 Hz.
+txlpf = 0                       ; Transmitter Audio Low Pass Filter 0,1
+                                ; 0 - 3.0 kHz cutoff. (Default) value.
+                                ; 1 - 3.3 kHz cutoff for increased high end, sibilance and brightness.
+txhpf = 0                       ; Transmitter Audio High Pass Filter 0,1,2
+                                ; 0 - 300 Hz cutoff. (Default) value to reduce interference between voice and sub-audible signaling tones and codes.
+                                ; 1 - 250 Hz cutoff for increased bass response in transmitted audio.
+                                ; 2 - 120 Hz cutoff for special applications requiring additional bass response in transmitted audio.
+                                ; Not recommended due to the increased possibility of voice energy interfering with sub-audible signaling
+
 invertptt = 0			; Invert PTT: 0,1 
 				; 0 - ground to transmit
 				; 1 - open to transmit

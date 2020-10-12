@@ -152,7 +152,6 @@ load => codec_g726.so ;				ITU G.726-32kbps G726 Transcoder
 load => codec_gsm.so ;				GSM Coder/Decoder                                 
 load => codec_ulaw.so ;				mu-Law Coder/Decoder                              
 load => codec_ilbc.so ;				http://en.wikipedia.org/wiki/Internet_Low_Bitrate_Codec
-
 ; Formats
 
 load => format_g723.so ;			G.723.1 Simple Timestamp File Format     
