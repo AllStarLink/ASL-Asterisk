@@ -1,3 +1,20 @@
+asl-asterisk (1:1.4.23-7) unstable; urgency=medium
+
+  * do not enable savenode by default
+  * shorten timeout for http registration
+  * use libcurl for statpost instead of shell call to wget
+  * update startup/shutdown scripts to query systemctl for service status
+  * clean up output from console node lookup
+  * updates to asterisk service management convenience scripts
+  * do not enable asterisk service by default on new installations
+  * fix compiler warnings, perhaps better system stability
+  * collect perceived ip, port and refresh time from http registration
+  * update config samples to match 1.01 distro and include feature updates
+  * add libi2c-dev to list of build dependencies
+  * add registerhttp and registeriax directives to chan_iax2
+
+ -- Adam Paul <adamjpaul@gmail.com>  Mon, 12 Octp 2020 14:02:52 -0400
+
 asl-asterisk (1:1.4.23-6) unstable; urgency=medium
 
   * refinements in http registration
