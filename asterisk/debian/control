@@ -3,7 +3,7 @@ Priority: optional
 Section: comm
 Maintainer: Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>
 Uploaders: Mark Purcell <msp@debian.org>, Kilian Krause <kilian@debian.org>, Tzafrir Cohen <tzafrir.cohen@xorcom.com>, Faidon Liambotis <paravoid@debian.org>
-Build-Depends: debhelper (>= 6.0.7), quilt, zlib1g-dev, libreadline-gplv2-dev, libgsm1-dev, libssl-dev, libtonezone-dev (>= 1:1.4.1~0), libasound2-dev, libpq-dev, unixodbc-dev, libpri-dev (>= 1.4.1), libvpb-dev, asl-dahdi-source (>= 1:1.4.1~0), autotools-dev, libnewt-dev, libsqlite-dev, libspeex-dev, libspeexdsp-dev, graphviz, libcurl4-openssl-dev | libcurl-dev, doxygen, gsfonts, libpopt-dev, libiksemel-dev, freetds-dev, libvorbis-dev, libsnmp-dev, libcap-dev
+Build-Depends: debhelper (>= 6.0.7), quilt, zlib1g-dev, libreadline-gplv2-dev, libgsm1-dev, libssl-dev, libtonezone-dev (>= 1:1.4.1~0), libasound2-dev, libpq-dev, unixodbc-dev, libpri-dev (>= 1.4.1), libvpb-dev, asl-dahdi-source (>= 1:1.4.1~0), autotools-dev, libnewt-dev, libsqlite-dev, libspeex-dev, libspeexdsp-dev, graphviz, libcurl4-openssl-dev | libcurl-dev, doxygen, gsfonts, libpopt-dev, libiksemel-dev, freetds-dev, libvorbis-dev, libsnmp-dev, libcap-dev, libi2c-dev
 Standards-Version: 3.7.3
 Homepage: http://www.asterisk.org/
 Vcs-Svn: svn://svn.debian.org/pkg-voip/asterisk/trunk/
