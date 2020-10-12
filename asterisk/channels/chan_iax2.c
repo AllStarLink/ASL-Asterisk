@@ -10185,7 +10185,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	int *rescode;
 	char url[100];
 	int regstate;
-	json_t root;
+	json_t *root, *ipaddr, *port, *refresh, *data;
 
 	strncpy(request, "{\"data\":{", MAX_HTTP_REQUEST_LENGTH - 1);
 	if(strlen(reg->regport)){
@@ -10236,13 +10236,24 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 	}
 	chunk.memory[chunk.size]='\0';
 	ast_log(LOG_DEBUG, "%s response: %s\n", proto, chunk.memory);
-	//{"ipaddr":"96.233.132.232","port":1234,"refresh":120,"data":["40376 successfully registered."]}
+	
+	root = json_loads(chunk.memory,0,NULL);
+        ipaddr = json_object_get(root,"ipaddr");
+        port = json_object_get(root,"port");
+        refresh = json_object_get(root,"refresh");
+        data = json_object_get(root,"data");
 
 	if(strstr(chunk.memory,"successfully registered")){
-		regstate = REG_STATE_REGISTERED;
+		reg->regstate = regstate = REG_STATE_REGISTERED;
+		reg->us.sin_addr.s_addr = inet_addr(json_string_value(ipaddr));
+		reg->us.sin_port = htons(json_integer_value(port));
+		reg->refresh = json_integer_value(refresh);
+		AST_SCHED_DEL(sched, reg->expire);
+	        reg->expire = iax2_sched_add(sched, (5 * reg->refresh / 6) * 1000, iax2_do_register_s, reg);
 	}
 	else
 		regstate = REG_STATE_UNREGISTERED;
+	json_decref(root);
 	free(chunk.memory);
 	free(request);
 	return regstate;
