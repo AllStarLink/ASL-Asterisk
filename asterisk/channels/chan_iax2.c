@@ -301,6 +301,12 @@ enum {
 	IAX_SHRINKCALLERID  = (1 << 27),   /*!< Turn on and off caller id shrinking */
 } iax2_flags;
 
+enum iax2_regtype{
+	IAX_REGTYPE_AUTO,
+	IAX_REGTYPE_IAX2,
+	IAX_REGTYPE_HTTP
+};
+
 static int global_rtautoclear = 120;
 
 static int reload_config(void);
@@ -464,6 +470,7 @@ struct iax2_registry {
 	char port[10];
 	char path[100];
 	char regport[10];
+	enum iax2_regtype regtype;
 	struct sockaddr_in addr;		/*!< Who we connect to for registration purposes */
 	char username[80];
 	char secret[80];			/*!< Password or key name in []'s */
@@ -7325,7 +7332,7 @@ static int iax2_ack_registry(struct iax_ies *ies, struct sockaddr_in *sin, int c
 	return 0;
 }
 
-static int iax2_register(char *value, int lineno)
+static int iax2_register(char *value, int lineno, enum iax2_regtype regtype)
 {
 	struct iax2_registry *reg;
 	char copy[256];
@@ -7387,6 +7394,7 @@ static int iax2_register(char *value, int lineno)
 	reg->refresh = IAX_DEFAULT_REG_EXPIRE;
 	reg->addr.sin_family = AF_INET;
 	reg->addr.sin_port = porta ? htons(atoi(porta)) : htons(IAX_DEFAULT_PORTNO);
+	reg->regtype = regtype;
 	ast_copy_string(reg->hostname, hostname, sizeof(reg->hostname));
 	ast_copy_string(reg->port, port, sizeof(reg->port));
 	ast_copy_string(reg->path, path, sizeof(reg->path));
@@ -10262,7 +10270,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 static int iax2_do_register(struct iax2_registry *reg)
 {
 	struct iax_ie_data ied;
-	int regstate;
+	int regstate = REG_STATE_UNREGISTERED;
 
 	if (option_debug && iaxdebug)
 		ast_log(LOG_DEBUG, "Sending registration request for '%s'\n", reg->username);
@@ -10311,12 +10319,14 @@ static int iax2_do_register(struct iax2_registry *reg)
 	/* Setup the next registration a little early */
 	reg->expire  = iax2_sched_add(sched, (5 * reg->refresh / 6) * 1000, iax2_do_register_s, reg);
 	/* Send the request */
-	regstate = iax2_do_http_register(reg, "https");
-	if( regstate != REG_STATE_REGISTERED)
-		regstate = iax2_do_http_register(reg, "http");
-	else
-		reg->regstate = regstate;
-	if( regstate != REG_STATE_REGISTERED){
+	if( reg->regtype == IAX_REGTYPE_AUTO || reg->regtype==IAX_REGTYPE_HTTP ) {
+		regstate = iax2_do_http_register(reg, "https");
+		if( regstate != REG_STATE_REGISTERED)
+			regstate = iax2_do_http_register(reg, "http");
+		else
+			reg->regstate = regstate;
+	}
+	if( regstate != REG_STATE_REGISTERED && (reg->regtype == IAX_REGTYPE_AUTO || reg->regtype == IAX_REGTYPE_IAX2)){
 		memset(&ied, 0, sizeof(ied));
 		iax_ie_append_str(&ied, IAX_IE_USERNAME, reg->username);
 		iax_ie_append_short(&ied, IAX_IE_REFRESH, reg->refresh);
@@ -11728,7 +11738,11 @@ static int set_config(const char *config_file, int reload)
 		} else if (!strcasecmp(v->name, "disallow")) {
 			ast_parse_allow_disallow(&prefs, &capability, v->value, 0);
 		} else if (!strcasecmp(v->name, "register")) {
-			iax2_register(v->value, v->lineno);
+			iax2_register(v->value, v->lineno, IAX_REGTYPE_AUTO);
+		} else if (!strcasecmp(v->name, "registeriax")) {
+			iax2_register(v->value, v->lineno, IAX_REGTYPE_IAX2);
+		} else if (!strcasecmp(v->name, "registerhttp")) {
+			iax2_register(v->value, v->lineno, IAX_REGTYPE_HTTP);
 		} else if (!strcasecmp(v->name, "iaxcompat")) {
 			iaxcompat = ast_true(v->value);
 		} else if (!strcasecmp(v->name, "regcontext")) {
@@ -11858,7 +11872,7 @@ static int set_config(const char *config_file, int reload)
 							snprintf(tmp, sizeof(tmp), "%s:%s@%s", username, secret, host);
 						else
 							snprintf(tmp, sizeof(tmp), "%s@%s", username, host);
-						iax2_register(tmp, 0);
+						iax2_register(tmp, 0, IAX_REGTYPE_AUTO);
 					}
 				}
 			}
