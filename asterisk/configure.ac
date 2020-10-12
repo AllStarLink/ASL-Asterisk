@@ -2,7 +2,7 @@
 
 AC_PREREQ(2.60)
 
-AC_INIT(asterisk, 1.4, www.asterisk.org)
+AC_INIT([asterisk], [1.4], [https://issues.asterisk.org])
 
 # cross-compile macros
 AC_CANONICAL_BUILD
@@ -11,13 +11,14 @@ AC_CANONICAL_HOST
 # check existence of the package
 AC_CONFIG_SRCDIR([main/asterisk.c])
 
+AC_CONFIG_AUX_DIR(`pwd`)
+
 # specify output header file
 AC_CONFIG_HEADER(include/asterisk/autoconfig.h)
 
 AC_COPYRIGHT("Asterisk")
 AC_REVISION($Revision$)
 
-AC_GNU_SOURCE
 AC_USE_SYSTEM_EXTENSIONS	# note- does not work on FreeBSD
 
 case "${host_os}" in
@@ -25,6 +26,11 @@ case "${host_os}" in
      ac_default_prefix=/usr/local
      CPPFLAGS=-I/usr/local/include
      LDFLAGS=-L/usr/local/lib
+     ;;
+     darwin*)
+     ac_default_prefix=/usr/local
+     AC_DEFINE([AST_POLL_COMPAT], 1, [Define to 1 if internal poll should be used.])
+     AC_DEFINE([_DARWIN_UNLIMITED_SELECT], 1, [Define to 1 if running on Darwin.])
      ;;
      *)
      ac_default_prefix=/usr
@@ -39,8 +45,10 @@ case "${host_os}" in
      ;;
 esac
 
-if test ${localstatedir} = '${prefix}/var'; then
-     localstatedir=/var
+if test ${prefix} = ${ac_default_prefix} || test ${prefix} = 'NONE'; then
+     if test ${localstatedir} = '${prefix}/var'; then
+        localstatedir=/var
+     fi
 fi
 
 BUILD_PLATFORM=${build}
@@ -75,6 +83,9 @@ case "${host_os}" in
      ;;
      solaris*)
      OSARCH=SunOS
+     ;;
+     linux-gnueabi)
+     OSARCH=linux-gnu
      ;;
      *)
      OSARCH=${HOST_OS}
@@ -124,9 +135,10 @@ AC_PROG_INSTALL
 AC_PROG_LN_S
 AC_PROG_RANLIB
 AST_CHECK_GNU_MAKE
+AC_PROG_EGREP
 
-AC_PATH_TOOL([STRIP], [strip], :)
-AC_PATH_TOOL([AR], [ar], :)
+AC_CHECK_TOOLS([STRIP], [strip gstrip], :)
+AC_CHECK_TOOLS([AR], [ar gar], :)
 
 GNU_LD=0
 if test "x$with_gnu_ld" = "xyes" ; then
@@ -135,23 +147,72 @@ fi
 AC_SUBST(GNU_LD)
 
 AC_PATH_PROG([AWK], [awk], :)
+AC_PATH_PROG([BISON], [bison], :)
+AC_PATH_PROG([CMP], [cmp], :)
+AC_PATH_PROG([FLEX], [flex], :)
 AC_PATH_PROG([GREP], [grep], :)
 AC_PATH_PROG([FIND], [find], :)
 AC_PATH_PROG([COMPRESS], [compress], :)
 AC_PATH_PROG([BASENAME], [basename], :)
-AC_PATH_PROG([ID], [id], :)
 AC_PATH_PROG([DIRNAME], [dirname], :)
 AC_PATH_PROG([SHELL], [sh], :)
 AC_PATH_PROG([LN], [ln], :)
 AC_PATH_PROG([DOT], [dot], :)
 AC_PATH_PROG([WGET], [wget], :)
+AC_PATH_PROG([CURL], [curl], :)
 if test "${WGET}" != ":" ; then
   DOWNLOAD=${WGET}
+else if test "${CURL}" != ":" ; then
+  DOWNLOAD="${CURL} -O --progress-bar -w \"%{url_effective}\n\""
 else
   AC_PATH_PROG([FETCH], [fetch], [:])
   DOWNLOAD=${FETCH}
 fi
+fi
 AC_SUBST(DOWNLOAD)
+
+AC_CACHE_CHECK([for bison that supports parse-param], [ac_cv_path_BISON2], [
+	if test "x$BISON" != "x:" ; then
+		# Create a temporary directory $tmp in $TMPDIR (default /tmp).
+		# Use mktemp if possible; otherwise fall back on mkdir,
+		# with $RANDOM to make collisions less likely.
+		: ${TMPDIR=/tmp}
+		{
+		  tmp=`
+		    (umask 077 && mktemp -d "$TMPDIR/fooXXXXXX") 2>/dev/null
+		  ` &&
+		  test -n "$tmp" && test -d "$tmp"
+		} || {
+		  tmp=$TMPDIR/foo$$-$RANDOM
+		  (umask 077 && mkdir "$tmp")
+		} || exit $?
+		cat >$tmp/test.y <<__EOL__
+%parse-param {struct parse_io *parseio}
+%%
+file : { \$\$ = parseio->pval = 1; }
+	;
+%%
+__EOL__
+		${BISON} -o ${tmp}/test.tab.c ${tmp}/test.y >/dev/null 2>&1
+		if test -e "${tmp}/test.tab.c"; then
+			ac_cv_path_BISON2=${BISON}
+		fi
+		rm -rf ${tmp}
+	fi
+	])
+if test "x${ac_cv_path_BISON2}" = "x" ; then
+	BISON=:
+	PBX_BISON=0
+else
+	PBX_BISON=1
+fi
+AC_SUBST(PBX_BISON)
+if test "x${FLEX}" = "x:" ; then
+	PBX_FLEX=0
+else
+	PBX_FLEX=1
+fi
+AC_SUBST(PBX_FLEX)
 
 AC_CHECK_TOOL([SOXMIX], [soxmix], [:])
 if test "${SOXMIX}" != ":" ; then
@@ -175,16 +236,18 @@ AC_SUBST(AST_DEVMODE)
 # by the --with option name, to make things easier for the users :-)
 
 AST_EXT_LIB_SETUP([ALSA], [Advanced Linux Sound Architecture], [asound])
-AST_EXT_LIB_SETUP([CURL], [cURL], [curl])
+AST_EXT_LIB_SETUP([BFD], [Debug symbol decoding], [bfd])
 AST_EXT_LIB_SETUP([CAP], [POSIX 1.e capabilities], [cap])
 AST_EXT_LIB_SETUP([CURSES], [curses], [curses])
 AST_EXT_LIB_SETUP([DAHDI], [DAHDI], [dahdi])
 AST_EXT_LIB_SETUP([GNUTLS], [GNU TLS support (used for iksemel only)], [gnutls])
 AST_EXT_LIB_SETUP([GSM], [GSM], [gsm], [, or 'internal'])
+AST_EXT_LIB_SETUP([OPENH323], [OpenH323], [h323])
 AST_EXT_LIB_SETUP([IKSEMEL], [Iksemel Jabber Library], [iksemel])
 AST_EXT_LIB_SETUP([IMAP_TK], [UW IMAP Toolkit], [imap])
 AST_EXT_LIB_SETUP([ISDNNET], [ISDN4Linux Library], [isdnnet])
 AST_EXT_LIB_SETUP([KDE], [KDE], [kde])
+AST_LIBCURL_CHECK_CONFIG([], [7.10.1])
 AST_EXT_LIB_SETUP([LTDL], [libtool], [ltdl])
 AST_EXT_LIB_SETUP([MISDN], [mISDN User Library], [misdn])
 AST_EXT_LIB_SETUP([NBS], [Network Broadcast Sound], [nbs])
@@ -193,19 +256,24 @@ AST_EXT_LIB_SETUP([NETSNMP], [Net-SNMP], [netsnmp])
 AST_EXT_LIB_SETUP([NEWT], [newt], [newt])
 AST_EXT_LIB_SETUP([UNIXODBC], [unixODBC], [odbc])
 AST_EXT_LIB_SETUP([OGG], [OGG], [ogg])
+AST_EXT_LIB_SETUP([OPENAIS], [OpenAIS], [openais])
+AST_EXT_LIB_SETUP([OPENR2], [MFR2], [openr2])
 AST_EXT_LIB_SETUP([OSPTK], [OSP Toolkit], [osptk])
 AST_EXT_LIB_SETUP([OSS], [Open Sound System], [oss])
 AST_EXT_LIB_SETUP([POPT], [popt], [popt])
 AST_EXT_LIB_SETUP([PGSQL], [PostgreSQL], [postgres])
 AST_EXT_LIB_SETUP([PRI], [ISDN PRI], [pri])
+AST_EXT_LIB_SETUP_DEPENDENT([PRI_CALL_HOLD], [NOTIFY with call ptr], [PRI], [pri])
+AST_EXT_LIB_SETUP_DEPENDENT([PRI_VERSION], [ISDN PRI get_version], [PRI], [pri])
+AST_EXT_LIB_SETUP_DEPENDENT([PRI_INBANDDISCONNECT], [ISDN PRI set_inbanddisconnect], [PRI], [pri])
 AST_EXT_LIB_SETUP([PWLIB], [PWlib], [pwlib])
-AST_EXT_LIB_SETUP([OPENH323], [OpenH323], [h323])
 AST_EXT_LIB_SETUP([RADIUS], [Radius Client], [radius])
 AST_EXT_LIB_SETUP([SPEEX], [Speex], [speex])
 AST_EXT_LIB_SETUP([SPEEXDSP], [Speexdsp], [speexdsp])
+AST_EXT_LIB_SETUP_DEPENDENT([SPEEX_PREPROCESS], [speex_preprocess_ctl], [], [speex])
 AST_EXT_LIB_SETUP([SQLITE], [SQLite], [sqlite])
-AST_EXT_LIB_SETUP([SUPPSERV], [mISDN Supplemental Services], [suppserv])
 AST_EXT_LIB_SETUP([OPENSSL], [OpenSSL], [ssl])
+AST_EXT_LIB_SETUP([SUPPSERV], [mISDN Supplemental Services], [suppserv])
 AST_EXT_LIB_SETUP([FREETDS], [FreeTDS], [tds])
 AST_EXT_LIB_SETUP([TERMCAP], [Termcap], [termcap])
 AST_EXT_LIB_SETUP([TINFO], [Term Info], [tinfo])
@@ -223,7 +291,11 @@ AC_FUNC_ALLOCA
 AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_HEADER_SYS_WAIT
-AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h libintl.h limits.h locale.h malloc.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h strings.h sys/file.h sys/ioctl.h sys/param.h sys/socket.h sys/time.h syslog.h termios.h unistd.h utime.h arpa/nameser.h])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h libintl.h limits.h locale.h malloc.h netdb.h netinet/in.h stddef.h stdint.h stdlib.h string.h strings.h sys/file.h sys/ioctl.h sys/param.h sys/socket.h sys/time.h syslog.h termios.h unistd.h utime.h arpa/nameser.h sys/io.h])
+
+AC_CHECK_HEADER([sys/poll.h],
+	 [],
+     AC_DEFINE([AST_POLL_COMPAT], 1, [Define to 1 if internal poll should be used.]))
 
 AC_SYS_LARGEFILE
 
@@ -265,7 +337,16 @@ AC_FUNC_STRNLEN
 AC_FUNC_STRTOD
 AC_FUNC_UTIME_NULL
 AC_FUNC_VPRINTF
-AC_CHECK_FUNCS([asprintf atexit bzero dup2 endpwent floor ftruncate getcwd gethostbyname gethostname getloadavg gettimeofday inet_ntoa isascii localtime_r memchr memmove memset mkdir munmap pow putenv re_comp regcomp rint select setenv socket sqrt strcasecmp strcasestr strchr strcspn strdup strerror strlcat strlcpy strncasecmp strndup strnlen strrchr strsep strspn strstr strtol strtoq unsetenv utime vasprintf])
+AC_CHECK_FUNCS([asprintf atexit bzero dup2 endpwent floor ftruncate getcwd gethostbyname gethostname getloadavg gettimeofday inet_ntoa isascii localtime_r memchr memmove memset mkdir munmap pow ppoll putenv re_comp regcomp rint select setenv socket sqrt strcasecmp strcasestr strchr strcspn strdup strerror strlcat strlcpy strncasecmp strndup strnlen strrchr strsep strspn strstr strtol strtoq unsetenv utime vasprintf ioperm])
+
+AC_MSG_CHECKING(for timersub in time.h)
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#include <sys/time.h>],
+			[struct timeval *zombies; timersub(zombies, zombies, zombies);]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([HAVE_TIMERSUB], 1, [Define to 1 if your system has timersub in time.h]),
+	AC_MSG_RESULT(no)
+)
 
 # some systems already have gethostbyname_r so we don't need to build ours in main/utils.c
 AC_SEARCH_LIBS(gethostbyname_r, [socket nsl])
@@ -308,6 +389,62 @@ AC_LINK_IFELSE(
         AC_MSG_RESULT(no)
 )
 
+AC_MSG_CHECKING(for pthread_rwlock_timedwrlock() in pthread.h)
+saved_LDFLAGS="${LDFLAGS}"
+LDFLAGS="${LDFLAGS} -lpthread"
+AC_LINK_IFELSE(
+  [AC_LANG_PROGRAM(
+    [#include <pthread.h>
+     #include <time.h>],
+    [pthread_rwlock_t foo; struct timespec bar; pthread_rwlock_timedwrlock(&foo, &bar)])
+  ],[
+    AC_MSG_RESULT(yes)
+    ac_cv_pthread_rwlock_timedwrlock="yes"
+  ],[
+    AC_MSG_RESULT(no)
+    ac_cv_pthread_rwlock_timedwrlock="no"
+  ]
+)
+LDFLAGS="${saved_LDFLAGS}"
+if test "${ac_cv_pthread_rwlock_timedwrlock}" = "yes"; then
+  AC_DEFINE([HAVE_PTHREAD_RWLOCK_TIMEDWRLOCK], 1, [Define if your system has pthread_rwlock_timedwrlock()])
+fi
+
+AC_MSG_CHECKING(if PTHREAD_ONCE_INIT needs braces)
+saved_CFLAGS="${CFLAGS}"
+CFLAGS="${CFLAGS} -Werror -Wmissing-braces"
+AC_COMPILE_IFELSE(
+  [AC_LANG_PROGRAM(
+    [#include <pthread.h>
+     void empty(){}],
+	[pthread_once_t once = PTHREAD_ONCE_INIT; pthread_once(&once, empty);])
+  ],[
+    AC_MSG_RESULT(no)
+    ac_cv_pthread_once_needsbraces="no"
+  ],[
+    AC_MSG_RESULT(yes)
+    ac_cv_pthread_once_needsbraces="yes"
+  ]
+)
+CFLAGS="${saved_CFLAGS}"
+if test "${ac_cv_pthread_once_needsbraces}" = "yes"; then
+  AC_DEFINE([PTHREAD_ONCE_INIT_NEEDS_BRACES], 1, [Define if your system needs braces around PTHREAD_ONCE_INIT])
+fi
+
+# Can we compare a mutex to its initial value?
+# Generally yes on OpenBSD/FreeBSD and no on Mac OS X.
+AC_MSG_CHECKING(whether we can compare a mutex to its initial value)
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#include <pthread.h>], [pthread_mutex_t lock;
+	if ((lock) != ((pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER)) {
+		return 0;
+	}
+	return 0]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([CAN_COMPARE_MUTEX_TO_INIT_VALUE], 1, [Define to 1 if the implementation of mutexes supports comparison of a mutex to its initializer.]),
+	AC_MSG_RESULT(no)
+)
+
 AC_MSG_CHECKING(for compiler atomic operations)
 AC_LINK_IFELSE(
 AC_LANG_PROGRAM([], [int foo1; int foo2 = __sync_fetch_and_add(&foo1, 1);]),
@@ -316,12 +453,55 @@ AC_DEFINE([HAVE_GCC_ATOMICS], 1, [Define to 1 if your GCC C compiler provides at
 AC_MSG_RESULT(no)
 )
 
+AC_MSG_CHECKING(if we can increase the maximum select-able file descriptor)
+AC_RUN_IFELSE(
+AC_LANG_PROGRAM([
+#include <stdio.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <string.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+], [[
+	struct rlimit rlim = { FD_SETSIZE * 2, FD_SETSIZE * 2 };
+	int fd0, fd1;
+	struct timeval tv = { 0, };
+	struct ast_fdset { long fds_bits[[1024]]; } fds = { { 0, } };
+	if (setrlimit(RLIMIT_NOFILE, &rlim)) { exit(1); }
+	if ((fd0 = open("/dev/null", O_RDONLY)) < 0) { exit(1); }
+	if (dup2(fd0, (fd1 = FD_SETSIZE + 1)) < 0) { exit(1); }
+	FD_SET(fd0, (fd_set *) &fds);
+	FD_SET(fd1, (fd_set *) &fds);
+	if (select(FD_SETSIZE + 2, (fd_set *) &fds, NULL, NULL, &tv) < 0) { exit(1); }
+	exit(0)]]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([HAVE_VARIABLE_FDSET], 1, [Define to 1 if your system can support larger than default select bitmasks.]),
+	AC_MSG_RESULT(no),
+	AC_MSG_RESULT(cross-compile)
+)
+
+if test "${ac_cv_have_variable_fdset}x" = "0x"; then
+	AC_RUN_IFELSE(
+		AC_LANG_PROGRAM([
+#include <unistd.h>
+#include <sys/types.h>
+#include <stdlib.h>
+], [if (getuid() != 0) { exit(1); }]),
+		AC_DEFINE([CONFIGURE_RAN_AS_ROOT], 1, [Some configure tests will unexpectedly fail if configure is run by a non-root user.  These may be able to be tested at runtime.]))
+fi
+
 AST_GCC_ATTRIBUTE(pure)
 AST_GCC_ATTRIBUTE(malloc)
 AST_GCC_ATTRIBUTE(const)
 AST_GCC_ATTRIBUTE(unused)
 AST_GCC_ATTRIBUTE(always_inline)
 AST_GCC_ATTRIBUTE(deprecated)
+AST_GCC_ATTRIBUTE(warn_unused_result)
 
 AC_MSG_CHECKING(for -ffunction-sections support)
 saved_CFLAGS="${CFLAGS}"
@@ -351,18 +531,28 @@ if $(${CC} -Wdeclaration-after-statement -S -o /dev/null -xc /dev/null > /dev/nu
    AC_MSG_RESULT(yes)
    AST_DECLARATION_AFTER_STATEMENT=-Wdeclaration-after-statement
 else
-	AC_MSG_RESULT(no)
-	AST_DECLARATION_AFTER_STATEMENT=
+   AC_MSG_RESULT(no)
+   AST_DECLARATION_AFTER_STATEMENT=
 fi
 AC_SUBST(AST_DECLARATION_AFTER_STATEMENT)
+
+AC_MSG_CHECKING(for _FORTIFY_SOURCE support)
+if $(${CC} -D_FORTIFY_SOURCE=2 -S -o /dev/null -xc /dev/null > /dev/null 2>&1); then
+   AC_MSG_RESULT(yes)
+   AST_FORTIFY_SOURCE=-D_FORTIFY_SOURCE=2
+else
+   AC_MSG_RESULT(no)
+   AST_FORTIFY_SOURCE=
+fi
+AC_SUBST(AST_FORTIFY_SOURCE)
 
 AC_MSG_CHECKING(for -fno-strict-overflow)
 if $(${CC} -O2 -fno-strict-overflow -S -o /dev/null -xc /dev/null > /dev/null 2>&1); then
    AC_MSG_RESULT(yes)
    AST_NO_STRICT_OVERFLOW=-fno-strict-overflow
 else
-	AC_MSG_RESULT(no)
-	AST_NO_STRICT_OVERFLOW=
+   AC_MSG_RESULT(no)
+   AST_NO_STRICT_OVERFLOW=
 fi
 AC_SUBST(AST_NO_STRICT_OVERFLOW)
 
@@ -405,12 +595,21 @@ AC_LINK_IFELSE(
 	AC_MSG_RESULT(no)
 )
 
-AC_MSG_CHECKING(for RTLD_NOLOAD)
+AC_MSG_CHECKING(for GLOB_NOMAGIC)
 AC_LINK_IFELSE(
-	AC_LANG_PROGRAM([#include <dlfcn.h>],
-			[int foo = RTLD_NOLOAD;]),
+	AC_LANG_PROGRAM([#include <glob.h>],
+			[int foo = GLOB_NOMAGIC;]),
 	AC_MSG_RESULT(yes)
-	AC_DEFINE([HAVE_RTLD_NOLOAD], 1, [Define to 1 if your system has a dynamic linker that supports RTLD_NOLOAD.]),
+	AC_DEFINE([HAVE_GLOB_NOMAGIC], 1, [Define to 1 if your glob function supports GLOB_NOMAGIC option.]),
+	AC_MSG_RESULT(no)
+)
+
+AC_MSG_CHECKING(for GLOB_BRACE)
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#include <glob.h>],
+			[int foo = GLOB_BRACE;]),
+	AC_MSG_RESULT(yes)
+	AC_DEFINE([HAVE_GLOB_BRACE], 1, [Define to 1 if your glob function supports GLOB_BRACE option.]),
 	AC_MSG_RESULT(no)
 )
 
@@ -427,19 +626,60 @@ AC_CHECK_HEADER([libkern/OSAtomic.h],
                 [AC_DEFINE_UNQUOTED([HAVE_OSX_ATOMICS], 1, [Define to 1 if OSX atomic operations are supported.])])
 
 AC_CHECK_SIZEOF(int)
+AC_CHECK_SIZEOF(long)
+AC_CHECK_SIZEOF(long long)
+AC_COMPUTE_INT([ac_cv_sizeof_fd_set_fds_bits], [sizeof(foo.fds_bits[[0]])], [$ac_includes_default
+fd_set foo;])
+# This doesn't actually work; what it does is to use the variable set in the
+# previous test as a cached value to set the right output variables.
+AC_CHECK_SIZEOF(fd_set.fds_bits)
+
+# Set a type compatible with the previous.  We cannot just use a generic type
+# for these bits, because on big-endian systems, the bits won't match up
+# correctly if the size is wrong.
+if test $ac_cv_sizeof_int = $ac_cv_sizeof_fd_set_fds_bits; then
+  AC_DEFINE([TYPEOF_FD_SET_FDS_BITS], [int], [Define to a type of the same size as fd_set.fds_bits[[0]]])
+else if test $ac_cv_sizeof_long = $ac_cv_sizeof_fd_set_fds_bits; then
+  AC_DEFINE([TYPEOF_FD_SET_FDS_BITS], [long], [Define to a type of the same size as fd_set.fds_bits[[0]]])
+else if test $ac_cv_sizeof_long_long = $ac_cv_sizeof_fd_set_fds_bits; then
+  AC_DEFINE([TYPEOF_FD_SET_FDS_BITS], [long long], [Define to a type of the same size as fd_set.fds_bits[[0]]])
+fi ; fi ; fi
+
+AC_MSG_CHECKING(for dladdr in dlfcn.h)
+PBX_DLADDR=0
+old_LIBS=${LIBS}
+LIBS="${LIBS} -ldl"
+AC_LINK_IFELSE(
+	AC_LANG_PROGRAM([#define _GNU_SOURCE 1
+#include <dlfcn.h>],
+		[dladdr((void *)0, (void *)0)]
+	),
+	AC_MSG_RESULT(yes)
+	PBX_DLADDR=1
+	AC_SUBST([PBX_DLADDR])
+	AC_DEFINE([HAVE_DLADDR], 1, [Define to 1 if your system has the dladdr() GNU extension]),
+	AC_MSG_RESULT(no)
+)
+LIBS=${old_LIBS}
+
 
 # do the package library checks now
 
 AST_EXT_LIB_CHECK([ALSA], [asound], [snd_spcm_init], [alsa/asoundlib.h], [-lm -ldl])
 
+AST_EXT_LIB_CHECK([BFD], [bfd], [bfd_openr], [bfd.h])
+
 AST_EXT_LIB_CHECK([CURSES], [curses], [initscr], [curses.h])
 
-if test "x${host_os}" = "xlinux-gnu" ; then
+if test "x${OSARCH}" = "xlinux-gnu" ; then
   AST_EXT_LIB_CHECK([CAP], [cap], [cap_from_text], [sys/capability.h])
 fi
 
+PBX_DAHDI_TRANSCODE=0
 if test "${USE_DAHDI}" != "no" ; then
-	AST_C_DEFINE_CHECK([DAHDI], [DAHDI_CODE], [dahdi/user.h])
+	AST_C_DEFINE_CHECK([DAHDI], [DAHDI_RESET_COUNTERS], [dahdi/user.h], [230])
+	AST_C_DEFINE_CHECK([DAHDI], [DAHDI_DEFAULT_MTU_MRU], [dahdi/user.h], [220])
+	AST_C_DEFINE_CHECK([DAHDI], [DAHDI_CODE], [dahdi/user.h], [200])
 	if test "x${PBX_DAHDI}" = "x1" ; then
 		PBX_DAHDI_TRANSCODE=1
 		AC_SUBST(PBX_DAHDI_TRANSCODE)
@@ -1244,9 +1484,8 @@ fi
 AST_EXT_LIB_CHECK([POPT], [popt], [poptStrerror], [popt.h])
 
 AST_EXT_LIB_CHECK([PRI], [pri], [pri_keypad_facility], [libpri.h])
-
+AST_EXT_LIB_CHECK([PRI_CALL_HOLD], [pri], [pri_hold_enable], [libpri.h])
 AST_EXT_LIB_CHECK([PRI_VERSION], [pri], [pri_get_version], [libpri.h])
-
 AST_EXT_LIB_CHECK([PRI_INBANDDISCONNECT], [pri], [pri_set_inbanddisconnect], [libpri.h])
 
 if test "${USE_PWLIB}" != "no"; then
@@ -1254,17 +1493,17 @@ if test "${USE_PWLIB}" != "no"; then
 		PWLIBDIR="${PWLIB_DIR}"
 	fi
 	AST_CHECK_PWLIB()
-	AST_CHECK_PWLIB_VERSION([PWLib], [PWLIB], [ptbuildopts.h], [1], [9], [2])
+	AST_CHECK_PWLIB_VERSION([PWLib], [PWLIB], [ptbuildopts.h], [1], [9], [2], [P[[WT]]LIB_VERSION])
 		
 	if test "${HAS_PWLIB:-unset}" != "unset"; then
-		AST_CHECK_OPENH323_PLATFORM()
+		AST_CHECK_PWLIB_PLATFORM()
 
 		PLATFORM_PWLIB="pt_${PWLIB_PLATFORM}_r"
 
 		AST_CHECK_PWLIB_BUILD([PWLib], [PWLIB],
 			[Define if your system has the PWLib libraries.],
 			[#include "ptlib.h"],
-			[BOOL q = PTime::IsDaylightSavings();])
+			[int q = (int) PTime::IsDaylightSavings();])
 	fi
 fi
 
@@ -1281,7 +1520,7 @@ if test "${PBX_PWLIB}" = "1" -a "${USE_OPENH323}" != "no" ; then
 		OPENH323DIR="${OPENH323_DIR}"
 	fi
 	AST_CHECK_OPENH323()
-	AST_CHECK_PWLIB_VERSION([OpenH323], [OPENH323], [openh323buildopts.h], [1], [17], [3])
+	AST_CHECK_PWLIB_VERSION([OpenH323], [OPENH323], [openh323buildopts.h], [1], [17], [3], [], [1], [19], [0])
 	AST_CHECK_OPENH323_BUILD()
 	PLATFORM_OPENH323="h323_${PWLIB_PLATFORM}_${OPENH323_SUFFIX}"
 	AST_CHECK_PWLIB_BUILD([OpenH323], [OPENH323],
@@ -1464,8 +1703,6 @@ if test "${USE_ZAPTEL}" != "no" && test "x${PBX_DAHDI}" != "x1"; then
 	CPPFLAGS="${saved_cppflags}"
 	if test "${ac_cv_member_ZT_PARAMS_chan_alarms}" = "yes"; then
 	     AC_DEFINE([HAVE_ZAPTEL_CHANALARMS], 1, [Define if your Zaptel drivers have chan_alarms.])
-	else
-	     AC_DEFINE([HAVE_ZAPTEL_CHANALARMS], 0, [Define if your Zaptel drivers have chan_alarms.])
 	fi
    elif test -n "${ZAPTEL_MANDATORY}"; 
    then
@@ -1545,7 +1782,7 @@ elif test "x$CURSES_LIB" != "x" ; then
 elif test "x$NCURSES_LIB" != "x" ; then
   EDITLINE_LIB="$NCURSES_LIB"
 else
-  AC_MSG_ERROR(*** termcap support not found)
+  AC_MSG_ERROR([*** termcap support not found (on modern systems, this typically means the ncurses development package is missing)])
 fi
 AC_SUBST(EDITLINE_LIB)
 
@@ -1592,40 +1829,24 @@ AC_SUBST(PBX_GTK2)
 AC_SUBST(GTK2_INCLUDE)
 AC_SUBST(GTK2_LIB)
 
-if test "${USE_CURL}" != "no"; then
-   AC_PATH_TOOL([CURL_CONFIG], [curl-config], No)
-   if test ! x"${CURL_CONFIG}" = xNo; then
-   # check for version
-      if test $(printf "%d" 0x$(${CURL_CONFIG} --vernum)) -ge $(printf "%d" 0x070907); then
-         CURL_INCLUDE=$(${CURL_CONFIG} --cflags)
-         CURL_LIB=$(${CURL_CONFIG} --libs)
-
-         AC_MSG_CHECKING(for curl_version() in curl/curl.h)
-         saved_cppflags="${CPPFLAGS}"
-         CPPFLAGS="${CPPFLAGS} ${CURL_INCLUDE}"
-         AC_COMPILE_IFELSE(
-            [AC_LANG_PROGRAM(
-                [#include <curl/curl.h>],
-                    [curl_version();])
-            ],[
-                AC_MSG_RESULT(yes)
-                ac_cv_curl_h="yes"
-            ],[
-                AC_MSG_RESULT(no)
-                ac_cv_curl_h="no"
-            ]
-	 )
-	 CPPFLAGS="${saved_cppflags}"
-         if test "${ac_cv_curl_h}" = "yes"; then
-             PBX_CURL=1
-             AC_DEFINE([HAVE_CURL], 1, [Define if your system has the curl libraries.])
-         fi
-      fi
-   fi
+if test -f makeopts; then
+	${ac_cv_path_EGREP} 'CURSES|GTK2|OSARCH|NEWT' makeopts > makeopts.acbak
+else
+	touch makeopts.acbak
 fi
 
 AC_CONFIG_FILES([build_tools/menuselect-deps makeopts channels/h323/Makefile])
 AC_OUTPUT
+
+${ac_cv_path_EGREP} 'CURSES|GTK2|OSARCH|NEWT' makeopts > makeopts.acbak2
+if test "x${ac_cv_path_CMP}" = "x:"; then
+	( cd `pwd`/menuselect && ./configure )
+else if ${ac_cv_path_CMP} -s makeopts.acbak makeopts.acbak2; then : ; else
+	( cd `pwd`/menuselect && ./configure )
+fi ; fi
+
+rm makeopts.acbak makeopts.acbak2
+
 
 if test "x${silent}" != "xyes" ; then
 echo
