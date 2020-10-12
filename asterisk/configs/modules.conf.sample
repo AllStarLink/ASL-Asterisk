@@ -214,7 +214,7 @@ load => res_indications.so ;			Indications Resource
 noload => res_jabber.so ;			AJI - Asterisk Jabber Interface                   
 noload => res_monitor.so ;			Call Monitoring Resource                          
 noload => res_musiconhold.so ;			Music On Hold Resource                            
-noload => res_smdi.so ;				Simplified Message Desk Interface (SMDI)          
+load => res_smdi.so ;				Simplified Message Desk Interface (SMDI)          
 noload => res_snmp.so ;				SNMP [Sub]Agent for Asterisk                      
 noload => res_speech.so ;			Generic Speech Recognition API                    
 
