@@ -1,15 +1,15 @@
 #!/bin/bash
+set -e
 
-# Clear out the /build and /release directory
-#rm -rf /release/*
+#if the debian changelong changed for asterisk in the last commit, then build the asterisk package
+if git diff --name-only HEAD HEAD~1 | grep -q asterisk/debian/changelog; then
+  cd /src/asterisk
+  ./bootstrap.sh && ./configure
+  debuild -b -uc -us
+fi
 
-# Re-pull the repository
-#git fetch 
-
-# Configure, make, make install
-cd /src/asterisk
-./bootstrap.sh && ./configure
-debuild -b -uc -us
-
-cd /src/allstar
-debuild -b -uc -us
+#if the debian changelong changed for allstar in the last commit, then build the allstar package
+if git diff --name-only HEAD HEAD~1 | grep -q allstar/debian/changelog; then
+  cd /src/allstar
+  debuild -b -uc -us
+fi
