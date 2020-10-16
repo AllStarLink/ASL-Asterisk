@@ -13,7 +13,7 @@ asl-asterisk (1:1.4.23-7) unstable; urgency=medium
   * add libi2c-dev to list of build dependencies
   * add registerhttp and registeriax directives to chan_iax2
 
- -- Adam Paul <adamjpaul@gmail.com>  Mon, 12 Oct 2020 14:02:53 -0400
+ -- Adam Paul <adamjpaul@gmail.com>  Mon, 12 Oct 2020 14:02:54 -0400
 
 asl-asterisk (1:1.4.23-6) unstable; urgency=medium
 
