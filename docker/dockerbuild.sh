@@ -1,8 +1,6 @@
 #!/bin/bash
 
 ARCHS="amd64 armhf"
-ARCHS=amd64
-
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PDIR=$(dirname $DIR)
