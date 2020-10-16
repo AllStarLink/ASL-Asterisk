@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 ARCHS="amd64 armhf"
 
