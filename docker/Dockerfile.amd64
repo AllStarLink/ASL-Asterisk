@@ -24,7 +24,7 @@ RUN apt-get update && apt-get -y install \
 
 # add the kc1kcc repo for build deps
 RUN echo "deb https://kc1kcc.com/repos/asl_builds buster main" > /etc/apt/sources.list.d/kc1kcc_asl_builds.list
-RUN wget -O - http://kc1kcc.com/repos/apt.gpg.key | apt-key add -
+RUN wget -O - https://kc1kcc.com/repos/apt.gpg.key | apt-key add -
 
 # Install application dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
