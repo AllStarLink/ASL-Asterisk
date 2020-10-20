@@ -7,4 +7,9 @@ pipeline {
             }
         }
     }
+    post {
+        always {
+            archiveArtifacts artifacts: '*.deb'
+        }
+    }
 }
