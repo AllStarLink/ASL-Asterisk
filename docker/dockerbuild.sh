@@ -2,15 +2,25 @@
 set -e
 
 ARCHS="amd64 armhf"
+TARGETS="asterisk allstar"
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PDIR=$(dirname $DIR)
 
-#get number of 'all' packages
-ALLCOUNT=$(egrep "^Architecture: ?all" debian/control | wc -l)
+#get the build targets
+cd $DIR
+BUILD_TARGETS=""
+for t in "$TARGETS"; do
+  if git diff --name-only HEAD HEAD~1 | grep -q $t/debian/changelog; then
+    BUILD_TARGETS+="$t "
+  fi
+done
 
-#get number of 'any'(non-any) packages
-ANYCOUNT=$(grep "^Architecture:" debian/control | egrep -v "^Architecture: ?all" | wc -l)
+#get number of 'any' (non-all) packages
+ANYCOUNT=0
+for t in "$BUILD_TARGETS"; do
+  ((ANYCOUNT=ANYCOUNT+$(grep "^Architecture:" $t/debian/control | egrep -v "^Architecture: ?all" | wc -l)))
+done
 
 #if 'any' = 0, only run for one arch (there are no arch specific packages)
 if [ "$ANYCOUNT" -eq "0" ] ; then
@@ -22,7 +32,7 @@ fi
 DPKG_BUILDOPTS="-b -uc -us"
 for A in $ARCHS; do
 	docker build -f $DIR/Dockerfile.$A -t asl-asterisk_builder.$A $DIR
-	docker run -v $PDIR:/src asl-asterisk_builder.$A --env DPKG_BUILDOPTS="$DPKG_BUILDOPTS"
+	docker run -v $PDIR:/src asl-asterisk_builder.$A --env DPKG_BUILDOPTS="$DPKG_BUILDOPTS" --env BUILD_TARGETS="$BUILD_TARGETS"
 	docker image rm --force asl-asterisk_builder.$A
 	DPKG_BUILDOPTS="--build=any -uc -us"
 done
