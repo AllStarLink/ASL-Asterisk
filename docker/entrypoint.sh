@@ -6,7 +6,7 @@ OPTS=${DPKG_BUILDOPTS:-"-b -uc -us"}
 
 for t in "$BUILD_TARGETS"; do
   cd /src/$t
-  if [ "$t" -eq "asterisk" ]; then
+  if [ "$t" == "asterisk" ]; then
     ./bootstrap.sh && ./configure
   fi
   debuild "$OPTS"
