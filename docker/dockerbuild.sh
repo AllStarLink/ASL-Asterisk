@@ -10,17 +10,15 @@ PDIR=$(dirname $DIR)
 #get the build targets
 cd $PDIR
 BUILD_TARGETS=""
-for t in "$TARGETS"; do
+ANYCOUNT=0
+for t in $TARGETS; do
   if git diff --name-only HEAD HEAD~1 | grep -q $t/debian/changelog; then
     BUILD_TARGETS+="$t "
+    c=$(grep "^Architecture:" $t/debian/control | egrep -v "^Architecture: ?all" | wc -l)
+    ANYCOUNT=$((c+ANYCOUNT))
   fi
 done
 
-#get number of 'any' (non-all) packages
-ANYCOUNT=0
-for t in "$BUILD_TARGETS"; do
-  ((ANYCOUNT=ANYCOUNT+$(grep "^Architecture:" $t/debian/control | egrep -v "^Architecture: ?all" | wc -l)))
-done
 
 #if 'any' = 0, only run for one arch (there are no arch specific packages)
 if [ "$ANYCOUNT" -eq "0" ] ; then
@@ -31,8 +29,8 @@ fi
 #run --build=any for following arch's after the first to prevent re-creating 'all' packages
 DPKG_BUILDOPTS="-b -uc -us"
 for A in $ARCHS; do
-	docker build -f $DIR/Dockerfile.$A -t asl-asterisk_builder.$A $DIR
-	docker run -v $PDIR:/src asl-asterisk_builder.$A --env DPKG_BUILDOPTS="$DPKG_BUILDOPTS" --env BUILD_TARGETS="$BUILD_TARGETS"
-	docker image rm --force asl-asterisk_builder.$A
-	DPKG_BUILDOPTS="--build=any -uc -us"
+       docker build -f $DIR/Dockerfile.$A -t asl-asterisk_builder.$A $DIR
+       docker run -v $PDIR:/src asl-asterisk_builder.$A --env DPKG_BUILDOPTS="$DPKG_BUILDOPTS" --env BUILD_TARGETS="$BUILD_TARGETS"
+       docker image rm --force asl-asterisk_builder.$A
+       DPKG_BUILDOPTS="--build=any -uc -us"
 done
