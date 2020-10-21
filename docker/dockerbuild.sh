@@ -8,7 +8,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PDIR=$(dirname $DIR)
 
 #get the build targets
-cd $DIR
+cd $PDIR
 BUILD_TARGETS=""
 for t in "$TARGETS"; do
   if git diff --name-only HEAD HEAD~1 | grep -q $t/debian/changelog; then
