@@ -13,5 +13,5 @@ for t in "$BUILD_TARGETS"; do
   if [ "$t" == "asterisk" ]; then
     ./bootstrap.sh && ./configure
   fi
-  debuild "$OPTS"
+  debuild $OPTS
 done
