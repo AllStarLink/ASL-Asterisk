@@ -18,7 +18,7 @@ for t in $TARGETS; do
     ANYCOUNT=$((c+ANYCOUNT))
   fi
 done
-BUILD_TARGETS = $(echo "$BUILD_TARGETS" | xargs)
+BUILD_TARGETS=$(echo "$BUILD_TARGETS" | xargs)
 
 
 #if 'any' = 0, only run for one arch (there are no arch specific packages)
