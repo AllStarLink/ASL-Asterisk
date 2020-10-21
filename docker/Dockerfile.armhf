@@ -5,8 +5,6 @@ ARG GROUP_ID
 
 RUN addgroup --gid $GROUP_ID user
 RUN adduser --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID user
-RUN chown -R user / || true
-USER user
 
 # Volumes
 #VOLUME .. /src
@@ -44,5 +42,8 @@ COPY ./entrypoint.sh /entrypoint.sh
 
 # Make Executable
 RUN chmod +x /entrypoint.sh
+
+RUN chown -R user /  2>/dev/null || true
+USER user
 
 ENTRYPOINT ["/entrypoint.sh"]
