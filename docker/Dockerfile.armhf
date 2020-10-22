@@ -43,4 +43,8 @@ COPY ./entrypoint.sh /entrypoint.sh
 # Make Executable
 RUN chmod +x /entrypoint.sh
 
+RUN chown -R user /src
+RUN chown user /entrypoint.sh
+USER user
+
 ENTRYPOINT ["/entrypoint.sh"]
