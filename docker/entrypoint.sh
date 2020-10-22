@@ -14,5 +14,5 @@ for t in "$BUILD_TARGETS"; do
     ./bootstrap.sh && ./configure
   fi
   debuild $OPTS
-  chown -R user .
 done
+chown -R user ..
