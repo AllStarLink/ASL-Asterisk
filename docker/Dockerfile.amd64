@@ -1,7 +1,10 @@
 FROM amd64/debian:buster
 
-# Volumes
-#VOLUME .. /src
+ARG USER_ID
+ARG GROUP_ID
+
+RUN addgroup --gid $GROUP_ID user
+RUN adduser --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID user
 
 # Install build dependencies
 RUN apt-get update && apt-get -y install \
@@ -17,6 +20,9 @@ RUN apt-get update && apt-get -y install \
     wget \
     --no-install-recommends
 
+# Volumes
+#VOLUME .. /src
+
 # clone ASL-Asterisk
 #RUN git clone https://github.com/ajpaul25/ASL-Asterisk.git/ /src
 #WORKDIR /src/asterisk
@@ -24,7 +30,7 @@ RUN apt-get update && apt-get -y install \
 
 # add the kc1kcc repo for build deps
 RUN echo "deb https://kc1kcc.com/repos/asl_builds buster main" > /etc/apt/sources.list.d/kc1kcc_asl_builds.list
-RUN wget -O - http://kc1kcc.com/repos/apt.gpg.key | apt-key add -
+RUN wget -O - https://kc1kcc.com/repos/apt.gpg.key | apt-key add -
 
 # Install application dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \

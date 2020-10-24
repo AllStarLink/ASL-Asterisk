@@ -2,3 +2,4 @@
 *.buildinfo
 *.changes
 *.deb
+build/
