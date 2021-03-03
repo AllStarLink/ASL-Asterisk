@@ -1,3 +1,10 @@
+asl-asterisk (1:1.4.23-8) unstable; urgency=medium
+
+  * Merge in asl-menu and other scripts from ASL-Live-Build
+  * Merge in modules.conf and manager.conf from ASL-Live-Build
+
+ -- Rob Vella <me@robvella.com>  Wed, 3 Mar 2021 13:53:00 -0800
+
 asl-asterisk (1:1.4.23-7) unstable; urgency=medium
 
   * do not enable savenode by default

@@ -1,7 +1,7 @@
-MENUSELECT_APPS=app_skel app_ivrdemo app_osplookup 
-MENUSELECT_CDR=cdr_tds cdr_radius 
-MENUSELECT_CHANNELS=chan_phone chan_nbs chan_alsa chan_h323 chan_mgcp chan_features chan_oss chan_skinny chan_misdn 
-MENUSELECT_CODECS=codec_lpc10 
+MENUSELECT_APPS=app_ivrdemo app_osplookup app_skel 
+MENUSELECT_CDR=cdr_radius cdr_tds 
+MENUSELECT_CHANNELS=chan_nbs chan_phone chan_h323 chan_features chan_misdn 
+MENUSELECT_CODECS=codec_ilbc 
 MENUSELECT_FORMATS=
 MENUSELECT_FUNCS=
 MENUSELECT_PBX=pbx_gtkconsole 
@@ -11,13 +11,13 @@ MENUSELECT_CFLAGS=LOADABLE_MODULES
 MENUSELECT_EMBED=
 MENUSELECT_CORE_SOUNDS=CORE-SOUNDS-EN-ULAW 
 MENUSELECT_MOH=
-MENUSELECT_EXTRA_SOUNDS=EXTRA-SOUNDS-EN-ULAW 
+MENUSELECT_EXTRA_SOUNDS=
 MENUSELECT_ASL_SOUNDS=ASL-SOUNDS-EN-ULAW 
-MENUSELECT_BUILD_DEPS=res_indications app_meetme chan_local res_adsi res_smdi res_monitor res_jabber res_features res_odbc 
+MENUSELECT_BUILD_DEPS=chan_local res_indications app_meetme res_adsi res_smdi res_monitor res_jabber res_features res_odbc 
 MENUSELECT_DEPSFAILED=MENUSELECT_APPS=app_osplookup
-MENUSELECT_DEPSFAILED=MENUSELECT_CDR=cdr_tds
 MENUSELECT_DEPSFAILED=MENUSELECT_CDR=cdr_radius
-MENUSELECT_DEPSFAILED=MENUSELECT_CHANNELS=chan_phone
+MENUSELECT_DEPSFAILED=MENUSELECT_CDR=cdr_tds
 MENUSELECT_DEPSFAILED=MENUSELECT_CHANNELS=chan_nbs
+MENUSELECT_DEPSFAILED=MENUSELECT_CHANNELS=chan_phone
 MENUSELECT_DEPSFAILED=MENUSELECT_CHANNELS=chan_h323
 MENUSELECT_DEPSFAILED=MENUSELECT_CHANNELS=chan_misdn
