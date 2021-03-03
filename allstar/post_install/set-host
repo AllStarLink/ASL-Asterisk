@@ -82,7 +82,7 @@ fi
 
 
 else
-        whiptail --msgbox "We will leave this alone for now." 8 78
+        # whiptail --msgbox "We will leave this alone for now." 8 78
         # comment this out.....maybe
     exit 0
 fi

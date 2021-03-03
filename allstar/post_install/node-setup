@@ -42,7 +42,6 @@ echo "doing calc_wt_size" >> $logfile
 
 do_create_tmp_env() {
 echo "doing do_create_tmp_env" >> $logfile
-whiptail --msgbox "Importing the current node & Echolink configuration and creating the temporary work environment" 20 60 2
         mkdir -p $TMP
         cp -f $CONFIGS/extensions.conf $TMP/extensions.conf.tmp
         cp -f $CONFIGS/echolink.conf $TMP/echolink.conf.tmp
@@ -55,7 +54,7 @@ whiptail --msgbox "Importing the current node & Echolink configuration and creat
         cp -f $CONFIGS/simpleusb.conf $TMP/simpleusb.conf.tmp
         cp -f $CONFIGS/voter.conf $TMP/voter.conf.tmp
         CURRENT_NODE=$(grep -o '^\[[0-9]*\]' $TMP/rpt.conf.tmp | sed 's/.*\[\([^]]*\)\].*/\1/g')
-        CURRENT_REG1=$(grep 'register =' $TMP/iax.conf.tmp | awk -F'=' '{print $2}' | awk -F'   ;' '{print $1}')
+        CURRENT_REG1=$(grep -e 'register[ \t]*=[ \t]*' $TMP/iax.conf.tmp | awk -F'=' '{print $2}' | awk -F'   ;' '{print $1}')
         CURRENT_REG=$(echo "$CURRENT_REG1" | awk -F'@' '{print $1}')
         CURRENT_REG_NODE=$(echo "$CURRENT_REG" | awk -F':' '{print $1}')
         CURRENT_REG_PSWD=$(echo "$CURRENT_REG" | awk -F':' '{print $2}')
@@ -112,7 +111,7 @@ do_rxchannel_set        #comments out all rxchannel statemnets and uncomments wi
 do_iax_node             #set node:password on register line of rpt.conf
 do_rpt_node             #set node number and call sign in rpt.conf
 do_extensions_node      #set node variable in extensions.conf
-do_rpt_statpost         #uncomment statpost lines in rpt.conf
+# do_rpt_statpost         #uncomment statpost lines in rpt.conf
 do_rpt_duplex           #sets duplex type in rpt.conf
 do_iface_nodenum        #sets node number in usbradio.conf simpleusb.conf voter.conf
 whiptail --msgbox "Node Number, Call Sign and the node password have been \nsaved in $TMP/FILENAME.conf.tmp \n From the Main Menu Select (SAVE) \nto Save changes and backup originals" 20 60 2
@@ -216,9 +215,8 @@ echo "doing do_echolink_config" >> $logfile
 do_echolink_enable() {
 # sets chan_echolink.so to LOAD
 echo "doing do_echolink_enable" >> $logfile
-        whiptail --msgbox "Enabling Echolink channel drivers" 20 60 2
+        # whiptail --msgbox "Enabling Echolink channel drivers" 20 60 2
         sed -i '/chan_echolink/s/^noload/load/g' $TMP/modules.conf.tmp
-
 }
 
 do_build_allmon() {
@@ -374,7 +372,7 @@ do_iax_node() {
 # uncomments register line of iax.conf and swaps node num. and passwd
 echo "doing do_iax_node" >> $logfile
         whiptail --msgbox "Enabling Allstarlink.org registration \nin iax.conf for $NEWNODE , $NEWPSWD" 20 60 2
-        sed -i 's/^[ \t]*;[ \t]*register[ \t]*=/register =/g' $TMP/iax.conf.tmp
+        sed -i 's/^[ \t]*;[ \t]*register[ \t]*=/register=/g' $TMP/iax.conf.tmp
         sed -i "s/$CURRENT_REG_NODE/$NEWNODE/g" $TMP/iax.conf.tmp
         sed -i "s/$CURRENT_REG_PSWD/$NEWPSWD/g" $TMP/iax.conf.tmp
         AST_RESTART=1

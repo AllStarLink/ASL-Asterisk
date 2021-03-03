@@ -1,9 +1,9 @@
 #!/bin/bash
-#ASL-MENU
-#V2.1
-#2018 May
-#By N8THN
-#release date 20181016
+# ASL-MENU
+# V2.1
+# 2018 May
+# By N8THN
+# Modifications by KK9ROB 2021/02/25
 clear
 
 # define variables
@@ -11,7 +11,6 @@ rm -f /tmp/asl-menu.log
 logfile=/tmp/asl-menu.log
 #logfile=/dev/null
 ## all other variables defined in get_node_info
-
 
 check_if_root() {
 echo "check_if_root" >> $logfile
@@ -49,8 +48,9 @@ CONFIGS=/etc/asterisk
 WEBROOT=/var/www/html
 TMP=/tmp
 
-FAIL2BANFILE=/etc/fail2ban/jail.local
-FIREWALLFILE=/etc/iptables.conf
+FAIL2BANFILE=/etc/fail2ban/jail.d/allstar.conf
+#FIREWALLFILE=/etc/iptables.conf
+FIREWALLFILE=/etc/iptables/rules.v4
 
 APTGET=$(which apt-get)
 PING=$(which ping)
@@ -236,7 +236,7 @@ fi
 do_is_fw_installed() {
 echo "do_is_fw_installed" >> $logfile
 $DPKG_QUERY -l | grep iptables > /dev/null
-if [ $? = 0 ] && [ -f /etc/network/if-up.d/firewall ]; then
+if [ $? = 0 ]; then
 IPTAB_YN=YES
 echo "IPTAB_YN=YES" >> $logfile
 else
@@ -592,18 +592,12 @@ fi
 do_install_fail2ban() {
 echo "do_install_fail2ban" >> $logfile
 if (whiptail --title "Install fail2ban?" --yesno "A FIREWALL MUST BE INSTALLED FIRST\n\nWould you like to install the fail2ban firewall addon?" 20 60) then
-        do_is_f2b_installed
-        if [ $F2B_YN = "YES" ]; then
-                whiptail --msgbox "We will update the fail2ban package to latest version\nuse the System Security Menu page for configuration options" 20 60 2
-                $APTGET update
-                $APTGET -y install --only-upgrade fail2ban
-        else
-                whiptail --msgbox "We will install the fail2ban package\nuse the System Security Menu page for configuration options" 20 60 2
-                $APTGET update
-                $APTGET -y install fail2ban
-                do_set_precon_firewall
-                do_set_precon_fail2ban
-        fi
+        whiptail --msgbox "We will install the fail2ban package\nuse the System Security Menu page for configuration options" 20 60 2
+        $APTGET update
+        $APTGET -y install fail2ban
+        do_set_precon_firewall
+        do_set_precon_fail2ban
+
         whiptail --msgbox "The pre-configured firewall and fail2ban rules have been loaded\nYou may edit the fail2ban rules from the System Securities Menu" 20 60 2
 fi
 }
@@ -888,7 +882,6 @@ whiptail --msgbox "Firewall rules installed and loaded." 20 60 2
 else
 
 whiptail --msgbox "This will only allow the ports necessary for ASL to function.\nAll other ports will be blocked." 20 60 2
-whiptail --msgbox "Using port numbers listed in current configuration files." 20 60 2
 get_node_info
 # IF FAIL2BAN NOT INSTALLED
 
@@ -996,7 +989,7 @@ fi
 do_edit_fail2ban() {
 echo "do_edit_fail2ban" >> $logfile
 if [ ! -f $FAIL2BANFILE ]; then
-        whiptail --msgbox "Fail2ban jail.local not found, is fail2ban service installed?" 20 60 2
+        whiptail --msgbox "Fail2ban $FAIL2BANFILE not found, is fail2ban service installed?" 20 60 2
         else
         nano $FAIL2BANFILE
         $SERVICE fail2ban restart > /dev/null

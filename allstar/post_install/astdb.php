@@ -2,7 +2,7 @@
 <?php
 
 // Read AllStar database
-$url = "https://allstarlink.org/cgi-bin/allmondb.pl";
+$url = "http://allmondb.allstarlink.org";
 $astArr = file($url);
 
 // Read private nodes
@@ -23,7 +23,7 @@ if (!empty($privateArr)) {
 natsort($fileArr);
 
 // Output
-$db = "astdb.txt";
+$db = "/var/log/asterisk/astdb.txt";
 if (! $fh = fopen($db, 'w')) {
     die("Cannot open $db.");
 }

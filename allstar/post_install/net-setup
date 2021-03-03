@@ -189,7 +189,7 @@ fi
 
 if [ $ANSWER = 1 ]
 then
-        whiptail --msgbox "You may set up your IP address settings later" 8 78
+        # whiptail --msgbox "You may set up your IP address settings later" 8 78
         exit 0
 else
 do_dhcpcd_yn
