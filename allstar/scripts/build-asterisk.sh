@@ -42,7 +42,7 @@ cp uridiag /usr/local/bin/uridiag
 # cp -r /srv/configs/* .
 
 # Install Nodelist updater
-cp /usr/src/astsrc-1.4.23-pre/allstar/rc.updatenodelist /usr/local/bin/rc.updatenodelist
+# cp /usr/src/astsrc-1.4.23-pre/allstar/rc.updatenodelist /usr/local/bin/rc.updatenodelist
 
 # echo " If all looks good, edit iax.conf extensions.conf and rpt.conf"
 # echo " Pay attention to the top of rpt.conf"

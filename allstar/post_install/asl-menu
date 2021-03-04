@@ -406,20 +406,20 @@ ASLVERS=$($ASTERISK -rx "core show version")
 whiptail --msgbox "ASL Version:\n$ASLVERS" 20 70 2
 }
 
-do_validate_updatenodelist_running() {
-echo "do_validate_updatenodelist_running" >> $logfile
-ps -aux | grep updatenodelist
+do_validate_update-node-list_running() {
+echo "do_validate_update-node-list_running" >> $logfile
+ps -aux | grep update-node-list
 if [ $? -eq 0 ]; then #yes
-whiptail --msgbox "updatenodeslist program IS running" 20 60 2
+whiptail --msgbox "update-node-list program IS running" 20 60 2
 else
-whiptail --msgbox "updatenodeslist program is NOT running" 20 60 2
+whiptail --msgbox "update-node-list program is NOT running" 20 60 2
 fi
 }
 
-do_updatenodelist_restart() {
-echo "do_updatenodelist_restart" >> $logfile
-$SERVICE updatenodelist restart
-whiptail --msgbox "The updatenodelist program has been restarted" 20 60 2
+do_update-node-list_restart() {
+echo "do_update-node-list_restart" >> $logfile
+$SERVICE update-node-list restart
+whiptail --msgbox "The update-node-list program has been restarted" 20 60 2
 
 }
 
@@ -480,8 +480,8 @@ $ASTERISK -rx "core show version" >> $sendtoadminfile
 echo "" >> $sendtoadminfile
 echo "Current date and time: $DATEEXT" >> $sendtoadminfile
 echo "" >> $sendtoadminfile
-echo "updatenodelist service running?" >> $sendtoadminfile
-ps -aux | grep updatenodelist >> $sendtoadminfile
+echo "update-node-list service running?" >> $sendtoadminfile
+ps -aux | grep update-node-list >> $sendtoadminfile
 echo "" >> $sendtoadminfile
 echo "/tmp/rpt_extnodes-temp file" >> $sendtoadminfile
 ls -l /tmp/rpt_extnodes-temp >> $sendtoadminfile
@@ -1345,8 +1345,8 @@ RET=0
       "B " "Ping register.allstarlink.org" \
       "C " "Show IAX2 registry" \
       "D " "Show ASL-Asterisk version" \
-      "E " "Validate updatenodelist service is running" \
-      "F " "Restart updatenodelist program" \
+      "E " "Validate update-node-list service is running" \
+      "F " "Restart update-node-list program" \
       "G " "Restart ASL Asterisk (astres.sh)" \
       "H " "Start ASL Asterisk (astup.sh)" \
       "I " "Stop ASL Asterisk (astdn.sh)" \
@@ -1362,8 +1362,8 @@ RET=0
         B\ *) do_ping_reg_asl ;;
         C\ *) do_iax_show_reg ;;
         D\ *) do_asl_version_show ;;
-        E\ *) do_validate_updatenodelist_running ;;
-        F\ *) do_updatenodelist_restart ;;
+        E\ *) do_validate_update-node-list_running ;;
+        F\ *) do_update-node-list_restart ;;
         G\ *) do_astres ;;
         H\ *) do_astup ;;
         I\ *) do_astdn ;;

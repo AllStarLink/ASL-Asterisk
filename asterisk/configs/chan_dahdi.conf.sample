@@ -47,7 +47,7 @@
 ;
 ; Default context
 ;
-context=default
+;context=default
 ;
 ; Switchtype:  Only used for PRI.
 ;
@@ -59,7 +59,7 @@ context=default
 ; ni1:            Old National ISDN 1
 ; qsig:           Q.SIG
 ;
-switchtype=national
+;switchtype=national
 ;
 ; Some switches (AT&T especially) require network specific facility IE
 ; supported values are currently 'none', 'sdn', 'megacom', 'tollfreemegacom', 'accunet'
@@ -203,7 +203,7 @@ switchtype=national
 ;                 (2-way)
 ; sf_rxtx:        Same as sf_txrx (for our dyslexic friends)
 ;
-signalling=fxo_ls
+signalling=em_txrx
 ;
 ; If you have an outbound signalling format that is different from format
 ; specified above (but compatible), you can specify outbound signalling format,
@@ -230,7 +230,7 @@ signalling=fxo_ls
 ;    rxflash:     Receiver flashtime (default 1250ms)
 ;    debounce:    Debounce timing (default 600ms)
 ;
-rxwink=300		; Atlas seems to use long (250ms) winks
+; rxwink=300		; Atlas seems to use long (250ms) winks
 ;
 ; How long generated tones (DTMF and MF) will be played on the channel
 ; (in milliseconds)
@@ -244,7 +244,7 @@ rxwink=300		; Atlas seems to use long (250ms) winks
 ;
 ; Whether or not to use caller ID
 ;
-usecallerid=yes
+; usecallerid=yes
 ;
 ; Type of caller ID signalling in use
 ;     bell     = bell202 as used in US
@@ -263,14 +263,14 @@ usecallerid=yes
 ;
 ; Whether or not to hide outgoing caller ID (Override with *67 or *82)
 ;
-hidecallerid=no
+; hidecallerid=no
 ;
 ; Whether or not to enable call waiting on internal extensions
 ; With this set to 'yes', busy extensions will hear the call-waiting
 ; tone, and can use hook-flash to switch between callers. The Dial()
 ; app will not return the "BUSY" result for extensions.
 ;
-callwaiting=yes
+; callwaiting=yes
 ;
 ; Whether or not restrict outgoing caller ID (will be sent as ANI only, not
 ; available for the user)
@@ -282,7 +282,7 @@ callwaiting=yes
 ; calling switch is sending.
 ; See doc/callingpres.txt
 ;
-usecallingpres=yes
+; usecallingpres=yes
 ;
 ; Some countries (UK) have ring tones with different ring tones (ring-ring),
 ; which means the callerid needs to be set later on, and not just after
@@ -293,11 +293,11 @@ usecallingpres=yes
 ;
 ; Support Caller*ID on Call Waiting
 ;
-callwaitingcallerid=yes
+; callwaitingcallerid=yes
 ;
 ; Support three-way calling
 ;
-threewaycalling=yes
+; threewaycalling=yes
 ;
 ; For FXS ports (either direct analog or over T1/E1):
 ;   Support flash-hook call transfer (requires three way calling)
@@ -310,20 +310,20 @@ threewaycalling=yes
 ;   the transfer to the ISDN switch, since it sent in a FACILITY
 ;   message.
 ;
-transfer=yes
+;transfer=yes
 ;
 ; Allow call parking
 ; ('canpark=no' is overridden by 'transfer=yes')
 ;
-canpark=yes
+;canpark=yes
 ;
 ; Support call forward variable
 ;
-cancallforward=yes
+;cancallforward=yes
 ;
 ; Whether or not to support Call Return (*69)
 ;
-callreturn=yes
+;callreturn=yes
 ;
 ; Stutter dialtone support: If a mailbox is specified without a voicemail 
 ; context, then when voicemail is received in a mailbox in the default 
@@ -355,13 +355,13 @@ callreturn=yes
 ; modules, they take precedence over the software echo canceller compiled
 ; into DAHDI automatically.
 ;
-echocancel=yes
+;echocancel=yes
 ;
 ; Generally, it is not necessary (and in fact undesirable) to echo cancel when
 ; the circuit path is entirely TDM.  You may, however, change this behavior
 ; by enabling the echo cancel during pure TDM bridging below.
 ;
-echocancelwhenbridged=yes
+;echocancelwhenbridged=yes
 ;
 ; In some cases, the echo canceller doesn't train quickly enough and there
 ; is echo at the beginning of the call.  Enabling echo training will cause
@@ -388,21 +388,23 @@ echocancelwhenbridged=yes
 ;
 ; You may also set the default receive and transmit gains (in dB)
 ;
-rxgain=0.0
-txgain=0.0
+;rxgain=0.0
+;txgain=0.0
 ;
 ; Logical groups can be assigned to allow outgoing rollover.  Groups range
 ; from 0 to 63, and multiple groups can be specified.
 ;
-group=1
+group=9
+channel=pseudo
+
 ;
 ; Ring groups (a.k.a. call groups) and pickup groups.  If a phone is ringing
 ; and it is a member of a group which is one of your pickup groups, then
 ; you can answer it by picking up and dialling *8#.  For simple offices, just
 ; make these both the same.  Groups range from 0 to 63.
 ;
-callgroup=1
-pickupgroup=1
+;callgroup=1
+;pickupgroup=1
 
 ;
 ; Specify whether the channel should be answered immediately or if the simple
@@ -410,7 +412,7 @@ pickupgroup=1
 ; Note: If immediate=yes the dialplan execution will always start at extension
 ; 's' priority 1 regardless of the dialed number!
 ;
-immediate=no
+;immediate=no
 ;
 ; Specify whether flash-hook transfers to 'busy' channels should complete or
 ; return to the caller performing the transfer (default is yes).
