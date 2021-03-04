@@ -1,0 +1,5 @@
+debian/allstar-helpers*
+.debhelper
+debian/files
+debian/debhelper-build-stamp
+

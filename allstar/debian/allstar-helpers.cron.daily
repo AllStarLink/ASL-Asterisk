@@ -1,0 +1,5 @@
+#!/bin/bash
+# KK9ROB 2021/03/03
+
+# Get new allmon data daily
+/usr/sbin/astdb.php

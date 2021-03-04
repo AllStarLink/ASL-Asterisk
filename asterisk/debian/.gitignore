@@ -5,6 +5,7 @@ asl-asterisk-dbg/
 asl-asterisk-dev/
 asl-asterisk-doc/
 asl-asterisk-sounds-main/
+asl-asterisk.postrm.debhelper
 asl-asterisk/
 files
 stamp-patched

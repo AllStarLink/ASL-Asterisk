@@ -2,6 +2,7 @@
 
 %:
 	dh $@  
+	dh_installcron -i
 
 #override_dh_installsystemd:
 #	dh_installsystemd --name updatenodelist
