@@ -24,7 +24,17 @@ case "$1" in
 	fi
 
     # Remove service from ASL-Live-Build
-    rm -f /etc/systemd/system/asterisk.service
+    set +e
+
+	if [ -f /etc/systemd/system/asterisk.service ]; then
+        rm -f /etc/systemd/system/asterisk.service
+        rm -f /etc/init.d/asl-asterisk
+
+        systemctl disable asterisk.service
+        systemctl stop asterisk.service 
+    fi
+
+    set -e 
 
 	# add asterisk to required groups
 	for group in dialout audio; do
