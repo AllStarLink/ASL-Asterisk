@@ -1,39 +1,26 @@
 ; Inter-Asterisk eXchange driver definition
-; http://docs.allstarlink.org/drupal/node/15 
-
-; ulaw, alaw, GSM and ADPCM should only be used, 
-; the rest of the standard Asterisk codecs
-; This needs to be updated
-; (speex, ilbc, lpc10, etc) should be avoided.
-
-; The ulaw and alaw codecs have the best audio quality,
-; followed by ADPCM, and lastly GSM,
-; Bandwidth used is in the reverse order to audio quality. 
-; GSM uses the least bandwidth, and alaw/ulaw the most. 
-
-; CODEC         AUDIO QUALITY           BANDWIDTH (including IP and Ethernet headers)
-; ULAW          best                    87 kbps
-; ADPCM         good                    55 kbps
-; GSM           mediocre                36 kbps
-
 
 [general]
-bindport = 4569			; bindport and bindaddr may be specified
-                                ; NOTE: bindport must be specified BEFORE
-				; bindaddr or may be specified on a specific
-				; bindaddr if followed by colon and port
-				;  (e.g. bindaddr=192.168.0.1:4569)
+; !!! Change this to match your node registration !!!
+; register=1999:123456@register.allstarlink.org    ; This must be changed to your node number, password 
+; remove the leading ";"
 
-; bindaddr = 192.168.0.1	; more than once to bind to multiple
+bindport = 4569    ; bindport and bindaddr may be specified
+
+; NOTE: bindport must be specified BEFORE
+; bindaddr or may be specified on a specific
+; bindaddr if followed by colon and port
+;  (e.g. bindaddr=192.168.0.1:4569)
+
+; bindaddr = 192.168.0.1    ; more than once to bind to multiple
                                 ; addresses, but the first will be the 
                                 ; default
 
-disallow = all			; The permitted codecs for outgoing connections 
-				; Audio Quality	Bandwidth
-;allow = ulaw			; best		87 kbps
-;allow = adpcm			; good		55 kbps
-;allow = gsm			; medicore	36 kbps
-
+disallow = all    ; The permitted codecs for outgoing connections 
+    ; Audio Quality    Bandwidth
+;allow = ulaw    ; best    87 kbps
+;allow = adpcm    ; good    55 kbps
+;allow = gsm    ; medicore    36 kbps
 allow = ulaw
 allow = adpcm
 allow = g722
@@ -57,8 +44,6 @@ delayreject = yes
 ; iaxthreadcount = 30                                                              
 ; iaxmaxthreadcount = 150   
 
-; register = 1999:123456@register.allstarlink.org	; This must be changed to your node number, password 
-                                                	; remove the leading ";"
 
 ; Incoming radio connections
 
@@ -71,15 +56,13 @@ allow = g722
 allow = g726aal2
 allow = gsm
 allow = ilbc
-
-
 codecpriority = host
 context = radio-secure
 transfer = no
 
-[iaxrpt]                        	; Connect from iaxrpt Username field (PC AllStar Client)
-type = user                       	; Notice type is user here <---------------
-context = iaxrpt			; Context to jump to in extensions.conf
+[iaxrpt]                            ; Connect from iaxrpt Username field (PC AllStar Client)
+type = user                           ; Notice type is user here <---------------
+context = iaxrpt    ; Context to jump to in extensions.conf
 auth = md5
 secret = Your_Secret_Pasword_Here
 host = dynamic
@@ -89,9 +72,9 @@ allow = adpcm
 allow = gsm                       
 transfer = no
 
-[iaxclient]                     	; Connect from iax client (Zoiper...)
-type = friend                     	; Notice type here is friend <--------------
-context = iax-client              	; Context to jump to in extensions.conf
+[iaxclient]                         ; Connect from iax client (Zoiper...)
+type = friend                         ; Notice type here is friend <--------------
+context = iax-client                  ; Context to jump to in extensions.conf
 auth = md5
 secret = Your_Secret_Password_Here
 host = dynamic
