@@ -19,4 +19,4 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-
+Alias=asterisk.service
