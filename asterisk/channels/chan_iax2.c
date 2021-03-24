@@ -10224,7 +10224,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 			sprintf(url, "%.8s://%.30s/%.50s", proto, reg->hostname, reg->path);
 		hs = curl_slist_append(hs, "Content-Type:application/json");
 		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllstarClient/1.01");
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllStarClient/2.0.0-beta");
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request);

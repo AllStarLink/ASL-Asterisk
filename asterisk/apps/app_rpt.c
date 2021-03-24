@@ -5715,7 +5715,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 		curl = curl_easy_init();
 		if(curl) {
 			curl_easy_setopt(curl, CURLOPT_URL, str);
-			curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllstarClient/1.01");
+			curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllStarClient/2.0.0-beta");
 			curl_easy_perform(curl);
 			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
 			curl_easy_cleanup(curl);
@@ -20730,9 +20730,9 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			}
                 	p = strstr(tdesc, "version");
                 	if(p){
-				int vmajor,vminor;
-				if(sscanf(p, "version %d.%d", &vmajor, &vminor) == 2)
-					sprintf(str + strlen(str),"&apprptvers=%d.%d",vmajor,vminor);
+				int vmajor,vminor,vpatch;
+				if(sscanf(p, "version %d.%d.%d", &vmajor, &vminor, &vpatch) == 3)
+					sprintf(str + strlen(str),"&apprptvers=%d.%d",vmajor,vminor,vpatch);
 			}
 			time(&now);
 			sprintf(str + strlen(str),"&apprptuptime=%d",(int)(now-starttime));
