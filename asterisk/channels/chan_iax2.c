@@ -38,6 +38,7 @@
  ***/
 
 #include "asterisk.h"
+#include "asterisk/version.h"
 
 ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 

@@ -1,5 +1,5 @@
 #!/bin/sh
 
-VERSION="GIT Version "$(git log -1 --format="%h")
+VERSION="GIT "$(git log -1 --format="%h")
 echo "${VERSION}"
 echo "${VERSION}" > .version
