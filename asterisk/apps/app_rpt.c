@@ -5715,7 +5715,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 		curl = curl_easy_init();
 		if(curl) {
 			curl_easy_setopt(curl, CURLOPT_URL, str);
-			curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllStarClient/2.0.0-beta");
+			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
 			curl_easy_perform(curl);
 			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
 			curl_easy_cleanup(curl);
