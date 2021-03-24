@@ -644,7 +644,7 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 0.327 11/24/2016";
+static  char *tdesc = "Radio Repeater / Remote Base  version 2.0.0-beta 03/24/2021";
 
 static char *app = "Rpt";
 
