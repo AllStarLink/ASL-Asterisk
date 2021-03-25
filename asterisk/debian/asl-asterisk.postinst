@@ -26,12 +26,20 @@ case "$1" in
     # Remove service from ASL-Live-Build
     set +e
 
-	if [ -f /etc/systemd/system/asterisk.service ]; then
+    if [ -f /etc/systemd/system/asterisk.service ]; then
         rm -f /etc/systemd/system/asterisk.service
         rm -f /etc/init.d/asl-asterisk
 
         systemctl disable asterisk.service
         systemctl stop asterisk.service 
+
+    fi
+
+    # Re-install service so aliases come through
+    if [ -f /lib/systemd/system/asl-asterisk.service ]; then
+        systemctl daemon-reload
+        systemctl disable asl-asterisk.service
+        systemctl enable asl-asterisk.service
     fi
 
     set -e 
