@@ -4,13 +4,13 @@ This is the Asterisk source package for AllStarLink and the files to build the A
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
-AllStarLink wiki: https://wiki.allstarlink.org
+AllStarLink Wiki: https://wiki.allstarlink.org
+
+AllStarLink Community Forum: https://community.allstarlink.org/
 
 AllStarLink Portal:  https://www.allstarlink.org
 
-Official AllStarLink mailing list - app_rpt-users: http://lists.allstarlink.org
-
-AllStarLink Network/System status:  https://grafana.allstarlink.org
+AllStarLink Node Stats:  https://stats.allstarlink.org
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -24,8 +24,13 @@ AllStarLink Network/System status:  https://grafana.allstarlink.org
 apt update</pre>
 
 * Install apt dependencies
-<pre>
-apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev libpq-dev unixodbc-dev libpri-dev libvpb-dev asl-dahdi-source libnewt-dev libsqlite-dev libspeex-dev libspeexdsp-dev libcurl4-openssl-dev libpopt-dev libiksemel-dev freetds-dev libvorbis-dev libsnmp-dev libcap-dev libi2c-dev libjansson-dev raspberrypi-kernel-headers build-essential git cmake g++ libboost-all-dev libgmp-dev swig python3-numpy asl-dahdi-source</pre>
+```
+apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev libpq-dev \
+  unixodbc-dev libpri-dev libvpb-dev asl-dahdi-source libnewt-dev libsqlite-dev libspeex-dev \
+  libspeexdsp-dev libcurl4-openssl-dev libpopt-dev libiksemel-dev freetds-dev libvorbis-dev \
+  libsnmp-dev libcap-dev libi2c-dev libjansson-dev raspberrypi-kernel-headers build-essential \
+  git cmake g++ libboost-all-dev libgmp-dev swig python3-numpy asl-dahdi-source
+```
 
 ## Compiling
 <pre>
@@ -36,7 +41,7 @@ make
 make install
 </pre>
 
-If all goes well, you will have cloned, configured, compiled and installed the Astersisk 1.4.23pre and app_rpt suite of programs that comprise the ASL 1.01+ release onto your system.
+If all goes well, you will have cloned, configured, compiled and installed the Astersisk 1.4.23pre and app_rpt suite of programs that comprise the ASL 2.0.0+ release onto your system.
 
 Packaging (.deb)
 
@@ -52,7 +57,9 @@ debuild -b -us -uc
 
 ## Help
 
-Refer to the app_rpt-users mailing list and AllStarLink Wiki for information on the app_rpt suite of programs.
+Community Forum: https://community.allstarlink.org/
+AllStarLink Wiki: http://wiki.allstarlink.org
+E-Mail: developers@allstarlink.org
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
