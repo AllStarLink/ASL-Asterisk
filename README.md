@@ -33,25 +33,28 @@ apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev
 ```
 
 ## Compiling
-<pre>
+Packaging (.deb)
+
+This will compile and package AllStar into .deb files. You do not need to run configure or make before doing this.
+
+```
+git clone https://github.com/AllStarLink/ASL-Asterisk.git
+cd ASL-Asterisk/asterisk
+debuild -b -us -uc
+```
+
+.debs will appear in the repository root folder after compiling and packaging
+
+Manually
+```
 git clone https://github.com/AllStarLink/ASL-Asterisk.git
 cd ASL-Asterisk/asterisk
 ./configure
 make
 make install
-</pre>
+```
 
 If all goes well, you will have cloned, configured, compiled and installed the Astersisk 1.4.23pre and app_rpt suite of programs that comprise the ASL 2.0.0+ release onto your system.
-
-Packaging (.deb)
-
-<pre>
-git clone https://github.com/AllStarLink/ASL-Asterisk.git
-cd ASL-Asterisk/asterisk
-debuild -b -us -uc
-</pre>
-
-.debs will appear in the repository root folder after compiling and packaging
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
