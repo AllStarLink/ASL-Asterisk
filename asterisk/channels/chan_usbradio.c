@@ -251,6 +251,8 @@ START_CONFIG
 
 	; rxondelay=0		  ; number of 20ms intervals to hold off receiver turn-on indication
 
+	; txoffdelay=0		  ; number of 20ms intervals to hold off receiver turn-on indication (only after transmitter unkeys)
+	
 	; duplex3 = 0		; duplex 3 gain setting (0 to disable)
 
 	; gpioX=in		; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
@@ -579,7 +581,9 @@ struct chan_usbradio_pvt {
 	char txtestkey;
 
 	int rxoncnt;
+	int txoffcnt;
 	int rxondelay;
+	int txoffdelay; // This is the value which RX is ignored after TX Unkey
 
 	time_t lasthidtime;
     struct ast_dsp *dsp;
@@ -748,6 +752,7 @@ static struct chan_usbradio_pvt usbradio_default = {
 	.rptnum = 0,
 	.usedtmf = 1,
 	.rxondelay = 0,
+	.txoffdelay = 0,
 };
 
 /*	DECLARE FUNCTION PROTOTYPES	*/
@@ -2974,11 +2979,19 @@ static struct ast_frame *usbradio_read(struct ast_channel *c)
 	if(o->rxsdtype == SD_PP) sd = o->rxppctcss;
 	if(o->rxsdtype == SD_PP_INVERT) sd = !o->rxppctcss;
 	if (o->rxctcssoverride) sd = 1;
+	// Timers for how long TX has ben unkeyed
+	// This is used for the TX offdelay
+	if (o->txkeyed == 1)
+		o->txoffcnt = 0; // If keyed, set this to zero.
+	if (o->txkeyed == 0)
+		o->txoffcnt++; // Timer starts after radio unkeys.
+	if (o->txoffcnt > 50000)
+		o->txoffcnt=20000; // This prevents integer overflow
 	if ( cd && sd)
 	{
 		//if(!o->rxkeyed)o->pmrChan->dd.b.doitnow=1;
 		if(!o->rxkeyed && o->debuglevel)ast_log(LOG_NOTICE,"o->rxkeyed = 1, chan %s\n", o->owner->name);
-		if (o->rxkeyed || (o->rxoncnt >= o->rxondelay))
+		if (o->rxkeyed || ((o->txoffcnt >= o->txoffdelay) && ( o->rxoncnt >= o->rxondelay)))
 			o->rxkeyed = 1;
 		else o->rxoncnt++;
 	}
@@ -5303,6 +5316,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_UINT("tracetype",o->tracetype)
 			M_UINT("tracelevel",o->tracelevel)
 			M_UINT("rxondelay",o->rxondelay);
+			M_UINT("txoffdelay",o->txoffdelay);
 			M_UINT("area",o->area)
 			M_STR("ukey",o->ukey)
  			M_UINT("duplex3",o->duplex3)
