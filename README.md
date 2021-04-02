@@ -21,7 +21,7 @@ AllStarLink Node Stats:  https://stats.allstarlink.org
 * Install the ASL Repo
 
 <pre>
-echo "deb http://apt.allstarlink.org/repos/asl_builds buster main" > /etc/apt/sources.list.d/allstarlink.list
+echo "deb http://apt.allstarlink.org/repos/asl_builds buster main" > /etc/apt/sources.list.d/allstar.list
 curl -s http://apt.allstarlink.org/repos/repo_signing.key | sudo apt-key add -
 apt update</pre>
 </pre>
