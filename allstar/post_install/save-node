@@ -1,49 +1,47 @@
 #!/usr/bin/env bash
-set -o errexit
 
 # N4IRS 07/26/2017
 # mod4whip N8THN 2018
 #release date 20180323-1
-#################################################
-#                                               #
-#                                               #
-#                                               #
-#################################################
+#Fixes by WD6AWP 3/8/2021
 
 SAVESITE=http://backup.allstarlink.org
+SAVENODEFILE=/etc/asterisk/savenode.conf
 
-if [ -r /etc/asterisk/savenode.conf ]
-then
-        .  /etc/asterisk/savenode.conf
+# source config file, exit on error
+if [ -r /etc/asterisk/savenode.conf ]; then
+    .  /etc/asterisk/savenode.conf
 else
-        whiptail --msgbox "Savenode.conf file does not exist. Exiting." 20 60 2
-        exit 0
+    whiptail --msgbox "Sorry, $SAVENODEFILE file does not exist." 20 60
+    exit 0
 fi
 
-if [ .$ENABLE = "." ]
-then
-        exit 0
+if [ .$ENABLE = "." ]; then
+    whiptail --msgbox "Configuration file $SAVENODEFILE is not configured. Please use the ASL Configuration Menu to edit savenode.conf." 20 60
+    exit 0
 fi
 
-if [ $ENABLE -eq 0 ]
-then
-        exit 0
+if [ $ENABLE -eq 0 ]; then
+    whiptail --msgbox "Configuration file $SAVENODEFILE is not configured. Please use the ASL Configuration Menu to edit savenode.conf." 20 60
+    exit 0
 fi
 
-whiptail --msgbox "Saving Asterisk node configuration to $SAVESITE" 20 60 2
+#Config file looks good
+whiptail --msgbox "Ready to save ASL node $NODE configuration to $SAVESITE." 20 60
 
-cd / && tar czf /tmp/astsave.tgz  etc/asterisk > /dev/null
-if [ $? -eq 0 ]
-then
-        wget -q --timeout=60 --tries=1 --post-file=/tmp/astsave.tgz  \
-            --http-user=$NODE --http-password=$PASSWORD -O- \
-            $SAVESITE/savenode.cgi
-        if [ $? -ne 0 ]
-        then
-                whiptail --msgbox "Error in transfer." 20 60 2
-        else
-                whiptail --msgbox "File transfer successful." 20 60 2
-        fi
+cd / && tar czf /tmp/astsave.tgz etc/asterisk > /dev/null
+
+if [ $? -eq 0 ]; then
+    wget -q --timeout=60 --tries=1 --post-file=/tmp/astsave.tgz  \
+        --http-user=$NODE --http-password=$PASSWORD -O- \
+        $SAVESITE/savenode.cgi
+
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+        whiptail --msgbox "There was an error in the file transfer. Exit code $exitcode." 20 60
+    else
+        whiptail --msgbox "File transfer successful." 20 60
+    fi
 fi
 #rm -r /tmp/astsave.tgz > /dev/null
 exit 0
