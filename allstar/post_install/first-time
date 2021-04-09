@@ -13,19 +13,36 @@ if [ $EUID -ne 0 ]; then
 fi
 }
 
-title="First Time Setup"
+title="ASL 2.0.0-Beta"
+
+calc_wt_size() {
+    echo "doing calc_wt_size" >> $logfile
+    WT_HEIGHT=22
+    WT_WIDTH=$(tput cols)
+
+    if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
+        WT_WIDTH=80
+    fi
+    if [ "$WT_WIDTH" -gt 178 ]; then
+        WT_WIDTH=120
+    fi
+    WT_MENU_HEIGHT=$(($WT_HEIGHT-10))
+}
+
 
 do_welcome() {
-ANSWER=1
-MSG="Welcome to the AllStarLink First Time Setup. This script will walk you through the settings to get your AllStarLink node running."
-MSG="${MSG}\n\nWould you like to run setup now?"
-if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
-    ANSWER=$?
-fi
-if [ "$ANSWER" = "0" ]; then #answered yes
-    return
-fi
-exit 0
+    calc_wt_size
+    ANSWER=1
+    MSG="AllStarLink First Time Setup.\n\nThis script will walk you through the initial server settings for your AllStarLink node. "
+    MSG="${MSG}You will be asked a number of questions. You may run this setup as many times as you like."
+    MSG="${MSG}\n\nWould you like to run setup now?"
+    if (whiptail --title "$title" --yesno "${MSG}" 18 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then #answered yes
+        return
+    fi
+    exit 0
 }
 
 do_check_if_firsttime() {
@@ -46,34 +63,34 @@ fi
 do_set_root_passwd() {
 ANSWER=1
 MSG="The root login is disabled for SSH and CONSOLE login.\n\n"
-MSG="${MSG}However, the password for the repeater ID may be changed now. "
-MSG="${MSG}It is strongly recommended to change your repeater password.\n\nWould you like do this now?"
+MSG="${MSG}However, the password for root may be changed now. "
+MSG="${MSG}It is strongly recommended to change the root password.\n\nWould you like do this now?"
 if (whiptail --title "$title" --yesno  "${MSG}" 12 60) then
     ANSWER=$?
 fi
 if [ "$ANSWER" = "0" ]; then    # answered yes
-    while ! passwd
+    while ! passwd root
         do
-            whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60 2
+            whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60
         done
 fi
 }
 
 do_set_my_passwd() {
-ANSWER=1
-REALID=$(who am i | awk '{print $1}')
-MSG="It is strongly recommended to change the password for this Linux server. "
-MSG="${MSG}The ID you are curently logged in with is '$REALID'.\n\n"
-MSG="${MSG}Would you like to change this password?"
-if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
-    ANSWER=$?
-fi
-if [ "$ANSWER" = "0" ]; then
-    while ! passwd $REALID
-    do
-        whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60
-    done
-fi
+    ANSWER=1
+    REALID=$(who am i | awk '{print $1}')
+    #MSG="It is strongly recommended to change the password for this Linux server. "
+    MSG="The ID you are curently logged in with is '$REALID'. "
+    MSG="${MSG}It is strongly recommended to change your password.\n\nWould you like to change this password?"
+    if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then
+        while ! passwd $REALID
+        do
+            whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60
+        done
+    fi
 }
 
 do_set_timezone() {
@@ -183,7 +200,7 @@ do_use_menu() {
 
 do_finish() {
     ANSWER=1
-    whiptail --title "$title" --yesno "Setup is complete.\nWould you like to reboot now?" --defaultno 12 60 2
+    whiptail --title "$title" --yesno "Setup is complete. Settings will take effect on next boot.\n\nWould you like to reboot now?" --defaultno 12 60 2
     #rm /etc/asterisk/firsttime
     if [ "$ANSWER" = "0" ]; then
         sync
@@ -197,12 +214,12 @@ do_finish() {
 
 do_is_root
 do_welcome
-do_check_if_firsttime
-#do_set_root_passwd
+#do_check_if_firsttime
+do_set_root_passwd
 do_set_my_passwd
 do_set_timezone
 do_set_host
 do_net_setup
-do_node_setup
-do_use_aslmenu
+#do_node_setup
+#do_use_aslmenu
 do_finish
