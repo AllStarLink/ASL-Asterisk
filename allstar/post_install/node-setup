@@ -13,6 +13,8 @@ REBOOT_NEEDED=0
 AST_RESTART=0
 #logfile=/dev/null
 logfile=/tmp/node_setup_whip.log
+title="ASL 2.0.0-Beta"
+menu_title="Node Settings Menu"
 
 ##############################
 # check if root
@@ -37,7 +39,7 @@ echo "doing calc_wt_size" >> $logfile
   if [ "$WT_WIDTH" -gt 178 ]; then
     WT_WIDTH=120
   fi
-  WT_MENU_HEIGHT=$(($WT_HEIGHT-7))
+  WT_MENU_HEIGHT=$(($WT_HEIGHT-10))
 }
 
 do_create_tmp_env() {
@@ -520,8 +522,8 @@ fi
 do_echolink_edit_menu() {
 RETE=0
 while true; do
-FUNE=$(whiptail --title "Edit echolink config" \
---menu "Select an item to change its current value" \
+FUNE=$(whiptail --title "$title" \
+--menu "Echolink Settings Menu" \
 $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
     "EA ASL node" "AST NODE is $ECHOASTNODE" \
     "EB EL Callsign" "EL Call sign is $ECHOCALLSIGN" \
@@ -632,27 +634,27 @@ RET=0
   while true; do
 echo "Main Menu" >> $logfile
    calc_wt_size
-    FUN=$(whiptail --title "AllStarLink Asterisk" --menu "Node configure Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Exit \
-      "A1 Initial Node Setup" "Node number, password, call sign" \
-      "A2 Edit Echolink" "Enable and Edit Echolink configuration" \
-      "A3 Enable savenode" "Enables savenode.conf for node $NEWNODE" \
-      "A4 Quick backup" "Copy existing files to folder $CONFIGS/$MONTHDAY" \
-      "A5 Review" "Review of configuration settings" \
-      "A0 About" "AllStarLink Asterisk" \
-      "AZ SAVE" "Save configuration and make it live" \
+    FUN=$(whiptail --title "$title" --menu "Node Settings Main Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Exit \
+      "1" "Set or change node number, password and call sign" \
+      "2" "Enable and Edit Echolink configuration" \
+      "3" "Enable ASL offsite backup settings for node $NEWNODE" \
+      "4" "Local backup - copy existing files to folder $CONFIGS/$MONTHDAY" \
+      "5" "Review of configuration settings" \
+      "S" "Save configuration and make it live" \
+      "I" "Information About this menu" \
       3>&1 1>&2 2>&3)
     RET=$?
     if [ $RET -eq 1 ]; then
       do_bailout
     elif [ $RET -eq 0 ]; then
       case "$FUN" in
-        A1\ *) do_quick_set_menu ;;
-        A2\ *) do_echolink_edit_menu ;;
-        A3\ *) do_savenode ;;
-        A4\ *) do_create_backups ;;
-        A5\ *) do_config_list ;;
-        A0\ *) do_about ;;
-        AZ\ *) do_finish ;;
+        1) do_quick_set_menu ;;
+        2) do_echolink_edit_menu ;;
+        3) do_savenode ;;
+        4) do_create_backups ;;
+        5) do_config_list ;;
+        I) do_about ;;
+        S) do_finish ;;
         *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
       esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
     else
