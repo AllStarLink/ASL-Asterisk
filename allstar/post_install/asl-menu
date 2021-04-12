@@ -348,8 +348,12 @@ do_finish() {
             whiptail --msgbox "Please restart Asterisk at your convenience." $msgbox_height $msgbox_width
         fi
     fi
-    whiptail --msgbox "Type asl-menu to relaunch the menu." $msgbox_height $msgbox_width
-    exit
+    whiptail --title "$title" --yesno "Exit ASL Main Menu now?\n\nIf yes type asl-menu to relaunch the menu." $msgbox_height $msgbox_width
+    if [ $? -ne 0 ]; then
+        return
+    else
+        exit
+    fi
 }
 
 ###################################
@@ -402,16 +406,6 @@ do_bash_shell() {
     whiptail --title "$title" --msgbox "Entering a bash shell. Type exit when done." $msgbox_height $msgbox_width
     clear
     /bin/bash
-}
-
-do_exit() {
-    echo "do_exit" >>$logfile
-    clear
-    if (whiptail --title "$title" --yesno "Exit ASL Main Menu now?" $msgbox_height $msgbox_width); then
-        do_finish
-    else
-        do_main_menu
-    fi
 }
 
 do_reboot() {
@@ -1262,7 +1256,7 @@ do_main_menu() {
     echo "do_main_menu" >>$logfile
     while true; do
         calc_wt_size
-        FUN=$(whiptail --menu "Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Exit \
+        FUN=$(whiptail --menu "Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Main Menu" \
             "1" "First Time Setup" \
             "2" "Node Settings" \
             "3" "Simple USB Radio Interface Settings" \
@@ -1278,7 +1272,7 @@ do_main_menu() {
             "I" "Information" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
-            do_exit
+            do_finish
         else
             case "$FUN" in
             1) do_run_firsttime ;;
@@ -1292,7 +1286,7 @@ do_main_menu() {
             9) do_sys_security_menu ;;
             10) do_sys_diags_menu ;;
             11) do_backup_restore_menu ;;
-            12) do_exit_menu ;;
+            12) do_logout_menu ;;
             I) info_main_menu ;;
             *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
@@ -1563,8 +1557,8 @@ do_backup_restore_menu() {
     done
 }
 
-do_exit_menu() {
-    echo "do_exit_menu" >>$logfile
+do_logout_menu() {
+    echo "do_logout_menu" >>$logfile
     while true; do
         calc_wt_size
         FUN=$(whiptail --title "$title" --menu "Exit Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Back to Main" \
