@@ -1426,33 +1426,33 @@ do_sys_diags_menu() {
     while true; do
         calc_wt_size
         FUN=$(whiptail --menu "System Diagnostics Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
-            "A " "Ping Google DNS 8.8.8.8" \
-            "B " "Ping register.allstarlink.org" \
-            "C " "Show IAX2 registry" \
-            "D " "Show ASL-Asterisk version" \
-            "E " "Validate updatenodelist service is running" \
-            "F " "Restart updatenodelist program" \
-            "G " "Restart ASL Asterisk (astres.sh)" \
-            "H " "Start ASL Asterisk (astup.sh)" \
-            "I " "Stop ASL Asterisk (astdn.sh)" \
-            "J " "Create Upload file for ASL Admin Team" \
-            "K " "Information" \
+            "1" "Ping Google DNS 8.8.8.8" \
+            "2" "Ping register.allstarlink.org" \
+            "3" "Show IAX2 registry" \
+            "4" "Show ASL-Asterisk version" \
+            "5" "Validate updatenodelist service is running" \
+            "6" "Restart updatenodelist program" \
+            "7" "Restart ASL Asterisk (astres.sh)" \
+            "8" "Start ASL Asterisk (astup.sh)" \
+            "9" "Stop ASL Asterisk (astdn.sh)" \
+            "10" "Create Upload file for ASL Admin Team" \
+            "I" "Information" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             return
         else
             case "$FUN" in
-            A\ *) do_ping_google_dns ;;
-            B\ *) do_ping_reg_asl ;;
-            C\ *) do_iax_show_reg ;;
-            D\ *) do_asl_version_show ;;
-            E\ *) do_validate_updatenodelist_running ;;
-            F\ *) do_updatenodelist_restart ;;
-            G\ *) do_astres ;;
-            H\ *) do_astup ;;
-            I\ *) do_astdn ;;
-            J\ *) do_upload_diag ;;
-            K\ *) info_diagnostics_menu ;;
+            1) do_ping_google_dns ;;
+            2) do_ping_reg_asl ;;
+            3) do_iax_show_reg ;;
+            4) do_asl_version_show ;;
+            5) do_validate_updatenodelist_running ;;
+            6) do_updatenodelist_restart ;;
+            7) do_astres ;;
+            8) do_astup ;;
+            9) do_astdn ;;
+            10) do_upload_diag ;;
+            I) info_diagnostics_menu ;;
             *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
@@ -1464,17 +1464,17 @@ do_enable_blackwhite_list() {
     while true; do
         calc_wt_size
         FUN=$(whiptail --menu "Blacklist/Whitelist Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
-            "A " "Enable using Blacklist" \
-            "B " "Enable using Whitelist" \
-            "C " "Disable filters Open to all nodes" \
+            "1" "Enable using Blacklist" \
+            "2" "Enable using Whitelist" \
+            "3" "Disable filters Open to all nodes" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             return
         else
             case "$FUN" in
-            A\ *) do_set_blacklist ;;
-            B\ *) do_set_whitelist ;;
-            C\ *) do_set_noblkwhi ;;
+            1) do_set_blacklist ;;
+            2) do_set_whitelist ;;
+            3) do_set_noblkwhi ;;
             *) whiptail --msgbox "Programmer error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "Invalid option, please try again" $msgbox_height $msgbox_width
         fi
@@ -1486,21 +1486,21 @@ do_cpu_clocking_menu() {
     while true; do
         calc_wt_size
         FUN=$(whiptail --menu "CPU Governor Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
-            "A " "Install/upgrade CPU clocking packages" \
-            "B " "Set on-demand governor (default)" \
-            "C " "Set conservative governor" \
-            "D " "Set performance governor" \
-            "E " "Set powersave governor" \
+            "1" "Install/upgrade CPU clocking packages" \
+            "2" "Set on-demand governor (default)" \
+            "3" "Set conservative governor" \
+            "4" "Set performance governor" \
+            "5" "Set powersave governor" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             return
         else
             case "$FUN" in
-            A\ *) do_install_cpu_clocking ;;
-            B\ *) do_set_cpu_ondemand ;;
-            C\ *) do_set_cpu_conservative ;;
-            D\ *) do_set_cpu_performance ;;
-            E\ *) do_set_cpu_powersave ;;
+            1) do_install_cpu_clocking ;;
+            2) do_set_cpu_ondemand ;;
+            3) do_set_cpu_conservative ;;
+            4) do_set_cpu_performance ;;
+            5) do_set_cpu_powersave ;;
             *) whiptail --msgbox "Programmer error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "Invalid option, please try again" $msgbox_height $msgbox_width
         fi
@@ -1512,15 +1512,15 @@ do_addon_packages_menu() {
     while true; do
         calc_wt_size
         FUN=$(whiptail --menu "Add-on Packages Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
-            "A " "Information" \
-            "B " "Install Allmon2" \
+            "1" "Information" \
+            "2" "Install Allmon2" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             return
         else
             case "$FUN" in
-            A\ *) info_asl_addons_menu ;;
-            B\ *) do_install_allmon ;;
+            1) info_asl_addons_menu ;;
+            2) do_install_allmon ;;
             *) whiptail --msgbox "Programmer error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "Invalid option, please try again" $msgbox_height $msgbox_width
         fi
