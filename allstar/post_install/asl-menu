@@ -35,16 +35,29 @@ check_config_files() {
 }
 
 calc_wt_size() {
-    echo "doing calc_wt_size" >>$logfile
-    WT_HEIGHT=22
-    WT_WIDTH=$(tput cols)
+	echo "doing calc_wt_size" >>$logfile
+    ##WT_WIDTH=$(tput cols)
+	# Bash knows the terminal size
+	# echo "The number of columns are $COLUMNS"
+	# echo "The number of lines are $LINES"
 
-    if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
-        WT_WIDTH=80
+    if [ $LINES -lt 22 ]; then
+    	echo "Teaminal size must be at least 22 lines."
+    	exit
     fi
-    if [ "$WT_WIDTH" -gt 178 ]; then
-        WT_WIDTH=120
+    if [ $COLUMNS -lt 60 ]; then
+    	echo "Teaminal size must be at least 60 columns."
+    	exit
     fi
+
+    WT_HEIGHT=22
+
+    # Leave full width up to 100 columns
+    WT_WIDTH=$COLUMNS
+    if [ $COLUMNS -gt 100 ]; then
+    	WT_WIDTH=100
+    fi
+
     WT_MENU_HEIGHT=$(($WT_HEIGHT - 8))
 }
 
@@ -474,18 +487,22 @@ do_asl_version_show() {
 
 do_validate_updatenodelist_running() {
     echo "do_validate_updatenodelist_running" >>$logfile
-    ps -aux | grep updatenodelist
+    systemctl is-active --quiet update-node-list.service
     if [ $? -eq 0 ]; then #yes
-        whiptail --msgbox "updatenodeslist program IS running" $msgbox_height $msgbox_width
+        whiptail --msgbox "update-node-list program IS running" $msgbox_height $msgbox_width
     else
-        whiptail --msgbox "updatenodeslist program is NOT running" $msgbox_height $msgbox_width
+        whiptail --msgbox "update-node-list program is NOT running" $msgbox_height $msgbox_width
     fi
 }
 
 do_updatenodelist_restart() {
     echo "do_updatenodelist_restart" >>$logfile
-    $SERVICE updatenodelist restart
-    whiptail --msgbox "The updatenodelist program has been restarted" $msgbox_height $msgbox_width
+    systemctl restart --quiet update-node-list.service
+    if [ $? -eq 0 ]; then #yes
+        whiptail --msgbox "update-node-list did restart" $msgbox_height $msgbox_width
+    else
+        whiptail --msgbox "update-node-list did NOT restart" $msgbox_height $msgbox_width
+    fi
 }
 
 do_astres() {
@@ -545,8 +562,8 @@ do_upload_diag() {
     echo "" >>$sendtoadminfile
     echo "Current date and time: $DATEEXT" >>$sendtoadminfile
     echo "" >>$sendtoadminfile
-    echo "updatenodelist service running?" >>$sendtoadminfile
-    ps -aux | grep updatenodelist >>$sendtoadminfile
+    echo "update-node-list service running?" >>$sendtoadminfile
+    systemctl status update-node-list >>$sendtoadminfile
     echo "" >>$sendtoadminfile
     echo "/tmp/rpt_extnodes-temp file" >>$sendtoadminfile
     ls -l /tmp/rpt_extnodes-temp >>$sendtoadminfile
@@ -1425,19 +1442,21 @@ do_sys_diags_menu() {
     echo "do_sys_diags_menu" >>$logfile
     while true; do
         calc_wt_size
-        FUN=$(whiptail --menu "System Diagnostics Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
-            "1" "Ping Google DNS 8.8.8.8" \
-            "2" "Ping register.allstarlink.org" \
-            "3" "Show IAX2 registry" \
-            "4" "Show ASL-Asterisk version" \
-            "5" "Validate updatenodelist service is running" \
-            "6" "Restart updatenodelist program" \
-            "7" "Restart ASL Asterisk (astres.sh)" \
-            "8" "Start ASL Asterisk (astup.sh)" \
-            "9" "Stop ASL Asterisk (astdn.sh)" \
-            "10" "Create Upload file for ASL Admin Team" \
-            "I" "Information" \
-            3>&1 1>&2 2>&3)
+        FUN=$(
+            whiptail --menu "System Diagnostics Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Back \
+                "1" "Ping Google DNS 8.8.8.8" \
+                "2" "Ping register.allstarlink.org" \
+                "3" "Show IAX2 registry" \
+                "4" "Show ASL-Asterisk version" \
+                "5" "Validate update node list service is running" \
+                "6" "Restart update node list service" \
+                "7" "Restart ASL Asterisk (astres.sh)" \
+                "8" "Start ASL Asterisk (astup.sh)" \
+                "9" "Stop ASL Asterisk (astdn.sh)" \
+                "10" "Create diagnostic file for admins" \
+                "I" "Information" \
+                3>&1 1>&2 2>&3 #"10" "Create Upload file for ASL Admin Team" \
+        )
         if [ $? -ne 0 ]; then
             return
         else
