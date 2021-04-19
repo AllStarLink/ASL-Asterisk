@@ -418,7 +418,7 @@ do_bash_shell() {
     echo "do_bash_shell" >>$logfile
     whiptail --title "$title" --msgbox "Entering a bash shell. Type exit when done." $msgbox_height $msgbox_width
     clear
-    /bin/bash
+    su - `logname`
 }
 
 do_reboot() {

@@ -16,7 +16,6 @@ fi
 title="ASL 2.0.0-Beta"
 
 calc_wt_size() {
-    echo "doing calc_wt_size" >> $logfile
     WT_HEIGHT=22
     WT_WIDTH=$(tput cols)
 
