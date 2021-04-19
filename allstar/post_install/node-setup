@@ -1,8 +1,11 @@
-#!/bin/sh
+#!/bin/bash
 #AllStarLink Asterisk configure script
 #by N8THN Feb. 012, 2018
 #VERSION 1.90
 #release date 20180323-1
+# Major rework by WD6AWP April 2021
+#  There are those who call me... Tim?
+
 /usr/bin/clear
 INTERACTIVE=True
 CONFIGS=/etc/asterisk
@@ -14,7 +17,9 @@ AST_RESTART=0
 #logfile=/dev/null
 logfile=/tmp/node_setup_whip.log
 title="ASL 2.0.0-Beta"
-menu_title="Node Settings Menu"
+msgbox_height=12
+msgbox_width=60
+
 
 ##############################
 # check if root
@@ -30,16 +35,29 @@ fi
 
 calc_wt_size() {
     echo "doing calc_wt_size" >>$logfile
-    WT_HEIGHT=22
-    WT_WIDTH=$(tput cols)
+    ##WT_WIDTH=$(tput cols)
+    # Bash knows the terminal size
+    # echo "The number of columns are $COLUMNS"
+    # echo "The number of lines are $LINES"
 
-    if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
-        WT_WIDTH=80
+    if [ $LINES -lt 22 ]; then
+        echo "Teaminal size must be at least 22 lines."
+        exit
     fi
-    if [ "$WT_WIDTH" -gt 178 ]; then
-        WT_WIDTH=120
+    if [ $COLUMNS -lt 60 ]; then
+        echo "Teaminal size must be at least 60 columns."
+        exit
     fi
-    WT_MENU_HEIGHT=$(($WT_HEIGHT - 10))
+
+    WT_HEIGHT=22
+
+    # Leave full width up to 100 columns
+    WT_WIDTH=$COLUMNS
+    if [ $COLUMNS -gt 100 ]; then
+        WT_WIDTH=100
+    fi
+
+    WT_MENU_HEIGHT=$(($WT_HEIGHT - 8))
 }
 
 do_create_tmp_env() {
@@ -77,14 +95,91 @@ do_create_tmp_env() {
     echo "CURRENT_CALLSIGN var is $CURRENT_CALLSIGN" >>$logfile
     echo "CURRENT_INTERFACE var is $CURRENT_INTERFACE" >>$logfile
 
+    REALID=$(who am i | awk '{print $1}')
+    if [ $REALID == "root" ]; then
+        HOMEDIR=$REALID
+    else
+        HOMEDIR="/home/$REALID"
+    fi
 }
 
-do_create_backups() {
-    echo "doing do_create_backups" >>$logfile
-    mkdir -p /$CONFIGS/$MONTHDAY
-    cp -f /$CONFIGS/*.conf /etc/asterisk/$MONTHDAY/
-    whiptail --msgbox "Your original config files have been saved as \n$CONFIGS/$MONTHDAY/FILENAME.conf \nif you need to undo any changes" 20 60 2
+get_time_stamps() {
+    MONTHDAY=$(date +%Y-%m-%d)
+    DATEEXT=$(date +%Y-%m-%d.%H:%M)
+    FILEDATENAME=$(date +ASL_%Y-%m-%d_%H%M)
 }
+
+do_local_conf_backup() {
+    echo "do_local_conf_backup" >>$logfile
+    get_time_stamps
+
+    #echo "$HOMEDIR $FILEDATENAME"; exit
+    whiptail --title "$title" --yesno "Local backup to file $FILEDATENAME?" $msgbox_height $msgbox_width
+    if [ $? -eq 0 ]; then
+        if [ ! -d $HOMEDIR/asl-backups ]; then
+            mkdir $HOMEDIR/asl-backups
+        fi
+        cd / && tar czf $HOMEDIR/asl-backups/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
+
+        chown -R $REALID.$REALID $HOMEDIR/asl-backups/$FILEDATENAME.tgz
+
+        whiptail --msgbox "Backup $HOMEDIR/asl-backups/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
+    fi
+}
+
+do_local_conf_restore() {
+    calc_wt_size
+    echo "do_local_conf_restore" >>$logfile
+    AST_RESTART=0
+
+    #Build array of /etc/asterisk/*.tgz files
+    shopt -s nullglob
+    filearr=($HOMEDIR/asl-backups/*.tgz)
+    file_count=${#filearr[@]}
+    #echo ${#filearr[@]}
+    #echo ${filearr[@]}
+
+    # Restrict menu height to 10 backups
+    if [ $file_count -gt 10 ]; then
+        WT_MENU_HEIGHT=10
+    else
+        WT_MENU_HEIGHT=$file_count
+    fi
+
+    # build array of backups for radiolist
+    if [ $file_count -eq 0 ]; then
+        whiptail --msgbox "No available backups to restore." $msgbox_height $msgbox_width
+    else
+        newarr=()
+        for i in ${!filearr[@]}; do
+            #set last file to ON (selected)
+            if [ $((i + 1)) -eq ${#filearr[@]} ]; then
+                ONOFF="ON"
+            else
+                ONOFF="OFF"
+            fi
+            newarr+=("${filearr[$i]}" "" "$ONOFF")
+        done
+    fi
+    #echo ${newarr[@]}; exit
+
+    # select file for restore
+    if [ $file_count -ne 0 ]; then
+        selected_file=$(whiptail --title "$title" --radiolist "Restore: Use arrow keys to scroll. Space bar to select." $WT_HEIGHT 66 $WT_MENU_HEIGHT "${newarr[@]}" 3>&1 1>&2 2>&3)
+        if [ $? = 0 ]; then
+            cd / && tar xzf $selected_file
+            AST_RESTART=1
+            whiptail --msgbox "The $selected_file file has been restored." $msgbox_height $msgbox_width
+        fi
+    fi
+}
+
+#do_create_backups() {
+#    echo "doing do_create_backups" >>$logfile
+#    mkdir -p /$CONFIGS/$MONTHDAY
+#    cp -f /$CONFIGS/*.conf /etc/asterisk/$MONTHDAY/
+#    whiptail --msgbox "Your original config files have been saved as \n$CONFIGS/$MONTHDAY/FILENAME.conf \nif you need to undo any changes" 20 60 2
+#}
 
 do_tmp_to_live() {
     echo "doing do_tmp_to_live" >>$logfile
@@ -259,7 +354,7 @@ _EOF
 
 do_write_echo_config_conf() {
     AST_RESTART=1
-    # writes an echolink.conf file based on variables set by (do_echolink_setup) OR by (do_echolink_edit_menu) after (do_echolink_import)
+    # writes an echolink.conf file based on variables set by (do_echolink_setup) OR by (do_echolink_setup_menu) after (do_echolink_import)
     echo "doing do_write_echo_config_conf" >>$logfile
     whiptail --msgbox "Creating Temporary Echolink config file \n You must select SAVE Changes when exiting \n the MAIN menu or ALL changes will be lost" 20 60 4
     cat <<_EOF >$TMP/echolink.conf.tmp
@@ -500,11 +595,15 @@ See wiki.allstarlink.org for full documentation\
 
 do_bailout() {
     echo "doing do_bailout" >>$logfile
-    if (whiptail --title "Exit YES or NO" --yesno "All changes will be lost if you did not use menu option SAVE\n\nAre you sure you want to exit?" 12 78); then
-        rm -f $TMP/*.conf.tmp
-        exit 0
+    if [ $AST_RESTART -eq 1 ]; then
+        if (whiptail --title "$title" --yesno "Asterisk must be restarted to make changes.\n\nAre you sure you want to exit?" 12 78); then
+            rm -f $TMP/*.conf.tmp
+            exit 0
+        else
+            do_main_menu
+        fi
     else
-        do_main_menu
+        exit 0
     fi
 }
 
@@ -518,7 +617,7 @@ do_exit() {
     fi
 }
 
-do_echolink_edit_menu() {
+do_echolink_setup_menu() {
     RETE=0
     while true; do
         FUNE=$(whiptail --title "$title" \
@@ -570,94 +669,137 @@ do_echolink_edit_menu() {
 do_interface_type() {
     ## interface MENU
     echo "doing do_interface_type" >>$logfile
-    FUNM=$(whiptail --title "Select repeater interface channel driver to load" --menu "Repeater interface" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
-        "I1 SimpleUSB" "CM1xx USB Cards no/DSP (URIx or RA-40)" \
-        "I2 USBRadio" "CM1xx USB Cards with DSP (URIx or RA-40)" \
-        "I3 Voter" "Voting systems with RTCM's" \
-        "I4 Dahdi/pseudo" "No radio interface or HUB node" \
+    FUN=$(whiptail --title "Select repeater interface channel driver to load" --menu "Repeater interface" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+        "1" "SimpleUSB: CM1xx USB Cards no/DSP (URIx or RA-40)" \
+        "2" "USBRadio: CM1xx USB Cards with DSP (URIx or RA-40)" \
+        "3" "RTCM: Systems with RTCM or Voter Boards" \
+        "4" "Dahdi/pseudo: No radio interface or HUB node" \
         3>&1 1>&2 2>&3)
-    RETM=$?
-    if [ $RETM -eq 1 ]; then
-        return 0
-    elif [ $RETM -eq 0 ]; then
-        case "$FUNM" in
-        I1\ *) do_simpleusb ;;
-        I2\ *) do_usbradio ;;
-        I3\ *) do_voter ;;
-        I4\ *) do_dahdi ;;
+    if [ $? -ne 0 ]; then
+        return
+    else
+        case "$FUN" in
+        1) do_simpleusb ;;
+        2) do_usbradio ;;
+        3) do_voter ;;
+        4) do_dahdi ;;
         *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
-        esac || whiptail --msgbox "Invalid option, please try again" 20 60 1
+        esac # || whiptail --msgbox "Invalid option, please try again" 20 60 1
     fi
 }
 
-do_quick_set_menu() {
+do_set_node_number() {
+    test=$(whiptail --inputbox "Current Node Number is $NEWNODE Enter New Node Number" 8 78 "$NEWNODE" --title "$title" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then
+        return
+    else
+        if [ $test != $NEWNODE ]; then
+            AST_RESTART=1;
+            NEWNODE=$test
+            sed -i "s/$CURRENT_NODE/$NEWNODE/g" /etc/asterisk/rpt.conf
+            sed -i "s/NODE[ \t]*=[ \t]*[0-9]\+/NODE = $NEWNODE/" /etc/asterisk/extensions.conf
+            sed -i "s/^register[ \t]*=[ \t]*$CURRENT_NODE/register=$NEWNODE/g" /etc/asterisk/iax.conf
+            sed -i "s/^registeriax[ \t]*=[ \t]*$CURRENT_NODE/registeriax=$NEWNODE/g" /etc/asterisk/iax.conf
+            sed -i "s/NODE[ \t]*=[ \t]*$CURRENT_NODE/NODE=$NEWNODE/" /etc/asterisk/savenode.conf
+            sed -i "s/ENABLE[ \t]*=[ \t]*[01]/ENABLE=1/" /etc/asterisk/savenode.conf
+        fi
+    fi
+}
+
+do_set_node_password() {
+    test=$(whiptail --inputbox "Enter password for Node $NEWNODE" 8 78 "$NEWPSWD" --title "$title" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then
+        return
+    else
+        if [ $test != $NEWPSWD ]; then
+            AST_RESTART=1;
+            NEWPSWD=$test
+            sed -i "s/^register[ \t]*=[ \t]*$CURRENT_NODE:$CURRENT_REG_PSWD/register=$CURRENT_NODE:$NEWPSWD@/g" /etc/asterisk/iax.conf
+            sed -i "s/PASSWORD[ \t]*=[ \t]*[01]/PASSWORD=$NEWPSWD/" /etc/asterisk/savenode.conf
+        fi
+    fi
+}
+
+do_set_node_callsign() {
+    test=$(whiptail --inputbox "Current Call is $NEWCALL Enter New Call Sign for $NEWNODE" 8 78 "$NEWCALL" --title "$title" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then
+        return
+    else
+        if [ $test != $NEWCALL ]; then
+            AST_RESTART=1;
+            NEWCALL=$test
+        fi
+    fi
+}
+
+do_asterisk_setup_menu() {
     echo "doing do_quick_set_menu" >>$logfile
     # uses variables from (do_create_tmp_env) node number, node password, call sign, interface type.
     # menu items to change each
     # menu item to save to temp files
+    echo "Node Settings Menu" >>$logfile
     while true; do
-        echo "ASL Node Menu" >>$logfile
         calc_wt_size
-        FUNA=$(whiptail --title "AllStarlink Asterisk " --menu "Node configure Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
-            "N1 Node Number" "Current Node is $NEWNODE" \
-            "N2 Node Password" "Current password is $NEWPSWD" \
-            "N3 Node Call Sign" "Current call sign is $NEWCALL" \
-            "N4 Radio Interface" "Node Radio Interface type $NEWIFACE" \
-            "N5 Duplex type" "Current duplex type is $NEWDUPLEX" \
-            "N6 Asterisk-secret" "Change Asterisk manager.conf password" \
-            "N9 SAVE" "Save this configuration" \
+        CURRENT_NODE=$(grep -o '^\[[0-9]*\]' $TMP/rpt.conf.tmp | sed 's/.*\[\([^]]*\)\].*/\1/g')
+        CURRENT_REG_PSWD=$(echo "$CURRENT_REG" | awk -F':' '{print $2}')
+        CURRENT_CALLSIGN=$(grep '^idrecording =' /$TMP/rpt.conf.tmp | awk -F'=' '{print $2}' | sed 's/|\i//' | sed -e 's/^\(.\{9\}\).*/\1/')
+        CURRENT_DUPLEX=$(grep '^duplex =' $TMP/rpt.conf.tmp | awk -F " " '{print $3}')
+        CURRENT_INTERFACE=$(grep '^rxchannel' $TMP/rpt.conf.tmp | awk -F'=' '{print $2}' | awk -F'  ;' '{print$1}')
+
+        FUN=$(whiptail --title "$title" --menu "Node Settings" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+            "1" "Node Number: Current Node is $NEWNODE" \
+            "2" "Node Password: Current password is $NEWPSWD" \
+            "3" "Node Call Sign: Current call sign is $NEWCALL" \
+            "4" "Radio Interface: Current Radio Interface type $NEWIFACE" \
+            "5" "Duplex type: Current duplex type is $NEWDUPLEX" \
+            "6" "Asterisk Manager Interface: Current password: $NEWMNGRSECRET" \
             3>&1 1>&2 2>&3)
-        RETA=$?
-        if [ $RETA -eq 1 ]; then
+        if [ $? -ne 0 ]; then
             return
-        elif [ $RETA -eq 0 ]; then
-            case "$FUNA" in
-            N1\ *) NEWNODE=$(whiptail --inputbox "Current Node Number is $NEWNODE Enter New Node Number" 8 78 "$NEWNODE" --title "Node Number" 3>&1 1>&2 2>&3) ;;
-            N2\ *) NEWPSWD=$(whiptail --inputbox "Enter password for Node $NEWNODE" 8 78 "$NEWPSWD" --title "Password" 3>&1 1>&2 2>&3) ;;
-            N3\ *) NEWCALL=$(whiptail --inputbox "Current Call is $NEWCALL Enter New Call Sign for $NEWNODE" 8 78 "$NEWCALL" --title "Call Sign" 3>&1 1>&2 2>&3) ;;
-            N4\ *) do_interface_type ;;
-            N5\ *) do_new_duplex ;;
-            N6\ *) do_mngr_secret ;;
-            N9\ *) do_save_newnode_newcall_newpswd ;;
+        else
+            case "$FUN" in
+            1) do_set_node_number ;;
+            2) do_set_node_password ;;
+            3) do_set_node_callsign ;;
+            4) do_interface_type ;;
+            5) do_new_duplex ;;
+            6) do_mngr_secret ;;
             *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
-            esac || whiptail --msgbox "There was an error running option $FUNA" 20 60 1
+            esac #|| whiptail --msgbox "There was an error running option $FUNA $rc" 20 60 1
         fi
     done
-    return
 }
 
 ## FUN=$(whiptail --title "AllStarLink Asterisk" --menu "Node configure Options" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Exit --ok-button Select \
 
 do_main_menu() {
-    RET=0
+    echo "Node Setup Main Menu" >>$logfile
     while true; do
-        echo "Main Menu" >>$logfile
         calc_wt_size
-        FUN=$(whiptail --title "$title" --menu "Node Settings Main Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button Exit \
-            "1" "Set or change node number, password and call sign" \
-            "2" "Enable and Edit Echolink configuration" \
-            "3" "Enable ASL offsite backup settings for node $NEWNODE" \
-            "4" "Local backup - copy existing files to folder $CONFIGS/$MONTHDAY" \
-            "5" "Review of configuration settings" \
-            "S" "Save configuration and make it live" \
+        FUN=$(whiptail --title "$title" --menu "Node Setup Main Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Node Setup" \
+            "C" "Create a local backup" \
+            "R" "Restore a local backup" \
+            "1" "AllStar Node Settings Menu" \
+            "2" "Echolink Settings Menu" \
+            "3" "Restart Asterisk" \
+            "4" "Show AllStar & Echolink Settings" \
+            "5" "Load Initial AllStar & Echolink Settings" \
             "I" "Information About this menu" \
             3>&1 1>&2 2>&3)
-        RET=$?
-        if [ $RET -eq 1 ]; then
+        if [ $? -ne 0 ]; then
             do_bailout
-        elif [ $RET -eq 0 ]; then
-            case "$FUN" in
-            1) do_quick_set_menu ;;
-            2) do_echolink_edit_menu ;;
-            3) do_savenode ;;
-            4) do_create_backups ;;
-            5) do_config_list ;;
-            I) do_about ;;
-            S) do_finish ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
-            esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
         else
-            exit 1
+            case "$FUN" in
+            C) do_local_conf_backup ;;
+            1) do_asterisk_setup_menu ;;
+            2) do_echolink_setup_menu ;;
+            3) astres.sh ;;
+            4) do_config_list ;;
+            5) do_load_initial_settings ;;
+            R) do_local_conf_restore ;;
+            I) do_about ;;
+            *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
+            esac #|| whiptail --msgbox "There was an error running option $FUN" 20 60 1
         fi
     done
 }
