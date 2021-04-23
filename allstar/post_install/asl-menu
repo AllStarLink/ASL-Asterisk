@@ -1276,16 +1276,14 @@ do_main_menu() {
         FUN=$(whiptail --menu "Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Main Menu" \
             "1" "First Time Setup" \
             "2" "Node Settings" \
-            "3" "Simple USB Radio Interface Settings" \
-            "4" "USB Radio w/DSP Interface Settings" \
-            "5" "Enter a bash shell" \
-            "6" "Enter the Asterisk CLI" \
-            "7" "Asterisk Editor Menu" \
-            "8" "Operating System Menu" \
-            "9" "Security Menu" \
-            "10" "Diagnostics Menu" \
-            "11" "Backup and Restore Menu" \
-            "12" "Logout/Reboot/Shutdown" \
+            "3" "Enter a bash shell" \
+            "4" "Enter the Asterisk CLI" \
+            "5" "Asterisk Editor Menu" \
+            "6" "Operating System Menu" \
+            "7" "Security Menu" \
+            "8" "Diagnostics Menu" \
+            "9" "Backup and Restore Menu" \
+            "10" "Logout/Reboot/Shutdown" \
             "I" "Information" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
@@ -1294,16 +1292,14 @@ do_main_menu() {
             case "$FUN" in
             1) do_run_firsttime ;;
             2) do_node_setup ;;
-            3) do_simpleusb_tune_menu ;;
-            4) do_radio_tune_menu ;;
-            5) do_bash_shell ;;
-            6) do_asl_cli ;;
-            7) do_conf_edit_menu ;;
-            8) do_OS_menu ;;
-            9) do_sys_security_menu ;;
-            10) do_sys_diags_menu ;;
-            11) do_backup_restore_menu ;;
-            12) do_logout_menu ;;
+            3) do_bash_shell ;;
+            4) do_asl_cli ;;
+            5) do_conf_edit_menu ;;
+            6) do_OS_menu ;;
+            7) do_sys_security_menu ;;
+            8) do_sys_diags_menu ;;
+            9) do_backup_restore_menu ;;
+            10) do_logout_menu ;;
             I) info_main_menu ;;
             *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
