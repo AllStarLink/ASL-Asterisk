@@ -20732,7 +20732,7 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
                 	if(p){
 				int vmajor,vminor,vpatch;
 				if(sscanf(p, "version %d.%d.%d", &vmajor, &vminor, &vpatch) == 3)
-					sprintf(str + strlen(str),"&apprptvers=%d.%d",vmajor,vminor,vpatch);
+					sprintf(str + strlen(str),"&apprptvers=%d.%d.%d",vmajor,vminor,vpatch);
 			}
 			time(&now);
 			sprintf(str + strlen(str),"&apprptuptime=%d",(int)(now-starttime));
