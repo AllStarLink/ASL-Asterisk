@@ -214,11 +214,6 @@ do_select_statpost() {
         #whiptail --msgbox "$rc Escape or other" 20 60
         return
     fi
-
-
-    # Used the $ in place of the /
-    #sed -i 's$[ \t]*;[ \t]*statpost_program[ \t]*=[ \t]*/usr/bin/wget$statpost_program = /usr/bin/wget$g' $TMP/rpt.conf.tmp
-    #sed -i "0,/statpost_url/ s/^[ \t]*;[ \t]*statpost_url/statpost_url/" $TMP/rpt.conf.tmp
 }
 
 do_select_duplex() {
@@ -239,7 +234,10 @@ See wiki.allstarlink.org for full documentation.\
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_DUPLEX ]; then
+        re=^[0-4]$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Duplex type must be a number between 0 and 4." 20 60
+        elif [[ $test != $CURRENT_DUPLEX ]]; then
             NEW_DUPLEX=$test
             do_set_duplex
         fi
@@ -248,14 +246,8 @@ See wiki.allstarlink.org for full documentation.\
 
 do_set_duplex() {
     echo "doing do_rpt_duplex" >>$logfile
-    re=^[0-4]$
-    if ! [[ $NEW_DUPLEX =~ $re ]]; then
-        whiptail --msgbox "Duplex type must be a number between 0 and 4." 20 60
-    else
-        #whiptail --msgbox "Changing duplex $CURRENT_DUPLEX to $NEW_DUPLEX in rpt.conf" 20 60
-        sed -i "/^duplex\s*=\s*/s/$CURRENT_DUPLEX/$NEW_DUPLEX/" $CONFIGS/rpt.conf
-        AST_RESTART=1
-    fi
+    sed -i "/^duplex\s*=\s*/s/$CURRENT_DUPLEX/$NEW_DUPLEX/" $CONFIGS/rpt.conf
+    AST_RESTART=1
 }
 
 do_select_node_number() {
@@ -263,7 +255,10 @@ do_select_node_number() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_NODE ]; then
+        re=^[0-9]\+$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Node number must be a number, usually 3 or more digits." 20 60
+        elif [[ $test != $CURRENT_NODE ]]; then
             NEW_NODE=$test
             do_set_node_number
         fi
@@ -272,17 +267,11 @@ do_select_node_number() {
 
 do_set_node_number() {
     echo "doing do_set_node_number" >>$logfile
-    re=^[0-9]\+$
-    if ! [[ $NEW_NODE =~ $re ]]; then
-        whiptail --msgbox "Node number must be a number, usually 3 or more digits." 20 60
-    else
-        sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
-        sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
-        sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
-        sed -i "/^NODE\s*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/savenode.conf
-        #sed -i "s/ENABLE\s*=\s*[01]/ENABLE=1/" $CONFIGS/savenode.conf
-        AST_RESTART=1;
-    fi
+    sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
+    sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
+    sed -i "/^NODE\s*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/savenode.conf
+    AST_RESTART=1;
 }
 
 do_select_node_password() {
@@ -290,7 +279,10 @@ do_select_node_password() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_PASSWD ]; then
+        re=^[0-9a-zA-Z_-]{6,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Node password may only contain letters, numbers, underscore and dash. It must be 6 or more characters in length." 20 60
+        elif [[ "$test" != "$CURRENT_PASSWD" ]]; then
             NEW_PASSWD=$test
             do_set_node_password
         fi
@@ -298,16 +290,20 @@ do_select_node_password() {
 }
 
 do_set_node_password() {
-    re=^[0-9a-zA-Z_-]{6,}$
-    if ! [[ $NEW_PASSWD =~ $re ]]; then
-        whiptail --msgbox "Node password may only contain letters, numbers, underscore and dash. It must be 6 or more characters in length." 20 60
-    else
+
+    # Test for existing uncommented register line. New nodes won't have one.
+    if grep -q "^register" $CONFIGS/iax.conf ; then
         sed -i "/^register.*=\s*$CURRENT_NODE:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-        #this sed is for http registration with an alternate port. ie register=<node>#<port>:<passwd>@register.allstarlink.org
+
+        # This is for http registration with an alternate port. ie register=<node>#<port>:<passwd>@register.allstarlink.org
         sed -i "/^register\s*=\s*$CURRENT_NODE#.\+:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-        sed -i "/^PASSWORD\s*=\s*$CURRENT_PASSWD/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/savenode.conf
-        AST_RESTART=1;
+    else
+        # No uncomment register line so add one.
+        new_register_line="register=$CURRENT_NODE:$NEW_PASSWD@register.allstarlink.org   ;added by node-setup"
+        sed -i "/^;\s*register.*=.*/a $new_register_line" $CONFIGS/iax.conf
     fi
+    sed -i "/^PASSWORD\s*=\s*$CURRENT_PASSWD/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/savenode.conf
+    AST_RESTART=1;
 }
 
 do_select_node_callsign() {
@@ -315,7 +311,10 @@ do_select_node_callsign() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_CALLSIGN ]; then
+        re=^[0-9A-Z]{3,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Call sign may only uppercase letters and numbers. It must be 3 or more characters in length." 20 60
+        elif [[ $test != $CURRENT_CALLSIGN ]]; then
             NEW_CALLSIGN=$test
             do_set_node_callsign
         fi
@@ -323,14 +322,9 @@ do_select_node_callsign() {
 }
 
 do_set_node_callsign() {
-    re=^[0-9A-Z]{3,}$
-    if ! [[ $NEW_CALLSIGN =~ $re ]]; then
-        whiptail --msgbox "Call sign may only uppercase letters and numbers. It must be 3 or more characters in length." 20 60
-    else
-        sed -i "/^idrecording\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
-        sed -i "/^idtalkover\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
-        AST_RESTART=1;
-    fi
+    sed -i "/^idrecording\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
+    sed -i "/^idtalkover\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
+    AST_RESTART=1;
 }
 
 do_select_ami_secret() {
@@ -339,7 +333,10 @@ do_select_ami_secret() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_AMI_SECRET ]; then
+        re=^[0-9a-zA-Z_-]{12,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "AMI secret may only contain letters, numbers, underscore and dash. It must be 12 or more characters in length." 20 60
+        elif [[ $test != $CURRENT_AMI_SECRET ]]; then
             NEW_AMI_SECRET=$test
             do_set_ami_secret
         fi
@@ -347,13 +344,8 @@ do_select_ami_secret() {
 }
 
 do_set_ami_secret() {
-    re=^[0-9a-zA-Z_-]{12,}$
-    if ! [[ $NEW_AMI_SECRET =~ $re ]]; then
-        whiptail --msgbox "AMI secret may only contain letters, numbers, underscore and dash. It must be 12 or more characters in length." 20 60
-    else
-        sed -i "/^secret\s*=\s*$CURRENT_AMI_SECRET/ s/$CURRENT_AMI_SECRET/$NEW_AMI_SECRET/" $CONFIGS/manager.conf
-        AST_RESTART=1;
-    fi
+    sed -i "/^secret\s*=\s*$CURRENT_AMI_SECRET/ s/$CURRENT_AMI_SECRET/$NEW_AMI_SECRET/" $CONFIGS/manager.conf
+    AST_RESTART=1;
     #do_write_mngr_secret
     #do_build_allmon
 }
@@ -474,6 +466,9 @@ get_node_settings () {
 
     #sed captures everything between : and @
     CURRENT_PASSWD=$(grep '^register.*=\s*' $CONFIGS/iax.conf | sed 's/.*:\(.*\)@.*/\1/')
+    if [[ -z $CURRENT_PASSWD ]]; then
+        CURRENT_PASSWD='Not Set'
+    fi
 
     #sed captures alphanumeric between |i and the rest of line
     #CURRENT_CALLSIGN=$(grep '^idrecording\s*=\s*' $CONFIGS/rpt.conf | sed 's/.*|i\([0-9a-zA-Z]*\).*/\1/')
