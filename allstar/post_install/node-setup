@@ -120,7 +120,7 @@ do_set_env() {
 
     REALID=$(who am i | awk '{print $1}')
     if [ $REALID == "root" ]; then
-        HOMEDIR=$REALID
+        HOMEDIR=/$REALID
     else
         HOMEDIR="/home/$REALID"
     fi
