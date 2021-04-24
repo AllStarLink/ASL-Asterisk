@@ -496,16 +496,14 @@ do_interface_tune_cli() {
     if [[ $CURRENT_INTERFACE == *"SimpleUSB"* ]]; then
         clear
         /usr/sbin/simpleusb-tune-menu
-        clear
         if [ $? -ne 0 ]; then
-            whiptail --title "$title" --msgbox "CLI did not launch. Try resetting Asterisk." $msgbox_height $msgbox_width
+            whiptail --title "$title" --msgbox "Simple USB CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
         fi
     elif [[ $CURRENT_INTERFACE == *"Radio/usb"* ]]; then
         clear
         /usr/sbin/radio-tune-menu
-        clear
         if [ $? -ne 0 ]; then
-            whiptail --title "$title" --msgbox "CLI did not launch. Try resetting Asterisk." $msgbox_height $msgbox_width
+            whiptail --title "$title" --msgbox "USB Radio CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
         fi
     elif [[ $CURRENT_INTERFACE == *"pseudo"* ]]; then
         whiptail --title "$title" --msgbox "We're good. dahdi/pseudo has no interface settings." $msgbox_height $msgbox_width
