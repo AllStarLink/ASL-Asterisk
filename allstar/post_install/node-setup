@@ -16,8 +16,12 @@ title="ASL 2.0.0-Beta"
 msgbox_height=12
 msgbox_width=60
 
-read -r -d '' main_menu_text << EOT
+do_node_setup+main_menu_text() {
+read -r -d '' text << EOT
 Node Setup Main Menu Instructions
+
+Use arrow keys to scroll, TAB to select Ok and then enter to
+close instructions.
 
 Menu item 1 is where you'll configure most of the basic
 setting for your AllStar node. For servers with more
@@ -38,11 +42,14 @@ to get your node up and running.
 
 For help see https://community.allstarlink.org
 EOT
+    whiptail --title "$title" --scrolltext --msgbox "$text" 20 70
+}
 
-read -r -d '' node_setup_menu_text << EOT
+do_node_setup_menu_info() {
+read -r -d '' text << EOT
 Node Setup Menu Instructions
 
-For new nodes you will need to choose values each one of
+For new nodes you will should choose values for each one of
 these items.
 
 1 Duplex is explained when selected. Most often you will
@@ -57,12 +64,17 @@ these items.
   from a web browser.
 6 Type of radio interface. Most often you will use
   simple USB.
-7 Send statistics yes or no to stats.allstarlink.org
+7 Send statistics (yes or no) to stats.allstarlink.org
   Allows you and others to see the status and connections
-  of your node including on a map.
+  of your node including the location on a map.
+
+These settings will go into effect when Asterisk is
+restarted.
 
 For help see https://community.allstarlink.org
 EOT
+    whiptail --title "$title" --scrolltext --msgbox "$text" 20 70
+}
 
 do_dummy_yesno() {
     whiptail --title "$title" --yesno "Select Yes, NO or press escape." $msgbox_height $msgbox_width
@@ -373,10 +385,41 @@ do_select_interface() {
         5) do_set_quadradio ;;
         6) do_set_beagle ;;
         7) do_set_usrp ;;
-        *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+        *) whiptail --msgbox "$FUN is an unrecognized selection." 20 60 1 ;;
         esac
     fi
 }
+
+# First attempt at a radiolist for rxchannel. Abandoning for now.
+# do_select_interface_radiolist() {
+#     ## interface MENU
+#     echo "doing do_interface_type" >>$logfile
+
+#     # Array of
+#     SELECTIONS=("1" "SimpleUSB: CM1xx USB Cards no/DSP (URIx or RA-40)" "OFF"\
+#         "2" "USBRadio: CM1xx USB Cards with DSP (URIx or RA-40)" "OFF"\
+#         "3" "RTCM: Radio Thin Client or Voter Boards" "OFF"\
+#         "4" "Dahdi/pseudo: No radio interface or HUB node" "OFF"\
+#         "5" "PCI Quad Radio Card" "OFF"\
+#         "6" "Rpi Beagle Board" "OFF"\
+#         "7" "USRP" "ON"
+#     )
+#     FUN=$(whiptail --title "$title" --radiolist "Select Radio Interface" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT "${SELECTIONS[@]}" 3>&1 1>&2 2>&3)
+#     if [ $? -ne 0 ]; then
+#         return
+#     else
+#         case "$FUN" in
+#         1) do_set_simpleusb ;;
+#         2) do_set_usbradio ;;
+#         3) do_set_voter ;;
+#         4) do_set_pseudo ;;
+#         5) do_set_quadradio ;;
+#         6) do_set_beagle ;;
+#         7) do_set_usrp ;;
+#         *) whiptail --msgbox "$FUN is an unrecognized selection" 20 60 1 ;;
+#         esac
+#     fi
+# }
 
 do_noload_chan_modules() {
     # Set common app_rpt channel modules to noload
@@ -496,13 +539,17 @@ do_interface_tune_cli() {
     if [[ $CURRENT_INTERFACE == *"SimpleUSB"* ]]; then
         clear
         /usr/sbin/simpleusb-tune-menu
-        if [ $? -ne 0 ]; then
+        rc=$?
+        clear
+        if [ $rc -ne 0 ]; then
             whiptail --title "$title" --msgbox "Simple USB CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
         fi
     elif [[ $CURRENT_INTERFACE == *"Radio/usb"* ]]; then
         clear
         /usr/sbin/radio-tune-menu
-        if [ $? -ne 0 ]; then
+        rc=$?
+        clear
+        if [ $rc -ne 0 ]; then
             whiptail --title "$title" --msgbox "USB Radio CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
         fi
     elif [[ $CURRENT_INTERFACE == *"pseudo"* ]]; then
@@ -539,8 +586,8 @@ do_asterisk_setup_menu() {
             5) do_select_ami_secret ;;
             6) do_select_interface ;;
             7) do_select_statpost ;;
-            I) whiptail --msgbox "$node_setup_menu_text" --title "$title" 30 65 ;;
-            *) whiptail --msgbox "Sorry! $test is an unrecognized selection at this time." 20 60 ;;
+            I) do_node_setup_menu_info ;;
+            *) whiptail --msgbox "$test is an unrecognized selection." 20 60 ;;
             esac
         fi
     done
@@ -569,8 +616,8 @@ do_main_menu() {
             4) do_load_initial_settings ;;
             C) do_local_conf_backup ;;
             R) do_local_conf_restore ;;
-            I) whiptail --msgbox "$main_menu_text" --title "$title" 30 65 ;;
-            *) whiptail --msgbox "$FUN is unrecognized option." 20 60 ;;
+            I) do_node_setup+main_menu_text ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." 20 60 ;;
             esac
         fi
     done

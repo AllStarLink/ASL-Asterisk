@@ -5,14 +5,13 @@
 # By N8THN
 # Modifications by KK9ROB 2021/02/25
 # Extensive Mods by WD6AWP April 2021
-clear
 
-# define variables
+clear
+source /etc/environment
+title=$ASLVERSION
 logfile=/tmp/asl-menu.log
-title="ASL 2.0.0-Beta"
 msgbox_height=12
 msgbox_width=60
-#logfile=/dev/null
 ## all other variables defined in get_node_info
 
 check_if_root() {
@@ -45,8 +44,8 @@ calc_wt_size() {
     	echo "Teaminal size must be at least 22 lines."
     	exit
     fi
-    if [ $COLUMNS -lt 60 ]; then
-    	echo "Teaminal size must be at least 60 columns."
+    if [ $COLUMNS -lt 70 ]; then
+    	echo "Teaminal size must be at least 70 columns."
     	exit
     fi
 
@@ -136,66 +135,136 @@ get_time_stamps() {
 ################
 
 info_main_menu() {
+read -r -d '' text << EOT
+AllStarLink Main Menu Information
+
+Welcome to the AllStarLink Main Menu. Use the arrow keys
+to scroll this text. To exit press the TAB key to select
+the Ok button and press ENTER.
+
+The first time you started up your node you were asked a
+series of initial setup questions. Should you want to change
+any of those settings, Menu Item 1 will ask you those
+questions again. You probably don't need to do that again
+but you may if you want to.
+
+For new node installs you will want to select Menu Item 2.
+This is where all of the settings are to get your new node
+on the air with a basic setup. Of course you may make
+changes here later should the need arise. Advanced options
+may be set up with Menu Item 6, the Asterisk Edit Menu.
+But don't worry about that advanced stuff just yet.
+
+The bash shell, Menu Item 3, is for access Linux Command
+Line Interface, also known as the Linux CLI. This is for
+Linux experts or if you are provided with CLI instructions.
+
+The Asterisk CLI is for direct access to the heart of what
+makes an AllStar node. You might to go into the *CLI for
+testing, troubleshooting or for control of your node. This
+is pretty advance stuff but the good news is that much of
+this can be done from the Diagonsitics Menu or with Allmon
+or Supermon.
+
+AllStarLink is supported on our community web site. If
+you'd like futher information or help please visit
+https://community.allstarlink.org
+EOT
     echo "info_main_menu" >>$logfile
-    MSG="Welcome to the AllStarLink Main Menu.\n\n"
-    MSG="${MSG}Use the information menu option on each sub menu for an explanation of each option. Please vist the AllStarLink Web Site https://www.allstarlink.org for more information."
-    whiptail --msgbox "${MSG}" $msgbox_height $msgbox_width
+    whiptail --title "$title" --scrolltext --msgbox "$text"  20 70
 }
 
 info_config_menu() {
+read -r -d '' text << EOT
+Expert Configuration Menu Information
+
+Editing configuration files requires detailed knowledge of
+Asterisk and app_rpt settings. Please make a back of your
+settings before editing any files.
+
+You may make a backup from Menu Item "C" or from the ASL
+Main Menu.
+EOT
     echo "info_config_menu" >>$logfile
-    MSG="Editing configuration files requires detailed knowledge of Asterisk and app_rpt settings. "
-    MSG="${MSG}Please make a copy of your settings before editing any files."
-    whiptail --msgbox "${MSG}" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
 info_backup_restore_menu() {
+read -r -d '' text << EOT
+Auto savenode - uses the save-node script to archive your
+configuration in .tgz format and uploads to ASL backup
+server.
+
+Restore node - retrieves the list from the ASL backup server
+and allows you to choose which one to use The Local backup
+copies you configuration files to a separate directory under
+the name of YEAR-MONTH-DAY for reference
+
+The Local backup also creates an archive file in .tgz format
+which you may download using the backup-server webpage
+interface for off-site storage of your configuration The
+Restore backup allows you to restore from either a
+YEAR-MONTH-DAY folder or an archive .tgz file you uploaded
+using the backup-server webpage interface
+EOT
     echo "info_backup_restore_menu" >>$logfile
-    whiptail --msgbox "Auto savenode - uses the save-node script to archive your configuration in .tgz format and uploads to ASL backup server. \
-\nRestore node - retrieves the list from the ASL backup server and allows you to choose which one to use \
-The Local backup copies you configuration files to a separate directory under the name of YEAR-MONTH-DAY for reference \
-The Local backup also creates an archive file in .tgz format which you may download using the backup-server webpage interface \
-for off-site storage of your configuration\n \
-The Restore backup allows you to restore from either a YEAR-MONTH-DAY folder or an archive .tgz file you uploaded using the backup-server webpage interface \
-" $msgbox_height $msgbox_width
+    whiptail --title "$title" --scrolltext --msgbox "$text" 20 70
 }
 
 info_OS_menu() {
+read -r -d '' text << EOT
+Apt-get update is used to updates the repositories with the
+latest packages Apt-get upgrade will upgrade all of the
+packages on your system firewall and fail2ban are two of the
+basic security features you should use if you have a public
+IP address The ASL addons menu list available packages to
+enhance your ASL node Change CPU performance is for
+Raspberry Pi systems only
+EOT
     echo "info_OS_menu" >>$logfile
-    whiptail --msgbox "Apt-get update is used to updates the repositories with the latest packages \
-Apt-get upgrade will upgrade all of the packages on your system \
-firewall and fail2ban are two of the basic security features you should use if you have a public IP address \
-The ASL addons menu list available packages to enhance your ASL node \
-Change CPU performance is for Raspberry Pi systems only \
-" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
 info_security_menu() {
+read -r -d '' text << EOT
+Tools to help secure you system and ASL node. Please be
+mindfull so you do not disable your system.
+EOT
     echo "info_security_menu" >>$logfile
-    whiptail --msgbox "Tools to help secure you system and ASL node \
-Please be mindfull so you do not disable your system \
-" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
 info_diagnostics_menu() {
+read -r -d '' text << EOT
+Tools to help diagnose a possibly problem with you
+configuration Also allows you to create a file with the
+listed menu options to download and send to the ASL admin
+team or someone else who may be able to help
+EOT
     echo "info_diagnostics_menu" >>$logfile
-    whiptail --msgbox "Tools to help diagnose a possibly problem with you configuration \
-Also allows you to create a file with the listed menu options to download and send to the ASL admin team \
-or someone else who may be able to help \
-" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
 info_asl_addons_menu() {
+read -r -d '' text << EOT
+Please encourage developers to create an apt-get package
+that we may add to this menu.
+EOT
     echo "info_asl_addons_menu" >>$logfile
-    whiptail --msgbox "Please encourage developers to create an apt-get package that we may add to this menu" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
 info_exit_menu() {
+read -r -d '' text << EOT
+You get this one, right?
+EOT
     echo "info_exit_menu" >>$logfile
-    whiptail --msgbox "Under Construction" $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "$text" 20 70
 }
 
-###### Configuration checks
+##########################
+## Configuration checks ##
+##########################
 
 do_check_is_usbradio() {
     echo "do_check_is_usbradio" >>$logfile
@@ -361,7 +430,7 @@ do_finish() {
             whiptail --msgbox "Please restart Asterisk at your convenience." $msgbox_height $msgbox_width
         fi
     fi
-    whiptail --title "$title" --yesno "Exit ASL Main Menu now?\n\nIf yes type asl-menu to relaunch the menu." $msgbox_height $msgbox_width
+    whiptail --title "$title" --defaultno --yesno "If you exit you may type asl-menu to relaunch the menu.\n\nExit ASL Main Menu now?" $msgbox_height $msgbox_width
     if [ $? -ne 0 ]; then
         return
     else
@@ -385,40 +454,44 @@ do_node_setup() {
     /usr/sbin/node-setup
 }
 
-do_radio_tune_menu() {
-    echo "do_radio_tune_menu" >>$logfile
-    do_check_is_usbradio
-    if [ $USBRADIO_YN = "YES" ]; then
-        clear
-        /usr/sbin/radio-tune-menu
-    else
-        whiptail --title "$title" --msgbox "USBradio must be enabled in modules.conf and selected in rpt.conf" $msgbox_height $msgbox_width
-    fi
-}
+# Moved to node-setup
+#do_radio_tune_menu() {
+#     echo "do_radio_tune_menu" >>$logfile
+#     do_check_is_usbradio
+#     if [ $USBRADIO_YN = "YES" ]; then
+#         clear
+#         /usr/sbin/radio-tune-menu
+#     else
+#         whiptail --title "$title" --msgbox "USBradio must be enabled in modules.conf and selected in rpt.conf" $msgbox_height $msgbox_width
+#     fi
+# }
 
-do_simpleusb_tune_menu() {
-    echo "do_simpleusb_tune_menu" >>$logfile
-    do_check_is_simpleusb
-    if [ $SIMPLEUSB_YN = "YES" ]; then
-        clear
-        /usr/sbin/simpleusb-tune-menu
-    else
-        whiptail --title "$title" --msgbox "SimpleUSB must be enabled in modules.conf and selected in rpt.conf" $msgbox_height $msgbox_width
-    fi
-}
+# do_simpleusb_tune_menu() {
+#     echo "do_simpleusb_tune_menu" >>$logfile
+#     do_check_is_simpleusb
+#     if [ $SIMPLEUSB_YN = "YES" ]; then
+#         clear
+#         /usr/sbin/simpleusb-tune-menu
+#     else
+#         whiptail --title "$title" --msgbox "SimpleUSB must be enabled in modules.conf and selected in rpt.conf" $msgbox_height $msgbox_width
+#     fi
+# }
 
 do_asl_cli() {
     echo "do_asl_cli" >>$logfile
     whiptail --title "$title" --msgbox "Entering the Asterisk CLI. Type exit when done." $msgbox_height $msgbox_width
     clear
     $ASTERISK -rvvv
+    clear
 }
 
 do_bash_shell() {
     echo "do_bash_shell" >>$logfile
     whiptail --title "$title" --msgbox "Entering a bash shell. Type exit when done." $msgbox_height $msgbox_width
     clear
-    su - `logname`
+    /bin/bash
+    clear
+    #su - `logname`
 }
 
 do_reboot() {
@@ -489,9 +562,9 @@ do_validate_updatenodelist_running() {
     echo "do_validate_updatenodelist_running" >>$logfile
     systemctl is-active --quiet update-node-list.service
     if [ $? -eq 0 ]; then #yes
-        whiptail --msgbox "update-node-list program IS running" $msgbox_height $msgbox_width
+        whiptail --msgbox "The update-node-list program IS running." $msgbox_height $msgbox_width
     else
-        whiptail --msgbox "update-node-list program is NOT running" $msgbox_height $msgbox_width
+        whiptail --msgbox "The update-node-list program is NOT running." $msgbox_height $msgbox_width
     fi
 }
 
@@ -525,90 +598,91 @@ do_astdn() {
     whiptail --msgbox "$result" $msgbox_height $msgbox_width
 }
 
-do_upload_diag() {
-    echo "do_upload_diag" >>$logfile
-    whiptail --msgbox "This will gather node number, password, basic system configuration and \nany error messages from the log files." $msgbox_height $msgbox_width
-    RETEMAIL=$(whiptail --inputbox "Please enter a contact email for us to get back with you" $msgbox_height $msgbox_width --title "Contact email address" 3>&1 1>&2 2>&3)
-    whiptail --msgbox "Please have a little patience while we gather a few system details" $msgbox_height $msgbox_width
-    echo "return email: $RETEMAIL" >$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "NODE=$NODENUM" >>$sendtoadminfile
-    echo "REGPASS=$REGPASSWD" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Call sign: $CALLSIGN" >>$sendtoadminfile
-    echo "Interface type: $INTERFACE" >>$sendtoadminfile
-    echo "Echolink Callsign: $ECHOLINKCALLSIGN" >>$sendtoadminfile
-    echo "Echolink node: $ECHOLINKNODE  ASL node used: $ECHOASTNODE" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Ping test to 8.8.8.8" >>$sendtoadminfile
-    $PING 8.8.8.8 -c4 >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Ping test to register.allstarlink.org" >>$sendtoadminfile
-    $PING register.allstarlink.org -c4 >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Ouput of ifconfig" >>$sendtoadminfile
-    $IFCONFIG >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Output of lsmod grep dahdi" >>$sendtoadminfile
-    $LSMOD | grep dahdi >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "IAX2 registry" >>$sendtoadminfile
-    $ASTERISK -rx "iax2 show registry" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Asterisk version:" >>$sendtoadminfile
-    $ASTERISK -rx "core show version" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "Current date and time: $DATEEXT" >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "update-node-list service running?" >>$sendtoadminfile
-    systemctl status update-node-list >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "/tmp/rpt_extnodes-temp file" >>$sendtoadminfile
-    ls -l /tmp/rpt_extnodes-temp >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "/var/lib/asterisk/rpt_extnodes file" >>$sendtoadminfile
-    ls -l /var/lib/asterisk/rpt_extnodes >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "####### Begin warnings from messages file" >>$sendtoadminfile
-    cat /var/log/asterisk/messages | grep WARNING >>$sendtoadminfile
-    echo "" >>$sendtoadminfile
-    echo "####### Begin warnings from messages.1 file" >>$sendtoadminfile
-    cat /var/log/asterisk/messages.1 | grep WARNING >>$sendtoadminfile
-    whiptail --msgbox "Use the backup-server option to retrieve the $sendtoadminfile file. Simply rename with .txt extension after download." $msgbox_height $msgbox_width
+# Disabled for now
+# do_upload_diag() {
+#     echo "do_upload_diag" >>$logfile
+#     whiptail --msgbox "This will gather node number, password, basic system configuration and \nany error messages from the log files." $msgbox_height $msgbox_width
+#     RETEMAIL=$(whiptail --inputbox "Please enter a contact email for us to get back with you" $msgbox_height $msgbox_width --title "Contact email address" 3>&1 1>&2 2>&3)
+#     whiptail --msgbox "Please have a little patience while we gather a few system details" $msgbox_height $msgbox_width
+#     echo "return email: $RETEMAIL" >$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "NODE=$NODENUM" >>$sendtoadminfile
+#     echo "REGPASS=$REGPASSWD" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Call sign: $CALLSIGN" >>$sendtoadminfile
+#     echo "Interface type: $INTERFACE" >>$sendtoadminfile
+#     echo "Echolink Callsign: $ECHOLINKCALLSIGN" >>$sendtoadminfile
+#     echo "Echolink node: $ECHOLINKNODE  ASL node used: $ECHOASTNODE" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Ping test to 8.8.8.8" >>$sendtoadminfile
+#     $PING 8.8.8.8 -c4 >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Ping test to register.allstarlink.org" >>$sendtoadminfile
+#     $PING register.allstarlink.org -c4 >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Ouput of ifconfig" >>$sendtoadminfile
+#     $IFCONFIG >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Output of lsmod grep dahdi" >>$sendtoadminfile
+#     $LSMOD | grep dahdi >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "IAX2 registry" >>$sendtoadminfile
+#     $ASTERISK -rx "iax2 show registry" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Asterisk version:" >>$sendtoadminfile
+#     $ASTERISK -rx "core show version" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "Current date and time: $DATEEXT" >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "update-node-list service running?" >>$sendtoadminfile
+#     systemctl status update-node-list >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "/tmp/rpt_extnodes-temp file" >>$sendtoadminfile
+#     ls -l /tmp/rpt_extnodes-temp >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "/var/lib/asterisk/rpt_extnodes file" >>$sendtoadminfile
+#     ls -l /var/lib/asterisk/rpt_extnodes >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "####### Begin warnings from messages file" >>$sendtoadminfile
+#     cat /var/log/asterisk/messages | grep WARNING >>$sendtoadminfile
+#     echo "" >>$sendtoadminfile
+#     echo "####### Begin warnings from messages.1 file" >>$sendtoadminfile
+#     cat /var/log/asterisk/messages.1 | grep WARNING >>$sendtoadminfile
+#     whiptail --msgbox "Use the backup-server option to retrieve the $sendtoadminfile file. Simply rename with .txt extension after download." $msgbox_height $msgbox_width
 
-    return
+#     return
 
-    ##########This part skipped as its not used yet###############################################################################################################
-    SENDDIAGS_SITE=http://backup.allstarlink.org
-    if [ -r /etc/asterisk/savenode.conf ]; then
-        . /etc/asterisk/savenode.conf
-    else
-        whiptail --msgbox "Savenode.conf file does not exist please edit and set it to enabled" $msgbox_height $msgbox_width
-        return
-    fi
+#     ##########This part skipped as its not used yet###############################################################################################################
+#     SENDDIAGS_SITE=http://backup.allstarlink.org
+#     if [ -r /etc/asterisk/savenode.conf ]; then
+#         . /etc/asterisk/savenode.conf
+#     else
+#         whiptail --msgbox "Savenode.conf file does not exist please edit and set it to enabled" $msgbox_height $msgbox_width
+#         return
+#     fi
 
-    if [ .$ENABLE = "." ]; then
-        whiptail --msgbox "Savenode.conf file not set to enable" $msgbox_height $msgbox_width
-        return
-    fi
+#     if [ .$ENABLE = "." ]; then
+#         whiptail --msgbox "Savenode.conf file not set to enable" $msgbox_height $msgbox_width
+#         return
+#     fi
 
-    if [ $ENABLE -eq 0 ]; then
-        whiptail --msgbox "Savenode.conf file not set to enable" $msgbox_height $msgbox_width
-        return
-    fi
+#     if [ $ENABLE -eq 0 ]; then
+#         whiptail --msgbox "Savenode.conf file not set to enable" $msgbox_height $msgbox_width
+#         return
+#     fi
 
-    whiptail --msgbox "Uploading diagnostic file to ASL Admin team" $msgbox_height $msgbox_width
+#     whiptail --msgbox "Uploading diagnostic file to ASL Admin team" $msgbox_height $msgbox_width
 
-    wget -q --timeout=60 --tries=1 --post-file=$sendtoadminfile \
-        --http-user=$NODE --http-password=$PASSWORD -O- \
-        $SENDDIAGS_SITE/uploaddiags.cgi
-    if [ $? -ne 0 ]; then
-        whiptail --msgbox "There was an error uploading the file to ASL admin team"
-    fi
+#     wget -q --timeout=60 --tries=1 --post-file=$sendtoadminfile \
+#         --http-user=$NODE --http-password=$PASSWORD -O- \
+#         $SENDDIAGS_SITE/uploaddiags.cgi
+#     if [ $? -ne 0 ]; then
+#         whiptail --msgbox "There was an error uploading the file to ASL admin team"
+#     fi
 
-}
+# }
 
 ####################
 ## OS subsections ##
@@ -635,9 +709,10 @@ do_edit_allmon_config() {
 
 do_apt_get_update() {
     echo "do_apt_get_update" >>$logfile
-    whiptail --msgbox "Grab a cup of coffee if you have not run this in a while\nUpdating repository information" $msgbox_height $msgbox_width
-    $APTGET update
-    whiptail --msgbox "Done running apt-get update" $msgbox_height $msgbox_width
+    if (whiptail --yesno "Grab a cup of coffee if you have not run this in a while.\nUpdate now?" $msgbox_height $msgbox_width); then
+        $APTGET update
+        whiptail --msgbox "Done running apt-get update" $msgbox_height $msgbox_width
+    fi
 }
 
 do_apt_get_upgrade() {
@@ -1273,18 +1348,16 @@ do_main_menu() {
     echo "do_main_menu" >>$logfile
     while true; do
         calc_wt_size
-        FUN=$(whiptail --menu "Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Main Menu" \
+        FUN=$(whiptail --menu "AllStarLink Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Main Menu" \
             "1" "First Time Setup" \
             "2" "Node Settings" \
             "3" "Enter a bash shell" \
             "4" "Enter the Asterisk CLI" \
             "5" "Asterisk Editor Menu" \
-            "6" "Operating System Menu" \
-            "7" "Security Menu" \
-            "8" "Diagnostics Menu" \
-            "9" "Backup and Restore Menu" \
-            "10" "Logout/Reboot/Shutdown" \
-            "I" "Information" \
+            "6" "Diagnostics Menu" \
+            "7" "Backup and Restore Menu" \
+            "8" "Logout/Reboot/Shutdown" \
+            "I" "Information and help text" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             do_finish
@@ -1295,13 +1368,11 @@ do_main_menu() {
             3) do_bash_shell ;;
             4) do_asl_cli ;;
             5) do_conf_edit_menu ;;
-            6) do_OS_menu ;;
-            7) do_sys_security_menu ;;
-            8) do_sys_diags_menu ;;
-            9) do_backup_restore_menu ;;
-            10) do_logout_menu ;;
+            6) do_sys_diags_menu ;;
+            7) do_backup_restore_menu ;;
+            8) do_logout_menu ;;
             I) info_main_menu ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
     done
@@ -1345,7 +1416,7 @@ do_conf_edit_menu() {
             10) nano $CONFIGS/savenode.conf ;;
             11) do_edit_allmon_config ;;
             I) info_config_menu ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
     done
@@ -1381,7 +1452,7 @@ do_OS_menu() {
             8) do_cpu_clocking_menu ;;
             9) do_use_aslmenu ;;
             I) info_OS_menu ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
     done
@@ -1428,7 +1499,7 @@ do_sys_security_menu() {
             13) do_add_login_name ;;
             14) do_delete_login_name ;;
             I) info_security_menu ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
     done
@@ -1449,8 +1520,6 @@ do_sys_diags_menu() {
                 "7" "Restart ASL Asterisk (astres.sh)" \
                 "8" "Start ASL Asterisk (astup.sh)" \
                 "9" "Stop ASL Asterisk (astdn.sh)" \
-                "10" "Create diagnostic file for admins" \
-                "I" "Information" \
                 3>&1 1>&2 2>&3 #"10" "Create Upload file for ASL Admin Team" \
         )
         if [ $? -ne 0 ]; then
@@ -1466,9 +1535,8 @@ do_sys_diags_menu() {
             7) do_astres ;;
             8) do_astup ;;
             9) do_astdn ;;
-            10) do_upload_diag ;;
             I) info_diagnostics_menu ;;
-            *) whiptail --msgbox "Whoooops, script error: unrecognized option" $msgbox_height $msgbox_width ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
         fi
     done
@@ -1552,7 +1620,6 @@ do_backup_restore_menu() {
             "3" "Backup node to local file" \
             "4" "Restore node from local backup files" \
             "5" "Delete a local backup file" \
-            "6" "Start webserver for backup/restore" \
             "I" "Information" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
