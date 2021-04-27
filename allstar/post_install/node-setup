@@ -279,14 +279,32 @@ do_select_node_number() {
 
 do_set_node_number() {
     echo "doing do_set_node_number" >>$logfile
-    sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    #sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    # sed apropreiate rpt.conf lines
+    sed -i "/^\[$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^$CURRENT_NODE\s*=\s*/ s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    sed -i "/^rxchannel\s*=.*usb_$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^;\s*rxchannel\s*=.*usb_$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^rxchannel\s*=\s*Voter\/$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^;\s*rxchannel\s*=\s*Voter\/$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+
     sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
+
+    # New nodes will have the register statement commented. Remove it first then change node number.
+    sed -i "/^;.*register.*=\s*$CURRENT_NODE/ s/;//" $CONFIGS/iax.conf
     sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
-    sed -i "/^NODE\s*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/savenode.conf
+
+    # Reolace the whole line
+    sed -i "/^NODE\s*=/ s/NODE\s*=.*/NODE=$NEW_NODE/" $CONFIGS/savenode.conf
     AST_RESTART=1;
 }
 
 do_select_node_password() {
+    if [ "$CURRENT_PASSWD" == "Not Set" ]; then
+        whiptail --title "$title" --msgbox "This looks like a new node. Change node number before setting the password." 20 60
+        return
+    fi
+
     test=$(whiptail --inputbox "Enter password for Node $NEW_NODE" 8 78 "$CURRENT_PASSWD" --title "$title" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then
         return
@@ -302,19 +320,10 @@ do_select_node_password() {
 }
 
 do_set_node_password() {
+    sed -i "/^register\s*=\s*$CURRENT_NODE/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
 
-    # Test for existing uncommented register line. New nodes won't have one.
-    if grep -q "^register" $CONFIGS/iax.conf ; then
-        sed -i "/^register.*=\s*$CURRENT_NODE:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-
-        # This is for http registration with an alternate port. ie register=<node>#<port>:<passwd>@register.allstarlink.org
-        sed -i "/^register\s*=\s*$CURRENT_NODE#.\+:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-    else
-        # No uncomment register line so add one.
-        new_register_line="register=$CURRENT_NODE:$NEW_PASSWD@register.allstarlink.org   ;added by node-setup"
-        sed -i "/^;\s*register.*=.*/a $new_register_line" $CONFIGS/iax.conf
-    fi
-    sed -i "/^PASSWORD\s*=\s*$CURRENT_PASSWD/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/savenode.conf
+    # Replace the whole line
+    sed -i "/^PASSWORD\s*=/ s/PASSWORD\s*=.*/PASSWORD=$NEW_PASSWD/" $CONFIGS/savenode.conf
     AST_RESTART=1;
 }
 
