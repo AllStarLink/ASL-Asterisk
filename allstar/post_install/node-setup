@@ -229,20 +229,27 @@ do_select_statpost() {
 }
 
 do_select_duplex() {
-    echo "doing do_new_duplex" >>$logfile
-    test=$(whiptail --title "$title" --inputbox "\
-Select Duplex type:
+echo "doing do_new_duplex" >>$logfile
 
- 0 = Half duplex with no telemetry tones
- 1 = Half duplex with telemetry tones (simplex node)
- 2 = Full Duplex with telemetry tones (repeater)
- 3 = Full Duplex with telemetry, but no repeated audio.
- 4 = Full Duplex with telemetry (Special use)
+# Array of duplex choices
+duplex_modes=( "Half duplex with no telemetry (link) " \
+"Half duplex with telemetry (hotspot) " \
+"Full Duplex with telemetry (repeater) " \
+"Full Duplex with telemetry, in cabinet repeat " \
+"Full Duplex with telemetry, no repeat w/autopatch " )
 
-The most common types are (1) or (2)
+    newarr=()
+    for i in ${!duplex_modes[@]}; do
+        if [ $i -eq $CURRENT_DUPLEX ]; then
+            ONOFF="ON"
+        else
+            ONOFF="OFF"
+        fi
+        newarr+=("$i" "${duplex_modes[$i]}" "$ONOFF")
+    done
+    ((i++))
 
-See wiki.allstarlink.org for full documentation.\
-" 20 60 "$CURRENT_DUPLEX" 3>&1 1>&2 2>&3)
+    test=$(whiptail --title "$title" --radiolist "Press space bar to select Duplex type:" 20 70 $i "${newarr[@]}" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then
         return
     else
