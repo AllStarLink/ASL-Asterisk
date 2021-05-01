@@ -994,24 +994,23 @@ do_webserver_backup() {
     fi
 }
 
-do_use_aslmenu() {
+do_addremove_menu() {
     # use asl-menu on login for user account
-    ANSWER=1
-    REALID=$(who am i | awk '{print $1}')
-    if (whiptail --title "asl-menu at login" --yesno "Would you like to start the asl-menu script\nat login by default for user: $REALID?" --defaultno $msgbox_height $msgbox_width 3>&1 1>&2 2>&3); then
-        ANSWER=$?
-    fi
-    if [ "$ANSWER" = "0" ]; then
-        cat /home/$REALID/.bashrc | grep asl-menu >/dev/null
-        if [ $? = "1" ]; then
-            echo "sudo /usr/sbin/asl-menu" >>/home/$REALID/.bashrc
-            whiptail --msgbox "asl-menu will start at login for user $REALID" $msgbox_height $msgbox_width
-        else
-            whiptail --msgbox "asl-menu already starts for user $REALID at login." $msgbox_height $msgbox_width
-        fi
+read -r -d '' text << EOT
+ALS Menu removed from login for user $REALID.
+
+You may set to launch the menu at login by selecting
+this menu item again.
+EOT
+    cat $HOMEDIR/.bashrc | grep "^sudo /usr/sbin/asl-menu$" >/dev/null
+    if [ $? -eq 0 ]; then
+    	# Remove line
+    	sed -i "/^sudo \/usr\/sbin\/asl-menu/d" $HOMEDIR/.bashrc;
+    	whiptail --title "$title" --msgbox "$text" $msgbox_height $msgbox_width
     else
-        sed -i '/asl-menu/c\' /home/$REALID/.bashrc
-        whiptail --msgbox "the asl-menu autostart at login has been disabled\nYou may run the asl-menu script by typing sudo /usr/sbin/asl-menu" $msgbox_height $msgbox_width
+    	# Add line
+        echo "sudo /usr/sbin/asl-menu" >> $HOMEDIR/.bashrc
+        whiptail --title "$title" --msgbox "ASL Menu will start at login for user $REALID." $msgbox_height $msgbox_width
     fi
 }
 
@@ -1357,6 +1356,7 @@ do_main_menu() {
             "6" "Diagnostics Menu" \
             "7" "Backup and Restore Menu" \
             "8" "Logout/Reboot/Shutdown" \
+            "9" "Add/Remove Menu at login" \
             "I" "Information and help text" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
@@ -1371,6 +1371,7 @@ do_main_menu() {
             6) do_sys_diags_menu ;;
             7) do_backup_restore_menu ;;
             8) do_logout_menu ;;
+			9) do_addremove_menu ;;
             I) info_main_menu ;;
             *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;
             esac || whiptail --msgbox "There was an error running option $FUN" $msgbox_height $msgbox_width
