@@ -301,8 +301,11 @@ do_set_node_number() {
     sed -i "/^;.*register.*=\s*$CURRENT_NODE/ s/;//" $CONFIGS/iax.conf
     sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
 
-    # Reolace the whole line
+    # Replace the whole line
     sed -i "/^NODE\s*=/ s/NODE\s*=.*/NODE=$NEW_NODE/" $CONFIGS/savenode.conf
+
+    sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/simpleusb.conf
+    sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/usbradio.conf
     AST_RESTART=1;
 }
 
