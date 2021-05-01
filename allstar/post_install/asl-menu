@@ -4,7 +4,7 @@
 # 2018 May
 # By N8THN
 # Modifications by KK9ROB 2021/02/25
-# Extensive Mods by WD6AWP April 2021
+# Extensive Mods by WD6AWP April & May 2021
 
 clear
 source /etc/environment
@@ -487,7 +487,8 @@ do_asl_cli() {
 
 do_bash_shell() {
     echo "do_bash_shell" >>$logfile
-    whiptail --title "$title" --msgbox "Entering a bash shell. Type exit when done." $msgbox_height $msgbox_width
+    whiptail --title "$title" --msgbox "Entering a bash shell. Be careful, you're root! Type exit when done." $msgbox_height $msgbox_width
+
     clear
     /bin/bash
     clear
@@ -1350,7 +1351,7 @@ do_main_menu() {
         FUN=$(whiptail --menu "AllStarLink Main Menu" --title "$title" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Main Menu" \
             "1" "First Time Setup" \
             "2" "Node Settings" \
-            "3" "Enter a bash shell" \
+            "3" "Enter a bash shell as root" \
             "4" "Enter the Asterisk CLI" \
             "5" "Asterisk Editor Menu" \
             "6" "Diagnostics Menu" \
