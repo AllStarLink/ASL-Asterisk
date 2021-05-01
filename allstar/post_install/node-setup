@@ -298,7 +298,7 @@ do_set_node_number() {
     sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
 
     # New nodes will have the register statement commented. Remove it first then change node number.
-    sed -i "/^;.*register.*=\s*$CURRENT_NODE/ s/;//" $CONFIGS/iax.conf
+    sed -i "/^;.*register.*=\s*$CURRENT_NODE/ s/;\s*//" $CONFIGS/iax.conf
     sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
 
     # Replace the whole line
