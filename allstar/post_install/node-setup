@@ -10,6 +10,7 @@
 #INTERACTIVE=True
 CONFIGS=/etc/asterisk
 AST_RESTART=0
+BACKUPDIR=/var/asl-backups
 #logfile=/dev/null
 logfile=/tmp/node-setup.log
 title="ASL 2.0.0-Beta"
@@ -150,12 +151,12 @@ do_local_conf_backup() {
 
     whiptail --title "$title" --yesno "Local backup to file $FILEDATENAME.tgz?" $msgbox_height $msgbox_width
     if [ $? -eq 0 ]; then
-        if [ ! -d $HOMEDIR/asl-backups ]; then
-            mkdir $HOMEDIR/asl-backups
+        if [ ! -d $BACKUPDIR ]; then
+            mkdir $BACKUPDIR
         fi
-        cd / && tar czf $HOMEDIR/asl-backups/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
-        chown -R $REALID.$REALID $HOMEDIR/asl-backups/$FILEDATENAME.tgz
-        whiptail --msgbox "Backup $HOMEDIR/asl-backups/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
+        cd / && tar czf $BACKUPDIR/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
+        chmod og+r $BACKUPDIR/$FILEDATENAME.tgz
+        whiptail --msgbox "Backup $BACKUPDIR/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
     fi
 }
 
@@ -166,7 +167,7 @@ do_local_conf_restore() {
 
     #Build array of /etc/asterisk/*.tgz files
     shopt -s nullglob
-    filearr=($HOMEDIR/asl-backups/*.tgz)
+    filearr=($BACKUPDIR/*.tgz)
     file_count=${#filearr[@]}
     #echo ${#filearr[@]}
     #echo ${filearr[@]}
@@ -306,6 +307,7 @@ do_set_node_number() {
 
     sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/simpleusb.conf
     sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/usbradio.conf
+    sed -i "/^\[$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/voter.conf
     AST_RESTART=1;
 }
 

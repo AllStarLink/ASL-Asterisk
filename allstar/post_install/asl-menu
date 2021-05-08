@@ -65,7 +65,7 @@ get_node_info() {
     CONFIGS=/etc/asterisk
     WEBROOT=/var/www/html
     TMP=/tmp
-    BACKUPDIR=/etc/asterisk/backups
+    BACKUPDIR=/var/asl-backups
 
     FAIL2BANFILE=/etc/fail2ban/jail.d/allstar.conf
     #FIREWALLFILE=/etc/iptables.conf
@@ -130,6 +130,10 @@ get_time_stamps() {
     FILEDATENAME=$(date +ASL_%Y-%m-%d_%H%M)
 }
 
+get_current_node_number() {
+    CURRENT_NODE=$(grep -o "^\[[0-9]*\]" $CONFIGS/rpt.conf | grep -o "[0-9]*")
+}
+
 ################
 ## Info pages ##
 ################
@@ -142,11 +146,11 @@ Welcome to the AllStarLink Main Menu. Use the arrow keys
 to scroll this text. To exit press the TAB key to select
 the Ok button and press ENTER.
 
-The first time you started up your node you were asked a
-series of initial setup questions. Should you want to change
-any of those settings, Menu Item 1 will ask you those
-questions again. You probably don't need to do that again
-but you may if you want to.
+The first time you started up your node you may have been
+asked series of initial setup questions. Should you want
+to change any of those settings, Menu Item 1 will ask you
+those questions again. You probably don't need to do that
+again but you may if you want to.
 
 For new node installs you will want to select Menu Item 2.
 This is where all of the settings are to get your new node
@@ -880,17 +884,14 @@ do_local_conf_backup() {
     get_time_stamps
     whiptail --title "$title" --yesno "Local backup to file $FILEDATENAME?" $msgbox_height $msgbox_width
     if [ $? -eq 0 ]; then
-        #mkdir $CONFIGS/$FILEDATENAME > /dev/null
-        #cp -r $CONFIGS/*.conf $CONFIGS/$FILEDATENAME
-        #cd / && tar czf /tmp/$FILEDATENAME.tgz  etc/asterisk > /dev/null
-        if [ ! -d $HOMEDIR/asl-backups ]; then
-            mkdir $HOMEDIR/asl-backups
+        if [ ! -d $BACKUPDIR ]; then
+            mkdir $BACKUPDIR
         fi
-        cd / && tar czf $HOMEDIR/asl-backups/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
+        cd / && tar czf $BACKUPDIR/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
 
-        chown -R $REALID.$REALID $HOMEDIR/asl-backups/$FILEDATENAME.tgz
+        chmod og+r $BACKUPDIR/$FILEDATENAME.tgz
 
-        whiptail --msgbox "Backup $HOMEDIR/asl-backups/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
+        whiptail --msgbox "Backup $BACKUPDIR/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
     fi
 }
 
@@ -901,7 +902,7 @@ do_local_conf_restore() {
 
     #Build array of /etc/asterisk/*.tgz files
     shopt -s nullglob
-    filearr=($HOMEDIR/asl-backups/*.tgz)
+    filearr=($BACKUPDIR/*.tgz)
     file_count=${#filearr[@]}
     #echo ${#filearr[@]}
     #echo ${filearr[@]}
@@ -945,7 +946,7 @@ do_local_conf_delete() {
     echo "do_local_conf_delete" >>$logfile
     #Build array of /etc/asterisk/*.tgz files
     shopt -s nullglob
-    filearr=($HOMEDIR/asl-backups/*.tgz)
+    filearr=($BACKUPDIR/ASL*.tgz)
     file_count=${#filearr[@]}
 
     # Restrict menu height to 10 backups
