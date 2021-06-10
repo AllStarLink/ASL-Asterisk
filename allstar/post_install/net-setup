@@ -86,17 +86,16 @@ do_static_dhcp_menu() {
       "D DHCP" "Set DHCP addressing" \
       3>&1 1>&2 2>&3)
     RETIP=$?
-    if [ $RETIP -eq 1 ]; then
-      return
-    elif [ $RETIP -eq 0 ]; then
+    if [ $RETIP -eq 0 ]; then
       case "$FUNIP" in
         S\ *) do_set_static ;;
         D\ *) do_set_dhcp ;;
         *) whiptail --msgbox "Whoooops, script error: unrecognized option" 20 60 1 ;;
-      esac || whiptail --msgbox "There was an error running option $FUNA" 20 60 1
+      esac
+    else
+      return
     fi
   done
-  return
 }
 
 
@@ -112,12 +111,12 @@ numbits=$nbits
 DGW=$(whiptail --inputbox "Enter the default gateway in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
 PDNS=$(whiptail --inputbox "Enter the address of the primary nameserver in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
 SDNS=$(whiptail --inputbox "Enter the address of the secondary nameserver in the form XXX.XXX.XXX.XXX: " 8 78 3>&1 1>&2 2>&3)
-if (whiptail --yesno "So we have: \n\nIP Address/CIDR  : $IPADDR/$numbits\nNetmask          : $NETMASK\nDefault Gateway  : $DGW\nPrimary DNS      : $PDNS\nSecondary DNS    : $SDNS\n\nSelect yes to continue or no to start over." 30 80); then
-# yes, write it
-do_static_write
+whiptail --yesno "So we have: \n\nIP Address/CIDR  : $IPADDR/$numbits\nNetmask          : $NETMASK\nDefault Gateway  : $DGW\nPrimary DNS      : $PDNS\nSecondary DNS    : $SDNS\n\nSelect yes to continue or no to start over." 30 80
+if [ $? -eq 0 ]; then
+    # yes, write it
+    do_static_write
 else
-# no, re-enter
-do_set_static
+    return
 fi
 }
 

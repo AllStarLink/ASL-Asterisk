@@ -9,28 +9,96 @@
 /usr/bin/clear
 #INTERACTIVE=True
 CONFIGS=/etc/asterisk
-#TMP=/tmp
-#MONTHDAY=$(date +%Y-%m-%d)
-#DATEEXT=$(date +%Y-%m-%d.%H:%M)
-#REBOOT_NEEDED=0
 AST_RESTART=0
+BACKUPDIR=/var/asl-backups
 #logfile=/dev/null
-logfile=/tmp/node_setup_whip.log
+logfile=/tmp/node-setup.log
 title="ASL 2.0.0-Beta"
 msgbox_height=12
 msgbox_width=60
 
+do_node_setup+main_menu_text() {
+read -r -d '' text << EOT
+Node Setup Main Menu Instructions
+
+Use arrow keys to scroll, TAB to select Ok and then enter to
+close instructions.
+
+Menu item 1 is where you'll configure most of the basic
+setting for your AllStar node. For servers with more
+than one node or advance settings you'll need to use an
+editor/sftp client such as WinSCP. But don't worry,
+everything you need to get your node on the air is here.
+
+Before changing any settings you should make a local
+backup with menu item C. If something goes wrong you'll
+be able to restore with menu item R.
+
+Changes will go into effect once Asterisk is restarted
+with menu item 2.
+
+If this is a new setup, you should do all of item 1, then
+do menu items 2 and 3. That should be all that is needed
+to get your node up and running.
+
+For help see https://community.allstarlink.org
+EOT
+    whiptail --title "$title" --scrolltext --msgbox "$text" 20 70
+}
+
+do_node_setup_menu_info() {
+read -r -d '' text << EOT
+Node Setup Menu Instructions
+
+For new nodes you will should choose values for each one of
+these items.
+
+1 Duplex is explained when selected. Most often you will
+  set it to 1.
+2 The node number you were assigned by AllStarLink.org
+3 The node password you were assigned along with your node
+  number. Node number and node password is how your node
+  connects to the AllStarLink network.
+4 Your ham radio call sign.
+5 AMI password for Allmon and Supermon. The AMI password
+  allows Allmon and Supermon monitor and control your node
+  from a web browser.
+6 Type of radio interface. Most often you will use
+  simple USB.
+7 Send statistics (yes or no) to stats.allstarlink.org
+  Allows you and others to see the status and connections
+  of your node including the location on a map.
+
+These settings will go into effect when Asterisk is
+restarted.
+
+For help see https://community.allstarlink.org
+EOT
+    whiptail --title "$title" --scrolltext --msgbox "$text" 20 70
+}
+
+do_dummy_yesno() {
+    whiptail --title "$title" --yesno "Select Yes, NO or press escape." $msgbox_height $msgbox_width
+    rc=$?
+    if [[ rc -eq 0 ]]; then
+        whiptail --msgbox "$rc Yes" 20 60
+    elif [[ rc -eq 1 ]]; then
+        whiptail --msgbox "$rc No" 20 60
+    else
+        whiptail --msgbox "$rc Escape or other" 20 60
+    fi
+}
 
 ##############################
 # check if root
 if [ $(whoami) != root ]; then
-    whiptail --msgbox "This script must be run as root or with sudo" 20 60 2
+    whiptail --msgbox "This script must be run as root or with sudo" 20 60
     exit
 fi
 
 if [ ! -f $CONFIGS/rpt.conf ]; then
-    whiptail --msgbox "Config files not in $CONFIGS directory Exiting" 20 60 2
-    exit 1
+    whiptail --msgbox "Config files not in $CONFIGS directory Exiting" 20 60
+    exit
 fi
 
 calc_wt_size() {
@@ -61,43 +129,11 @@ calc_wt_size() {
 }
 
 do_set_env() {
-    echo "doing do_create_tmp_env" >>$logfile
-    # mkdir -p $TMP
-    # cp -f $CONFIGS/extensions.conf $TMP/extensions.conf.tmp
-    # cp -f $CONFIGS/echolink.conf $TMP/echolink.conf.tmp
-    # cp -f $CONFIGS/iax.conf $TMP/iax.conf.tmp
-    # cp -f $CONFIGS/modules.conf $TMP/modules.conf.tmp
-    # cp -f $CONFIGS/rpt.conf $TMP/rpt.conf.tmp
-    # cp -f $CONFIGS/savenode.conf $TMP/savenode.conf.tmp
-    # cp -f $CONFIGS/manager.conf $TMP/manager.conf.tmp
-    # cp -f $CONFIGS/usbradio.conf $TMP/usbradio.conf.tmp
-    # cp -f $CONFIGS/simpleusb.conf $TMP/simpleusb.conf.tmp
-    # cp -f $CONFIGS/voter.conf $TMP/voter.conf.tmp
-    # CURRENT_NODE=$(grep -o '^\[[0-9]*\]' $TMP/rpt.conf.tmp | sed 's/.*\[\([^]]*\)\].*/\1/g')
-    # CURRENT_REG1=$(grep -e 'register[ \t]*=[ \t]*' $TMP/iax.conf.tmp | awk -F'=' '{print $2}' | awk -F'   ;' '{print $1}')
-    # CURRENT_REG=$(echo "$CURRENT_REG1" | awk -F'@' '{print $1}')
-    # CURRENT_REG_NODE=$(echo "$CURRENT_REG" | awk -F':' '{print $1}')
-    # CURRENT_REG_PSWD=$(echo "$CURRENT_REG" | awk -F':' '{print $2}')
-    # CURRENT_CALLSIGN=$(grep '^idrecording\s*=\s*' $CONFIGS/rpt.conf | awk -F'=' '{print $2}' | sed 's/\s*|\i//' | sed -e 's/^\(.\{9\}\).*/\1/')
-    # ###     CURRENT_DUPLEX=$(grep '^duplex =' $TMP/rpt.conf.tmp | awk -F '=' '{print $2}' | grep -B1 ";")
-    # CURRENT_DUPLEX=$(grep '^duplex =' $TMP/rpt.conf.tmp | awk -F " " '{print $3}')
-    # NEWNODE="$CURRENT_NODE"
-    # NEWCALL="$CURRENT_CALLSIGN"
-    # NEWPSWD="$CURRENT_REG_PSWD"
-    # CURRENT_INTERFACE=$(grep '^rxchannel' $TMP/rpt.conf.tmp | awk -F'=' '{print $2}' | awk -F'  ;' '{print$1}')
-    # NEWIFACE="$CURRENT_INTERFACE"
-    # NEWDUPLEX="$CURRENT_DUPLEX"
-    # CURRENTMNGRSECRET=$(grep 'secret' $TMP/manager.conf.tmp | awk -F '= ' '{print $2}' | grep -o '^\S*')
-    # NEWMNGRSECRET="$CURRENTMNGRSECRET"
-    # echo "Start node configurations date/time is $DATEEXT" >>$logfile
-    # echo "CURRENT_NODE var is $CURRENT_NODE" >>$logfile
-    # echo "CURRENT_REG_PSWD var is $CURRENT_REG_PSWD" >>$logfile
-    # echo "CURRENT_CALLSIGN var is $CURRENT_CALLSIGN" >>$logfile
-    # echo "CURRENT_INTERFACE var is $CURRENT_INTERFACE" >>$logfile
+    echo "doing do_set_env" >>$logfile
 
     REALID=$(who am i | awk '{print $1}')
     if [ $REALID == "root" ]; then
-        HOMEDIR=$REALID
+        HOMEDIR=/$REALID
     else
         HOMEDIR="/home/$REALID"
     fi
@@ -115,12 +151,12 @@ do_local_conf_backup() {
 
     whiptail --title "$title" --yesno "Local backup to file $FILEDATENAME.tgz?" $msgbox_height $msgbox_width
     if [ $? -eq 0 ]; then
-        if [ ! -d $HOMEDIR/asl-backups ]; then
-            mkdir $HOMEDIR/asl-backups
+        if [ ! -d $BACKUPDIR ]; then
+            mkdir $BACKUPDIR
         fi
-        cd / && tar czf $HOMEDIR/asl-backups/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
-        chown -R $REALID.$REALID $HOMEDIR/asl-backups/$FILEDATENAME.tgz
-        whiptail --msgbox "Backup $HOMEDIR/asl-backups/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
+        cd / && tar czf $BACKUPDIR/$FILEDATENAME.tgz --exclude='*.tgz' etc/asterisk >/dev/null
+        chmod og+r $BACKUPDIR/$FILEDATENAME.tgz
+        whiptail --msgbox "Backup $BACKUPDIR/$FILEDATENAME.tgz complete." $msgbox_height $msgbox_width
     fi
 }
 
@@ -131,7 +167,7 @@ do_local_conf_restore() {
 
     #Build array of /etc/asterisk/*.tgz files
     shopt -s nullglob
-    filearr=($HOMEDIR/asl-backups/*.tgz)
+    filearr=($BACKUPDIR/*.tgz)
     file_count=${#filearr[@]}
     #echo ${#filearr[@]}
     #echo ${filearr[@]}
@@ -171,245 +207,57 @@ do_local_conf_restore() {
     fi
 }
 
-# do_tmp_to_live() {
-#     echo "doing do_tmp_to_live" >>$logfile
-#     mv -f $TMP/extensions.conf.tmp $CONFIGS/extensions.conf
-#     mv -f $TMP/echolink.conf.tmp $CONFIGS/echolink.conf
-#     mv -f $TMP/iax.conf.tmp $CONFIGS/iax.conf
-#     mv -f $TMP/modules.conf.tmp $CONFIGS/modules.conf
-#     mv -f $TMP/rpt.conf.tmp $CONFIGS/rpt.conf
-#     mv -f $TMP/savenode.conf.tmp $CONFIGS/savenode.conf
-#     mv -f $TMP/manager.conf.tmp $CONFIGS/manager.conf
-#     mv -f $TMP/usbradio.conf.tmp $CONFIGS/usbradio.conf
-#     mv -f $TMP/simpleusb.conf.tmp $CONFIGS/simpleusb.conf
-#     mv -f $TMP/voter.conf.tmp $CONFIGS/voter.conf
-#     touch $CONFIGS/usbradio_tune_usb_$NEWNODE.conf
-#     touch $CONFIGS/simpleusb_tune_usb_$NEWNODE.conf
-#     mv -f /var/www/html/allmon2/allmon.ini.php /var/www/html/allmon2/allmon.ini.php.$MONTHDAY 2>/dev/null
-#     cp -f $TMP/allmon.ini.php.tmp $CONFIGS/allmon.ini.php 2>/dev/null
-#     mv -f $TMP/allmon.ini.php.tmp /var/www/html/allmon2/allmon.ini.php 2>/dev/null
-#     whiptail --msgbox "New configuration written to $CONFIGS/FILENAME.conf" 20 60 2
-# }
-
-do_save_newnode_newcall_newpswd() {
-    echo "doing do_save_newnode_newcall_newpswd" >>$logfile
-    # write node number, call sign, & registration info.
-    do_rxchannel_set   #comments out all rxchannel statemnets and uncomments with selection from interface menu
-    do_iax_node        #set node:password on register line of rpt.conf
-    do_rpt_node        #set node number and call sign in rpt.conf
-    do_extensions_node #set node variable in extensions.conf
-    # do_rpt_statpost         #uncomment statpost lines in rpt.conf
-    do_rpt_duplex    #sets duplex type in rpt.conf
-    do_iface_nodenum #sets node number in usbradio.conf simpleusb.conf voter.conf
-    whiptail --msgbox "Node Number, Call Sign and the node password have been \nsaved in $TMP/FILENAME.conf.tmp \n From the Main Menu Select (SAVE) \nto Save changes and backup originals" 20 60 2
+do_load_initial_settings() {
+    whiptail --title "$title" --msgbox "Load initial settings is not implemented yet" $msgbox_height $msgbox_width
 }
 
-do_iface_nodenum() {
-    echo "doing do_iface_nodenum" >>$logfile
-    sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $TMP/usbradio.conf.tmp
-    sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $TMP/simpleusb.conf.tmp
-    sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $TMP/voter.conf.tmp
-    sed -i "s/1998/$NEW_NODE/g" $TMP/voter.conf.tmp
-}
-
-do_rpt_statpost() {
-    # uncomments the statpost command in rpt.conf
+do_select_statpost() {
+    # un/comments the statpost command in rpt.conf
     echo "doing do_rpt_statpost" >>$logfile
-    whiptail --msgbox "Enabling the Statpost program in rpt.conf" 20 60 2
-    # Used the $ in place of the /
-    sed -i 's$[ \t]*;[ \t]*statpost_program[ \t]*=[ \t]*/usr/bin/wget$statpost_program = /usr/bin/wget$g' $TMP/rpt.conf.tmp
-    sed -i "0,/statpost_url/ s/^[ \t]*;[ \t]*statpost_url/statpost_url/" $TMP/rpt.conf.tmp
-}
+    whiptail --title "$title" --yesno "Enabling Status posting to stats.allstarlink.org?" $msgbox_height $msgbox_width
+    rc=$?
+    if [[ rc -eq 0 ]]; then
+        #whiptail --msgbox "$rc Yes" 20 60
+        sed -i "/^;\s*statpost_url\s*=/ s/;\s*statpost_url/statpost_url/" $CONFIGS/rpt.conf
 
-do_usbradio() {
-    #sets usbradio to LOAD
-    echo "doing do_usbradio" >>$logfile
-    whiptail --msgbox "Enabling USBRadio channel drivers" 20 60 2
-    AST_RESTART=1
-    NEWIFACE="USBRadio"
-    channelchoice="USBRadio"
-    sed -i '/chan_usbradio/s/^noload/load/g' $TMP/modules.conf.tmp
-}
-
-do_voter() {
-    #sets voter channel to LOAD
-    echo "doing do_voter" >>$logfile
-    whiptail --msgbox "Enabling Voter channel drivers" 20 60 2
-    AST_RESTART=1
-    NEWIFACE="Voter"
-    channelchoice="voter"
-    sed -i '/chan_voter/s/^noload/load/g' $TMP/modules.conf.tmp
-}
-
-do_dahdi() {
-    #sets dahdi channel to LOAD
-    echo "doing do_dahdi" >>$logfile
-    whiptail --msgbox "Enabling Dahdi-Pseudo channel drivers" 20 60 2
-    NEWIFACE="Dahdi-pseudo"
-    AST_RESTART=1
-    channelchoice="dahdi"
-    sed -i '/chan_dahdi/s/^noload/load/g' $TMP/modules.conf.tmp
-}
-
-do_echolink_config() {
-    # runs the 3 parts to enable and build an echolink.conf
-    echo "doing do_echolink_config" >>$logfile
-    AST_RESTART=1
-    do_echolink_enable
-    do_write_echo_config_conf
-}
-
-#echo "do_echolink_enable"
-do_echolink_enable() {
-    # sets chan_echolink.so to LOAD
-    echo "doing do_echolink_enable" >>$logfile
-    # whiptail --msgbox "Enabling Echolink channel drivers" 20 60 2
-    sed -i '/chan_echolink/s/^noload/load/g' $TMP/modules.conf.tmp
-}
-
-do_write_echo_config_conf() {
-    AST_RESTART=1
-    # writes an echolink.conf file based on variables set by (do_echolink_setup) OR by (do_echolink_setup_menu) after (do_echolink_import)
-    echo "doing do_write_echo_config_conf" >>$logfile
-    whiptail --msgbox "Creating Temporary Echolink config file \n You must select SAVE Changes when exiting \n the MAIN menu or ALL changes will be lost" 20 60 4
-    cat <<_EOF >$TMP/echolink.conf.tmp
-[el0]
-call = $ECHOCALLSIGN                          ; Change this!
-pwd = $ECHOPASSWD                           ; Change this!
-name = $ECHOOWNERNAME                        ; Change this!
-qth = $ECHOQTH                           ; Change this!
-email = $ECHOEMAIL                         ; Change this!
-node = $ECHONODE                           ; Change this!
-; Data for EchoLink Status Page
-lat = $ECHONODELAT                               ; Latitude in decimal degrees
-lon = -$ECHONODELON                               ; Longitude in decimal degrees
-freq = $ECHONODEFREQ                              ; not mandatory Frequency in MHz
-tone = $ECHONODETONE                              ; not mandatory CTCSS Tone (0 for none)
-power = $ECHOTXPWR                               ; 0=0W, 1=1W, 2=4W, 3=9W, 4=16W, 5=25W, 6=36W, 7=49W, 8=64W, 9=81W (Power in Watts)
-height = $ECHOANTHEIGHT                              ; 0=10 1=20 2=40 3=80 4=160 5=320 6=640 7=1280 8=2560 9=5120 (AMSL in Feet)
-gain = $ECHOGAIN                                ; Gain in db (0-9)
-dir = 0                                 ; 0=omni 1=45deg 2=90deg 3=135deg 4=180deg 5=225deg 6=270deg 7=315deg 8=360deg (Direction)
-maxstns = 20                            ; Max Stations
-
-rtcptimeout = 10
-recfile = /tmp/echolink_recorded.gsm    ;
-astnode = $ECHOASTNODE                          ; Change this!
-context = radio-secure                  ; Default in code is echolink-in
-
-; Max 3 servers
-server1 = nasouth.echolink.org
-server2 = naeast.echolink.org
-server3 = server3.echolink.org
-
-; To deny w6xxx you would add the statement: deny = w6xxx
-; To prohibit computer-based connections you would write: permit = *-*
-; To allow access to only a select group of callsigns: permit = w6abc,w6def,...
-; permit                                ; comma delimited list of callsign, type (-r)
-; deny
-
-
-; Remote text commands thru netcat:
-; o.conip <IPaddress>    (request a connect)
-; o.dconip <IPaddress>   (request a disconnect)
-; o.rec                  (turn on/off recording)
-
-; ipaddr
-; port
-
-_EOF
-
-}
-
-do_echolink_import() {
-    # imports variables from echolink.conf
-    echo "doing do_echolink_import" >>$logfile
-    # import existing echolink.conf values as varibles
-    #whiptail --msgbox "Importing existing echolink configuration" 20 60 2
-    ECHOCALLSIGN=$(awk '/call =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOASTNODE=$(awk '/astnode =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHONODE=$(awk '/^node =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOPASSWD=$(awk '/pwd =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOOWNER_F_NAME=$(awk '/name =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOOWNER_L_NAME=$(awk '/name =/' $TMP/echolink.conf.tmp | awk '{print $4}' | sed 's/^;\(.*\)/\1/')
-    ECHOOWNERNAME=$(echo $ECHOOWNER_F_NAME $ECHOOWNER_L_NAME)
-    ECHOQTH=$(awk '/qth =/' $TMP/echolink.conf.tmp | awk '{print $3,$4}' | sed 's/^;\(.*\)/\1/')
-    ECHOEMAIL=$(awk '/email =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHONODELAT=$(awk '/lat =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHONODELON=$(awk '/lon =/' $TMP/echolink.conf.tmp | awk '{print $3}' | sed 's/^-\(.*\)/\1/')
-    ECHOTXPWR=$(awk '/power =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOANTHEIGHT=$(awk '/height =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHOGAIN=$(awk '/gain =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHONODEFREQ=$(awk '/freq =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-    ECHONODETONE=$(awk '/tone =/' $TMP/echolink.conf.tmp | awk '{print $3}')
-
-}
-
-do_rxchannel_set() {
-    # sets rxchannel in rpt.conf from variable set by (do_interface_type) menu option
-    echo "doing do_rxchannel_set" >>$logfile
-    AST_RESTART=1
-    whiptail --msgbox "Setting repeaters rxchannel to $channelchoice in rpt.conf" 20 60 4
-    # comment out ALL
-    sed -i '/dahdi\/pseudo/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/SimpleUSB\/usb/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/Pi\/1/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/Radio\/usb/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/Dahdi\/1/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/Beagle\/1/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/USRP\/127/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    sed -i '/Voter/s/^rxchannel/; rxchannel/g' $TMP/rpt.conf.tmp
-    #uncomment what they choose
-    #uses channelchoice varible from do_interface_type
-    #if channelchoice variable does not match then default as HUB
-    case "$channelchoice" in
-    SimpleUSB)
-        sed -i '/SimpleUSB\/usb/s/^[ \t]*;[ \t]*rxchannel/rxchannel/g' $TMP/rpt.conf.tmp
-        ;;
-    USBRadio)
-        sed -i '/Radio\/usb/s/^[ \t]*;[ \t]*rxchannel/rxchannel/g' $TMP/rpt.conf.tmp
-        ;;
-    voter)
-        sed -i "/rxchannel[ \t]*=[ \t]*USRP/a rxchannel = Voter\/$NEW_NODE \t\t;For voting systems using RTCM" $TMP/rpt.conf.tmp
-        ;;
-    dahdi)
-        sed -i '/dahdi\/pseudo/s/^[ \t]*;[ \t]*rxchannel/rxchannel/g' $TMP/rpt.conf.tmp
-        ;;
-    *)
-        sed -i '/dahdi\/pseudo/s/^[ \t]*;[ \t]*rxchannel/rxchannel/g' $TMP/rpt.conf.tmp
-        ;;
-    esac
-}
-
-do_about() {
-    # what every about section is for
-    echo "doing do_about" >>$logfile
-    whiptail --msgbox "\
-This script will help guide you
-through the initial Node configuration.
-Please visit http://allstarlink.org
-for more information \
-" 20 60 2
+    elif [[ rc -eq 1 ]]; then
+        #whiptail --msgbox "$rc No" 20 60
+        sed -i "/^statpost_url\s*=/ s/statpost_url/;statpost_url/" $CONFIGS/rpt.conf
+    else
+        #whiptail --msgbox "$rc Escape or other" 20 60
+        return
+    fi
 }
 
 do_select_duplex() {
-    echo "doing do_new_duplex" >>$logfile
-    test=$(whiptail --title "$title" --inputbox "\
-Select Duplex type:
+echo "doing do_new_duplex" >>$logfile
 
- 0 = Half duplex with no telemetry tones
- 1 = Half duplex with telemetry tones (simplex node)
- 2 = Full Duplex with telemetry tones (repeater)
- 3 = Full Duplex with telemetry, but no repeated audio.
- 4 = Full Duplex with telemetry (Special use)
+# Array of duplex choices
+duplex_modes=( "Half duplex with no telemetry (link) " \
+"Half duplex with telemetry (hotspot) " \
+"Full Duplex with telemetry (repeater) " \
+"Full Duplex with telemetry, in cabinet repeat " \
+"Full Duplex with telemetry, no repeat w/autopatch " )
 
-The most common types are (1) or (2)
+    newarr=()
+    for i in ${!duplex_modes[@]}; do
+        if [ $i -eq $CURRENT_DUPLEX ]; then
+            ONOFF="ON"
+        else
+            ONOFF="OFF"
+        fi
+        newarr+=("$i" "${duplex_modes[$i]}" "$ONOFF")
+    done
+    ((i++))
 
-See wiki.allstarlink.org for full documentation.\
-" 20 60 "$CURRENT_DUPLEX" 3>&1 1>&2 2>&3)
+    test=$(whiptail --title "$title" --radiolist "Press space bar to select Duplex type:" 20 70 $i "${newarr[@]}" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_DUPLEX ]; then
+        re=^[0-4]$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Duplex type must be a number between 0 and 4." 20 60
+        elif [[ $test != $CURRENT_DUPLEX ]]; then
             NEW_DUPLEX=$test
             do_set_duplex
         fi
@@ -418,14 +266,8 @@ See wiki.allstarlink.org for full documentation.\
 
 do_set_duplex() {
     echo "doing do_rpt_duplex" >>$logfile
-    re=^[0-4]$
-    if ! [[ $NEW_DUPLEX =~ $re ]]; then
-        whiptail --msgbox "Duplex type must be a number between 0 and 4." 20 60
-    else
-        #whiptail --msgbox "Changing duplex $CURRENT_DUPLEX to $NEW_DUPLEX in rpt.conf" 20 60
-        sed -i "/^duplex\s*=\s*/s/$CURRENT_DUPLEX/$NEW_DUPLEX/" $CONFIGS/rpt.conf
-        AST_RESTART=1
-    fi
+    sed -i "/^duplex\s*=\s*/s/$CURRENT_DUPLEX/$NEW_DUPLEX/" $CONFIGS/rpt.conf
+    AST_RESTART=1
 }
 
 do_select_node_number() {
@@ -433,7 +275,10 @@ do_select_node_number() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_NODE ]; then
+        re=^[0-9]\+$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Node number must be a number, usually 3 or more digits." 20 60
+        elif [[ $test != $CURRENT_NODE ]]; then
             NEW_NODE=$test
             do_set_node_number
         fi
@@ -442,25 +287,44 @@ do_select_node_number() {
 
 do_set_node_number() {
     echo "doing do_set_node_number" >>$logfile
-    re=^[0-9]\+$
-    if ! [[ $NEW_NODE =~ $re ]]; then
-        whiptail --msgbox "Node number must be a number, usually 3 or more digits." 20 60
-    else
-        sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
-        sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
-        sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
-        sed -i "/^NODE\s*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/savenode.conf
-        #sed -i "s/ENABLE\s*=\s*[01]/ENABLE=1/" $CONFIGS/savenode.conf
-        AST_RESTART=1;
-    fi
+    #sed -i "s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    # sed apropreiate rpt.conf lines
+    sed -i "/^\[$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^$CURRENT_NODE\s*=\s*/ s/$CURRENT_NODE/$NEW_NODE/g" $CONFIGS/rpt.conf
+    sed -i "/^rxchannel\s*=.*usb_$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^;\s*rxchannel\s*=.*usb_$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^rxchannel\s*=\s*Voter\/$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+    sed -i "/^;\s*rxchannel\s*=\s*Voter\/$CURRENT_NODE\s*/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/rpt.conf
+
+    sed -i "/^NODE\s*=\s*[0-9]\+/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/extensions.conf
+
+    # New nodes will have the register statement commented. Remove it first then change node number.
+    sed -i "/^;.*register.*=\s*$CURRENT_NODE/ s/;\s*//" $CONFIGS/iax.conf
+    sed -i "/^register.*=\s*$CURRENT_NODE/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/iax.conf
+
+    # Replace the whole line
+    sed -i "/^NODE\s*=/ s/NODE\s*=.*/NODE=$NEW_NODE/" $CONFIGS/savenode.conf
+
+    sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/simpleusb.conf
+    sed -i "/^\[usb_$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/usbradio.conf
+    sed -i "/^\[$CURRENT_NODE\]/ s/$CURRENT_NODE/$NEW_NODE/" $CONFIGS/voter.conf
+    AST_RESTART=1;
 }
 
 do_select_node_password() {
+    if [ "$CURRENT_PASSWD" == "Not Set" ]; then
+        whiptail --title "$title" --msgbox "This looks like a new node. Change node number before setting the password." 20 60
+        return
+    fi
+
     test=$(whiptail --inputbox "Enter password for Node $NEW_NODE" 8 78 "$CURRENT_PASSWD" --title "$title" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_PASSWD ]; then
+        re=^[0-9a-zA-Z_-]{6,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Node password may only contain letters, numbers, underscore and dash. It must be 6 or more characters in length." 20 60
+        elif [[ "$test" != "$CURRENT_PASSWD" ]]; then
             NEW_PASSWD=$test
             do_set_node_password
         fi
@@ -468,16 +332,11 @@ do_select_node_password() {
 }
 
 do_set_node_password() {
-    re=^[0-9a-zA-Z_-]{6,}$
-    if ! [[ $NEW_PASSWD =~ $re ]]; then
-        whiptail --msgbox "Node password may only contain letters, numbers, underscore and dash. It must be 6 or more characters in length." 20 60
-    else
-        sed -i "/^register.*=\s*$CURRENT_NODE:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-        #this sed is for http registration with an alternate port. ie register=<node>#<port>:<passwd>@register.allstarlink.org
-        sed -i "/^register\s*=\s*$CURRENT_NODE#.\+:$CURRENT_PASSWD@/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
-        sed -i "/^PASSWORD\s*=\s*$CURRENT_PASSWD/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/savenode.conf
-        AST_RESTART=1;
-    fi
+    sed -i "/^register\s*=\s*$CURRENT_NODE/ s/$CURRENT_PASSWD/$NEW_PASSWD/" $CONFIGS/iax.conf
+
+    # Replace the whole line
+    sed -i "/^PASSWORD\s*=/ s/PASSWORD\s*=.*/PASSWORD=$NEW_PASSWD/" $CONFIGS/savenode.conf
+    AST_RESTART=1;
 }
 
 do_select_node_callsign() {
@@ -485,7 +344,10 @@ do_select_node_callsign() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_CALLSIGN ]; then
+        re=^[0-9A-Z]{3,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "Call sign may only uppercase letters and numbers. It must be 3 or more characters in length." 20 60
+        elif [[ $test != $CURRENT_CALLSIGN ]]; then
             NEW_CALLSIGN=$test
             do_set_node_callsign
         fi
@@ -493,14 +355,9 @@ do_select_node_callsign() {
 }
 
 do_set_node_callsign() {
-    re=^[0-9A-Z]{3,}$
-    if ! [[ $NEW_CALLSIGN =~ $re ]]; then
-        whiptail --msgbox "Call sign may only uppercase letters and numbers. It must be 3 or more characters in length." 20 60
-    else
-        sed -i "/^idrecording\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
-        sed -i "/^idtalkover\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
-        AST_RESTART=1;
-    fi
+    sed -i "/^idrecording\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
+    sed -i "/^idtalkover\s*=\s*|i$CURRENT_CALLSIGN/ s/$CURRENT_CALLSIGN/$NEW_CALLSIGN/" $CONFIGS/rpt.conf
+    AST_RESTART=1;
 }
 
 do_select_ami_secret() {
@@ -509,7 +366,10 @@ do_select_ami_secret() {
     if [ $? -ne 0 ]; then
         return
     else
-        if [ $test != $CURRENT_AMI_SECRET ]; then
+        re=^[0-9a-zA-Z_-]{12,}$
+        if ! [[ $test =~ $re ]]; then
+            whiptail --msgbox "AMI secret may only contain letters, numbers, underscore and dash. It must be 12 or more characters in length." 20 60
+        elif [[ $test != $CURRENT_AMI_SECRET ]]; then
             NEW_AMI_SECRET=$test
             do_set_ami_secret
         fi
@@ -517,13 +377,8 @@ do_select_ami_secret() {
 }
 
 do_set_ami_secret() {
-    re=^[0-9a-zA-Z_-]{12,}$
-    if ! [[ $NEW_AMI_SECRET =~ $re ]]; then
-        whiptail --msgbox "AMI secret may only contain letters, numbers, underscore and dash. It must be 12 or more characters in length." 20 60
-    else
-        sed -i "/^secret\s*=\s*$CURRENT_AMI_SECRET/ s/$CURRENT_AMI_SECRET/$NEW_AMI_SECRET/" $CONFIGS/manager.conf
-        AST_RESTART=1;
-    fi
+    sed -i "/^secret\s*=\s*$CURRENT_AMI_SECRET/ s/$CURRENT_AMI_SECRET/$NEW_AMI_SECRET/" $CONFIGS/manager.conf
+    AST_RESTART=1;
     #do_write_mngr_secret
     #do_build_allmon
 }
@@ -551,10 +406,41 @@ do_select_interface() {
         5) do_set_quadradio ;;
         6) do_set_beagle ;;
         7) do_set_usrp ;;
-        *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
+        *) whiptail --msgbox "$FUN is an unrecognized selection." 20 60 1 ;;
         esac
     fi
 }
+
+# First attempt at a radiolist for rxchannel. Abandoning for now.
+# do_select_interface_radiolist() {
+#     ## interface MENU
+#     echo "doing do_interface_type" >>$logfile
+
+#     # Array of
+#     SELECTIONS=("1" "SimpleUSB: CM1xx USB Cards no/DSP (URIx or RA-40)" "OFF"\
+#         "2" "USBRadio: CM1xx USB Cards with DSP (URIx or RA-40)" "OFF"\
+#         "3" "RTCM: Radio Thin Client or Voter Boards" "OFF"\
+#         "4" "Dahdi/pseudo: No radio interface or HUB node" "OFF"\
+#         "5" "PCI Quad Radio Card" "OFF"\
+#         "6" "Rpi Beagle Board" "OFF"\
+#         "7" "USRP" "ON"
+#     )
+#     FUN=$(whiptail --title "$title" --radiolist "Select Radio Interface" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT "${SELECTIONS[@]}" 3>&1 1>&2 2>&3)
+#     if [ $? -ne 0 ]; then
+#         return
+#     else
+#         case "$FUN" in
+#         1) do_set_simpleusb ;;
+#         2) do_set_usbradio ;;
+#         3) do_set_voter ;;
+#         4) do_set_pseudo ;;
+#         5) do_set_quadradio ;;
+#         6) do_set_beagle ;;
+#         7) do_set_usrp ;;
+#         *) whiptail --msgbox "$FUN is an unrecognized selection" 20 60 1 ;;
+#         esac
+#     fi
+# }
 
 do_noload_chan_modules() {
     # Set common app_rpt channel modules to noload
@@ -638,67 +524,15 @@ do_set_usrp() {
     AST_RESTART=1
 }
 
-do_echolink_setup_menu() {
-    RETE=0
-    while true; do
-        FUNE=$(whiptail --title "$title" \
-            --menu "Echolink Settings Menu" \
-            $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
-            "EA ASL node" "AST NODE is $ECHOASTNODE" \
-            "EB EL Callsign" "EL Call sign is $ECHOCALLSIGN" \
-            "EC EL node" "EL NODE is $ECHONODE" \
-            "ED EL Password" "EL password is $ECHOPASSWD" \
-            "EF Owners Name" "EL Owners name is $ECHOOWNERNAME" \
-            "EG QTH" "EL QTH is $ECHOQTH" \
-            "EH Email addr" "EL Email addr. is $ECHOEMAIL" \
-            "EI Latitude" "GPS LAT is $ECHONODELAT" \
-            "EJ Longitude" "GPS LON is - $ECHONODELON" \
-            "EK TX PWR" "Transmitter power is $ECHOTXPWR" \
-            "EL Antenna Height" "Antenna Height is $ECHOANTHEIGHT" \
-            "EM Ant. Gain" "Ant gain is $ECHOGAIN" \
-            "EN Freq." "Transmitter Frequency is $ECHONODEFREQ" \
-            "EO PL tone" "PL tone used is $ECHONODETONE" \
-            "EZ Save" "Enable Echolink and save settings to temp file" \
-            3>&1 1>&2 2>&3)
-        RETE=$?
-        echo "RETE is $RETE" >>$logfile
-        if [ $RETE -eq 1 ]; then
-            return
-        elif [ $RETE -eq 0 ]; then
-            case $FUNE in
-            EA\ *) ECHOASTNODE=$(whiptail --inputbox "Enter AllStar NODE Number.( NOT ) Echolink node number" 8 78 --title "Asterisk Node Number" 3>&1 1>&2 2>&3) ;;
-            EB\ *) ECHOCALLSIGN=$(whiptail --inputbox "Enter Echolink Node Call Sign (W1AW-R)" 8 78 --title "Echolink Node Call Sign" 3>&1 1>&2 2>&3) ;;
-            EC\ *) ECHONODE=$(whiptail --inputbox "Enter Echolink Node Number" 8 78 --title "Echolink Node Number" 3>&1 1>&2 2>&3) ;;
-            ED\ *) ECHOPASSWD=$(whiptail --inputbox "Enter Echolink Password" 8 78 --title "Echolink Node Password" 3>&1 1>&2 2>&3) ;;
-            EF\ *) ECHOOWNERNAME=$(whiptail --inputbox "Enter Echolink User Name" 8 78 --title "Echolink User Name" 3>&1 1>&2 2>&3) ;;
-            EG\ *) ECHOQTH=$(whiptail --inputbox "Enter Echolink QTH" 8 78 --title "Echolink QTH" 3>&1 1>&2 2>&3) ;;
-            EH\ *) ECHOEMAIL=$(whiptail --inputbox "Enter Echolink Node Owners Email" 8 78 --title "Echolink Node Owners Email" 3>&1 1>&2 2>&3) ;;
-            EI\ *) ECHONODELAT=$(whiptail --inputbox "Enter Echolink GPS (LAT)" 8 78 --title "Echolink NODE GPS" 3>&1 1>&2 2>&3) ;;
-            EJ\ *) ECHONODELON=$(whiptail --inputbox "Enter Echolink GPS (LON) without the (-)" 8 78 --title "Echolink NODE GPS" 3>&1 1>&2 2>&3) ;;
-            EK\ *) ECHOTXPWR=$(whiptail --inputbox "0=0W, 1=1W, 2=4W, 3=9W, 4=16W, 5=25W, 6=36W, 7=49W, 8=64W, 9=81W (Power in Watts)" 8 78 --title "Echolink NODE TX PWR" 3>&1 1>&2 2>&3) ;;
-            EL\ *) ECHOANTHEIGHT=$(whiptail --inputbox "0=10 1=20 2=40 3=80 4=160 5=320 6=640 7=1280 8=2560 9=5120 (AMSL in Feet)" 8 78 --title "Echolink HAT" 3>&1 1>&2 2>&3) ;;
-            EM\ *) ECHOGAIN=$(whiptail --inputbox "Enter Echolink Antenna Gain in db (0-9)" 8 78 --title "Echolink Antenna Gain" 3>&1 1>&2 2>&3) ;;
-            EN\ *) ECHONODEFREQ=$(whiptail --inputbox "Enter Repeater Frequency, not mandatory" 8 78 --title "Echolink Repeater Freq" 3>&1 1>&2 2>&3) ;;
-            EO\ *) ECHONODETONE=$(whiptail --inputbox "Enter Repeater PL Tone, not mandatory" 8 78 --title "Echolink Repeater PL-Tone" 3>&1 1>&2 2>&3) ;;
-            EZ\ *) do_echolink_config ;;
-            *) whiptail --msgbox "Programmer error: unrecognized option" 20 60 1 ;;
-            esac || whiptail --msgbox "There was an error running option $FUN" 20 60 1
-        fi
-    done
-}
-
 get_node_settings () {
-    #CURRENT_NODE=$(grep -o '^\[[0-9]*\]' $TMP/rpt.conf.tmp | sed 's/.*\[\([^]]*\)\].*/\1/g')
-    #CURRENT_REG_PSWD=$(echo "$CURRENT_REG" | awk -F':' '{print $2}')
-    #CURRENT_CALLSIGN=$(grep '^idrecording =' /$TMP/rpt.conf.tmp | awk -F'=' '{print $2}' | sed 's/|\i//' | sed -e 's/^\(.\{9\}\).*/\1/')
-    #CURRENT_DUPLEX=$(grep '^duplex =' $TMP/rpt.conf.tmp | awk -F " " '{print $3}')
-    #CURRENT_INTERFACE=$(grep '^rxchannel' $TMP/rpt.conf.tmp | awk -F'=' '{print $2}' | awk -F'  ;' '{print$1}')
-
     #sed remove first and last character
     CURRENT_NODE=$(grep -o '^\[[0-9]*\]' $CONFIGS/rpt.conf | sed 's/^.//;s/.$//')
 
     #sed captures everything between : and @
     CURRENT_PASSWD=$(grep '^register.*=\s*' $CONFIGS/iax.conf | sed 's/.*:\(.*\)@.*/\1/')
+    if [[ -z $CURRENT_PASSWD ]]; then
+        CURRENT_PASSWD='Not Set'
+    fi
 
     #sed captures alphanumeric between |i and the rest of line
     #CURRENT_CALLSIGN=$(grep '^idrecording\s*=\s*' $CONFIGS/rpt.conf | sed 's/.*|i\([0-9a-zA-Z]*\).*/\1/')
@@ -712,22 +546,55 @@ get_node_settings () {
 
     #sed removes all before = and any after ;
     CURRENT_AMI_SECRET=$(grep '^secret\s*=\s*' $CONFIGS/manager.conf | sed 's/^secret\s*=\s*//;s/\s*;.*$//')
+
+    test=$(grep -c "^;statpost_url\s*=" $CONFIGS/rpt.conf)
+    if [[ $test -eq 1 ]]; then
+        CURRENT_STATPOST="No"
+    else
+        CURRENT_STATPOST="Yes"
+    fi
+}
+
+do_interface_tune_cli() {
+    get_node_settings
+    if [[ $CURRENT_INTERFACE == *"SimpleUSB"* ]]; then
+        clear
+        /usr/sbin/simpleusb-tune-menu
+        rc=$?
+        clear
+        if [ $rc -ne 0 ]; then
+            whiptail --title "$title" --msgbox "Simple USB CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
+        fi
+    elif [[ $CURRENT_INTERFACE == *"Radio/usb"* ]]; then
+        clear
+        /usr/sbin/radio-tune-menu
+        rc=$?
+        clear
+        if [ $rc -ne 0 ]; then
+            whiptail --title "$title" --msgbox "USB Radio CLI did not launch. Try restarting Asterisk." $msgbox_height $msgbox_width
+        fi
+    elif [[ $CURRENT_INTERFACE == *"pseudo"* ]]; then
+        whiptail --title "$title" --msgbox "We're good. dahdi/pseudo has no interface settings." $msgbox_height $msgbox_width
+    else
+        whiptail --title "$title" --msgbox "$CURRENT_INTERFACE is not supported. Use editor." $msgbox_height $msgbox_width
+    fi
 }
 
 do_asterisk_setup_menu() {
-    echo "Node Settings Menu" >>$logfile
+    echo "Node Setup Menu" >>$logfile
     while true; do
         calc_wt_size
         get_node_settings
 
-        FUN=$(whiptail --title "$title" --menu "AllStar Node Settings Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
+        FUN=$(whiptail --title "$title" --menu "AllStar Node Setup Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --cancel-button Back --ok-button Select \
             "1" "Duplex type: $CURRENT_DUPLEX" \
             "2" "Node Number: $CURRENT_NODE" \
             "3" "Node Password: $CURRENT_PASSWD" \
             "4" "Node Callsign: $CURRENT_CALLSIGN" \
             "5" "AMI Password: $CURRENT_AMI_SECRET" \
             "6" "Radio Interface: $CURRENT_INTERFACE" \
-            "I" "Information for these values" \
+            "7" "Post Node Status: $CURRENT_STATPOST" \
+            "I" "Node Setup Menu Instructions" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             return
@@ -739,7 +606,9 @@ do_asterisk_setup_menu() {
             4) do_select_node_callsign ;;
             5) do_select_ami_secret ;;
             6) do_select_interface ;;
-            *) whiptail --msgbox "Sorry! $test is an unrecognized selection at this time." 20 60 ;;
+            7) do_select_statpost ;;
+            I) do_node_setup_menu_info ;;
+            *) whiptail --msgbox "$test is an unrecognized selection." 20 60 ;;
             esac
         fi
     done
@@ -750,28 +619,26 @@ do_main_menu() {
     while true; do
         calc_wt_size
         FUN=$(whiptail --title "$title" --menu "Node Setup Main Menu" $WT_HEIGHT $WT_WIDTH $WT_MENU_HEIGHT --ok-button Select --cancel-button "Exit Node Setup" \
+            "1" "AllStar Node Setup Menu" \
+            "2" "Restart Asterisk" \
+            "3" "Interface Tune CLI" \
+            "4" "Load Initial AllStar Settings" \
             "C" "Create a local backup" \
             "R" "Restore a local backup" \
-            "1" "AllStar Node Settings Menu" \
-            "2" "Echolink Settings Menu" \
-            "3" "Restart Asterisk" \
-            "4" "Show AllStar & Echolink Settings" \
-            "5" "Load Initial AllStar & Echolink Settings" \
-            "I" "Information About this menu" \
+            "I" "Main Menu Instructions" \
             3>&1 1>&2 2>&3)
         if [ $? -ne 0 ]; then
             do_exit
         else
             case "$FUN" in
-            C) do_local_conf_backup ;;
             1) do_asterisk_setup_menu ;;
-            2) do_echolink_setup_menu ;;
-            3) AST_RESTART=0; astres.sh ;;
-            4) do_config_list ;;
-            5) do_load_initial_settings ;;
+            2) AST_RESTART=0; astres.sh; clear ;;
+            3) do_interface_tune_cli ;;
+            4) do_load_initial_settings ;;
+            C) do_local_conf_backup ;;
             R) do_local_conf_restore ;;
-            I) do_about ;;
-            *) whiptail --msgbox "$FUN is unrecognized option." 20 60 ;;
+            I) do_node_setup+main_menu_text ;;
+            *) whiptail --msgbox "$FUN is an unrecognized selection." 20 60 ;;
             esac
         fi
     done
@@ -791,5 +658,4 @@ do_exit() {
 }
 
 do_set_env
-#do_echolink_import
 do_main_menu
