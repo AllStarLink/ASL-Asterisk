@@ -159,8 +159,8 @@
  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
- *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
- *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
+ *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1:0[,GPIO4:1].....)
+ *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1:0[,GPIO4:1].....)
  *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
  *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR]) 
  *  65 - Send POCSAG page (equipped channel types only)
@@ -5350,7 +5350,7 @@ struct rpt_link *l;
 static void rpt_event_process(struct rpt *myrpt)
 {
 char	*myval,*argv[5],*cmpvar,*var,*var1,*cmd,c;
-char	buf[1000],valbuf[500],action;
+char	buf[1000],valbuf[500],holdingBin[12],action;
 int	i,l,argc,varp,var1p,thisAction,maxActions;
 struct ast_variable *v;
 struct ast_var_t *newvariable;
@@ -5521,8 +5521,14 @@ struct ast_var_t *newvariable;
 				if (argc > 1)
 					strlcpy(myrpt->cmdAction.param, argv[1], MAXDTMF-1);
 				myrpt->cmdAction.digits[0] = 0;
-				if (argc > 2)
+				if (argc > 2) //Let's actually parse the arguments
+				{
 					strlcpy(myrpt->cmdAction.digits, argv[2], MAXDTMF-1);
+					holdingBin[0] = 0;  // null the string
+					myrpt->cmdAction.param[0] = 0;
+					sprintf(holdingBin, "%s,%s", argv[1], argv[2]);
+					strlcpy(myrpt->cmdAction.param, holdingBin, MAXDTMF-1);
+				}
 				myrpt->cmdAction.command_source = SOURCE_RPT;
 				myrpt->cmdAction.state = CMD_STATE_READY;
 			} 
@@ -13165,7 +13171,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			/* go thru all the specs */
 			for(i = 1; i < argc; i++)
 			{
-				if (sscanf(argv[i],"GPIO%d=%d",&j,&k) == 2)
+				if ((sscanf(argv[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(argv[i],"GPIO%d:%d",&j,&k) == 2))
 				{
 					sprintf(string,"GPIO %d %d",j,k);
 					ast_sendtext(myrpt->rxchannel,string);
@@ -23820,7 +23826,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			int j,k;
 			char string[100];
 
-			if (sscanf(myrpt->p.lconn[i],"GPIO%d=%d",&j,&k) == 2)
+			if ((sscanf(myrpt->p.lconn[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(myrpt->p.lconn[i],"GPIO%d:%d",&j,&k) == 2))
 			{
 				sprintf(string,"GPIO %d %d",j,k);
 				ast_sendtext(myrpt->rxchannel,string);
@@ -24678,7 +24684,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			int j,k;
 			char string[100];
 
-			if (sscanf(myrpt->p.ldisc[i],"GPIO%d=%d",&j,&k) == 2)
+			if ((sscanf(myrpt->p.ldisc[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(myrpt->p.ldisc[i],"GPIO%d:%d",&j,&k) == 2))
 			{
 				sprintf(string,"GPIO %d %d",j,k);
 				ast_sendtext(myrpt->rxchannel,string);
