@@ -22311,7 +22311,7 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (who == myrpt->telechannel) /* if is telemetry conference output */
 		{
 			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->rxchankeyed,myrpt->remrx,myrpt->noduck);
-			if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->keyed,myrpt->remrx,myrpt->noduck);
+			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->keyed,myrpt->remrx,myrpt->noduck);
 			f = ast_read(myrpt->telechannel);
 			if (!f)
 			{
