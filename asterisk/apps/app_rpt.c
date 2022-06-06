@@ -5699,7 +5699,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 	time_t	now;
 	unsigned int seq;
 	CURL *curl;
-	int *rescode;
+	CURLcode res;
 
 	if (!myrpt->p.statpost_url) return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
@@ -5716,14 +5716,13 @@ static void statpost(struct rpt *myrpt,char *pairs)
 		if(curl) {
 			curl_easy_setopt(curl, CURLOPT_URL, str);
 			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-			curl_easy_perform(curl);
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+			res = curl_easy_perform(curl);
+			if(res != CURLE_OK){
+				ast_log(LOG_ERROR, "statpost failed\n");
+				perror("asterisk");
+			}
 			curl_easy_cleanup(curl);
-			curl_global_cleanup();
 		}
-		if(*rescode == 200) return;
-		ast_log(LOG_ERROR, "statpost failed\n");
-		perror("asterisk");
 		exit(0);
 	}
 	ast_free(str);
