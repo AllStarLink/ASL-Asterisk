@@ -8378,7 +8378,7 @@ static struct morse_bits mbits[] = {
 	
 	dashtime = 3 * dottime;
 	intralettertime = dottime;
-	interlettertime = dottime * 4 ;
+	interlettertime = dottime * 3 ;
 	interwordtime = dottime * 7;
 	
 	for(;(*string) && (!res); string++){
