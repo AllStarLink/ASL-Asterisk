@@ -18,6 +18,11 @@
   * at the top of the source tree.
  */
 
+/*
+ * Patching for aarch64 (ARM64) support by Gianni Peschiutta (F4IKZ)
+ * Disable Direct I/O port access on ARM64
+ */
+
 /*! \file
  *
  * \brief Simple Channel driver for CM108 USB Cards with Radio Interface
@@ -46,7 +51,9 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef __aarch64__ /* Parallel port are not available on arm64 architecture */
 #include <sys/io.h>
+#endif
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <sys/time.h>
@@ -170,7 +177,9 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #define	PP_MASK 0xbffc
 #define	PP_PORT "/dev/parport0"
+#ifndef __aarch64__ /* No Direct IO on ARM64 architecture*/
 #define	PP_IOPORT 0x378
+#endif
 
 #define	PAGER_SRC "PAGER"
 #define	ENDPAGE_STR "ENDPAGE"
@@ -574,17 +583,17 @@ struct chan_simpleusb_pvt {
 	struct qelem echoq;
 	int echomax;
 
-	int    	hdwtype;
-	int		hid_gpio_ctl;		
-	int		hid_gpio_ctl_loc;	
-	int		hid_io_cor; 		
-	int		hid_io_cor_loc; 	
-	int		hid_io_ctcss;		
-	int		hid_io_ctcss_loc; 	
-	int		hid_io_ptt; 		
-	int		hid_gpio_loc; 		
+	int    hdwtype;
+	int    hid_gpio_ctl;
+	int		hid_gpio_ctl_loc;
+	int		hid_io_cor;
+	int		hid_io_cor_loc;
+	int		hid_io_ctcss;
+	int		hid_io_ctcss_loc;
+	int		hid_io_ptt;
+	int		hid_gpio_loc;
 	int32_t		hid_gpio_val;
-	int32_t		valid_gpios; 		
+	int32_t		valid_gpios;
 	int32_t		gpio_set;
 	int32_t		last_gpios_in;
 	int		had_gpios_in;
@@ -1362,10 +1371,12 @@ unsigned char c;
 			c = 0;
 		}
 	}
+#ifndef __aarch64__  /*no direct IO on ARM64 architecture*/
 	if (haspp == 2) /* if its a direct I/O */
 	{
 		c = inb(pbase + 1);
 	}
+#endif
 	return(c);
 }
 
@@ -1378,10 +1389,12 @@ static void ppwrite(unsigned char c)
 			ast_log(LOG_ERROR,"Unable to write pp dev %s\n",pport);
 		}
 	}
+#ifndef __aarch64__ /* No IO direct access on ARM64 */
 	if (haspp == 2) /* if its a direct I/O */
 	{
 		outb(c,pbase);
 	}
+#endif
 	return;
 }
 
@@ -1391,7 +1404,9 @@ static void *pulserthread(void *arg)
 struct	timeval now,then;
 int	i,j,k;
 
+#ifndef __aarch64__ /* No IO direct access on ARM64 */
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
 	stoppulser = 0;
 	pp_lastmask = 0;
 	ast_mutex_lock(&pp_lock);
@@ -1447,7 +1462,9 @@ static void *hidthread(void *arg)
         usb_dev = NULL;
         usb_handle = NULL;
 	o->gpio_set = 1;
+#ifndef __aarch64__ /* No IO direct access on ARM64 */
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
         while(!o->stophid)
         {
                 time(&o->lasthidtime);
@@ -2263,9 +2280,9 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 	short *audio;
 	char audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
 	struct ast_frame wf,*f1;
-
+#ifndef __aarch64__ /* No IO direct access on ARM64 */
 	if (haspp == 2) ioperm(pbase,2,1);
-
+#endif
 	cmd = alloca(strlen(text) + 10);
 
 	/* print received messages */
@@ -4255,7 +4272,9 @@ static int load_module(void)
 	else strcpy(pport,PP_PORT);
 	val = (char *) ast_variable_retrieve(cfg, "general", "pbase");
 	if (val) pbase = strtoul(val,NULL,0);
+#ifndef __aarch64__
 	if (!pbase) pbase = PP_IOPORT;
+#endif
 	if (haspp) /* if is to use parallel port */
 	{
 		if (pport[0])
@@ -4269,9 +4288,10 @@ static int load_module(void)
 					close(ppfd);
 					haspp = 0;
 				}
-			} 
+			}
 			else
 			{
+#ifndef __aarch64__
 				if (ioperm(pbase,2,1) == -1)
 				{
 					ast_log(LOG_ERROR,"Cant get io permission on IO port %04x hex, disabling pp support\n",pbase);
@@ -4279,6 +4299,9 @@ static int load_module(void)
 				}
 				haspp = 2;
 				if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "Using direct IO port for pp support, since parport driver not available.\n");
+#else
+				haspp = 0; /*disabling pp on arm64 architecture*/
+#endif
 			}
 		}
 	}
@@ -4286,7 +4309,9 @@ static int load_module(void)
 	if (option_verbose > 2)
 	{
 		if (haspp == 1) ast_verbose(VERBOSE_PREFIX_3 "Parallel port is %s\n",pport);
+#ifndef __aarch64__
 		else if (haspp == 2) ast_verbose(VERBOSE_PREFIX_3 "Parallel port is at %04x hex\n",pbase);
+#endif
 	}
 
 	ast_config_destroy(cfg);
