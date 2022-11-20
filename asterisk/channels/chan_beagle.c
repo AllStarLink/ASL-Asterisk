@@ -18,6 +18,12 @@
   * at the top of the source tree.
  */
 
+/* 
+ * Patching for aarch64 (ARM64) support by Gianni Peschiutta (F4IKZ)
+ * Disable Direct I/O port access on ARM64
+ */
+
+
 /*! \file
  *
  * \brief Simple Channel driver for Native Audio/GPIO on Beagleboard
@@ -46,7 +52,9 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef __aarch64__ /* no direct IO port access on ARM64 architecture */
 #include <sys/io.h>
+#endif
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <sys/time.h>

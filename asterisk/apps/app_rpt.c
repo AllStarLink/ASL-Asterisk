@@ -16,6 +16,10 @@
  * the GNU General Public License Version 2. See the LICENSE file
  * at the top of the source tree.
  *
+ * 
+ * Patching for aarch64 (ARM64) support by Gianni Peschiutta (F4IKZ)
+ * Disable Direct I/O port access on ARM64
+ *
  * -------------------------------------
  * Notes on app_rpt.c
  * -------------------------------------
@@ -552,7 +556,9 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <sys/time.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#ifndef __aarch64__ /* no direct IO access on ARM64 architecture */
 #include <sys/io.h>
+#endif
 #include <sys/vfs.h>
 #include <math.h>
 #include <netinet/in.h>
@@ -9988,6 +9994,7 @@ treataslocal:
 		}
 		else if(!strcmp(myrpt->remoterig, remote_rig_rbi)||!strcmp(myrpt->remoterig, remote_rig_ppp16))
 		{
+#ifndef __aarch64__ /* No direct IO port access on ARM64 architecture */
 			if (ioperm(myrpt->p.iobase,1,1) == -1)
 			{
 				rpt_mutex_unlock(&myrpt->lock);
@@ -9995,6 +10002,9 @@ treataslocal:
 				res = -1;
 			}
 			else res = setrbi(myrpt);
+#else
+			res = -1;
+#endif
 		}
 		else if(!strcmp(myrpt->remoterig, remote_rig_kenwood))
 		{
@@ -19282,9 +19292,12 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		rpt_mutex_unlock(&myrpt->lock);
 		usleep(100000);
 		rpt_mutex_lock(&myrpt->lock);
-	}	
-	if ((!strcmp(myrpt->remoterig, remote_rig_rbi)) &&
-	  (ioperm(myrpt->p.iobase,1,1) == -1))
+	}
+	if ((!strcmp(myrpt->remoterig, remote_rig_rbi))
+#ifndef __aarch64__ /* no direct IO port access on ARM64 Architecture */
+	  && (ioperm(myrpt->p.iobase,1,1) == -1)
+#endif
+		)
 	{
 		rpt_mutex_unlock(&myrpt->lock);
 		ast_log(LOG_WARNING, "Cant get io permission on IO port %x hex\n",myrpt->p.iobase);
@@ -23592,8 +23605,11 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 		}
 	}
 
-	if ( (!strcmp(myrpt->remoterig, remote_rig_rbi)||!strcmp(myrpt->remoterig, remote_rig_ppp16)) &&
-	  (ioperm(myrpt->p.iobase,1,1) == -1))
+	if ( (!strcmp(myrpt->remoterig, remote_rig_rbi)||!strcmp(myrpt->remoterig, remote_rig_ppp16))
+#ifndef __aarch64__ /* no direct IO port access on ARM64 architecture */
+		&& (ioperm(myrpt->p.iobase,1,1) == -1)
+#endif
+		)
 	{
 		rpt_mutex_unlock(&myrpt->lock);
 		ast_log(LOG_WARNING, "Can't get io permission on IO port %x hex\n",myrpt->p.iobase);

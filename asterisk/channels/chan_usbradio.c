@@ -21,6 +21,12 @@
  * 20160829      inad            added rxlpf rxhpf txlpf txhpf
  */
 
+/* 
+ * Patching for aarch64 (ARM64) support by Gianni Peschiutta (F4IKZ)
+ * Disable Direct I/O port access on ARM64
+ */
+
+
 /*! \file
  *
  * \brief Channel driver for CM108 USB Cards with Radio Interface
@@ -52,7 +58,9 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef __aarch64__ /* No Direct IO port access on ARM64 */
 #include <sys/io.h>
+#endif
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <sys/time.h>
@@ -104,7 +112,10 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 
 #define	PP_MASK 0xbffc
 #define	PP_PORT "/dev/parport0"
+
+#ifndef __aarch64__ /* No Direct IO port access on ARM64 */
 #define	PP_IOPORT 0x378
+#endif
 
 #include "./xpmr/xpmr.h"
 #ifdef HAVE_XPMRX
@@ -1448,8 +1459,9 @@ static void *pulserthread(void *arg)
 {
 struct	timeval now,then;
 int	i,j,k;
-
+#ifndef __aarch64__ /* No direct IO port access on ARM64 architecture */
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
 	stoppulser = 0;
 	pp_lastmask = 0;
 	ast_mutex_lock(&pp_lock);
@@ -1505,8 +1517,9 @@ static void *hidthread(void *arg)
 
         usb_dev = NULL;
         usb_handle = NULL;
-
+#ifndef __aarch64__ /* No direct IO access on ARM64 architecture */
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
         while(!o->stophid)
         {
                 time(&o->lasthidtime);
@@ -2413,9 +2426,9 @@ static int usbradio_text(struct ast_channel *c, const char *text)
 	double tx,rx;
 	char cnt,rxs[16],txs[16],txpl[16],rxpl[16];
 	char pwr,*cmd;
-
+#ifndef __aarch64__ /* No direct IO port access on ARM64 architecture */
 	if (haspp == 2) ioperm(pbase,2,1);
-
+#endif
 	cmd = alloca(strlen(text) + 10);
 
 	/* print received messages */
@@ -5843,7 +5856,9 @@ static int load_module(void)
 	else strcpy(pport,PP_PORT);
 	val = (char *) ast_variable_retrieve(cfg, "general", "pbase");
 	if (val) pbase = strtoul(val,NULL,0);
+#ifndef __aarch64__ /* no direct IO port access on ARM64 architecture */
 	if (!pbase) pbase = PP_IOPORT;
+#endif
 	if (haspp) /* if is to use parallel port */
 	{
 		if (pport[0])
@@ -5860,6 +5875,7 @@ static int load_module(void)
 			} 
 			else
 			{
+#ifndef __aarch64__ /* no direct IO port access on ARM64 architecture */
 				if (ioperm(pbase,2,1) == -1)
 				{
 					ast_log(LOG_ERROR,"Cant get io permission on IO port %04x hex, disabling pp support\n",pbase);
@@ -5867,6 +5883,9 @@ static int load_module(void)
 				}
 				haspp = 2;
 				if (option_verbose > 2) ast_verbose(VERBOSE_PREFIX_3 "Using direct IO port for pp support, since parport driver not available.\n");
+#else
+				haspp = 0;
+#endif
 			}
 		}
 	}
