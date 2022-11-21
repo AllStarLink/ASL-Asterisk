@@ -110,9 +110,12 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "jitterbuf.h"
 
 /* WB6NIL backport stuff */
+/* N2MH patches - 2022-07-21 */
+/* #define	DAHDI_FILE_TIMER "/dev/zap/timer"	<--old line */
+/* #define	DAHDI_FILE_PSEUDO "/dev/dahdi/pseudo"	<--old line */
+#define	DAHDI_FILE_TIMER "/dev/dahdi/timer"
+#define	DAHDI_FILE_PSEUDO "/dev/dahdi/pseudo"
 
-#define	DAHDI_FILE_TIMER "/dev/zap/timer"
-#define	DAHDI_FILE_PSEUDO "/dev/zap/pseudo"
 #define	AST_FORMAT_AUDIO_UNDEFINED 0
 #define	BAD_RADIO_HACK
 #define	ast_free_ptr ast_free

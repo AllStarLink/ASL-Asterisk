@@ -5711,7 +5711,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
 	time_t	now;
 	unsigned int seq;
 	CURL *curl;
-	int *rescode;
+	CURLcode res;
 
 	if (!myrpt->p.statpost_url) return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
@@ -5728,14 +5728,14 @@ static void statpost(struct rpt *myrpt,char *pairs)
 		if(curl) {
 			curl_easy_setopt(curl, CURLOPT_URL, str);
 			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-			curl_easy_perform(curl);
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+			res = curl_easy_perform(curl);
+			if (res != CURLE_OK)
+			{
+				ast_log(LOG_ERROR, "statpost failed\n");
+				perror("asterisk");
+			}
 			curl_easy_cleanup(curl);
-			curl_global_cleanup();
 		}
-		if(*rescode == 200) return;
-		ast_log(LOG_ERROR, "statpost failed\n");
-		perror("asterisk");
 		exit(0);
 	}
 	ast_free(str);
@@ -20146,8 +20146,8 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			myrpt->macropatch=0;
 			channel_revert(myrpt);
 		}
-		/* get rid of tail if timed out */
-		if (!myrpt->totimer) myrpt->tailtimer = 0;
+		/* get rid of tail if timed out or repeater is beaconing */
+		if (!myrpt->totimer || (!myrpt->mustid && myrpt->p.beaconing)) myrpt->tailtimer = 0;
 		/* if not timed-out, add in tail */
 		if (myrpt->totimer) totx = totx || myrpt->tailtimer;
 		/* If user or links key up or are keyed up over standard ID, switch to talkover ID, if one is defined */
