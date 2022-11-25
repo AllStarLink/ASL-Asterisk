@@ -4535,7 +4535,7 @@ static void cancel_pfxtone(struct rpt *myrpt)
 {
 	struct rpt_tele *telem;
 	if(debug > 2)
-		ast_log(LOG_NOTICE, "cancel_pfxfone!!");
+		ast_log(LOG_NOTICE, "cancel_pfxtone!!");
 	telem = myrpt->tele.next;
 	while(telem != &myrpt->tele)
 	{
