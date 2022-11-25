@@ -5697,45 +5697,43 @@ int	i;
 	return;
 }
 
-
 static void statpost(struct rpt *myrpt,char *pairs)
 {
-	char *str;
-	int	pid;
-	time_t	now;
-	unsigned int seq;
-	CURL *curl;
-	int *rescode;
+        char *str;
+        int     pid;
+        time_t  now;
+        unsigned int seq;
 
-	if (!myrpt->p.statpost_url) return;
-	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
-	ast_mutex_lock(&myrpt->statpost_lock);
-	seq = ++myrpt->statpost_seqno;
-	ast_mutex_unlock(&myrpt->statpost_lock);
-	time(&now);
-	sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
-		myrpt->name,(unsigned int) now,seq);
-	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
-	if (!(pid = fork()))
-	{
-		curl = curl_easy_init();
-		if(curl) {
-			curl_easy_setopt(curl, CURLOPT_URL, str);
-			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-			curl_easy_perform(curl);
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
-			curl_easy_cleanup(curl);
-			curl_global_cleanup();
-		}
-		if(*rescode == 200) return;
-		ast_log(LOG_ERROR, "statpost failed\n");
-		perror("asterisk");
-		exit(0);
-	}
-	ast_free(str);
-	return;
+        if (!myrpt->p.statpost_url) return;
+        str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
+        ast_mutex_lock(&myrpt->statpost_lock);
+        seq = ++myrpt->statpost_seqno;
+        ast_mutex_unlock(&myrpt->statpost_lock);
+        time(&now);
+        sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
+                myrpt->name,(unsigned int) now,seq);
+        if (pairs) sprintf(str + strlen(str),"&%s",pairs);
+        if (!(pid = fork()))
+        {
+                long rescode = 0;
+                CURL *curl = curl_easy_init();
+                if(curl) {
+                        curl_easy_setopt(curl, CURLOPT_URL, str);
+                        curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
+                        curl_easy_perform(curl);
+                        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+                        curl_easy_cleanup(curl);
+                        curl_global_cleanup();
+                }
+                if(rescode != 200) {
+                        ast_log(LOG_ERROR, "statpost failed with code %ld\n", rescode);
+                        perror("asterisk");
+                }
+                exit(0);
+        }
+        ast_free(str);
+        return;
 }
-
 
 /* 
  * Function stream data 
