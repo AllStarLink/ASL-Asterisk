@@ -5697,6 +5697,12 @@ int	i;
 	return;
 }
 
+// Waste the output of libcurl (the OK is sent to stdout)
+static size_t writefunction(void *ptr, size_t size, size_t nmemb, void *stream)
+{
+  return (nmemb*size);
+}
+
 static void statpost(struct rpt *myrpt,char *pairs)
 {
         char *str;
@@ -5718,6 +5724,7 @@ static void statpost(struct rpt *myrpt,char *pairs)
                 long rescode = 0;
                 CURL *curl = curl_easy_init();
                 if(curl) {
+                        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunction);
                         curl_easy_setopt(curl, CURLOPT_URL, str);
                         curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
                         curl_easy_perform(curl);
