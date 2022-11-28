@@ -32,7 +32,7 @@ apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev
   unixodbc-dev libpri-dev libvpb-dev asl-dahdi-source libnewt-dev libsqlite-dev libspeex-dev \
   libspeexdsp-dev libcurl4-openssl-dev libpopt-dev libiksemel-dev freetds-dev libvorbis-dev \
   libsnmp-dev libcap-dev libi2c-dev libjansson-dev build-essential libtonezone-dev \
-  git cmake g++ libboost-all-dev libgmp-dev swig python3-numpy asl-dahdi-source libusb-dev
+  git cmake g++ libboost-all-dev libgmp-dev swig python3-numpy libusb-dev
 ```
 
 ## Compiling
