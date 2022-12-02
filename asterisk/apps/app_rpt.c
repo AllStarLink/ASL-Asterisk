@@ -5704,44 +5704,56 @@ static size_t writefunction(void *ptr, size_t size, size_t nmemb, void *stream)
   return (nmemb*size);
 }
 
-static void statpost(struct rpt *myrpt,char *pairs)
+static void *perform_statpost(void *statsURL)
 {
-        char *str;
-        int     pid;
-        time_t  now;
-        unsigned int seq;
-
-        if (!myrpt->p.statpost_url) return;
-        str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
-        ast_mutex_lock(&myrpt->statpost_lock);
-        seq = ++myrpt->statpost_seqno;
-        ast_mutex_unlock(&myrpt->statpost_lock);
-        time(&now);
-        sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
-                myrpt->name,(unsigned int) now,seq);
-        if (pairs) sprintf(str + strlen(str),"&%s",pairs);
-        if (!(pid = fork()))
-        {
-                long rescode = 0;
-                CURL *curl = curl_easy_init();
-                if(curl) {
-                        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunction);
-                        curl_easy_setopt(curl, CURLOPT_URL, str);
-                        curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-                        curl_easy_perform(curl);
-                        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
-                        curl_easy_cleanup(curl);
-                        curl_global_cleanup();
-                }
-                if(rescode != 200) {
-                        ast_log(LOG_ERROR, "statpost failed with code %ld\n", rescode);
-                        perror("asterisk");
-                }
-                exit(0);
-        }
-        ast_free(str);
-        return;
+	long rescode = 0;
+	CURL *curl = curl_easy_init();
+	if (curl)
+	{
+		char *str = (char *)statsURL;
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunction);
+		curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+		curl_easy_setopt(curl, CURLOPT_URL, str);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
+		curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+		curl_easy_cleanup(curl);
+		curl_global_cleanup();
+	}
+	if (rescode != 200)
+	{
+		ast_log(LOG_ERROR, "statpost to URL <%s> failed with code %ld\n", (char *)statsURL, rescode);
+		perror("asterisk");
+	}
+	free(statsURL); // Free it here since parent has lost track of memory
+	return NULL;
 }
+
+static void statpost(struct rpt *myrpt, char *pairs)
+{
+	char *str;
+	time_t now;
+	unsigned int seq;
+
+	if (!myrpt->p.statpost_url)
+		return;
+	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
+	ast_mutex_lock(&myrpt->statpost_lock);
+	seq = ++myrpt->statpost_seqno;
+	ast_mutex_unlock(&myrpt->statpost_lock);
+	time(&now);
+	sprintf(str, "%s?node=%s&time=%u&seqno=%u", myrpt->p.statpost_url,
+			myrpt->name, (unsigned int)now, seq);
+	if (pairs)
+		sprintf(str + strlen(str), "&%s", pairs);
+
+	pthread_t statpost_thread;
+	if (pthread_create(&statpost_thread, NULL, perform_statpost, (void *)str))
+	{
+		ast_log(LOG_ERROR, "Error creating statpost thread\n");
+	}
+}
+
 
 /* 
  * Function stream data 
