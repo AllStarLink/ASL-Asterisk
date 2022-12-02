@@ -4456,6 +4456,7 @@ static int retrieve_memory(struct rpt *myrpt, char *memory)
 				myrpt->remmode = REM_MODE_LSB;
 				break;
 			case 'F':
+			case 'f':	
 				myrpt->remmode = REM_MODE_FM;
 				break;
 			case 'L':
