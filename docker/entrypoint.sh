@@ -18,6 +18,7 @@ for t in $BUILD_TARGETS; do
   echo "$t"
   cd /src/$t
   pwd
+  make clean
   if [ "$t" == "asterisk" ]; then
     ./bootstrap.sh && ./configure
   fi
