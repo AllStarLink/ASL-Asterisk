@@ -1,8 +1,42 @@
 #!/bin/bash
+
 set -e
 
-ARCHS="amd64 armhf"
-TARGETS="asterisk allstar"
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -c|--check-changelog)
+      CHECK_CHANGELOG=YES
+      shift
+      ;;
+    -a|--architectures)
+      ARCHS="$2"
+      shift
+      shift
+      ;;
+    -t|--targets)
+      TARGETS="$2"
+      shift
+      shift
+      ;;
+    -*|--*|*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$ARCHS" ]
+then
+  ARCHS="amd64 armhf"
+fi
+
+if [ -z "$TARGETS" ]
+then
+  TARGETS="asterisk allstar"
+fi
+
+echo "Architectures: $ARCHS"
+echo "Targets: $TARGETS"
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 PDIR=$(dirname $DIR)
@@ -12,7 +46,7 @@ cd $PDIR
 BUILD_TARGETS=""
 ANYCOUNT=0
 for t in $TARGETS; do
-  if git diff --name-only HEAD HEAD~1 | grep -q $t/debian/changelog; then
+  if [ -z "$CHECK_CHANGELOG" ] || git diff --name-only HEAD HEAD~1 | grep -q $t/debian/changelog; then
     BUILD_TARGETS+="$t "
     c=$(grep "^Architecture:" $t/debian/control | egrep -v "^Architecture: ?all" | wc -l)
     ANYCOUNT=$((c+ANYCOUNT))
