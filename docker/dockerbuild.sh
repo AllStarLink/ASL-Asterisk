@@ -65,7 +65,7 @@ fi
 DPKG_BUILDOPTS="-b -uc -us"
 for A in $ARCHS; do
        docker build -f $DIR/Dockerfile.$A -t asl-asterisk_builder.$A --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g) $DIR
-       docker run -v $PDIR:/src -e DPKG_BUILDOPTS="$DPKG_BUILDOPTS" -e BUILD_TARGETS="$BUILD_TARGETS" -e FOO=bar asl-asterisk_builder.$A
+       docker run -v $PDIR:/src -e DPKG_BUILDOPTS="$DPKG_BUILDOPTS" -e BUILD_TARGETS="$BUILD_TARGETS" asl-asterisk_builder.$A
        docker image rm --force asl-asterisk_builder.$A
        DPKG_BUILDOPTS="--build=any -uc -us"
 done
