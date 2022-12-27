@@ -34,4 +34,4 @@ for t in $BUILD_TARGETS; do
   mv *.buildinfo build/$BASENAME
   mv *.changes build/$BASENAME
 done
-chown -R user .
+chown -R user /src/*
