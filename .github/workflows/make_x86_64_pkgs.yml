@@ -2,7 +2,7 @@
 name: make_x86_64_pkgs
 on: workflow_dispatch
 jobs:
-  call-workflow-passing-data:
+  make-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
     with:
       run-this: ./docker/dockerbuild.sh -a amd64 -r
@@ -11,3 +11,4 @@ jobs:
     secrets: inherit
   publish-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
+    needs: make-packages
