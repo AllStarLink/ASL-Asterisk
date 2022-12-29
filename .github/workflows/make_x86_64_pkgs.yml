@@ -7,5 +7,5 @@ jobs:
     with:
       run-this: ./docker/dockerbuild.sh -a amd64
       arch: x86_64
-      artifact-path: '*.deb'
+      artifact-path: 'build/*'
     secrets: inherit
