@@ -18,8 +18,8 @@ for t in $BUILD_TARGETS; do
   echo "$t"
   cd /src/$t
   pwd
-  make clean
   if [ "$t" == "asterisk" ]; then
+    make clean
     ./bootstrap.sh && ./configure
   fi
   #temporarily add OS_CODENAME to the package version
