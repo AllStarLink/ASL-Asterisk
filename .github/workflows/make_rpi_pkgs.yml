@@ -1,0 +1,10 @@
+name: make_rpi_pkgs
+on: workflow_dispatch
+jobs:
+  call-workflow-passing-data:
+    uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
+    with:
+      run-this: ./docker/dockerbuild.sh -a armhf
+      arch: arm64
+      artifact-path: 'build/*'
+    secrets: inherit
