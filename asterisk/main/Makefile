@@ -48,7 +48,7 @@ else
   endif
 endif
 
-ifneq ($(findstring $(OSARCH), linux-gnu uclinux linux-uclibc linux-gnueabi ),)
+ifneq ($(findstring $(OSARCH), linux-gnu uclinux linux-uclibc linux-gnueabi linux-gnueabihf ),)
   ifneq ($(findstring LOADABLE_MODULES,$(MENUSELECT_CFLAGS)),)
   AST_LIBS+=-ldl
   endif
