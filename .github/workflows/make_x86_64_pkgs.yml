@@ -9,3 +9,5 @@ jobs:
       arch: x86_64
       artifact-path: 'build/*'
     secrets: inherit
+  publish-packages:
+    uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
