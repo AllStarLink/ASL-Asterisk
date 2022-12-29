@@ -35,4 +35,4 @@ for t in $BUILD_TARGETS; do
   mv *.buildinfo build/$BASENAME
   mv *.changes build/$BASENAME
 done
-chown -R user /src/*
+if [ "$(id -u)" -ne 0 ]; then chown -R user /src/*; fi
