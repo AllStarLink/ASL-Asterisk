@@ -19,7 +19,7 @@ for t in $BUILD_TARGETS; do
   cd /src/$t
   pwd
   COMMIT_VERSION=""
-  if [ "$COMMIT_VERSIONING" == "yes" ] ; then
+  if [ "${COMMIT_VERSIONING^^}" == "YES" ] ; then
     COMMIT_VERSION=$(git show --date=format:'%Y%m%dT%H%M%S' --pretty=format:"+git%cd.%h" --no-patch)
   fi
   if [ "$t" == "asterisk" ]; then
