@@ -21,12 +21,16 @@ on:
         - testing
         - development
       commit-versioning:
-        type: boolean
+        type: choice
+        options:
+          - default
+          - yes
+          - no
 jobs:
   make-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
     with:
-      run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch == 'x86_64' && 'amd64' || inputs.arch == 'arm64' && 'armhf' || null }} -r
+      run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch == 'x86_64' && 'amd64' || inputs.arch == 'arm64' && 'armhf' || null }} ${{ inputs.commit-versioning == 'yes' && '-r' || inputs.commit-versioning == 'default' && inputs.deployment-environment == 'development' && '-r' || '' }}
       arch: ${{inputs.arch}}
       artifact-path: 'build/*'
     secrets: inherit
