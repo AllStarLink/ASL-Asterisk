@@ -17,9 +17,9 @@ on:
       deployment-environment:
         type: choice
         options:
-        - production
-        - testing
         - development
+        - testing
+        - production
       commit-versioning:
         type: choice
         options:
