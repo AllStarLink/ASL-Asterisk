@@ -33,6 +33,6 @@ jobs:
   publish-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
     with:
-      repo-name: asl_builds-${{inputs.os}}${{ inputs.deployment-environment == 'production' && '' || inputs.deployment-environment == 'testing' && '-testing' || inputs.deployment-environment == 'development' && 'devel' || null }}
+      repo-name: asl_builds-${{inputs.os}}${{ inputs.deployment-environment == 'production' && '' || inputs.deployment-environment == 'testing' && '-testing' || inputs.deployment-environment == 'development' && '-devel' || null }}
     secrets: inherit
     needs: make-packages
