@@ -8,20 +8,20 @@ on:
         options: 
         - x64_64
         - arm64
-      commit-versioning:
-        type: boolean
-      deployment-environment:
-        type: choice
-        options:
-        - production
-        - testing
-        - development
       os:
         type: choice
         options:
           - buster
           - bullseye
           - bookworm
+      deployment-environment:
+        type: choice
+        options:
+        - production
+        - testing
+        - development
+      commit-versioning:
+        type: boolean
 jobs:
   make-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
@@ -33,6 +33,6 @@ jobs:
   publish-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
     with:
-      repo-name: asl_builds-${{inputs.os}}${{ inputs.deployment-environment == 'production' && '' || inputs.deployment-environment == 'testing' && '-testing' || input.deployment-environment == 'development' && 'devel' || null }}
+      repo-name: asl_builds-${{inputs.os}}${{ inputs.deployment-environment == 'production' && '' || inputs.deployment-environment == 'testing' && '-testing' || inputs.deployment-environment == 'development' && 'devel' || null }}
     secrets: inherit
     needs: make-packages
