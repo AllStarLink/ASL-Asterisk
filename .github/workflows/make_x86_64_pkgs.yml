@@ -12,6 +12,6 @@ jobs:
   publish-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
     with:
-      repo-name: asl_builds-testing
+      repo-name: asl_builds-buster-testing
     secrets: inherit
     needs: make-packages
