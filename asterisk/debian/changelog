@@ -1,4 +1,4 @@
-asl-asterisk (1:1.4.23~pre1-10) UNRELEASED; urgency=medium
+asl-asterisk (1:1.4.23-10) unstable; urgency=medium
 
   * app_rpt: resolve stats reporting segfaults
   * app_rpt: reduce debug spamminess
