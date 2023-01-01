@@ -30,7 +30,7 @@ RUN apt-get update && apt-get -y install \
 
 # add the allstarlink repo for build deps
 RUN echo "deb https://apt.allstarlink.org/repos/asl_builds buster main" > /etc/apt/sources.list.d/allstarlink.list
-RUN wget -O - https://apt.allstarlink.org/repos/apt.gpg.key | apt-key add -
+RUN wget -O - https://apt.allstarlink.org/repos/repo_signing.gpg | apt-key add -
 
 # Install application dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install \
