@@ -5703,6 +5703,11 @@ int	i;
 	return;
 }
 
+// Waste the output of libcurl (the OK is sent to stdout)
+static size_t writefunction(void *ptr, size_t size, size_t nmemb, void *stream)
+{
+	return (nmemb*size);
+}
 
 static void statpost(struct rpt *myrpt,char *pairs)
 {
@@ -5710,8 +5715,6 @@ static void statpost(struct rpt *myrpt,char *pairs)
 	int	pid;
 	time_t	now;
 	unsigned int seq;
-	CURL *curl;
-	CURLcode res;
 
 	if (!myrpt->p.statpost_url) return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
@@ -5724,18 +5727,21 @@ static void statpost(struct rpt *myrpt,char *pairs)
 	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
 	if (!(pid = fork()))
 	{
-		curl = curl_easy_init();
+		long rescode = 0;
+		CURL *curl = curl_easy_init();
 		if(curl) {
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunction);
 			curl_easy_setopt(curl, CURLOPT_URL, str);
 			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-			res = curl_easy_perform(curl);
-			if (res != CURLE_OK)
-			{
-				ast_log(LOG_ERROR, "statpost failed\n");
-				perror("asterisk");
-			}
+			curl_easy_perform(curl);
+			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
 			curl_easy_cleanup(curl);
+			curl_global_cleanup();
 		}
+		if(rescode != 200) {
+			ast_log(LOG_ERROR, "statpost failed with code %ld\n", rescode);
+                        perror("asterisk");
+                }
 		exit(0);
 	}
 	ast_free(str);
