@@ -1,0 +1,42 @@
+
+name: make_and_publish_pkgs
+on: 
+  workflow_dispatch:
+    inputs:
+      arch:
+        type: choice
+        options: 
+        - x86_64
+        - arm64
+      os:
+        type: choice
+        options:
+          - buster
+          - bullseye
+          - bookworm
+      deployment-environment:
+        type: choice
+        options:
+        - development
+        - testing
+        - production
+      commit-versioning:
+        type: choice
+        options:
+          - default
+          - yes
+          - no
+jobs:
+  make-packages:
+    uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
+    with:
+      run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch == 'x86_64' && 'amd64' || inputs.arch == 'arm64' && 'armhf' || null }} ${{ (inputs.commit-versioning == 'yes' || (inputs.commit-versioning == 'default' && inputs.deployment-environment == 'development')) && '-r' || null }}
+      arch: ${{inputs.arch}}
+      artifact-path: 'build/*'
+    secrets: inherit
+  publish-packages:
+    uses: AllStarLink/asl_workflows/.github/workflows/publish_artifacts_to_aptly.yml@develop
+    with:
+      repo-name: asl_builds-${{inputs.os}}${{ inputs.deployment-environment == 'production' && '' || inputs.deployment-environment == 'testing' && '-testing' || inputs.deployment-environment == 'development' && '-devel' || null }}
+    secrets: inherit
+    needs: make-packages

@@ -1,3 +1,16 @@
+asl-asterisk (1:1.4.23-10) unstable; urgency=medium
+
+  * app_rpt: resolve stats reporting segfaults
+  * app_rpt: reduce debug spamminess
+  * app_rpt: make REM_REMOTE_FM flag case-insensitve
+  * app_rpt: fix pfxtone type (pfxfone)
+  * app_rpt: parse both arguments to the GPIO commands
+  * chan_usrp: add dtmf decode feature
+  * chan_iax2: update zaptel/dahdi device paths
+  * chan_usbradio: add txoffdelay feature
+
+ -- Adam Paul <adamjpaul@gmail.com>  Sun, 1 Jan 2023 01:03:28 -0400
+
 asl-asterisk (1:1.4.23-9) UNRELEASED; urgency=medium
 
   * Fix systemd service names
