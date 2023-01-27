@@ -5725,7 +5725,7 @@ static void *perform_statpost(void *statsURL)
 		ast_log(LOG_ERROR, "statpost to URL <%s> failed with code %ld\n", (char *)statsURL, rescode);
 		perror("asterisk");
 	}
-	free(statsURL); // Free it here since parent has lost track of memory
+	ast_free(statsURL); // Free it here since parent has lost track of memory
 	return NULL;
 }
 
@@ -5752,6 +5752,7 @@ static void statpost(struct rpt *myrpt, char *pairs)
 	{
 		ast_log(LOG_ERROR, "Error creating statpost thread\n");
 	}
+    pthread_detach(statpost_thread);
 }
 
 
