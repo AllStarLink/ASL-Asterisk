@@ -38,6 +38,7 @@
  ***/
 
 #include "asterisk.h"
+#include "asterisk/version.h"
 
 ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
@@ -109,9 +110,12 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "jitterbuf.h"
 
 /* WB6NIL backport stuff */
+/* N2MH patches - 2022-07-21 */
+//#define	DAHDI_FILE_TIMER "/dev/zap/timer"   <-- old line
+//#define	DAHDI_FILE_PSEUDO "/dev/zap/pseudo" <-- old line
+#define	DAHDI_FILE_TIMER "/dev/dahdi/timer"
+#define	DAHDI_FILE_PSEUDO "/dev/dahdi/pseudo"
 
-#define	DAHDI_FILE_TIMER "/dev/zap/timer"
-#define	DAHDI_FILE_PSEUDO "/dev/zap/pseudo"
 #define	AST_FORMAT_AUDIO_UNDEFINED 0
 #define	BAD_RADIO_HACK
 #define	ast_free_ptr ast_free
@@ -10224,7 +10228,7 @@ static int iax2_do_http_register(struct iax2_registry *reg, char* proto)
 			sprintf(url, "%.8s://%.30s/%.50s", proto, reg->hostname, reg->path);
 		hs = curl_slist_append(hs, "Content-Type:application/json");
 		curl_easy_setopt(curl, CURLOPT_URL, url);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, "AllstarClient/1.01");
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
 		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request);

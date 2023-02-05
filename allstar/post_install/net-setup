@@ -2,12 +2,19 @@
 # Origianl by N4IRS
 # mod4whip N8THN
 # V2.1 May 2018
-
 # release date 20180503
+# Minor mods WD6AWP 3/28/2021
 
 # Network interface setup script
 #
 #
+
+#check if root or sudo
+if [ `whoami` != root ]; then
+    whiptail --msgbox "This script must be run as root or with sudo." 12 60
+    exit
+fi
+
 DHCPCDPATH=/etc/dhcpcd.conf
 INTPATH=/etc/network/interfaces
 IFUPDPATH=/etc/network/if-up.d/touchfile
@@ -32,6 +39,15 @@ if [ $? = "1" ]; then
         ETH=eth0
 fi
 
+do_intro() {
+    ANSWER=1
+    if (whiptail --title "Network setup" --yesno "Network DHCP or Static setup.\n\nDo you want to do this now?" 15 78) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "1" ]; then
+        exit 0
+    fi
+}
 
 mask2cidr() {
     nbits=0
@@ -65,7 +81,7 @@ fi
 
 do_static_dhcp_menu() {
   while true; do
-    FUNIP=$(whiptail --title "DHCP or Static" --menu "Network addressing options" 20 80 5 --cancel-button Back --ok-button Select \
+    FUNIP=$(whiptail --title "DHCP or Static" --menu "Network addressing options:" 20 80 5 --cancel-button Back --ok-button Select \
       "S Static" "Set Static IP addressing" \
       "D DHCP" "Set DHCP addressing" \
       3>&1 1>&2 2>&3)
@@ -181,17 +197,8 @@ fi
 }
 
 ########  Main body here
-if (whiptail --title "Network setup" --yesno "Network DHCP or Static setup.\n\nDo you want to do this now?" 15 78) then
- ANSWER=$?
-else
- ANSWER=$?
+if [ "$1" != 'nointro' ]; then
+    do_intro
 fi
-
-if [ $ANSWER = 1 ]
-then
-        # whiptail --msgbox "You may set up your IP address settings later" 8 78
-        exit 0
-else
 do_dhcpcd_yn
 do_static_dhcp_menu
-fi

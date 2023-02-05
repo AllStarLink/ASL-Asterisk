@@ -1,3 +1,27 @@
+allstar-helpers (0.1-6) UNRELEASED; urgency=low
+
+  * update usbradio sample config
+  * use local system editor for menu edits
+  * Rework first-time, net-setup and set-host scripts: 
+  * save-node fixes and clarifications
+  * Modify first-time script to better integrate with asl-menu.
+  * Major rewrite of local backups
+  * Minor tweaks to node-setup menu.
+  * Fixed local backup file delete. Added Logout/Reboot/Shutdown
+  * Prettyfi bash. Fix menus ESC key behavior.
+  * Simplify Main Menu exit
+  * Change all main menu indexes to numeric.
+  * Improve term size test and set. Fix test and restart update-node-list.
+
+ -- Adam Paul <adamjpaul@gmail.com>  Sun, 01 Jan 2023 01:32:08 -0400
+
+allstar-helpers (0.1-5) UNRELEASED; urgency=low
+
+  * Remove rc.updatenodelist
+  * Add cron scripts for astdb.php
+
+ -- Rob Vella <me@robvella.com>  Wed, 03 Mar 2021 17:50:36 -0800
+
 allstar-helpers (0.1-4) UNRELEASED; urgency=low
 
   * Update asterisk service control scripts

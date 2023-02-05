@@ -1,8 +1,0 @@
-[general]
-server=https://web-tpa.allstarlink.org/api/register.php   ; registration server url
-syslog=n                                                  ; Syslog response. Optional, default is no
-
-[nodes]
-;1999:123456,n                                           ; This must be changed to your node number and
-                                                         ; password.  Remove the leading ";"
-                                                         ; y = remote base. Optional, default is no

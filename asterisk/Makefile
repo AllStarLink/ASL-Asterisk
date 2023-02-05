@@ -560,12 +560,12 @@ endif
 upgrade: bininstall
 
 adsi:
-	mkdir -p $(DESTDIR)$(ASTETCDIR)
-	for x in configs/*.adsi; do \
-		if [ ! -f $(DESTDIR)$(ASTETCDIR)/$$x ]; then \
-			$(INSTALL) -m 644 $$x $(DESTDIR)$(ASTETCDIR)/`$(BASENAME) $$x` ; \
-		fi ; \
-	done
+#	mkdir -p $(DESTDIR)$(ASTETCDIR)
+#	for x in configs/*.adsi; do \
+#		if [ ! -f $(DESTDIR)$(ASTETCDIR)/$$x ]; then \
+#			$(INSTALL) -m 644 $$x $(DESTDIR)$(ASTETCDIR)/`$(BASENAME) $$x` ; \
+#		fi ; \
+#	done
 
 samples: adsi
 	mkdir -p $(DESTDIR)$(ASTETCDIR)

@@ -4,7 +4,7 @@
 
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
-
+export ASTERISK_NO_DOCS=1
 export DEB_HOST_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
 export DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
 
@@ -161,9 +161,6 @@ install-indep: build-indep
 	dh_install -i --sourcedir=debian/tmp
 	dh_lintian -i
 
-	# create a simple config
-	echo "; please read doc/manager.txt" > $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/manager.d/README.conf
-
 # Build architecture-independent files here.
 binary-indep: install-indep
 	dh_testdir -i
@@ -177,8 +174,7 @@ binary-indep: install-indep
 	dh_fixperms -i
 	# should follow dh_fixperms; asterisk configurations may contain
 	# sensitive information, such as passwords
-	chmod o-rwx $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/*
-	chmod o+rx  $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/manager.d
+	chmod 644 $(CURDIR)/debian/asl-asterisk-config/etc/asterisk/*
 	dh_installdeb -i
 	dh_gencontrol -i
 	dh_md5sums -i
@@ -192,7 +188,7 @@ binary-arch: install-arch
 	dh_installdocs -a
 	dh_installman utils/*.1 doc/*.8 contrib/scripts/*.8
 	dh_installexamples -a
-	dh_installinit -a -- defaults-disabled
+	dh_installsystemd --restart-after-upgrade
 	dh_strip -a --dbg-package=asl-asterisk-dbg
 	dh_link -a
 	dh_compress -a

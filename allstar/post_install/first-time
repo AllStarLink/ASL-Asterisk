@@ -3,142 +3,222 @@
 # original by N4IRS 07/26/2017
 # mod4whip by N8THN
 # Fixes by K6JWN and KK9ROB 02/25/2021
+# Fixes by WD6AWP 03/25/2021
 # V2.0 Feb 25
 
-do_check_if_firsttime() {
-if [ -e /etc/asterisk/firsttime ]; then
-return
-else
-exit 0
-fi
-}
-
 do_is_root() {
-if [ `whoami` != root ]; then
-        whiptail --msgbox "This script must be run as root or with sudo." 20 60 2
+if [ $EUID -ne 0 ]; then
+    whiptail --msgbox "This script must be run as root or with sudo." 12 60
     exit 1
 fi
 }
 
+title="ASL 2.0.0-Beta"
 
-do_set_my_passwd() {
-REALID=$(who am i | awk '{print $1}')
-ANSWER=1
-        if (whiptail --title "First-time" --yesno "Welcome to AllstarLink first-time setup. \
-        \nThis script will walk you through a few of the basic system setup options. \
-        \nThe root login is disabled for SSH and CONSOLE login.\n\
-        \nHowever, the repeater user's password is set to default. \n\
-        \nIf you forward your SSH port, this may allow attackers to use the default credentials.\n \
-        \nWould you like to set the $REALID password?" --defaultno 20 80) then
-         ANSWER=$?
-        fi
-        if [ "$ANSWER" = "0" ]; then    # answered yes
-                # no options to pretty up the display for this part
-                while ! passwd $REALID
-                do
-                        whiptail --msgbox "ERROR: A valid password must be assigned to continue" 20 80 2
-                done
-        fi
+calc_wt_size() {
+    WT_HEIGHT=22
+    WT_WIDTH=$(tput cols)
+
+    if [ -z "$WT_WIDTH" ] || [ "$WT_WIDTH" -lt 60 ]; then
+        WT_WIDTH=80
+    fi
+    if [ "$WT_WIDTH" -gt 178 ]; then
+        WT_WIDTH=120
+    fi
+    WT_MENU_HEIGHT=$(($WT_HEIGHT-10))
+}
+
+
+do_welcome() {
+    calc_wt_size
+    ANSWER=1
+    MSG="AllStarLink First Time Setup.\n\nThis script will walk you through the initial server settings for your AllStarLink node. "
+    MSG="${MSG}You will be asked a number of questions. You may run this setup as many times as you like."
+    MSG="${MSG}\n\nWould you like to run setup now?"
+    if (whiptail --title "$title" --yesno "${MSG}" 18 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then #answered yes
+        return
+    fi
+    exit 0
+}
+
+do_check_if_firsttime() {
+if [ -f /etc/asterisk/firsttime ]; then #file found
+    ANSWER=1
+    MSG="Looks like you've already run this setup, but it's ok to do it again.\n\nWould you like to run setup again?"
+    if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then    #answered yes
+        touch /etc/asterisk/firsttime
+        return
+    fi
+    exit 0
+fi
 }
 
 do_set_root_passwd() {
 ANSWER=1
-if (whiptail --title "Root password" --yesno "Would you like to change root's password?" 20 80 2) then
-ANSWER=$?
+MSG="The root login is disabled for SSH and CONSOLE login.\n\n"
+MSG="${MSG}However, the password for root may be changed now. "
+MSG="${MSG}It is strongly recommended to change the root password.\n\nWould you like do this now?"
+if (whiptail --title "$title" --yesno  "${MSG}" 12 60) then
+    ANSWER=$?
 fi
-if [ "$ANSWER" = "0" ]; then
-        while ! passwd root
+if [ "$ANSWER" = "0" ]; then    # answered yes
+    while ! passwd root
         do
-                whiptail --msgbox "ERROR: " 20 80 2
+            whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60
         done
 fi
 }
 
+do_set_my_passwd() {
+    ANSWER=1
+    REALID=$(who am i | awk '{print $1}')
+    #MSG="It is strongly recommended to change the password for this Linux server. "
+    MSG="The ID you are curently logged in with is '$REALID'. "
+    MSG="${MSG}It is strongly recommended to change your password.\n\nWould you like to change this password?"
+    if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then
+        while ! passwd $REALID
+        do
+            whiptail --msgbox "ERROR: A valid password must be assigned to continue" 12 60
+        done
+    fi
+}
 
 do_set_timezone() {
-                        whiptail --msgbox "** Time Zone setup **\n\nBy default, the time zone is set to $(cat /etc/timezone). A correct time\nzone entry will allow the system clock to report the correct time." 20 80 2
-                        dpkg-reconfigure tzdata
-                        # dpkg-reconfigure -f noninteractive tzdata
+    ANSWER=1
+    timezone=$(cat /etc/timezone)
+    MSG="The time zone is set to ${timezone}.\n\n"
+    MSG="${MSG}Would you like to change the timezone?"
+    if (whiptail --title "$title" --yesno "${MSG}" 12 60) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then #answered yes
+        dpkg-reconfigure tzdata
+        # dpkg-reconfigure -f noninteractive tzdata
+    fi
+
+
 }
 
 do_set_host() {
-                if [ -x /usr/sbin/set-host ]; then
-                        whiptail --msgbox "By default, the host name is set to $(cat /etc/hostname).\nThe host name should be set to something meaningful\n(i.e. the location of this system)" 20 80 2
-                        /usr/sbin/set-host
-                fi
+    if [ -x /usr/sbin/set-host ]; then
+        hostname=$(cat /etc/hostname)
+        MSG="The hostname for this server is $hostname\n\n"
+        MSG="${MSG}Do you want to change the hostname?"
+        ANSWER=1
+        if (whiptail --title "$title" --yesno  "${MSG}" 12 60) then
+            ANSWER=$?
+        fi
+        if [ "$ANSWER" = "0" ]; then #answered yes
+            /usr/sbin/set-host nointro
+        fi
+
+    fi
 }
 
 do_net_setup() {
-                if [ -x /usr/sbin/net-setup ]; then
-                        whiptail --msgbox "You can now set up the networking for the system to use\neither static or DHCP (dynamic) addressing.\nIf you choose static addressing, you will need to have 5 key IP\naddresses handy:  IP ADDRESS, NETMASK, DEFAULT GATEWAY,\nPRIMARY DNS, and SECONDARY DNS." 20 80 2
-                        /usr/sbin/net-setup
-                fi
+    if [ -x /usr/sbin/net-setup ]; then
+        ip_address=$(hostname -I | xargs)
+        MSG="The IP address for this server is $ip_address.\n\n"
+        #MSG="${MSG}The IP address may be set to static (fixed) or DHCP (dynamic) addressing. "
+        #MSG="${MSG}For static addressing, you will need to know the "
+        #MSG="${MSG}IP ADDRESS, NETMASK, DEFAULT GATEWAY, PRIMARY DNS and SECONDARY DNS. "
+        #MSG="${MSG}If you are not sure what these should be choose DHCP.\n\n"
+        MSG="${MSG}Would you like to change the IP settings?"
+        ANSWER=1
+        if (whiptail --title "$title" --yesno  "${MSG}" 12 60) then
+            ANSWER=$?
+        fi
+        if [ "$ANSWER" = "0" ]; then #answered yes
+            /usr/sbin/net-setup nointro
+        fi
+    fi
 }
 
 do_node_setup() {
-                if [ -x /usr/sbin/node-setup ]; then
-                        whiptail --msgbox "You can now configure you node or download\na configuration from AllStarLink" 20 80 2
-                       /usr/sbin/node-setup
-                fi
+    if [ -x /usr/sbin/node-setup ]; then
+        MSG="Set up hotspot/repeater, node number and other AllStar settings.\n\n"
+        MSG="${MSG}Would you like to change AllStar settings?"
+        ANSWER=1
+        if (whiptail --title "$title" --yesno  "${MSG}" 12 60) then
+            ANSWER=$?
+        fi
+        if [ "$ANSWER" = "0" ]; then #answered yes
+           /usr/sbin/node-setup
+        fi
+    fi
 }
 
 do_use_aslmenu() {
-# use asl-menu on login for user account
-ANSWER=1
-REALID=$(who am i | awk '{print $1}')
-if (whiptail --title "asl-menu at login" --yesno "Would you like to start the asl-menu script\nat login by default for user: $REALID?" --defaultno 20 80 2 3>&1 1>&2 2>&3) then
-ANSWER=$?
-fi
-if [ "$ANSWER" = "0" ]; then
+    # use asl-menu on login for user account
+    ANSWER=1
+    REALID=$(who am i | awk '{print $1}')
+    if (whiptail --title "$title" --yesno "Would you like to start the asl-menu script at login by default for user: $REALID?" --defaultno 12 60 2 3>&1 1>&2 2>&3) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then
         cat /home/$REALID/.bashrc |grep asl-menu > /dev/null
         if [ $? = "1" ]; then
-        echo "sudo /usr/sbin/asl-menu" >> /home/$REALID/.bashrc
-        whiptail --msgbox "asl-menu will start at login for user $REALID" 20 60 2
+            echo "sudo /usr/sbin/asl-menu" >> /home/$REALID/.bashrc
+            whiptail --msgbox "asl-menu will start at login for user $REALID" 12 60 2
         else
-        whiptail --msgbox "asl-menu already starts for user $REALID at login." 20 60 2
+            whiptail --msgbox "asl-menu already starts for user $REALID at login." 12 60 2
         fi
-else
+    else
         sed -i '/asl-menu/c\' /home/$REALID/.bashrc
-        whiptail --msgbox "the asl-menu autostart at login has been disabled\nYou may run the asl-menu script by typing sudo /usr/sbin/asl-menu" 20 60 2
-fi
+        whiptail --msgbox "The asl-menu autostart at login has been disabled. You may run the asl-menu script by typing sudo /usr/sbin/asl-menu" 12 60 2
+    fi
 }
 
 do_use_menu() {
-# use asl-menu on login for user account
-ANSWER=1
-REALID=$(who am i | awk '{print $1}')
-if (whiptail --title "asl-menu at login" --yesno "Would you like to start the asl-menu script\nat login by default for user $REALID?" --defaultno 20 80 2) then
-ANSWER=$?
-fi
-if [ "$ANSWER" = "0" ]; then
-        cat /home/$REALID/.bashrc |grep asl-menu > /dev/null
-        if [ $? = "1" ]; then
-        echo "sudo /usr/sbin/asl-menu" >> /home/$REALID/.bashrc
-        else
-        whiptail --msgbox "asl-menu already starts for user $REALID at login." 20 60 2
-        fi
-else
-        whiptail --msgbox "You may run the asl-menu script by typing sudo /usr/sbin/asl-menu" 20 60 2
-fi
+    # use asl-menu on login for user account
+    ANSWER=1
+    REALID=$(who am i | awk '{print $1}')
+    if (whiptail --title "$title" --yesno "Would you like to start the asl-menu script at login by default for user $REALID?" --defaultno 12 60 2) then
+        ANSWER=$?
+    fi
+    if [ "$ANSWER" = "0" ]; then
+            cat /home/$REALID/.bashrc |grep asl-menu > /dev/null
+            if [ $? = "1" ]; then
+            echo "sudo /usr/sbin/asl-menu" >> /home/$REALID/.bashrc
+            else
+            whiptail --msgbox "asl-menu already starts for user $REALID at login." 12 60 2
+            fi
+    else
+            whiptail --msgbox "You may run the asl-menu script by typing sudo /usr/sbin/asl-menu" 12 60 2
+    fi
 }
 
 do_finish() {
-                whiptail --msgbox "Setup is complete.\nWe will reboot once you click <OK>" 20 80 2
-                rm /etc/asterisk/firsttime
-                sync
-                sleep 1
-                reboot
+    ANSWER=1
+    whiptail --title "$title" --yesno "Setup is complete. Settings will take effect on next boot.\n\nWould you like to reboot now?" --defaultno 12 60 2
+    #rm /etc/asterisk/firsttime
+    if [ "$ANSWER" = "0" ]; then
+        sync
+        sleep 1
+        reboot
+    else
+        exit 0
+    fi
 }
 
 
-do_check_if_firsttime
 do_is_root
+do_welcome
+#do_check_if_firsttime
+do_set_root_passwd
 do_set_my_passwd
 do_set_timezone
 do_set_host
 do_net_setup
-do_node_setup
-do_use_aslmenu
+#do_node_setup
+#do_use_aslmenu
 do_finish
-
-

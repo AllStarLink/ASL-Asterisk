@@ -6,6 +6,7 @@ if [ ! -f ../.flavor ]; then
  * Automatically generated
  */
 #define ASTERISK_VERSION "${ASTERISKVERSION}"
+#define ASTERISK_VERSION_HTTP "AllStarClient/${ASTERISKVERSION}"
 #define ASTERISK_VERSION_NUM ${ASTERISKVERSIONNUM}
 
 END
@@ -18,6 +19,7 @@ else
  * Automatically generated
  */
 #define ASTERISK_VERSION "${ASTERISKVERSION} (${aadkflavor} ${aadkver})"
+#define ASTERISK_VERSION_HTTP "AllStarClient/${ASTERISKVERSION}"
 #define ASTERISK_VERSION_NUM ${ASTERISKVERSIONNUM}
 
 END

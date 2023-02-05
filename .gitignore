@@ -3,3 +3,4 @@
 *.changes
 *.deb
 build/
+.vscode

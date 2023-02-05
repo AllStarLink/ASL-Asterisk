@@ -1,9 +1,17 @@
 ; Radio Repeater configuration file (for use with app_rpt)
-
-
 ; Your Repeater
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This is where you define your nodes which can be connected to.
+;
+
+[nodes]
+; Note, if you are using automatic update for allstar link nodes,
+; no allstar link nodes should be defined here. Only place a definition
+; for your local nodes, and private (off of allstar link) nodes here.
+
+1999 = radio@127.0.0.1:4569/1999,NONE	; This must be changed to your node number
+                                        ; and iax port number if not the default
 
 [1999]					; Change this to your assigned node number
 
@@ -63,12 +71,12 @@ context = radio				; dialing context for phone
 callerid = "Repeater" <0000000000>	; callerid for phone calls
 accountcode = RADIO                     ; account code (optional)
 
-hangtime = 5000				; squelch tail hang time (in ms) (optional, default 5 seconds, 5000 ms)
-althangtime = 4000			; longer squelch tail
+hangtime = 1000				; squelch tail hang time (in ms) (optional, default 5 seconds, 5000 ms)
+althangtime = 3000			; longer squelch tail
 totime = 180000				; transmit time-out time (in ms) (optional, default 3 minutes 180000 ms)
 
-idrecording = |iWA4XYZ			; cording or morse string see http://ohnosec.org/drupal/node/87
-idtalkover = |iWA4XYZ                   ; Talkover ID (optional) default is none see http://ohnosec.org/drupal/node/129
+idrecording = |iWB6NIL			; cording or morse string see https://wiki.allstarlink.org/wiki/Rpt.conf#idrecording.3D
+idtalkover = |iWB6NIL                   ; Talkover ID (optional) default is none see https://wiki.allstarlink.org/wiki/Rpt.conf#idtalkover.3D
 					; See Telemetry section Example: idrecording = rpt/nodenames/1999
 idtime = 540000				; id interval time (in ms) (optional) Default 5 minutes (300000 ms)
 politeid = 30000			; time in milliseconds before ID timer expires to try and ID in the tail. (optional, default 30000)
@@ -77,6 +85,10 @@ unlinkedct = ct2			; Send a this courtesy tone when the user unkeys if the node 
 remotect = ct3				; remote linked courtesy tone (indicates a remote is in the list of links)
 linkunkeyct = ct8			; sent when a transmission received over the link unkeys
 ;nolocallinkct = 0			; Send unlinkedct instead if another local node is connected to this node (hosted on the same PC).
+
+; Supermon smlogger
+connpgm=/usr/local/sbin/supermon/smlogger 1
+discpgm=/usr/local/sbin/supermon/smlogger 0
 
 ;connpgm = yourconnectprogram		; Disabled. Execute a program you specify on connect. (default)
 					; passes 2 command line arguments to your program:
@@ -128,6 +140,9 @@ startup_macro =
 
 ; nodenames = /var/lib/asterisk/sounds/rpt/nodenames.callsign	; Point to alternate nodename sound directory
 
+; Stream your node audio to Broadcastify or similar. See https://wiki.allstarlink.org/wiki/Stream_Node_Audio_to_Broadcastify
+; outstreamcmd = /bin/sh,-c,/usr/bin/lame --preset cbr 16 -r -m m -s 8 --bitwidth 16 - - | /usr/bin/ezstream -qvc /etc/ezstream.xml
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Need more information on these
 
@@ -176,8 +191,8 @@ startup_macro =
 
 ; *** Status Reporting ***
 
-; Uncomment the following statpost line to report the status of your node to stats.allstarlink.org
-;statpost_url = http://stats.allstarlink.org/uhandler.php ; Status updates 
+; Comment the following statpost line stop to reporting of the status of your node to stats.allstarlink.org
+statpost_url = http://stats.allstarlink.org/uhandler ; Status updates
 
 [functions]
 
@@ -200,8 +215,6 @@ startup_macro =
 
 
 ; Mandatory Command Codes
-; http://docs.allstarlink.org/drupal/node/91
-
 1 = ilink,1		; Disconnect specified link
 2 = ilink,2		; Connect specified link -- monitor only
 3 = ilink,3		; Connect specified link -- tranceive
@@ -277,6 +290,7 @@ startup_macro =
 
 ; ilink commands 1 through 5 are defined in the Mandatory Command section
 
+76 = ilink,6
 806 = ilink,6			; Disconnect all links
 807 = ilink,7			; Last Node to Key Up
 808 = ilink,8			; Connect specified link -- local monitor only
@@ -292,103 +306,105 @@ startup_macro =
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; Control operator (cop) functions. Change these to something other than these codes listed below!
+; Control operator (cop) functions.
+; Change these to something other than these codes listed below!
+; Uncomment as needed.
 
-901 = cop,1				; System warm boot
-902 = cop,2				; System enable
-903 = cop,3				; System disable
+; 901 = cop,1				; System warm boot
+; 902 = cop,2				; System enable
+; 903 = cop,3				; System disable
 
-904 = cop,4				; Test tone on/off (toggle)
-905 = cop,5				; Dump system variables on console (debug use only)
+; 904 = cop,4				; Test tone on/off (toggle)
+; 905 = cop,5				; Dump system variables on console (debug use only)
 
-907 = cop,7				; Time out timer enable
-908 = cop,8				; Time out timer disable
+; 907 = cop,7				; Time out timer enable
+; 908 = cop,8				; Time out timer disable
 
-909 = cop,9				; Autopatch enable
-910 = cop,10				; Autopatch disable
+; 909 = cop,9				; Autopatch enable
+; 910 = cop,10				; Autopatch disable
 
-911 = cop,11				; User linking functions enable
-912 = cop,12				; User linking functions disable
+; 911 = cop,11				; User linking functions enable
+; 912 = cop,12				; User linking functions disable
 
-913 = cop,13				; Query system control state
-914 = cop,14				; Set system control state
+; 913 = cop,13				; Query system control state
+; 914 = cop,14				; Set system control state
 
-915 = cop,15				; Scheduler enable
-916 = cop,16				; Scheduler disable
+; 915 = cop,15				; Scheduler enable
+; 916 = cop,16				; Scheduler disable
 
-917 = cop,17				; User functions enable (time, id, etc)
-918 = cop,18				; User functions disable
+; 917 = cop,17				; User functions enable (time, id, etc)
+; 918 = cop,18				; User functions disable
 
-919 = cop,19				; Select alternate hang time (althangtime)
-920 = cop,20				; Select standard hangtime (hangtime)
+; 919 = cop,19				; Select alternate hang time (althangtime)
+; 920 = cop,20				; Select standard hangtime (hangtime)
 
-921 = cop,21				; Enable Parrot Mode
-922 = cop,22				; Disable Parrot Mode
-923 = cop,23				; Birdbath (Current Parrot Cleanup/Flush)
+; 921 = cop,21				; Enable Parrot Mode
+; 922 = cop,22				; Disable Parrot Mode
+; 923 = cop,23				; Birdbath (Current Parrot Cleanup/Flush)
 
-924 = cop,24				; Flush all telemetry
-925 = cop,25				; Query last node un-keyed
-926 = cop,26				; Query all nodes keyed/unkeyed
-927 = cop,27				; Reset DAQ minimum on a pin
-928 = cop,28				; Reset DAQ maximum on a pin
+; 924 = cop,24				; Flush all telemetry
+; 925 = cop,25				; Query last node un-keyed
+; 926 = cop,26				; Query all nodes keyed/unkeyed
+; 927 = cop,27				; Reset DAQ minimum on a pin
+; 928 = cop,28				; Reset DAQ maximum on a pin
 
-930 = cop,30				; Recall Memory Setting in Attached Xcvr
+; 930 = cop,30				; Recall Memory Setting in Attached Xcvr
 
-931 = cop,31				; Channel Selector for Parallel Programmed Xcvr
+; 931 = cop,31				; Channel Selector for Parallel Programmed Xcvr
 
-932 = cop,32				; Touchtone pad test: command + Digit string + # to playback all digits pressed
+; 932 = cop,32				; Touchtone pad test: command + Digit string + # to playback all digits pressed
 
-933 = cop,33				; Local Telemetry Output Enable
-934 = cop,34				; Local Telemetry Output Disable
-935 = cop,35				; Local Telemetry Output on Demand
+; 933 = cop,33				; Local Telemetry Output Enable
+; 934 = cop,34				; Local Telemetry Output Disable
+; 935 = cop,35				; Local Telemetry Output on Demand
 
-936 = cop,36				; Foreign Link Local Output Path Enable
-937 = cop,37				; Foreign Link Local Output Path Disable
-938 = cop,38				; Foreign Link Local Output Path Follows Local Telemetry
-939 = cop,39				; Foreign Link Local Output Path on Demand
+; 936 = cop,36				; Foreign Link Local Output Path Enable
+; 937 = cop,37				; Foreign Link Local Output Path Disable
+; 938 = cop,38				; Foreign Link Local Output Path Follows Local Telemetry
+; 939 = cop,39				; Foreign Link Local Output Path on Demand
 
-942 = cop,42				; Echolink announce node # only
-943 = cop,43				; Echolink announce node Callsign only
-944 = cop,44				; Echolink announce node # & Callsign
+; 942 = cop,42				; Echolink announce node # only
+; 943 = cop,43				; Echolink announce node Callsign only
+; 944 = cop,44				; Echolink announce node # & Callsign
 
-945 = cop,45				; Link Activity timer enable
-945 = cop,46				; Link Activity timer disable
-947 = cop,47				; Reset "Link Config Changed" Flag
+; 945 = cop,45				; Link Activity timer enable
+; 945 = cop,46				; Link Activity timer disable
+; 947 = cop,47				; Reset "Link Config Changed" Flag
 
-948 = cop,48				; Send Page Tone (Tone specs separated by parenthesis)
+; 948 = cop,48				; Send Page Tone (Tone specs separated by parenthesis)
 
-949 = cop,49				; Disable incoming connections (control state noice)
-950 = cop,50				; Enable incoming connections (control state noicd)
+; 949 = cop,49				; Disable incoming connections (control state noice)
+; 950 = cop,50				; Enable incoming connections (control state noicd)
 
-951 = cop,51				; Enable sleep mode
-952 = cop,52				; Disable sleep mode
-953 = cop,53				; Wake up from sleep
-954 = cop,54				; Go to sleep
-955 = cop,55				; Parrot Once if parrot mode is disabled
+; 951 = cop,51				; Enable sleep mode
+; 952 = cop,52				; Disable sleep mode
+; 953 = cop,53				; Wake up from sleep
+; 954 = cop,54				; Go to sleep
+; 955 = cop,55				; Parrot Once if parrot mode is disabled
 
-956 = cop,56                            ; Rx CTCSS Enable
-957 = cop,57                            ; Rx CTCSS Disable
+; 956 = cop,56                            ; Rx CTCSS Enable
+; 957 = cop,57                            ; Rx CTCSS Disable
 
-958 = cop.58                            ; Tx CTCSS On Input only Enable
-959 = cop,59                            ; Tx CTCSS On Input only Disable
+; 958 = cop.58                            ; Tx CTCSS On Input only Enable
+; 959 = cop,59                            ; Tx CTCSS On Input only Disable
 
-960 = cop,60                            ; Send MDC-1200 Burst (cop,60,type,UnitID[,DestID,SubCode])
-                                        ; Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call
-                                        ; (SelCall or Alert), or 'SX' for STS (ststus), where X is 0-F.
-                                        ; DestID and subcode are only specified for  the 'C' type message.
-                                        ; UnitID is the local systems UnitID. DestID is the MDC1200 ID of
-                                        ; the radio being called, and the subcodes are as follows:
-                                        ; Subcode '8205' is Voice Selective Call for Spectra ('Call')
-                                        ; Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
-                                        ; Astro-Saber('Call')
-                                        ; Subcode '810D' is Call Alert (like Maxtrac 'CA')
+; 960 = cop,60                            ; Send MDC-1200 Burst (cop,60,type,UnitID[,DestID,SubCode])
+;                                         ; Type is 'I' for PttID, 'E' for Emergency, and 'C' for Call
+;                                         ; (SelCall or Alert), or 'SX' for STS (ststus), where X is 0-F.
+;                                         ; DestID and subcode are only specified for  the 'C' type message.
+;                                         ; UnitID is the local systems UnitID. DestID is the MDC1200 ID of
+;                                         ; the radio being called, and the subcodes are as follows:
+;                                         ; Subcode '8205' is Voice Selective Call for Spectra ('Call')
+;                                         ; Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
+;                                         ; Astro-Saber('Call')
+;                                         ; Subcode '810D' is Call Alert (like Maxtrac 'CA')
 
-961 = cop,61                            ; Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
-962 = cop,62                            ; Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
+; 961 = cop,61                            ; Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
+; 962 = cop,62                            ; Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
 
-963 = cop,63                            ; Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
-964 = cop,64                            ; Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR])
-965 = cop,65                            ; Send POCSAG page (equipped channel types only)
+; 963 = cop,63                            ; Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
+; 964 = cop,64                            ; Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR])
+; 965 = cop,65                            ; Send POCSAG page (equipped channel types only)
 
 [functions-remote]
 
@@ -510,17 +526,6 @@ idwait = 500                            ; Time to wait before starting ID
 unkeywait = 2000                        ; Time to wait after unkey before sending CT's and link telemetry
 calltermwait = 2000                     ; Time to wait before announcing "call terminated"
 
-;
-; This is where you define your nodes which cam be connected to.
-;
-
-[nodes]
-; Note, if you are using automatic update for allstar link nodes,
-; no allstar link nodes should be defined here. Only place a definition
-; for your local nodes, and private (off of allstar link) nodes here.
-
-1999 = radio@127.0.0.1:4569/1999,NONE	; This must be changed to your node number
-                                        ; and iax port number if not the default
 ; Memories for remote bases
 
 [memory]
@@ -628,6 +633,9 @@ calltermwait = 2000                     ; Time to wait before announcing "call t
 [schedule]
 ;dtmf_function =  m h dom mon dow  ; ala cron, star is implied
 ;2 = 00 00 * * *   ; at midnight, execute macro 2.
+
+; See https://wiki.allstarlink.org/wiki/Event_Management
+[events]
 
 #includeifexists custom/rpt.conf
 

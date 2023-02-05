@@ -9,12 +9,12 @@
 #                                               #
 #################################################
 
-systemctl is-active --quiet asterisk.service
+systemctl is-active --quiet asl-asterisk.service
 err=$?
 if [ $err -eq 0 ]; then
 	echo "Restarting Asterisk"
-        echo "systemctl restart asterisk.service"
-	systemctl restart asterisk.service
+    echo "systemctl restart asl-asterisk.service"
+	systemctl restart asl-asterisk.service
 else
 	echo "Asterisk is not running!"
 fi
