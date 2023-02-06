@@ -199,7 +199,7 @@ i16 string_parse(char *src, char **dest, char ***ptrs)
 	}
 
 	if(*ptrs)free(*ptrs);
-	*ptrs=calloc(numsub,4);
+	*ptrs=calloc(numsub, sizeof(char*));
 	for(i=0;i<numsub;i++)
 	{
 		(*ptrs)[i]=ptstr[i];	
