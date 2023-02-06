@@ -8395,7 +8395,7 @@ static struct morse_bits mbits[] = {
 	
 	dashtime = 3 * dottime;
 	intralettertime = dottime;
-	interlettertime = dottime * 4 ;
+	interlettertime = dottime * 3 ;
 	interwordtime = dottime * 7;
 	
 	for(;(*string) && (!res); string++){
@@ -8633,8 +8633,8 @@ static int telem_any(struct rpt *myrpt,struct ast_channel *chan, char *entry)
 	res = 0;
 	
 	morsespeed = retrieve_astcfgint(myrpt, myrpt->p.morse, "speed", 5, 20, 20);
-       	morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
-       	morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
+    morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
+    morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
 	morseidampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "idamplitude", 200, 8192, 2048);
 	morseidfreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "idfrequency", 300, 3000, 330);	
 	
@@ -20150,8 +20150,8 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			myrpt->macropatch=0;
 			channel_revert(myrpt);
 		}
-		/* get rid of tail if timed out */
-		if (!myrpt->totimer) myrpt->tailtimer = 0;
+		/* get rid of tail if timed out or repeater is beaconing */
+		if (!myrpt->totimer || (!myrpt->mustid && myrpt->p.beaconing)) myrpt->tailtimer = 0;
 		/* if not timed-out, add in tail */
 		if (myrpt->totimer) totx = totx || myrpt->tailtimer;
 		/* If user or links key up or are keyed up over standard ID, switch to talkover ID, if one is defined */
