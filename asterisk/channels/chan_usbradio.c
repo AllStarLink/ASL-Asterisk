@@ -237,6 +237,7 @@ START_CONFIG
 	; rxctcssoverride=0	; default condition to not require rx CTCSS
 
 	; carrierfrom=dsp     ;no,usb,usbinvert,dsp,vox,pp,ppinvert
+	; voxhangtime=2000    ;if carrierfrom=vox, mS to wait detecting RX audio before setting rxcarrierdetect=0
 	; ctcssfrom=dsp       ;no,usb,usbinvert,dsp,pp,ppinvert
 
 	; rxdemod=flat            ; input type from radio: no,speaker,flat
@@ -252,7 +253,7 @@ START_CONFIG
 	; rxondelay=0		  ; number of 20ms intervals to hold off receiver turn-on indication
 
 	; txoffdelay=0		  ; number of 20ms intervals to hold off receiver turn-on indication (only after transmitter unkeys)
-	
+
 	; duplex3 = 0		; duplex 3 gain setting (0 to disable)
 
 	; gpioX=in		; define input/output pin GPIO(x) in,out0,out1 (where X {1..32}) (optional)
@@ -596,6 +597,7 @@ struct chan_usbradio_pvt {
 	char	rxdemod;
 	float	rxgain;
 	char 	rxcdtype;
+	int		voxhangtime; // If rxcdtype=vox, mS to wait detecting RX audio before setting CD=0
 	char 	rxsdtype;
 	int	rxsquelchadj;   /* this copy needs to be here for initialization */
 	int	rxsqhyst;
@@ -753,6 +755,7 @@ static struct chan_usbradio_pvt usbradio_default = {
 	.usedtmf = 1,
 	.rxondelay = 0,
 	.txoffdelay = 0,
+	.voxhangtime = 2000,
 };
 
 /*	DECLARE FUNCTION PROTOTYPES	*/
@@ -1647,6 +1650,7 @@ static void *hidthread(void *arg)
 
 			tChan.rxDemod=o->rxdemod;
 			tChan.rxCdType=o->rxcdtype;
+			tChan.voxHangTime=o->voxhangtime;
 			tChan.rxSqVoxAdj=o->rxsqvoxadj;
 
 			if (o->txlimonly) 
@@ -5052,6 +5056,8 @@ static void pmrdump(struct chan_usbradio_pvt *o)
 
 	pd(o->rxdemod);
 	pd(o->rxcdtype);
+	if(o->rxcdtype==CD_XPMR_VOX)
+		pd(o->voxhangtime);
 	pd(o->rxsdtype);
 	pd(o->txtoctype);
 
@@ -5281,6 +5287,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 			M_F("txmixa",store_txmixa(o,(char *)v->value))
 			M_F("txmixb",store_txmixb(o,(char *)v->value))
 			M_F("carrierfrom",store_rxcdtype(o,(char *)v->value))
+			M_UINT("voxhangtime",o->voxhangtime)
 			M_F("ctcssfrom",store_rxsdtype(o,(char *)v->value))
 		        M_UINT("rxsqvox",o->rxsqvoxadj)
 		        M_UINT("rxsqhyst",o->rxsqhyst)
@@ -5459,6 +5466,7 @@ static struct chan_usbradio_pvt *store_config(struct ast_config *cfg, char *ctg,
 
 		tChan.rxDemod=o->rxdemod;
 		tChan.rxCdType=o->rxcdtype;
+		tChan.voxHangTime=o->voxhangtime;
 		tChan.rxCarrierHyst=o->rxsqhyst;
 		tChan.rxSqVoxAdj=o->rxsqvoxadj;
 		tChan.rxSquelchDelay=o->rxsquelchdelay;
