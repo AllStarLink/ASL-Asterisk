@@ -26,6 +26,21 @@ curl -s http://apt.allstarlink.org/repos/repo_signing.key | sudo apt-key add -
 apt update</pre>
 </pre>
 
+* Alternative Repo install for both Debian 10 or Debian 11
+<pre>
+apt update
+apt install curl gpg
+
+# If 10 Repo installed, remove from lists.
+rm /etc/apt/sources.list.d/allstar.list   
+
+cd /tmp
+wget http://apt.allstarlink.org/repos/asl_builds/install-allstarlink-repository
+chmod +x install-allstarlink-repository
+./install-allstarlink-repository
+apt update
+</pre>
+
 * Install apt dependencies
 ```
 apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev libpq-dev \
