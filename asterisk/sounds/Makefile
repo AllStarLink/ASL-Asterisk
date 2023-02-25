@@ -23,7 +23,7 @@ MOH_DIR:=$(DESTDIR)$(ASTDATADIR)/moh
 ASL_DIR:=$(DESTDIR)$(ASTDATADIR)/sounds/rpt
 CORE_SOUNDS_VERSION:=1.4.9
 EXTRA_SOUNDS_VERSION:=1.4.8
-SOUNDS_URL:=http://downloads.digium.com/pub/telephony/sounds/releases
+SOUNDS_URL:=http://downloads.asterisk.org/pub/telephony/sounds/releases
 ASL_SOUNDS_URL:=http://dvswitch.org/files/AllStarLink
 
 MCS:=$(subst -EN-,-en-,$(MENUSELECT_CORE_SOUNDS))
