@@ -2609,10 +2609,12 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE+1);
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
 		
-		mynode = el_db_find_ipaddr(el_node_key->ip);
+		/* get key by CALL */
+		mynode = el_db_find_callsign(el_node_key->ip);
 		if (!mynode)
 		{
-			ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
+			/* Should be removed? this will flood the log on every incoming relay connections. */
+			//ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
 			ast_free(el_node_key); 
 			return 1;
 		}
@@ -2978,14 +2980,12 @@ static void *el_reader(void *data)
 									time(&now);
 									if (instp->starttime < (now - EL_APRS_START_DELAY))
 										instp->aprstime = now;
-									else
-									{
-										el_sleeptime = 0;
-										el_login_sleeptime = 0;
-									}
+										el_sleeptime = 0;			/* refresh the directory */
+										el_login_sleeptime = 0;		/* re-register with Echolink */
 								}
 								else
 								{
+									/* Where did you come from? How did you get here? You should not be here. */
 									ast_log(LOG_ERROR,"Cannot find open pending echolink request slot for IP %s\n",
 										instp->el_node_test.ip);
 								}
