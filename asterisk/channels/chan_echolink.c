@@ -157,7 +157,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define EL_PWD_SIZE 16
 #define EL_EMAIL_SIZE 32
 #define EL_QTH_SIZE 32
-#define EL_MAX_SERVERS 3
+#define EL_MAX_SERVERS 4
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
 #define	EL_MAX_CALL_LIST 60
@@ -3242,6 +3242,12 @@ pthread_attr_t attr;
         else
            strncpy(instp->elservers[2],val,EL_SERVERNAME_SIZE);
 
+        val = (char *) ast_variable_retrieve(cfg,ctg,"server4");
+        if (!val)
+           instp->elservers[3][0] = '\0';
+        else
+           strncpy(instp->elservers[3],val,EL_SERVERNAME_SIZE);
+
         val = (char *) ast_variable_retrieve(cfg,ctg,"deny"); 
 	if (val) instp->ndenylist = finddelim(strdup(val),instp->denylist,EL_MAX_CALL_LIST);
 
@@ -3281,7 +3287,7 @@ pthread_attr_t attr;
            ast_log(LOG_ERROR,"Your Echolink call or password is not right\n");
 	   return -1;
 	}
-        if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0'))
+	if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0') || (instp->elservers[3][0] == '\0'))
 	{
            ast_log(LOG_ERROR, "One of the Echolink servers missing\n");
 	   return -1;
