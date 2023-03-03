@@ -2610,7 +2610,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
 		
 		/* get key by CALL */
-		mynode = el_db_find_callsign(el_node_key->ip);
+		mynode = el_db_find_callsign(el_node_key->call);
 		if (!mynode)
 		{
 			/* Should be removed? this will flood the log on every incoming relay connections. */
