@@ -391,6 +391,7 @@ int ninstances = 0;
 
 int count_n = 0;
 int count_outbound_n = 0;
+int dummy_outbound = 0;
 struct el_instance *count_instp;
 
 /* binary search tree in memory, root node */
@@ -1009,10 +1010,10 @@ static int el_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_free(str);
 		ast_mutex_lock(&instp->lock);
 		strcpy(instp->el_node_test.ip,cp);
-		do_new_call(instp,p,"OUTBOUND","OUTBOUND");
 		process_cmd(buf,"127.0.0.1",instp);
 		ast_mutex_unlock(&instp->lock);
 	}
+	dummy_outbound = 1; /* switch to outbound */
 	ast_setstate(ast,AST_STATE_RINGING);
 	return 0;
 }
@@ -2613,8 +2614,6 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		mynode = el_db_find_callsign(el_node_key->call);
 		if (!mynode)
 		{
-			/* Should be removed? this will flood the log on every incoming relay connections. */
-			//ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
 			ast_free(el_node_key); 
 			return 1;
 		}
@@ -2634,7 +2633,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 			}
 			else
 			{
-				if (p == NULL) /* if a new inbound call */
+				if (!dummy_outbound) /* if a new inbound call */
 				{
 					p = el_alloc((void *)instp->name);
 					if (!p)
@@ -2656,22 +2655,34 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 					if (instp->starttime < (now - EL_APRS_START_DELAY))
 						instp->aprstime = now;
 					ast_mutex_unlock(&instp->lock);
+					dummy_outbound = 0; /* reset to default inbound */
 				}
-				else
+				else /* this is an outbound call */
 				{
-					el_node_key->p = p;
-					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
-					el_node_key->chan = p->owner;
+                    p = el_alloc((void *)instp->name);
+                    if (!p)
+                    {
+                        ast_log(LOG_ERROR,"Cannot alloc el channel\n");
+                        return -1;
+                    }
+                    el_node_key->p = p;
+                    strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
+                    el_node_key->chan = el_new(el_node_key->p,
+                                               AST_STATE_RINGING,el_node_key->nodenum);
+                    if (!el_node_key->chan)
+                    {
+                        el_destroy(el_node_key->p);
+                        return -1;
+                    }
 					el_node_key->outbound = 1;
-					ast_mutex_lock(&instp->lock);
+                    ast_mutex_lock(&instp->lock);
 					strcpy(instp->lastcall,mynode->callsign);
 					time(&instp->lasttime);
-					ast_mutex_unlock(&instp->lock);
-					time(&now);
-					instp->lasttime = now;
-					if (instp->starttime < (now - EL_APRS_START_DELAY))
-						instp->aprstime = now;
-					ast_mutex_unlock(&instp->lock);
+                    time(&now);
+                    if (instp->starttime < (now - EL_APRS_START_DELAY))
+                        instp->aprstime = now;
+                    ast_mutex_unlock(&instp->lock);
+					dummy_outbound = 0; /* reset to default inbound */
 				}
 			}
 		}
@@ -2751,6 +2762,7 @@ static void *el_reader(void *data)
 			}
 			else
 			{
+				/* this login_display will now work on outbound calls */
 				snprintf(instp->login_display,EL_NAME_SIZE + EL_CALL_SIZE,
 					"In Conference %s",instp->lastcall);
 				snprintf(instp->aprs_display,EL_APRS_SIZE,
