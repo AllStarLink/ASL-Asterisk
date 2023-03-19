@@ -33,6 +33,12 @@
  * 20090725 2039 sph@xelatec.com improved rxfrontend and squelch
   */
 
+/*
+ * Patching for aarch64 (ARM64) support by Gianni Peschiutta (F4IKZ)
+ * Disable Direct I/O port access on ARM64
+ */
+
+
 /*! \file
  *
  * \brief Private Land Mobile Radio Channel Voice and Signaling Processor
@@ -70,12 +76,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#ifndef __aarch64__ /* no direct IO port access on ARM64 architecture */
 #include <sys/io.h>
+#endif
 #include <fcntl.h>
 #include <sys/time.h>
 #include <stdlib.h>
 #include <errno.h>
-	   
+
 #include "xpmr.h"
 #include "xpmr_coef.h"
 #include "sinetabx.h"
