@@ -12,6 +12,16 @@ title=$ASLVERSION
 logfile=/tmp/asl-menu.log
 msgbox_height=12
 msgbox_width=60
+# Look for sensible-editor, which should be part of Raspbian
+if [ -x /usr/bin/sensible-editor ]; then
+  editor=/usr/bin/sensible-editor
+else
+# Otherwise try to find editor which should be part of alternatives system on Debian 
+  ALT_EDIT=`which editor`
+  # Then determine editor with order of precedence
+  editor=${EDITOR:-${ALT_EDIT:-nano}}
+fi
+#logfile=/dev/null
 ## all other variables defined in get_node_info
 
 check_if_root() {
@@ -708,7 +718,7 @@ do_edit_allmon_config() {
     if [ ! -f $WEBROOT/allmon2/allmon.ini.php ]; then
         whiptail --msgbox "Allmon2 config file not found, is Allmon2 installed?" $msgbox_height $msgbox_width
     else
-        nano $WEBROOT/allmon2/allmon.ini.php
+        $editor $WEBROOT/allmon2/allmon.ini.php
     fi
 }
 
@@ -1116,12 +1126,12 @@ do_edit_firewall() {
     if [ ! -f $FIREWALLFILE ]; then
         whiptail --msgbox "Firewall config file $FIREWALLFILE not found, is firewall service installed?" $msgbox_height $msgbox_width
     else
-        nano $FIREWALLFILE
+        $editor $FIREWALLFILE
         $IPTABLES_RESTORE <$FIREWALLFILE
         # loop while iptables fails to reload
         while [ $? = 1 ]; do
             whiptail --msgbox "Firewall failed to load edited configuration, we will reload the editor" $msgbox_height $msgbox_width
-            nano $FIREWALLFILE
+            $editor $FIREWALLFILE
             $IPTABLES_RESTORE <$FIREWALLFILE
         done
 
@@ -1179,12 +1189,12 @@ do_edit_fail2ban() {
     if [ ! -f $FAIL2BANFILE ]; then
         whiptail --msgbox "Fail2ban $FAIL2BANFILE not found, is fail2ban service installed?" $msgbox_height $msgbox_width
     else
-        nano $FAIL2BANFILE
+        $editor $FAIL2BANFILE
         $SERVICE fail2ban restart >/dev/null
         # loop while fail2ban errors on reload
         while [ $? = 1 ]; do
             whiptail --msgbox "Fail2ban failed to load edited configuration, we will reload the editor." $msgbox_height $msgbox_width
-            nano $FAIL2BANFILE
+            $editor $FAIL2BANFILE
             $SERVICE fail2ban restart >/dev/null
         done
     fi
@@ -1407,16 +1417,16 @@ do_conf_edit_menu() {
             case "$FUN" in
             C) do_local_conf_backup ;;
             R) do_local_conf_restore ;;
-            1) nano $CONFIGS/rpt.conf ;;
-            2) nano $CONFIGS/extensions.conf ;;
-            3) nano $CONFIGS/iax.conf ;;
-            4) nano $CONFIGS/modules.conf ;;
-            5) nano $CONFIGS/manager.conf ;;
-            6) nano $CONFIGS/echolink.conf ;;
-            7) nano $CONFIGS/usbradio.conf ;;
-            8) nano $CONFIGS/simpleusb.conf ;;
-            9) nano $CONFIGS/voter.conf ;;
-            10) nano $CONFIGS/savenode.conf ;;
+            1) $editor $CONFIGS/rpt.conf ;;
+            2) $editor $CONFIGS/extensions.conf ;;
+            3) $editor $CONFIGS/iax.conf ;;
+            4) $editor $CONFIGS/modules.conf ;;
+            5) $editor $CONFIGS/manager.conf ;;
+            6) $editor $CONFIGS/echolink.conf ;;
+            7) $editor $CONFIGS/usbradio.conf ;;
+            8) $editor $CONFIGS/simpleusb.conf ;;
+            9) $editor $CONFIGS/voter.conf ;;
+            10) $editor $CONFIGS/savenode.conf ;;
             11) do_edit_allmon_config ;;
             I) info_config_menu ;;
             *) whiptail --msgbox "$FUN is an unrecognized selection." $msgbox_height $msgbox_width ;;

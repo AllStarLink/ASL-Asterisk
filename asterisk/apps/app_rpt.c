@@ -159,8 +159,8 @@
  *          Subcode '8015' is Voice Selective Call for Maxtrac ('SC') or
  *             Astro-Saber('Call')
  *          Subcode '810D' is Call Alert (like Maxtrac 'CA')
- *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1=0[,GPIO4=1].....)
- *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1=0[,GPIO4=1].....)
+ *  61 - Send Message to USB to control GPIO pins (cop,61,GPIO1:0[,GPIO4:1].....)
+ *  62 - Send Message to USB to control GPIO pins, quietly (cop,62,GPIO1:0[,GPIO4:1].....)
  *  63 - Send pre-configred APRSTT notification (cop,63,CALL[,OVERLAYCHR])
  *  64 - Send pre-configred APRSTT notification, quietly (cop,64,CALL[,OVERLAYCHR]) 
  *  65 - Send POCSAG page (equipped channel types only)
@@ -644,13 +644,13 @@ int ast_playtones_start(struct ast_channel *chan, int vol, const char* tonelist,
 /*! Stop the tones from playing */
 void ast_playtones_stop(struct ast_channel *chan);
 
-static  char *tdesc = "Radio Repeater / Remote Base  version 2.0.0-beta 03/24/2021";
+static  char *tdesc = "Radio Repeater / Remote Base  version 2.0.0-beta 11/30/2022";
 
 static char *app = "Rpt";
 
 static char *synopsis = "Radio Repeater/Remote Base Control System";
 
-static char *descrip = 
+static char *descrip =
 "  Rpt(nodename[|options][|M][|*]):  \n"
 "    Radio Remote Link or Remote Base Link Endpoint Process.\n"
 "\n"
@@ -4456,6 +4456,7 @@ static int retrieve_memory(struct rpt *myrpt, char *memory)
 				myrpt->remmode = REM_MODE_LSB;
 				break;
 			case 'F':
+			case 'f':	
 				myrpt->remmode = REM_MODE_FM;
 				break;
 			case 'L':
@@ -4535,7 +4536,7 @@ static void cancel_pfxtone(struct rpt *myrpt)
 {
 	struct rpt_tele *telem;
 	if(debug > 2)
-		ast_log(LOG_NOTICE, "cancel_pfxfone!!");
+		ast_log(LOG_NOTICE, "cancel_pfxtone!!");
 	telem = myrpt->tele.next;
 	while(telem != &myrpt->tele)
 	{
@@ -5350,7 +5351,7 @@ struct rpt_link *l;
 static void rpt_event_process(struct rpt *myrpt)
 {
 char	*myval,*argv[5],*cmpvar,*var,*var1,*cmd,c;
-char	buf[1000],valbuf[500],action;
+char	buf[1000],valbuf[500],holdingBin[12],action;
 int	i,l,argc,varp,var1p,thisAction,maxActions;
 struct ast_variable *v;
 struct ast_var_t *newvariable;
@@ -5521,8 +5522,14 @@ struct ast_var_t *newvariable;
 				if (argc > 1)
 					strlcpy(myrpt->cmdAction.param, argv[1], MAXDTMF-1);
 				myrpt->cmdAction.digits[0] = 0;
-				if (argc > 2)
+				if (argc > 2) //Let's actually parse the arguments
+				{
 					strlcpy(myrpt->cmdAction.digits, argv[2], MAXDTMF-1);
+					holdingBin[0] = 0;  // null the string
+					myrpt->cmdAction.param[0] = 0;
+					sprintf(holdingBin, "%s,%s", argv[1], argv[2]);
+					strlcpy(myrpt->cmdAction.param, holdingBin, MAXDTMF-1);
+				}
 				myrpt->cmdAction.command_source = SOURCE_RPT;
 				myrpt->cmdAction.state = CMD_STATE_READY;
 			} 
@@ -5691,43 +5698,61 @@ int	i;
 	return;
 }
 
+// Waste the output of libcurl (the OK is sent to stdout)
+static size_t writefunction(void *ptr, size_t size, size_t nmemb, void *stream)
+{
+  return (nmemb*size);
+}
 
-static void statpost(struct rpt *myrpt,char *pairs)
+static void *perform_statpost(void *statsURL)
+{
+	long rescode = 0;
+	CURL *curl = curl_easy_init();
+	if (curl)
+	{
+		char *str = (char *)statsURL;
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunction);
+		curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+		curl_easy_setopt(curl, CURLOPT_URL, str);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
+		curl_easy_perform(curl);
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
+		curl_easy_cleanup(curl);
+		curl_global_cleanup();
+	}
+	if (rescode != 200)
+	{
+		ast_log(LOG_ERROR, "statpost to URL <%s> failed with code %ld\n", (char *)statsURL, rescode);
+		perror("asterisk");
+	}
+	ast_free(statsURL); // Free it here since parent has lost track of memory
+	return NULL;
+}
+
+static void statpost(struct rpt *myrpt, char *pairs)
 {
 	char *str;
-	int	pid;
-	time_t	now;
+	time_t now;
 	unsigned int seq;
-	CURL *curl;
-	int *rescode;
 
-	if (!myrpt->p.statpost_url) return;
+	if (!myrpt->p.statpost_url)
+		return;
 	str = ast_malloc(strlen(pairs) + strlen(myrpt->p.statpost_url) + 200);
 	ast_mutex_lock(&myrpt->statpost_lock);
 	seq = ++myrpt->statpost_seqno;
 	ast_mutex_unlock(&myrpt->statpost_lock);
 	time(&now);
-	sprintf(str,"%s?node=%s&time=%u&seqno=%u",myrpt->p.statpost_url,
-		myrpt->name,(unsigned int) now,seq);
-	if (pairs) sprintf(str + strlen(str),"&%s",pairs);
-	if (!(pid = fork()))
+	sprintf(str, "%s?node=%s&time=%u&seqno=%u", myrpt->p.statpost_url,
+			myrpt->name, (unsigned int)now, seq);
+	if (pairs)
+		sprintf(str + strlen(str), "&%s", pairs);
+
+	pthread_t statpost_thread;
+	if (pthread_create(&statpost_thread, NULL, perform_statpost, (void *)str))
 	{
-		curl = curl_easy_init();
-		if(curl) {
-			curl_easy_setopt(curl, CURLOPT_URL, str);
-			curl_easy_setopt(curl, CURLOPT_USERAGENT, ASTERISK_VERSION_HTTP);
-			curl_easy_perform(curl);
-			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &rescode);
-			curl_easy_cleanup(curl);
-			curl_global_cleanup();
-		}
-		if(*rescode == 200) return;
-		ast_log(LOG_ERROR, "statpost failed\n");
-		perror("asterisk");
-		exit(0);
+		ast_log(LOG_ERROR, "Error creating statpost thread\n");
 	}
-	ast_free(str);
-	return;
+    pthread_detach(statpost_thread);
 }
 
 
@@ -7177,8 +7202,7 @@ static int rpt_do_lstats(int fd, int argc, char *argv[])
 
 static int rpt_do_xnode(int fd, int argc, char *argv[])
 {
-	int i,j;
-	char ns;
+	int i,j,ns;
 	char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
 	struct rpt *myrpt;
 	struct ast_var_t *newvariable;
@@ -7417,8 +7441,7 @@ static int rpt_do_xnode(int fd, int argc, char *argv[])
 
 static int rpt_do_nodes(int fd, int argc, char *argv[])
 {
-	int i,j;
-	char ns;
+	int i,j,ns;
 	char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
 	struct rpt *myrpt;
 	if(argc != 3)
@@ -8372,7 +8395,7 @@ static struct morse_bits mbits[] = {
 	
 	dashtime = 3 * dottime;
 	intralettertime = dottime;
-	interlettertime = dottime * 4 ;
+	interlettertime = dottime * 3 ;
 	interwordtime = dottime * 7;
 	
 	for(;(*string) && (!res); string++){
@@ -8610,8 +8633,8 @@ static int telem_any(struct rpt *myrpt,struct ast_channel *chan, char *entry)
 	res = 0;
 	
 	morsespeed = retrieve_astcfgint(myrpt, myrpt->p.morse, "speed", 5, 20, 20);
-       	morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
-       	morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
+    morsefreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "frequency", 300, 3000, 800);
+    morseampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "amplitude", 200, 8192, 4096);
 	morseidampl = retrieve_astcfgint(myrpt, myrpt->p.morse, "idamplitude", 200, 8192, 2048);
 	morseidfreq = retrieve_astcfgint(myrpt, myrpt->p.morse, "idfrequency", 300, 3000, 330);	
 	
@@ -13165,7 +13188,7 @@ static int function_cop(struct rpt *myrpt, char *param, char *digitbuf, int comm
 			/* go thru all the specs */
 			for(i = 1; i < argc; i++)
 			{
-				if (sscanf(argv[i],"GPIO%d=%d",&j,&k) == 2)
+				if ((sscanf(argv[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(argv[i],"GPIO%d:%d",&j,&k) == 2))
 				{
 					sprintf(string,"GPIO %d %d",j,k);
 					ast_sendtext(myrpt->rxchannel,string);
@@ -20127,8 +20150,8 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			myrpt->macropatch=0;
 			channel_revert(myrpt);
 		}
-		/* get rid of tail if timed out */
-		if (!myrpt->totimer) myrpt->tailtimer = 0;
+		/* get rid of tail if timed out or repeater is beaconing */
+		if (!myrpt->totimer || (!myrpt->mustid && myrpt->p.beaconing)) myrpt->tailtimer = 0;
 		/* if not timed-out, add in tail */
 		if (myrpt->totimer) totx = totx || myrpt->tailtimer;
 		/* If user or links key up or are keyed up over standard ID, switch to talkover ID, if one is defined */
@@ -22311,7 +22334,7 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		if (who == myrpt->telechannel) /* if is telemetry conference output */
 		{
 			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->rxchankeyed,myrpt->remrx,myrpt->noduck);
-			if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->keyed,myrpt->remrx,myrpt->noduck);
+			//if(debug)ast_log(LOG_NOTICE,"node=%s %p %p %d %d %d\n",myrpt->name,who,myrpt->telechannel,myrpt->keyed,myrpt->remrx,myrpt->noduck);
 			f = ast_read(myrpt->telechannel);
 			if (!f)
 			{
@@ -23820,7 +23843,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			int j,k;
 			char string[100];
 
-			if (sscanf(myrpt->p.lconn[i],"GPIO%d=%d",&j,&k) == 2)
+			if ((sscanf(myrpt->p.lconn[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(myrpt->p.lconn[i],"GPIO%d:%d",&j,&k) == 2))
 			{
 				sprintf(string,"GPIO %d %d",j,k);
 				ast_sendtext(myrpt->rxchannel,string);
@@ -24678,7 +24701,7 @@ static int rpt_exec(struct ast_channel *chan, void *data)
 			int j,k;
 			char string[100];
 
-			if (sscanf(myrpt->p.ldisc[i],"GPIO%d=%d",&j,&k) == 2)
+			if ((sscanf(myrpt->p.ldisc[i],"GPIO%d=%d",&j,&k) == 2)||(sscanf(myrpt->p.ldisc[i],"GPIO%d:%d",&j,&k) == 2))
 			{
 				sprintf(string,"GPIO %d %d",j,k);
 				ast_sendtext(myrpt->rxchannel,string);
@@ -24802,8 +24825,7 @@ static int rpt_manager_do_sawstat(struct mansession *ses, const struct message *
 
 static int rpt_manager_do_xstat(struct mansession *ses, const struct message *m, char *str)
 {
-	int i,j;
-	char ns;
+	int i,j,ns;
 	char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
 	struct rpt *myrpt;
 	struct ast_var_t *newvariable;

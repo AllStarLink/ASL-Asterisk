@@ -26,13 +26,62 @@ curl -s http://apt.allstarlink.org/repos/repo_signing.key | sudo apt-key add -
 apt update</pre>
 </pre>
 
+* Alternative Repo install for both Debian 10 or Debian 11
+<pre>
+apt update
+apt install curl gpg
+
+# If 10 Repo installed, remove from lists.
+rm /etc/apt/sources.list.d/allstar.list   
+
+cd /tmp
+wget http://apt.allstarlink.org/repos/asl_builds/install-allstarlink-repository
+chmod +x install-allstarlink-repository
+./install-allstarlink-repository
+apt update
+</pre>
+
 * Install apt dependencies
 ```
-apt -y install quilt libreadline-gplv2-dev libgsm1-dev libssl-dev libasound2-dev libpq-dev \
-  unixodbc-dev libpri-dev libvpb-dev asl-dahdi-source libnewt-dev libsqlite-dev libspeex-dev \
-  libspeexdsp-dev libcurl4-openssl-dev libpopt-dev libiksemel-dev freetds-dev libvorbis-dev \
-  libsnmp-dev libcap-dev libi2c-dev libjansson-dev build-essential libtonezone-dev \
-  git cmake g++ libboost-all-dev libgmp-dev swig python3-numpy asl-dahdi-source libusb-dev
+apt -y install \
+  asl-dahdi-source \
+  build-essential \
+  cmake \
+  devscripts \
+  doxygen \
+  freetds-dev \
+  g++ \
+  git \
+  graphviz \
+  gsfonts \
+  libasound2-dev \
+  libboost-all-dev \
+  libcap-dev \
+  libcurl4-openssl-dev \
+  libgmp-dev \
+  libgsm1-dev \
+  libi2c-dev \
+  libiksemel-dev \
+  libjansson-dev \
+  libnewt-dev \
+  libpopt-dev \
+  libpq-dev \
+  libpri-dev \
+  libreadline-gplv2-dev \
+  libsnmp-dev \
+  libspeex-dev \
+  libspeexdsp-dev \
+  libsqlite-dev \
+  libssl-dev \
+  libtonezone-dev \
+  libusb-dev \
+  libvorbis-dev \
+  libvpb-dev \
+  python3-numpy \
+  quilt \
+  swig \
+  unixodbc-dev
+
 ```
 
 ## Compiling
