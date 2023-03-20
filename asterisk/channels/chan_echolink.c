@@ -157,7 +157,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define EL_PWD_SIZE 16
 #define EL_EMAIL_SIZE 32
 #define EL_QTH_SIZE 32
-#define EL_MAX_SERVERS 4
+#define EL_MAX_SERVERS 3
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
 #define	EL_MAX_CALL_LIST 60
@@ -391,7 +391,6 @@ int ninstances = 0;
 
 int count_n = 0;
 int count_outbound_n = 0;
-int dummy_outbound = 0;
 struct el_instance *count_instp;
 
 /* binary search tree in memory, root node */
@@ -1010,10 +1009,10 @@ static int el_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_free(str);
 		ast_mutex_lock(&instp->lock);
 		strcpy(instp->el_node_test.ip,cp);
+		do_new_call(instp,p,"OUTBOUND","OUTBOUND");
 		process_cmd(buf,"127.0.0.1",instp);
 		ast_mutex_unlock(&instp->lock);
 	}
-	dummy_outbound = 1; /* switch to outbound */
 	ast_setstate(ast,AST_STATE_RINGING);
 	return 0;
 }
@@ -2610,10 +2609,10 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE+1);
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
 		
-		/* get key by CALL */
-		mynode = el_db_find_callsign(el_node_key->call);
+		mynode = el_db_find_ipaddr(el_node_key->ip);
 		if (!mynode)
 		{
+			ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
 			ast_free(el_node_key); 
 			return 1;
 		}
@@ -2633,7 +2632,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 			}
 			else
 			{
-				if (!dummy_outbound) /* if a new inbound call */
+				if (p == NULL) /* if a new inbound call */
 				{
 					p = el_alloc((void *)instp->name);
 					if (!p)
@@ -2655,34 +2654,22 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 					if (instp->starttime < (now - EL_APRS_START_DELAY))
 						instp->aprstime = now;
 					ast_mutex_unlock(&instp->lock);
-					dummy_outbound = 0; /* reset to default inbound */
 				}
-				else /* this is an outbound call */
+				else
 				{
-                    p = el_alloc((void *)instp->name);
-                    if (!p)
-                    {
-                        ast_log(LOG_ERROR,"Cannot alloc el channel\n");
-                        return -1;
-                    }
-                    el_node_key->p = p;
-                    strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
-                    el_node_key->chan = el_new(el_node_key->p,
-                                               AST_STATE_RINGING,el_node_key->nodenum);
-                    if (!el_node_key->chan)
-                    {
-                        el_destroy(el_node_key->p);
-                        return -1;
-                    }
+					el_node_key->p = p;
+					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
+					el_node_key->chan = p->owner;
 					el_node_key->outbound = 1;
-                    ast_mutex_lock(&instp->lock);
+					ast_mutex_lock(&instp->lock);
 					strcpy(instp->lastcall,mynode->callsign);
 					time(&instp->lasttime);
-                    time(&now);
-                    if (instp->starttime < (now - EL_APRS_START_DELAY))
-                        instp->aprstime = now;
-                    ast_mutex_unlock(&instp->lock);
-					dummy_outbound = 0; /* reset to default inbound */
+					ast_mutex_unlock(&instp->lock);
+					time(&now);
+					instp->lasttime = now;
+					if (instp->starttime < (now - EL_APRS_START_DELAY))
+						instp->aprstime = now;
+					ast_mutex_unlock(&instp->lock);
 				}
 			}
 		}
@@ -2762,7 +2749,6 @@ static void *el_reader(void *data)
 			}
 			else
 			{
-				/* this login_display will now work on outbound calls */
 				snprintf(instp->login_display,EL_NAME_SIZE + EL_CALL_SIZE,
 					"In Conference %s",instp->lastcall);
 				snprintf(instp->aprs_display,EL_APRS_SIZE,
@@ -2992,12 +2978,14 @@ static void *el_reader(void *data)
 									time(&now);
 									if (instp->starttime < (now - EL_APRS_START_DELAY))
 										instp->aprstime = now;
-										el_sleeptime = 0;			/* refresh the directory */
-										el_login_sleeptime = 0;		/* re-register with Echolink */
+									else
+									{
+										el_sleeptime = 0;
+										el_login_sleeptime = 0;
+									}
 								}
 								else
 								{
-									/* Where did you come from? How did you get here? You should not be here. */
 									ast_log(LOG_ERROR,"Cannot find open pending echolink request slot for IP %s\n",
 										instp->el_node_test.ip);
 								}
@@ -3254,12 +3242,6 @@ pthread_attr_t attr;
         else
            strncpy(instp->elservers[2],val,EL_SERVERNAME_SIZE);
 
-        val = (char *) ast_variable_retrieve(cfg,ctg,"server4");
-        if (!val)
-           instp->elservers[3][0] = '\0';
-        else
-           strncpy(instp->elservers[3],val,EL_SERVERNAME_SIZE);
-
         val = (char *) ast_variable_retrieve(cfg,ctg,"deny"); 
 	if (val) instp->ndenylist = finddelim(strdup(val),instp->denylist,EL_MAX_CALL_LIST);
 
@@ -3299,7 +3281,7 @@ pthread_attr_t attr;
            ast_log(LOG_ERROR,"Your Echolink call or password is not right\n");
 	   return -1;
 	}
-	if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0') || (instp->elservers[3][0] == '\0'))
+        if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0'))
 	{
            ast_log(LOG_ERROR, "One of the Echolink servers missing\n");
 	   return -1;
