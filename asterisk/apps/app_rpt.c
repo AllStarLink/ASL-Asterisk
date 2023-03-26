@@ -1949,12 +1949,14 @@ static char restart_usage[] =
 "       Restarts app_rpt\n";
 
 static char playback_usage[] =
-"Usage: rpt playback <nodename> <sound_file_base_name>\n"
-"       Send an Audio File to a node, send to all other connected nodes (global)\n";
+"Usage: rpt playback <nodename> <param>\n"
+"       Send a pre-defined Telemetry entry (ct2, ranger), Tone (|t) or Morse (|m, or |i) sequence, or Audio File to a node,\n"
+"       send to all other connected nodes (global)\n";
 
 static char localplay_usage[] =
-"Usage: rpt localplay <nodename> <sound_file_base_name>\n"
-"       Send an Audio File to a node, do not send to other connected nodes (local)\n";
+"Usage: rpt localplay <nodename> <param>\n"
+"       Send a pre-defined Telemetry entry (ct2, ranger), Tone (|t) or Morse (|m, or |i) sequence, or Audio File to a node,\n"
+"       do not send to other connected nodes (local)\n";
 
 
 static char sendtext_usage[] =
@@ -9949,12 +9951,13 @@ treataslocal:
             case LOCALPLAY:
 		/* wait a little bit */
 		if (wait_interval(myrpt, DLY_TELEM, mychannel) == -1) break;
-		res = ast_streamfile(mychannel, mytele->param, mychannel->language);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
+
+		p = (char *) ast_variable_retrieve(myrpt->cfg, "telemetry", mytele->param);
+		if (p)
+			res = telem_any(myrpt, mychannel, p);
 		else
-			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
-		ast_stopstream(mychannel);
+			res = telem_any(myrpt, mychannel, mytele->param);
+
 		imdone = 1;
 		break;
 	    case TOPKEY:
