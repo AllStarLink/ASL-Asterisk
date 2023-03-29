@@ -157,7 +157,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define EL_PWD_SIZE 16
 #define EL_EMAIL_SIZE 32
 #define EL_QTH_SIZE 32
-#define EL_MAX_SERVERS 3
+#define EL_MAX_SERVERS 4
 #define EL_SERVERNAME_SIZE 63
 #define	EL_MAX_INSTANCES 100
 #define	EL_MAX_CALL_LIST 60
@@ -391,6 +391,7 @@ int ninstances = 0;
 
 int count_n = 0;
 int count_outbound_n = 0;
+int dummy_outbound = 0;
 struct el_instance *count_instp;
 
 /* binary search tree in memory, root node */
@@ -604,34 +605,52 @@ static int compare_eldb_callsign(const void *pa, const void *pb)
 
 static struct eldb *el_db_find_nodenum(char *nodenum)
 {
-struct eldb **found_key = NULL,key;
+	struct eldb** found_key = NULL, key;
+	char* findNodeNum;
 
-	memset(&key,0,sizeof(key));
-	strncpy(key.nodenum,strndup(nodenum,ELDB_NODENUMLEN),sizeof(key.nodenum) - 1);
-	found_key = (struct eldb **)tfind(&key,&el_db_nodenum,compare_eldb_nodenum);
-	if (found_key) return(*found_key);
+	memset(&key, 0, sizeof(key));
+
+	findNodeNum = ast_strndup(nodenum, ELDB_NODENUMLEN);
+	strncpy(key.nodenum, findNodeNum, sizeof(key.nodenum) - 1);
+	ast_free(findNodeNum);
+
+	found_key = (struct eldb**)tfind(&key, &el_db_nodenum, compare_eldb_nodenum);
+	if (found_key)
+		return (*found_key);
 	return NULL;
 }
 
 static struct eldb *el_db_find_callsign(char *callsign)
 {
-struct eldb **found_key = NULL,key;
+	struct eldb** found_key = NULL, key;
+	char* findCallSign;
 
-	memset(&key,0,sizeof(key));
-	strncpy(key.callsign,strndup(callsign,ELDB_CALLSIGNLEN),sizeof(key.callsign) - 1);
-	found_key = (struct eldb **)tfind(&key,&el_db_callsign,compare_eldb_callsign);
-	if (found_key) return(*found_key);
+	memset(&key, 0, sizeof(key));
+
+	findCallSign = ast_strndup(callsign, ELDB_CALLSIGNLEN);
+	strncpy(key.callsign, findCallSign, sizeof(key.callsign) - 1);
+	ast_free(findCallSign);
+
+	found_key = (struct eldb**)tfind(&key, &el_db_callsign, compare_eldb_callsign);
+	if (found_key)
+		return (*found_key);
 	return NULL;
 }
 
 static struct eldb *el_db_find_ipaddr(char *ipaddr)
 {
-struct eldb **found_key = NULL,key;
+	struct eldb** found_key = NULL, key;
+	char* findIpAddr;
 
-	memset(&key,0,sizeof(key));
-	strncpy(key.ipaddr,strndup(ipaddr,ELDB_IPADDRLEN),sizeof(key.ipaddr) - 1);
-	found_key = (struct eldb **)tfind(&key,&el_db_ipaddr,compare_eldb_ipaddr);
-	if (found_key) return(*found_key);
+	memset(&key, 0, sizeof(key));
+
+	findIpAddr = ast_strndup(ipaddr, ELDB_IPADDRLEN);
+	strncpy(key.ipaddr, findIpAddr, sizeof(key.ipaddr) - 1);
+	ast_free(findIpAddr);
+
+	found_key = (struct eldb**)tfind(&key, &el_db_ipaddr, compare_eldb_ipaddr);
+	if (found_key)
+		return (*found_key);
 	return NULL;
 }
 
@@ -660,6 +679,7 @@ static void el_db_delete(struct eldb *node)
 static struct eldb *el_db_put(char *nodenum,char *ipaddr, char *callsign)
 {
 struct eldb *node,*mynode;
+char* newValue;
 
 	node = (struct eldb *)ast_malloc(sizeof(struct eldb));
 	if (!node)
@@ -668,20 +688,33 @@ struct eldb *node,*mynode;
 		return NULL;
 	}
 	memset(node,0,sizeof(struct eldb));
-	strncpy(node->nodenum,strndup(nodenum, ELDB_NODENUMLEN),ELDB_NODENUMLEN - 1);
-	strncpy(node->ipaddr,strndup(ipaddr, ELDB_IPADDRLEN),ELDB_IPADDRLEN - 1);
-	strncpy(node->callsign,strndup(callsign, ELDB_CALLSIGNLEN),ELDB_CALLSIGNLEN - 1);
+
+	newValue = ast_strndup(nodenum, ELDB_NODENUMLEN);
+	strncpy(node->nodenum, newValue, ELDB_NODENUMLEN - 1);
+	ast_free(newValue);
+
+	newValue = ast_strndup(ipaddr, ELDB_IPADDRLEN);
+	strncpy(node->ipaddr, newValue, ELDB_IPADDRLEN - 1);
+	ast_free(newValue);
+
+	newValue = ast_strndup(callsign, ELDB_CALLSIGNLEN);
+	strncpy(node->callsign, newValue, ELDB_CALLSIGNLEN - 1);
+	ast_free(newValue);
+
 	mynode = el_db_find_nodenum(node->nodenum);
 	if (mynode) el_db_delete(mynode);
 	mynode = el_db_find_ipaddr(node->ipaddr);
 	if (mynode) el_db_delete(mynode);
 	mynode = el_db_find_callsign(node->callsign);
 	if (mynode) el_db_delete(mynode);
+
 	tsearch(node,&el_db_nodenum,compare_eldb_nodenum);
 	tsearch(node,&el_db_ipaddr,compare_eldb_ipaddr);
 	tsearch(node,&el_db_callsign,compare_eldb_callsign);
+
 	if (debug > 1)
 		ast_log(LOG_DEBUG,"eldb put: Node=%s, Call=%s, IP=%s\n",nodenum,callsign,ipaddr);
+
 	return(node);
 }
 
@@ -977,10 +1010,10 @@ static int el_call(struct ast_channel *ast, char *dest, int timeout)
 		ast_free(str);
 		ast_mutex_lock(&instp->lock);
 		strcpy(instp->el_node_test.ip,cp);
-		do_new_call(instp,p,"OUTBOUND","OUTBOUND");
 		process_cmd(buf,"127.0.0.1",instp);
 		ast_mutex_unlock(&instp->lock);
 	}
+	dummy_outbound = 1; /* switch to outbound */
 	ast_setstate(ast,AST_STATE_RINGING);
 	return 0;
 }
@@ -2577,10 +2610,10 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 		strncpy(el_node_key->ip, instp->el_node_test.ip, EL_IP_SIZE+1);
 		strncpy(el_node_key->name,name,EL_NAME_SIZE); 
 		
-		mynode = el_db_find_ipaddr(el_node_key->ip);
+		/* get key by CALL */
+		mynode = el_db_find_callsign(el_node_key->call);
 		if (!mynode)
 		{
-			ast_log(LOG_ERROR, "Cannot find DB entry for IP addr %s\n",el_node_key->ip);
 			ast_free(el_node_key); 
 			return 1;
 		}
@@ -2600,7 +2633,7 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 			}
 			else
 			{
-				if (p == NULL) /* if a new inbound call */
+				if (!dummy_outbound) /* if a new inbound call */
 				{
 					p = el_alloc((void *)instp->name);
 					if (!p)
@@ -2622,22 +2655,34 @@ static int do_new_call(struct el_instance *instp, struct el_pvt *p, char *call, 
 					if (instp->starttime < (now - EL_APRS_START_DELAY))
 						instp->aprstime = now;
 					ast_mutex_unlock(&instp->lock);
+					dummy_outbound = 0; /* reset to default inbound */
 				}
-				else
+				else /* this is an outbound call */
 				{
-					el_node_key->p = p;
-					strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
-					el_node_key->chan = p->owner;
+                    p = el_alloc((void *)instp->name);
+                    if (!p)
+                    {
+                        ast_log(LOG_ERROR,"Cannot alloc el channel\n");
+                        return -1;
+                    }
+                    el_node_key->p = p;
+                    strncpy(el_node_key->p->ip, instp->el_node_test.ip,EL_IP_SIZE+1);
+                    el_node_key->chan = el_new(el_node_key->p,
+                                               AST_STATE_RINGING,el_node_key->nodenum);
+                    if (!el_node_key->chan)
+                    {
+                        el_destroy(el_node_key->p);
+                        return -1;
+                    }
 					el_node_key->outbound = 1;
-					ast_mutex_lock(&instp->lock);
+                    ast_mutex_lock(&instp->lock);
 					strcpy(instp->lastcall,mynode->callsign);
 					time(&instp->lasttime);
-					ast_mutex_unlock(&instp->lock);
-					time(&now);
-					instp->lasttime = now;
-					if (instp->starttime < (now - EL_APRS_START_DELAY))
-						instp->aprstime = now;
-					ast_mutex_unlock(&instp->lock);
+                    time(&now);
+                    if (instp->starttime < (now - EL_APRS_START_DELAY))
+                        instp->aprstime = now;
+                    ast_mutex_unlock(&instp->lock);
+					dummy_outbound = 0; /* reset to default inbound */
 				}
 			}
 		}
@@ -2717,6 +2762,7 @@ static void *el_reader(void *data)
 			}
 			else
 			{
+				/* this login_display will now work on outbound calls */
 				snprintf(instp->login_display,EL_NAME_SIZE + EL_CALL_SIZE,
 					"In Conference %s",instp->lastcall);
 				snprintf(instp->aprs_display,EL_APRS_SIZE,
@@ -2847,7 +2893,9 @@ static void *el_reader(void *data)
 						{
 							if (option_verbose > 3) ast_verbose(VERBOSE_PREFIX_3 "Call changed from %s to %s\n",
 								(*found_key)->call,call);
-							strncpy((*found_key)->call,strndup(call, EL_CALL_SIZE),EL_CALL_SIZE);
+							ptr = ast_strndup(call, EL_CALL_SIZE);
+							strncpy((*found_key)->call, ptr, EL_CALL_SIZE);
+							ast_free(ptr);
 						}
 						if (strncmp((*found_key)->name, name, EL_NAME_SIZE) != 0) 
 						{
@@ -2944,14 +2992,12 @@ static void *el_reader(void *data)
 									time(&now);
 									if (instp->starttime < (now - EL_APRS_START_DELAY))
 										instp->aprstime = now;
-									else
-									{
-										el_sleeptime = 0;
-										el_login_sleeptime = 0;
-									}
+										el_sleeptime = 0;			/* refresh the directory */
+										el_login_sleeptime = 0;		/* re-register with Echolink */
 								}
 								else
 								{
+									/* Where did you come from? How did you get here? You should not be here. */
 									ast_log(LOG_ERROR,"Cannot find open pending echolink request slot for IP %s\n",
 										instp->el_node_test.ip);
 								}
@@ -3046,7 +3092,9 @@ static void *el_reader(void *data)
 							{
 								memcpy(qpel->buf,((struct gsmVoice_t *)buf)->data,
 									BLOCKING_FACTOR * GSM_FRAME_SIZE);
-								strncpy(qpel->fromip,strndup(instp->el_node_test.ip, EL_IP_SIZE),EL_IP_SIZE);
+								ptr = ast_strndup(instp->el_node_test.ip, EL_IP_SIZE);
+								strncpy(qpel->fromip, ptr, EL_IP_SIZE);
+								ast_free(ptr);
 								insque((struct qelem *)qpel,(struct qelem *)
 									p->rxqel.qe_back);
 							}
@@ -3206,6 +3254,12 @@ pthread_attr_t attr;
         else
            strncpy(instp->elservers[2],val,EL_SERVERNAME_SIZE);
 
+        val = (char *) ast_variable_retrieve(cfg,ctg,"server4");
+        if (!val)
+           instp->elservers[3][0] = '\0';
+        else
+           strncpy(instp->elservers[3],val,EL_SERVERNAME_SIZE);
+
         val = (char *) ast_variable_retrieve(cfg,ctg,"deny"); 
 	if (val) instp->ndenylist = finddelim(strdup(val),instp->denylist,EL_MAX_CALL_LIST);
 
@@ -3245,7 +3299,7 @@ pthread_attr_t attr;
            ast_log(LOG_ERROR,"Your Echolink call or password is not right\n");
 	   return -1;
 	}
-        if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0'))
+	if ((instp->elservers[0][0] == '\0') || (instp->elservers[1][0] == '\0') || (instp->elservers[2][0] == '\0') || (instp->elservers[3][0] == '\0'))
 	{
            ast_log(LOG_ERROR, "One of the Echolink servers missing\n");
 	   return -1;

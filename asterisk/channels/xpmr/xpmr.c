@@ -199,7 +199,7 @@ i16 string_parse(char *src, char **dest, char ***ptrs)
 	}
 
 	if(*ptrs)free(*ptrs);
-	*ptrs=calloc(numsub,4);
+	*ptrs=calloc(numsub, sizeof(char*));
 	for(i=0;i<numsub;i++)
 	{
 		(*ptrs)[i]=ptstr[i];	
@@ -1716,6 +1716,7 @@ t_pmr_chan	*createPmrChannel(t_pmr_chan *tChan, i16 numSamples)
 	{
 		pChan->rxDemod=tChan->rxDemod;
 		pChan->rxCdType=tChan->rxCdType;
+		pChan->voxHangTime=tChan->voxHangTime;
 		pChan->rxSquelchPoint = tChan->rxSquelchPoint;
 		pChan->rxCarrierHyst = tChan->rxCarrierHyst;
 		pChan->rxSqVoxAdj=tChan->rxSqVoxAdj;
@@ -2758,13 +2759,11 @@ i16 PmrRx(t_pmr_chan *pChan, i16 *input, i16 *outputrx, i16 *outputtx)
 		//pmr_sps=NULL;	// sph maw
 	}
 
-	#define XPMR_VOX_HANGTIME	2000
-
 	if(pChan->rxCdType==CD_XPMR_VOX)
 	{
 		if(pChan->spsRxVox->compOut)
 		{
-			pChan->rxVoxTimer=XPMR_VOX_HANGTIME;    //VOX HangTime in ms
+			pChan->rxVoxTimer=pChan->voxHangTime;  // VOX HangTime in mS
 		}
 		if(pChan->rxVoxTimer>0)
 		{
