@@ -8921,7 +8921,7 @@ struct	tm localtm;
 		else
 			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		ast_stopstream(mychannel);
-		res = ast_streamfile(mychannel, "digits/2", mychannel->language);
+		res = ast_streamfile(mychannel, "rpt/to", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		else
@@ -9926,7 +9926,7 @@ treataslocal:
 		else
 			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
 		ast_stopstream(mychannel);
-		res = ast_streamfile(mychannel, "digits/2", mychannel->language);
+		res = ast_streamfile(mychannel, "rpt/to", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		else
