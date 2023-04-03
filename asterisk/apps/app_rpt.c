@@ -8765,13 +8765,7 @@ struct	tm localtm;
 		if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1) return;
 		res = saynode(myrpt,mychannel,strs[2]);
 		if (!res)
-		    res = ast_streamfile(mychannel, "rpt/connected", mychannel->language);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		else
-			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
-		ast_stopstream(mychannel);
-		res = ast_streamfile(mychannel, "digits/2", mychannel->language);
+		    res = ast_streamfile(mychannel, "rpt/connected-to", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		else
@@ -9760,13 +9754,7 @@ treataslocal:
 		if (wait_interval(myrpt, DLY_TELEM,  mychannel) == -1) break;
 		res = saynode(myrpt,mychannel,mytele->mylink.name);
 		if (!res)
-		    res = ast_streamfile(mychannel, "rpt/connected", mychannel->language);
-		if (!res) 
-			res = ast_waitstream(mychannel, "");
-		else
-			 ast_log(LOG_WARNING, "ast_streamfile failed on %s\n", mychannel->name);
-		ast_stopstream(mychannel);
-		res = ast_streamfile(mychannel, "digits/2", mychannel->language);
+		    res = ast_streamfile(mychannel, "rpt/connected-to", mychannel->language);
 		if (!res) 
 			res = ast_waitstream(mychannel, "");
 		else
