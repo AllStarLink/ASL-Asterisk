@@ -5746,9 +5746,11 @@ int ast_say_time_fr(struct ast_channel *chan, time_t t, const char *ints, const 
 	res = ast_say_number(chan, tm.tm_hour, ints, lang, "f");
 	if (!res)
 		res = ast_streamfile(chan, "digits/oclock", lang);
+	if (!res)
+		res = ast_waitstream(chan, ints);
 	if (tm.tm_min) {
 		if (!res)
-		res = ast_say_number(chan, tm.tm_min, ints, lang, (char *) NULL);
+		res = ast_say_number(chan, tm.tm_min, ints, lang, "f");
 	}
 	return res;
 }
