@@ -5,6 +5,7 @@ FROM $ARCH/debian:$OS
 
 ARG ARCH
 ARG OS
+ARG ASL_REPO
 ARG USER_ID
 ARG GROUP_ID
 
@@ -26,7 +27,7 @@ RUN apt-get update && apt-get -y install \
     --no-install-recommends
 
 # add the allstarlink repo for build deps
-RUN echo "deb https://apt.allstarlink.org/repos/asl_builds $OS main" > /etc/apt/sources.list.d/allstarlink.list
+RUN echo "deb https://apt.allstarlink.org/repos/$ASL_REPO $OS main" > /etc/apt/sources.list.d/allstarlink.list
 RUN wget -O - https://apt.allstarlink.org/repos/repo_signing.gpg | apt-key add -
 
 # Install application dependencies

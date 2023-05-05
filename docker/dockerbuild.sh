@@ -49,6 +49,16 @@ then
   OPERATING_SYSTEMS="buster"
 fi
 
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if [ $BRANCH == "develop" ]; then
+  REPO_ENV="-devel"
+elif [ $BRANCH = "testing"]; then
+  REPO_ENV="-testing"
+else
+  REPO_ENV=""
+fi
+
 echo "Architectures: $ARCHS"
 echo "Targets: $TARGETS"
 echo "Operating Systems: $OPERATING_SYSTEMS"
@@ -85,9 +95,9 @@ for A in $ARCHS; do
     DA="$A"
   fi
   for O in $OPERATING_SYSTEMS; do
-       docker build -f $DIR/Dockerfile -t asl-asterisk_builder.$O.$A --build-arg ARCH="$DA" --build-arg OS="$O" --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g) $DIR
-       docker run -v $PDIR:/src -e DPKG_BUILDOPTS="$DPKG_BUILDOPTS" -e BUILD_TARGETS="$BUILD_TARGETS" -e COMMIT_VERSIONING="$COMMIT_VERSIONING" asl-asterisk_builder.$O.$A
-       docker image rm --force asl-asterisk_builder.$A
+       docker build -f $DIR/Dockerfile -t asl-asterisk_builder.$O.$A$REPO_ENV --build-arg ARCH="$DA" --build-arg OS="$O" --build-arg ASL_REPO="asl_builds${REPO_ENV}" --build-arg USER_ID=$(id -u) --build-arg GROUP_ID=$(id -g) $DIR
+       docker run -v $PDIR:/src -e DPKG_BUILDOPTS="$DPKG_BUILDOPTS" -e BUILD_TARGETS="$BUILD_TARGETS" -e COMMIT_VERSIONING="$COMMIT_VERSIONING" asl-asterisk_builder.$O.$A$REPO_ENV
+       docker image rm --force asl-asterisk_builder.$O.$A$REPO_ENV
        DPKG_BUILDOPTS="--build=any -uc -us"
   done
 done
