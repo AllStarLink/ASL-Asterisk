@@ -30,7 +30,7 @@ jobs:
   make-packages:
     uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
     with:
-      run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch == 'x86_64' && 'amd64' || inputs.arch == 'arm64' && 'armhf' || null }} ${{ (inputs.commit-versioning == 'yes' || (inputs.commit-versioning == 'default' && inputs.deployment-environment == 'development')) && '-r' || null }}
+      run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch == 'x86_64' && 'amd64' || inputs.arch == 'arm64' && 'armhf' || null }} -o ${{ inputs.os }} ${{ (inputs.commit-versioning == 'yes' || (inputs.commit-versioning == 'default' && inputs.deployment-environment == 'development')) && '-r' || null }}
       arch: ${{inputs.arch}}
       artifact-path: 'build/*'
     secrets: inherit

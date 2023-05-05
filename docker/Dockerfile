@@ -1,13 +1,15 @@
-FROM arm32v7/debian:buster
+ARG ARCH
+ARG OS
 
+FROM $ARCH/debian:$OS
+
+ARG ARCH
+ARG OS
 ARG USER_ID
 ARG GROUP_ID
 
 RUN addgroup --gid $GROUP_ID user; exit 0
 RUN adduser --disabled-password --gecos '' --uid $USER_ID --gid $GROUP_ID user; exit 0
-
-# Volumes
-#VOLUME .. /src
 
 # Install build dependencies
 RUN apt-get update && apt-get -y install \
@@ -23,13 +25,8 @@ RUN apt-get update && apt-get -y install \
     wget \
     --no-install-recommends
 
-# clone ASL-Asterisk
-#RUN git clone https://github.com/ajpaul25/ASL-Asterisk.git/ /src
-#WORKDIR /src/asterisk
-#RUN git fetch
-
 # add the allstarlink repo for build deps
-RUN echo "deb https://apt.allstarlink.org/repos/asl_builds buster main" > /etc/apt/sources.list.d/allstarlink.list
+RUN echo "deb https://apt.allstarlink.org/repos/asl_builds $OS main" > /etc/apt/sources.list.d/allstarlink.list
 RUN wget -O - https://apt.allstarlink.org/repos/repo_signing.gpg | apt-key add -
 
 # Install application dependencies
