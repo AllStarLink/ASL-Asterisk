@@ -3,7 +3,7 @@ Priority: optional
 Section: comm
 Maintainer: AllStarLink <developers@allstarlink.org>
 Uploaders: Adam Paul <adamjpaul@gmail.com>, Rob Vella <me@robvella.com>
-Build-Depends: debhelper (>= 6.0.7), quilt, zlib1g-dev, libreadline-gplv2-dev, libgsm1-dev, libssl-dev, libtonezone-dev (>= 1:1.4.1~0), libasound2-dev, libpq-dev, unixodbc-dev, libpri-dev (>= 1.4.1), libvpb-dev, asl-dahdi-source (>= 1:1.4.1~0), autotools-dev, libnewt-dev, libsqlite-dev, libspeex-dev, libspeexdsp-dev, graphviz, libcurl4-openssl-dev | libcurl-dev, doxygen, gsfonts, libpopt-dev, libiksemel-dev, freetds-dev, libvorbis-dev, libsnmp-dev, libcap-dev, libi2c-dev, libjansson-dev
+Build-Depends: debhelper (>= 6.0.7), quilt, zlib1g-dev, libreadline-gplv2-dev | libeditreadline-dev, libgsm1-dev, libssl-dev, libtonezone-dev (>= 1:1.4.1~0), libasound2-dev, libpq-dev, unixodbc-dev, libpri-dev (>= 1.4.1), libvpb-dev, asl-dahdi-source (>= 1:1.4.1~0), autotools-dev, libnewt-dev, libspeex-dev, libspeexdsp-dev, graphviz, libcurl4-openssl-dev | libcurl-dev, doxygen, gsfonts, libpopt-dev, libiksemel-dev, freetds-dev, libvorbis-dev, libsnmp-dev, libcap-dev, libi2c-dev, libjansson-dev
 Standards-Version: 3.7.3
 Homepage: http://www.allstarlink.org/
 Vcs-Git: git@github.com:AllStarLink/ASL-Asterisk.git
