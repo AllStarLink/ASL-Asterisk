@@ -5959,7 +5959,9 @@ static int unload_module(void)
 
 	ast_log(LOG_WARNING, "unload_module() called\n");
 
+#ifndef NO_PP
 	stoppulser = 1;
+#endif
 
 	ast_channel_unregister(&usbradio_tech);
 	ast_cli_unregister_multiple(cli_usbradio, sizeof(cli_usbradio) / sizeof(struct ast_cli_entry));
