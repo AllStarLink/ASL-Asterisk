@@ -46,7 +46,6 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/io.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <sys/time.h>
@@ -56,9 +55,18 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <usb.h>
 #include <search.h>
 #include <alsa/asoundlib.h>
+#include <linux/version.h>
+
+#ifndef __arm__
+#include <sys/io.h>
+#else
+#define NO_PP
+#endif
+
+#ifndef NO_PP
 #include <linux/ppdev.h>
 #include <linux/parport.h>
-#include <linux/version.h>
+#endif
 
 #include "../allstar/pocsag.c"
 
@@ -363,6 +371,8 @@ static char *usb_device_list = NULL;
 static int usb_device_list_size = 0;
 AST_MUTEX_DEFINE_STATIC(usb_list_lock);
 AST_MUTEX_DEFINE_STATIC(usb_dev_lock);
+
+#ifndef NO_PP
 AST_MUTEX_DEFINE_STATIC(pp_lock);
 
 static int8_t	pp_val;
@@ -375,6 +385,8 @@ static 	char	pport[50];
 static	int	pbase;
 static 	char	stoppulser;
 static	char	hasout;
+#endif
+
 pthread_t pulserid;
 
 static int simpleusb_debug;
@@ -1349,6 +1361,7 @@ static struct chan_simpleusb_pvt *find_desc_usb(char *devstr)
 	return o;
 }
 
+#ifndef NO_PP
 static unsigned char ppread(void)
 {
 unsigned char c;
@@ -1385,12 +1398,10 @@ static void ppwrite(unsigned char c)
 	return;
 }
 
-
 static void *pulserthread(void *arg)
 {
 struct	timeval now,then;
 int	i,j,k;
-
 	if (haspp == 2) ioperm(pbase,2,1);
 	stoppulser = 0;
 	pp_lastmask = 0;
@@ -1428,6 +1439,7 @@ int	i,j,k;
 	}
 	pthread_exit(0);
 }
+#endif
 
 /*
 */
@@ -1447,7 +1459,9 @@ static void *hidthread(void *arg)
         usb_dev = NULL;
         usb_handle = NULL;
 	o->gpio_set = 1;
+#ifndef NO_PP
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
         while(!o->stophid)
         {
                 time(&o->lasthidtime);
@@ -1790,6 +1804,7 @@ static void *hidthread(void *arg)
 				o->had_gpios_in = 1;
 				o->last_gpios_in = j;
 			}
+#ifndef NO_PP
 			ast_mutex_lock(&pp_lock);
 			j = k = ppread() ^ 0x80; /* get PP input */
 			ast_mutex_unlock(&pp_lock);
@@ -1855,6 +1870,7 @@ static void *hidthread(void *arg)
 				}
 
 			}
+#endif
 			j = ast_tvdiff_ms(ast_tvnow(),then);
 			/* make output inversion mask (for pulseage) */
 			o->hid_gpio_lastmask = o->hid_gpio_pulsemask;
@@ -1896,14 +1912,18 @@ static void *hidthread(void *arg)
 			{
 				if(o->debuglevel) printf("hidthread: tx set to %d\n",o->lasttx);
 				o->hid_gpio_val &= ~o->hid_io_ptt;
+#ifndef NO_PP
 				ast_mutex_lock(&pp_lock);
 				if (k) pp_val &= ~k;
+#endif
 				if (!o->invertptt)
 				{
 					if (o->lasttx) 
 					{
 						buf[o->hid_gpio_loc] = o->hid_gpio_val |= o->hid_io_ptt;
+#ifndef NO_PP
 						if (k) pp_val |= k;
+#endif
 					}
 				}
 				else
@@ -1911,11 +1931,15 @@ static void *hidthread(void *arg)
 					if (!o->lasttx)
 					{
 						buf[o->hid_gpio_loc] = o->hid_gpio_val |= o->hid_io_ptt;
+#ifndef NO_PP
 						if (k) pp_val |= k;
+#endif
 					}
 				}
+#ifndef NO_PP
 				if (k) ppwrite(pp_val);
 				ast_mutex_unlock(&pp_lock);
+#endif
 				buf[o->hid_gpio_loc] = o->hid_gpio_val ^ o->hid_gpio_pulsemask;
 				buf[o->hid_gpio_ctl_loc] = o->hid_gpio_ctl;
 				memcpy(bufsave,buf,sizeof(buf));
@@ -2264,7 +2288,9 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 	char audio1[AST_FRIENDLY_OFFSET + (FRAME_SIZE * sizeof(short))];
 	struct ast_frame wf,*f1;
 
+#ifndef NO_PP
 	if (haspp == 2) ioperm(pbase,2,1);
+#endif
 
 	cmd = alloca(strlen(text) + 10);
 
@@ -2305,6 +2331,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 		kickptt(o);
 		return 0;
 	}
+#ifndef NO_PP
 	if (!strncmp(text,"PP",2))
 	{
 		cnt = sscanf(text,"%s %d %d",cmd,&i,&j);
@@ -2328,6 +2355,7 @@ static int simpleusb_text(struct ast_channel *c, const char *text)
 		ast_mutex_unlock(&pp_lock);
 		return 0;
 	}
+#endif
 
 	if (!strncmp(text,"PAGE",4))
 	{
@@ -3995,6 +4023,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 				sprintf(buf,"gpio%d",i + 1);
 				if (!strcmp(v->name,buf)) o->gpios[i] = strdup(v->value);
 			}
+#ifndef NO_PP
 			for(i = 2; i <= 15; i++)
 			{
 				if (!((1 << i) & PP_MASK)) continue;
@@ -4004,6 +4033,7 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 					haspp = 1;
 				}
 			}
+#endif
 	}
 
 	o->debuglevel=0;
@@ -4018,9 +4048,11 @@ static struct chan_simpleusb_pvt *store_config(struct ast_config *cfg, char *ctg
 		/* skip if not out or PTT */
 		if (strncasecmp(o->pps[i],"out",3) &&
 			strcasecmp(o->pps[i],"ptt")) continue;
+#ifndef NO_PP
 		/* if default value is 1, set it */
 		if (!strcasecmp(o->pps[i],"out1")) pp_val |= (1 << (i - 2));
 		hasout = 1;
+#endif
 	}
 
 	snprintf(fname,sizeof(fname) - 1,config1,o->name);
@@ -4212,7 +4244,10 @@ static struct ast_cli_entry cli_simpleusb[] = {
 static int load_module(void)
 {
 	struct ast_config *cfg = NULL;
-	char *ctg = NULL,*val;
+	char *ctg = NULL;
+#ifndef NO_PP
+	char *val;
+#endif
 	int n;
 #ifdef	NEW_ASTERISK
 	struct ast_flags zeroflag = {0};
@@ -4229,9 +4264,10 @@ static int load_module(void)
 
 	/* Copy the default jb config over global_jbconf */
 	memcpy(&global_jbconf, &default_jbconf, sizeof(struct ast_jb_conf));
-
+#ifndef NO_PP
 	pp_val = 0;
 	hasout = 0;
+#endif
 
 	/* load config file */
 #ifdef	NEW_ASTERISK
@@ -4248,6 +4284,7 @@ static int load_module(void)
 		store_config(cfg, ctg, &n);
 	} while ( (ctg = ast_category_browse(cfg, ctg)) != NULL);
 
+#ifndef NO_PP
 	ppfd = -1;
 	pbase = 0;
 	val = (char *) ast_variable_retrieve(cfg, "general", "pport");
@@ -4288,6 +4325,7 @@ static int load_module(void)
 		if (haspp == 1) ast_verbose(VERBOSE_PREFIX_3 "Parallel port is %s\n",pport);
 		else if (haspp == 2) ast_verbose(VERBOSE_PREFIX_3 "Parallel port is at %04x hex\n",pbase);
 	}
+#endif
 
 	ast_config_destroy(cfg);
 
@@ -4305,7 +4343,9 @@ static int load_module(void)
 
 	ast_cli_register_multiple(cli_simpleusb, sizeof(cli_simpleusb) / sizeof(struct ast_cli_entry));
 
+#ifndef NO_PP
 	if (haspp && hasout) ast_pthread_create_background(&pulserid, NULL, pulserthread, NULL);
+#endif
 
 	return AST_MODULE_LOAD_SUCCESS;
 }
