@@ -1,5 +1,6 @@
 
 name: make_and_publish_pkgs
+run-name: make ${{ github.repository }} packages for ${{ inputs.os }} on ${{ inputs.arch }}
 on: 
   workflow_dispatch:
     inputs:
