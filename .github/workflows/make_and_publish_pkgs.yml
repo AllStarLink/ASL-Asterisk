@@ -1,6 +1,6 @@
 
 name: make_and_publish_pkgs
-run-name: make ${{ github.repository }} packages for ${{ inputs.os }} on ${{ inputs.arch }}
+run-name: Package ${{ github.event.repository.name }}(${{ github.ref_name }}) for ${{ inputs.os }}/${{ inputs.arch }}, Publish to ${{ inputs.deployment-environment }}
 on: 
   workflow_dispatch:
     inputs:
