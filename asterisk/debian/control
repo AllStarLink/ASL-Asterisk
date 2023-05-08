@@ -12,7 +12,7 @@ Vcs-Browser: https://github.com/AllStarLink/ASL-Asterisk
 Package: asl-asterisk
 Architecture: any
 Section: comm
-Depends: ${shlibs:Depends}, asl-asterisk-config (= ${source:Version}), adduser, asl-asterisk-sounds-main
+Depends: ${shlibs:Depends}, asl-asterisk-config (>= ${source:Version}), adduser, asl-asterisk-sounds-main
 Conflicts: asterisk, asterisk-classic, asterisk-bristuff, asterisk-chan-capi (<< 1.1.1-1~)
 Replaces: asterisk, asterisk-classic, asterisk-bristuff
 Provides: asterisk, asterisk-1.4
