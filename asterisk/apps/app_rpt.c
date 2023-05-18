@@ -10941,7 +10941,7 @@ struct rpt_link *l;
 		time_t stamp = myrpt->keychunk_t;
 		time(&now);
 		myrpt->keychunk_t = 0;
-		if (now - stamp <= myrpt->p.keychunktime) return;
+		if (now - stamp < myrpt->p.keychunktime) return;
 		if (!myrpt->keychunked) myrpt->keychunked = 1;
 
 		/* if any of the following are defined, go ahead and do it,
