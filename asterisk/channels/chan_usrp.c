@@ -571,6 +571,7 @@ static int usrp_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 						ast_log(LOG_NOTICE,"Got DTMF char %c\n",f->subclass);
 					ast_queue_frame(ast, f); 
 				}
+				ast_frfree(f);
 			}
 		}
 	}
