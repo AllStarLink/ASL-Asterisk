@@ -1291,7 +1291,7 @@ static struct rpt
 	long	rerxtimer;
 	long long totaltxtime;
 	time_t keychunk_t;
-        int keychunked;	
+    int keychunked;	
 	char mydtmf;
 	char exten[AST_MAX_EXTENSION];
 	char freq[MAXREMSTR],rxpl[MAXREMSTR],txpl[MAXREMSTR];
@@ -10894,13 +10894,14 @@ int res,vmajor,vminor,i,ns;
 pthread_attr_t attr;
 char *v1, *v2,mystr[1024],*p,haslink,lat[100],lon[100],elev[100];
 char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
-time_t	t,was;
+time_t t,was,stamp = myrpt->keychunk_t;
 unsigned int k;
 FILE *fp;
 struct stat mystat;
 struct rpt_link *l;
+myrpt->keychunk_t = 0;
 
-	if(debug >= 6)
+    if(debug >= 6)
 		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
 
 
@@ -10937,11 +10938,7 @@ struct rpt_link *l;
 		if (myrpt->p.nounkeyct) return;
 		
 		/* Check to see if the last local rx was long enough for pip */
-		time_t now;
-		time_t stamp = myrpt->keychunk_t;
-		time(&now);
-		myrpt->keychunk_t = 0;
-		if (now - stamp < myrpt->p.keychunktime) return;
+		if (time(NULL) - stamp < myrpt->p.keychunktime) return;
 		if (!myrpt->keychunked) myrpt->keychunked = 1;
 
 		/* if any of the following are defined, go ahead and do it,
@@ -10957,7 +10954,12 @@ struct rpt_link *l;
 		  (!(v2 && telem_lookup(myrpt,NULL, myrpt->name, v2)))) return;
 		break;
 	    case LINKUNKEY:
-		myrpt->keychunked = 1;
+
+        /* Check to see if the last remote rx was long enough for pip */
+		if (time(NULL) - stamp < myrpt->p.keychunktime) return;
+		if (!myrpt->keychunked) myrpt->keychunked = 1;
+
+
  		mylink = (struct rpt_link *) data;
 		if (myrpt->p.locallinknodesn)
 		{
@@ -20007,8 +20009,9 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		else{
 			myrpt->localtx = myrpt->keyed; /* If sleep disabled, just copy keyed state to localrx */
 		}
+
 		/* Set the keychunk timer */
-		if (myrpt->keyed && !myrpt->keychunk_t) {
+		if ((myrpt->remrx || myrpt->keyed) && !myrpt->keychunk_t) {
 			time(&myrpt->keychunk_t);
 		}
 			
