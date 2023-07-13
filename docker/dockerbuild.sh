@@ -36,7 +36,7 @@ done
 
 if [ -z "$ARCHS" ]
 then
-  ARCHS="amd64 armhf"
+  ARCHS="amd64 armhf arm64"
 fi
 
 if [ -z "$TARGETS" ]
@@ -91,6 +91,8 @@ DPKG_BUILDOPTS="-b -uc -us"
 for A in $ARCHS; do
   if [ "$A" == "armhf" ]; then
     DA="arm32v7"
+  elif [ "$A" == "arm64" ]; then
+    DA="arm64v8"
   else
     DA="$A"
   fi
