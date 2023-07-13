@@ -57,7 +57,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #include <alsa/asoundlib.h>
 #include <linux/version.h>
 
-#ifndef __arm__
+#if !defined(__arm__) && !defined(__aarch64__)
 #include <sys/io.h>
 #else
 #define NO_PP
