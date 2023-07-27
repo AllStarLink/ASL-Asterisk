@@ -16,6 +16,7 @@ on:
           - buster
           - bullseye
           - bookworm
+          - trixie
       deployment-environment:
         type: choice
         options:
