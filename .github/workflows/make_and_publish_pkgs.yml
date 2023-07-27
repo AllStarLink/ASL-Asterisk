@@ -17,6 +17,7 @@ on:
           - bullseye
           - bookworm
           - trixie
+          - sid
       deployment-environment:
         type: choice
         options:
