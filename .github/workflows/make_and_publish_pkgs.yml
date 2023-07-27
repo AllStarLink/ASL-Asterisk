@@ -10,6 +10,7 @@ on:
         - amd64
         - arm64
         - armhf
+        - riscv64
       os:
         type: choice
         options:
@@ -35,7 +36,7 @@ jobs:
     uses: AllStarLink/asl_workflows/.github/workflows/ephemeral_ec2_run-this.yml@develop
     with:
       run-this: ./docker/dockerbuild.sh -a ${{ inputs.arch  }} -o ${{ inputs.os }} ${{ (inputs.commit-versioning == 'yes' || (inputs.commit-versioning == 'default' && inputs.deployment-environment == 'development')) && '-r' || null }}
-      arch: ${{ inputs.arch == 'armhf' && 'arm64' || inputs.arch == 'amd64' && 'x86_64' || inputs.arch }}
+      arch: ${{ inputs.arch == 'armhf' && 'arm64' || inputs.arch == 'amd64' && 'x86_64' || inputs.arch == 'riscv64' && 'x86_64' || inputs.arch }}
       artifact-path: 'build/*'
     secrets: inherit
   publish-packages:
