@@ -24,7 +24,7 @@ ASL_DIR:=$(DESTDIR)$(ASTDATADIR)/sounds/rpt
 CORE_SOUNDS_VERSION:=1.4.9
 EXTRA_SOUNDS_VERSION:=1.4.8
 SOUNDS_URL:=http://downloads.asterisk.org/pub/telephony/sounds/releases
-ASL_SOUNDS_URL:=http://dvswitch.org/files/AllStarLink
+ASL_SOUNDS_URL:=http://downloads.allstarlink.org
 
 MCS:=$(subst -EN-,-en-,$(MENUSELECT_CORE_SOUNDS))
 MCS:=$(subst -FR-,-fr-,$(MCS))
