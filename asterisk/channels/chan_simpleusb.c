@@ -29,6 +29,7 @@
 
 /*** MODULEINFO
         <defaultenabled>yes</defaultenabled>
+        <depend>usb</depend>
  ***/
 
 #include "asterisk.h"

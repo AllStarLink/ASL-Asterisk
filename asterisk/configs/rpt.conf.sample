@@ -87,8 +87,8 @@ linkunkeyct = ct8			; sent when a transmission received over the link unkeys
 ;nolocallinkct = 0			; Send unlinkedct instead if another local node is connected to this node (hosted on the same PC).
 
 ; Supermon smlogger
-connpgm=/usr/local/sbin/supermon/smlogger 1
-discpgm=/usr/local/sbin/supermon/smlogger 0
+connpgm=/usr/local/sbin/smlogger 1
+discpgm=/usr/local/sbin/smlogger 0
 
 ;connpgm = yourconnectprogram		; Disabled. Execute a program you specify on connect. (default)
 					; passes 2 command line arguments to your program:

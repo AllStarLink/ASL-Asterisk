@@ -28,18 +28,17 @@ case "$1" in
 
     if [ -f /etc/systemd/system/asterisk.service ]; then
         rm -f /etc/systemd/system/asterisk.service
-        rm -f /etc/init.d/asl-asterisk
+		rm -f /etc/init.d/asterisk
 
         systemctl disable asterisk.service
         systemctl stop asterisk.service 
-
     fi
 
     # Re-install service so aliases come through
-    if [ -f /lib/systemd/system/asl-asterisk.service ]; then
+	if [ -f /lib/systemd/system/asterisk.service ]; then
         systemctl daemon-reload
-        systemctl disable asl-asterisk.service
-        systemctl enable asl-asterisk.service
+		systemctl disable asterisk.service
+		systemctl enable asterisk.service
     fi
 
     set -e 
