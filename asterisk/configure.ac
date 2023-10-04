@@ -246,6 +246,7 @@ AST_EXT_LIB_SETUP([OPENH323], [OpenH323], [h323])
 AST_EXT_LIB_SETUP([IKSEMEL], [Iksemel Jabber Library], [iksemel])
 AST_EXT_LIB_SETUP([IMAP_TK], [UW IMAP Toolkit], [imap])
 AST_EXT_LIB_SETUP([ISDNNET], [ISDN4Linux Library], [isdnnet])
+AST_EXT_LIB_SETUP([I2C], [I2C], [i2c])
 AST_EXT_LIB_SETUP([KDE], [KDE], [kde])
 AST_EXT_LIB_SETUP([JANSSON], [Jansson JSON library], [jansson])
 AST_LIBCURL_CHECK_CONFIG([], [7.10.1])
@@ -1836,6 +1837,9 @@ fi
 AC_SUBST(PBX_GTK2)
 AC_SUBST(GTK2_INCLUDE)
 AC_SUBST(GTK2_LIB)
+
+AC_CHECK_HEADER([i2c/smbus.h], [PBX_I2C=1], [PBX_I2C=0])
+AC_SUBST(PBX_I2C)
 
 if test -f makeopts; then
 	${ac_cv_path_EGREP} 'CURSES|GTK2|OSARCH|NEWT' makeopts > makeopts.acbak

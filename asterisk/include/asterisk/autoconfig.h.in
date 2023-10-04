@@ -190,6 +190,9 @@
 /* Define if your system has the GTK2 libraries. */
 #undef HAVE_GTK2
 
+/* Define to 1 if you have the I2C library. */
+#undef HAVE_I2C
+
 /* Define to 1 if you have the Iksemel Jabber Library library. */
 #undef HAVE_IKSEMEL
 

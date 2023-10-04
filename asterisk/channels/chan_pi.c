@@ -30,6 +30,7 @@
 
 /*** MODULEINFO
         <defaultenabled>yes</defaultenabled> 	 	 
+        <depend>i2c</depend> 	 	 
  ***/
 
 #include "asterisk.h"
