@@ -674,10 +674,10 @@ config:
 			if [ -z "$(DESTDIR)" ]; then /sbin/chkconfig --add asterisk; fi; \
 		elif [ -f /etc/amazon-linux-release ] && [ -f /etc/systemd/system.conf ]; then \
 			mkdir -p $(DESTDIR)/lib/systemd/system; \
-			$(INSTALL) -m 755 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
+			$(INSTALL) -m 644 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
 			if [ -z "$(DESTDIR)" ]; then /bin/systemctl enable asterisk.service; fi; \
 		elif [ -f /etc/debian_version ] && [ -f /etc/systemd/system.conf ]; then \
-			$(INSTALL) -m 755 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
+			$(INSTALL) -m 644 contrib/systemd/asterisk.service $(DESTDIR)/lib/systemd/system/asterisk.service; \
 			if [ -z "$(DESTDIR)" ]; then /bin/systemctl enable asterisk.service; fi; \
                 elif [ -f /etc/debian_version ] && [ ! -f /etc/systemd/system.conf ]; then \
                         $(INSTALL) -m 755 contrib/init.d/rc.debian.asterisk $(DESTDIR)/etc/init.d/asterisk; \
