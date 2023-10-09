@@ -1,2 +1,2 @@
-# Get AllMondb on reboot
-@reboot /usr/sbin/astdb.php
+# Get AllMon/Supermon/AllScan db on reboot
+@reboot root /usr/sbin/astdb.php
