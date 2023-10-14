@@ -56,7 +56,6 @@ Here is what comes to mind first:
 ---> no capacity limits.
 ---> no banned or privare station list.
 ---> no admin list, only local 127.0.0.1 access.
----> no welcome text message.
 ---> no login or connect timeouts.
 ---> no max TX time limit.
 ---> no activity reporting.
@@ -159,6 +158,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define EL_QTH_SIZE 32
 #define EL_MAX_SERVERS 4
 #define EL_SERVERNAME_SIZE 63
+#define EL_WELCOME_SIZE 1023
 #define	EL_MAX_INSTANCES 100
 #define	EL_MAX_CALL_LIST 60
 #define	EL_APRS_SERVER "aprs.echolink.org"
@@ -289,6 +289,7 @@ struct el_instance
 	char login_display[EL_NAME_SIZE + EL_CALL_SIZE + 1];
 	char aprs_display[EL_APRS_SIZE + 1];
 	pthread_t el_reader_thread;
+	char welcometext[EL_WELCOME_SIZE + 1];
 } ;
 
 struct el_rxqast {
@@ -1418,34 +1419,60 @@ static void count_users(const void *nodep, const VISIT which, const int depth)
 static void send_info(const void *nodep, const VISIT which, const int depth)
 {
 	struct sockaddr_in sin;
-	char pkt[2500],*cp;
-	struct el_instance *instp = (*(struct el_node **)nodep)->instp;
+	char pkt[2500], *cp, *lnstr;
 	int i;
 
 	if ((which == leaf) || (which == postorder)) {
 
-		sin.sin_family = AF_INET;
-		sin.sin_port = htons(instp->audio_port);
-		sin.sin_addr.s_addr = inet_addr((*(struct el_node **)nodep)->ip);
-		snprintf(pkt,sizeof(pkt) - 1,
-			"oNDATA\rWelcome to Allstar Node %s\r",instp->astnode);
-		i = strlen(pkt);
-		snprintf(pkt + i,sizeof(pkt) - (i + 1),
-			"Echolink Node %s\rNumber %u\r \r",
-				instp->mycall,instp->mynode);
-		if ((*(struct el_node **)nodep)->p &&
-		    (*(struct el_node **)nodep)->p->linkstr)
-		{
-			i = strlen(pkt);
-			strncat(pkt + i,"Systems Linked:\r",
-				sizeof(pkt) - (i + 1));
-			cp = ast_strdup((*(struct el_node **)nodep)->p->linkstr);
-			i = strlen(pkt);
-			strncat(pkt + i,cp,sizeof(pkt) - (i + 1));
-			ast_free(cp);
-		}
-		sendto(instp->audio_sock, pkt, strlen(pkt),
-			0,(struct sockaddr *)&sin,sizeof(sin));
+      struct el_instance *instp = (*(struct el_node **)nodep)->instp;
+
+      sin.sin_family = AF_INET;
+      sin.sin_port = htons(instp->audio_port);
+      sin.sin_addr.s_addr = inet_addr((*(struct el_node **)nodep)->ip);
+
+      memset(pkt, 0, sizeof(pkt));
+      strcpy(pkt, "oNDATA\r");
+      i = strlen(pkt);
+
+      cp = instp->welcometext;
+      while(*cp != (char)0) {
+
+        if(*cp == '$') {
+          cp++;
+          switch(*cp) {
+          case 'N':
+            strncat(pkt + i, instp->astnode, sizeof(pkt) - (i + 1));
+            break;
+          case 'E':
+            strncat(pkt + i, instp->mycall, sizeof(pkt) - (i + 1));
+            break;
+          case 'U':
+            snprintf(pkt + i, sizeof(pkt) - (i + 1), "%u", instp->mynode);
+            break;
+          case 'B':
+            *(pkt + i) = '\n';
+            break;
+          case 'S':
+            if((*(struct el_node **)nodep)->p
+               && (*(struct el_node **)nodep)->p->linkstr) {
+              lnstr = ast_strdup((*(struct el_node **)nodep)->p->linkstr);
+              strncat(pkt + i, lnstr, sizeof(pkt) - (i + 1));
+              ast_free(lnstr);
+            }
+            break;
+          default:
+            break;
+          }
+          i = strlen(pkt);
+          cp++;
+        } else {
+          *(pkt + i++) = *(cp++);
+        }
+      }
+      *(pkt + i) = '\0';
+
+      sendto(instp->audio_sock, pkt, strlen(pkt),
+             0,(struct sockaddr *)&sin,sizeof(sin));
 	}
 	return;
 }
@@ -3289,6 +3316,10 @@ pthread_attr_t attr;
 
         val = (char *) ast_variable_retrieve(cfg,ctg,"dir"); 
 	if (val) instp->dir = (char)strtol(val,NULL,0); else instp->dir = 0;
+
+        val = (char *) ast_variable_retrieve(cfg,ctg,"welcometext");
+        if(val) strncpy(instp->welcometext,val,EL_WELCOME_SIZE);
+        if(!val) strcpy(instp->welcometext, "Welcome to Allstar Node $N$BEcholink Node $E$BNumber $U$B$BSystems Linked:$B$S");
 
 	instp->audio_sock = -1;
 	instp->ctrl_sock = -1;
