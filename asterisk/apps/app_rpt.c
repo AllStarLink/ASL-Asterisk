@@ -19826,6 +19826,9 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 	rpt_update_boolean(myrpt,"RPT_AUTOPATCHUP",-1);
 	rpt_update_boolean(myrpt,"RPT_NUMLINKS",-1);
 	rpt_update_boolean(myrpt,"RPT_LINKS",-1);
+	rpt_update_boolean(myrpt,"RPT_ALINKS",-1);
+	rpt_update_boolean(myrpt,"RPT_NUMALINKS",-1);
+
 	myrpt->ready = 1;	
 	while (ms >= 0)
 	{
