@@ -1129,6 +1129,7 @@ static struct rpt
 		char *dtmfkeys;
 		int hangtime;
 		int althangtime;
+		int keychunktime;
 		int totime;
 		int idtime;
 		int tailmessagetime;
@@ -1294,6 +1295,8 @@ static struct rpt
 	long	retxtimer;
 	long	rerxtimer;
 	long long totaltxtime;
+	time_t keychunk_t;
+    int keychunked;	
 	char mydtmf;
 	char exten[AST_MAX_EXTENSION];
 	char freq[MAXREMSTR],rxpl[MAXREMSTR],txpl[MAXREMSTR];
@@ -6263,6 +6266,7 @@ static char *cs_keywords[] = {"rptena","rptdis","apena","apdis","lnkena","lnkdis
 		else rpt_vars[n].p.statpost_program = STATPOST_PROGRAM;
 	rpt_vars[n].p.statpost_url = 
 		(char *) ast_variable_retrieve(cfg,this,"statpost_url");
+	rpt_vars[n].p.keychunktime = retrieve_astcfgint(&rpt_vars[n],this, "keychunk", 0, 5, 0);
 	rpt_vars[n].p.tailmessagetime = retrieve_astcfgint(&rpt_vars[n],this, "tailmessagetime", 0, 200000000, 0);		
 	rpt_vars[n].p.tailsquashedtime = retrieve_astcfgint(&rpt_vars[n],this, "tailsquashedtime", 0, 200000000, 0);		
 	rpt_vars[n].p.duplex = retrieve_astcfgint(&rpt_vars[n],this,"duplex",0,4,(ISRANGER(rpt_vars[n].name) ? 0 : 2));
@@ -10888,13 +10892,14 @@ int res,vmajor,vminor,i,ns;
 pthread_attr_t attr;
 char *v1, *v2,mystr[1024],*p,haslink,lat[100],lon[100],elev[100];
 char lbuf[MAXLINKLIST],*strs[MAXLINKLIST];
-time_t	t,was;
+time_t t,was,stamp = myrpt->keychunk_t;
 unsigned int k;
 FILE *fp;
 struct stat mystat;
 struct rpt_link *l;
+myrpt->keychunk_t = 0;
 
-	if(debug >= 6)
+    if(debug >= 6)
 		ast_log(LOG_NOTICE,"Tracepoint rpt_telemetry() entered mode=%i\n",mode);
 
 
@@ -10929,6 +10934,11 @@ struct rpt_link *l;
 			return;
 		}
 		if (myrpt->p.nounkeyct) return;
+		
+		/* Check to see if the last local rx was long enough for pip */
+		if (time(NULL) - stamp < myrpt->p.keychunktime) return;
+		if (!myrpt->keychunked) myrpt->keychunked = 1;
+
 		/* if any of the following are defined, go ahead and do it,
 		   otherwise, dont bother */
 		v1 = (char *) ast_variable_retrieve(myrpt->cfg, myrpt->name, 
@@ -10942,6 +10952,12 @@ struct rpt_link *l;
 		  (!(v2 && telem_lookup(myrpt,NULL, myrpt->name, v2)))) return;
 		break;
 	    case LINKUNKEY:
+
+        /* Check to see if the last remote rx was long enough for pip */
+		if (time(NULL) - stamp < myrpt->p.keychunktime) return;
+		if (!myrpt->keychunked) myrpt->keychunked = 1;
+
+
  		mylink = (struct rpt_link *) data;
 		if (myrpt->p.locallinknodesn)
 		{
@@ -20000,6 +20016,12 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 		else{
 			myrpt->localtx = myrpt->keyed; /* If sleep disabled, just copy keyed state to localrx */
 		}
+
+		/* Set the keychunk timer */
+		if ((myrpt->remrx || myrpt->keyed) && !myrpt->keychunk_t) {
+			time(&myrpt->keychunk_t);
+		}
+			
 		/* Create a "must_id" flag for the cleanup ID */		
 		if(myrpt->p.idtime) /* ID time must be non-zero */
 			myrpt->mustid |= (myrpt->idtimer) && (myrpt->keyed || myrpt->remrx) ;
@@ -20157,8 +20179,8 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 			myrpt->macropatch=0;
 			channel_revert(myrpt);
 		}
-		/* get rid of tail if timed out or repeater is beaconing */
-		if (!myrpt->totimer || (!myrpt->mustid && myrpt->p.beaconing)) myrpt->tailtimer = 0;
+		/* get rid of tail if timed out, beaconing or keychunked */
+		if (!myrpt->totimer || (!myrpt->mustid && myrpt->p.beaconing) || !myrpt->keychunked) myrpt->tailtimer = 0;
 		/* if not timed-out, add in tail */
 		if (myrpt->totimer) totx = totx || myrpt->tailtimer;
 		/* If user or links key up or are keyed up over standard ID, switch to talkover ID, if one is defined */
@@ -20277,6 +20299,7 @@ char tmpstr[512],lstr[MAXLINKLIST],lat[100],lon[100],elev[100];
 
 			lasttx = 0;
 			myrpt->txkeyed = 0;
+			myrpt->keychunked = 0;
 			time(&myrpt->lasttxkeyedtime);
 			rpt_mutex_unlock(&myrpt->lock);
 			if (strncasecmp(myrpt->txchannel->name,"Zap/Pseudo",10))

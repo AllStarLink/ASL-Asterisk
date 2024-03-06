@@ -75,6 +75,7 @@ hangtime = 1000				; squelch tail hang time (in ms) (optional, default 5 seconds
 althangtime = 3000			; longer squelch tail
 totime = 180000				; transmit time-out time (in ms) (optional, default 3 minutes 180000 ms)
 
+keychunk = 1				; keychunk time (in secs) (optional, default is 0, max 5) 
 idrecording = |iWB6NIL			; cording or morse string see https://wiki.allstarlink.org/wiki/Rpt.conf#idrecording.3D
 idtalkover = |iWB6NIL                   ; Talkover ID (optional) default is none see https://wiki.allstarlink.org/wiki/Rpt.conf#idtalkover.3D
 					; See Telemetry section Example: idrecording = rpt/nodenames/1999
