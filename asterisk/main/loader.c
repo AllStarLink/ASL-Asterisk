@@ -199,7 +199,7 @@ void __ast_module_user_remove(struct ast_module *mod, struct ast_module_user *u)
 	AST_LIST_REMOVE(&mod->users, u, entry);
 	AST_LIST_UNLOCK(&mod->users);
 	ast_atomic_fetchadd_int(&mod->usecount, -1);
-  		free(u);
+	free(u);
 
 	ast_update_use_count();
 }
