@@ -199,7 +199,7 @@ void __ast_module_user_remove(struct ast_module *mod, struct ast_module_user *u)
 	AST_LIST_REMOVE(&mod->users, u, entry);
 	AST_LIST_UNLOCK(&mod->users);
 	ast_atomic_fetchadd_int(&mod->usecount, -1);
-	free(u);
+  		free(u);
 
 	ast_update_use_count();
 }
@@ -327,13 +327,17 @@ static void unload_dynamic_module(struct ast_module *mod)
 	   dereference it */
 
 	if (lib)
-		while (!dlclose(lib));
+               if (dlclose(lib)) {
+                      ast_log(LOG_ERROR, "Failure in dlclose for module '%s': %s\n",
+                                mod->resource, dlerror());
+                }
+
 }
 
 static struct ast_module *load_dynamic_module(const char *resource_in, unsigned int global_symbols_only)
 {
-	char fn[4097];
-	void *lib;
+	char fn[4097] = "";
+	void *lib = NULL;
 	struct ast_module *mod;
 	char *resource = (char *) resource_in;
 	unsigned int wants_global;
@@ -354,7 +358,7 @@ static struct ast_module *load_dynamic_module(const char *resource_in, unsigned 
 		return NULL;
 
 	strcpy(resource_being_loaded->resource, resource);
-
+	
 	if (!(lib = dlopen(fn, RTLD_LAZY | RTLD_LOCAL))) {
 		ast_log(LOG_WARNING, "Error loading module '%s': %s\n", resource_in, dlerror());
 		free(resource_being_loaded);
@@ -371,7 +375,12 @@ static struct ast_module *load_dynamic_module(const char *resource_in, unsigned 
 	if (resource_being_loaded != (mod = AST_LIST_LAST(&module_list))) {
 		ast_log(LOG_WARNING, "Module '%s' did not register itself during load\n", resource_in);
 		/* no, it did not, so close it and return */
-		while (!dlclose(lib));
+
+               if (dlclose(lib)) {
+                      ast_log(LOG_ERROR, "Failure in dlclose for module '%s': %s\n",
+                                resource_in, dlerror());
+                }
+ 		
 		/* note that the module's destructor will call ast_module_unregister(),
 		   which will free the structure we allocated in resource_being_loaded */
 		return NULL;
@@ -382,7 +391,10 @@ static struct ast_module *load_dynamic_module(const char *resource_in, unsigned 
 	/* if we are being asked only to load modules that provide global symbols,
 	   and this one does not, then close it and return */
 	if (global_symbols_only && !wants_global) {
-		while (!dlclose(lib));
+		if (dlclose(lib)) {
+		      ast_log(LOG_ERROR, "Failure in dlclose for module '%s': %s\n",
+		       		resource_in, dlerror());
+		}
 		return NULL;
 	}
 
@@ -393,12 +405,20 @@ static struct ast_module *load_dynamic_module(const char *resource_in, unsigned 
 #if defined(HAVE_RTLD_NOLOAD) && !defined(__Darwin__)
 	if (!dlopen(fn, RTLD_NOLOAD | (wants_global ? RTLD_LAZY | RTLD_GLOBAL : RTLD_NOW | RTLD_LOCAL))) {
 		ast_log(LOG_WARNING, "Unable to promote flags on module '%s': %s\n", resource_in, dlerror());
-		while (!dlclose(lib));
+                if (dlclose(lib)) {
+                      ast_log(LOG_ERROR, "Failure in dlclose for module '%s': %s\n",
+                                resource_in, dlerror());
+                }
+
 		free(resource_being_loaded);
 		return NULL;
 	}
 #else
-	while (!dlclose(lib));
+        if (dlclose(lib)) {
+              ast_log(LOG_ERROR, "Failure in dlclose for module '%s': %s\n",
+                        resource_in, dlerror());
+                }
+
 	resource_being_loaded = NULL;
 
 	/* start the load process again */
