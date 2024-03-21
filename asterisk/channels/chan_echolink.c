@@ -1702,7 +1702,6 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 			{
 				f2 = ast_translate(p->xpath,&fr,0);
 				f1 = ast_dsp_process(NULL,p->dsp,f2);
-				ast_frfree(f2);
 #ifdef	OLD_ASTERISK
 				if (f1->frametype == AST_FRAME_DTMF)
 #else
@@ -1720,6 +1719,7 @@ static int el_xwrite(struct ast_channel *ast, struct ast_frame *frame)
 						x = 1;
 					}
 				}
+				ast_frfree(f1);
 			} 
 			if (!x) ast_queue_frame(ast,&fr);
 		}
