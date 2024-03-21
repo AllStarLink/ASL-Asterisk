@@ -1,2 +1,2 @@
 # Get AllMondb on reboot
-@reboot /usr/sbin/astdb.php
+@reboot root /usr/sbin/astdb.php
