@@ -153,6 +153,7 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define EL_IP_SIZE 16
 #define EL_CALL_SIZE 16
 #define EL_NAME_SIZE 32
+#define EL_WELMSG_SIZE 1024
 #define EL_APRS_SIZE 200
 #define EL_PWD_SIZE 16
 #define EL_EMAIL_SIZE 32
@@ -253,6 +254,7 @@ struct el_instance
 	char port[EL_IP_SIZE + 1];
 	char astnode[EL_NAME_SIZE + 1];
 	char context[EL_NAME_SIZE + 1];
+	char welmsg[EL_WELMSG_SIZE + 1];
 	float lat;
 	float lon;
 	float freq;
@@ -1431,8 +1433,8 @@ static void send_info(const void *nodep, const VISIT which, const int depth)
 			"oNDATA\rWelcome to Allstar Node %s\r",instp->astnode);
 		i = strlen(pkt);
 		snprintf(pkt + i,sizeof(pkt) - (i + 1),
-			"Echolink Node %s\rNumber %u\r \r",
-				instp->mycall,instp->mynode);
+			"Echolink Node %s\rNumber %u\r \r%s\r",
+				instp->mycall,instp->mynode,instp->welmsg);
 		if ((*(struct el_node **)nodep)->p &&
 		    (*(struct el_node **)nodep)->p->linkstr)
 		{
@@ -3233,6 +3235,12 @@ pthread_attr_t attr;
            strncpy(instp->myemail, "INVALID", EL_EMAIL_SIZE);
         else
            strncpy(instp->myemail,val,EL_EMAIL_SIZE);
+
+        val = (char *) ast_variable_retrieve(cfg,ctg,"welcomemessage");
+        if (!val)
+           strncpy(instp->welmsg, "INVALID", EL_WELMSG_SIZE);
+        else
+           strncpy(instp->welmsg,val,EL_WELMSG_SIZE);
 
 	instp->useless_flag_1 = 0;
 

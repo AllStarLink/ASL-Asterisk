@@ -178,6 +178,11 @@ ASTERISK_FILE_VERSION(__FILE__,"$Revision$")
 #define N1KDO_PRODUCT_ID  	0x6a00
 #define C108_HID_INTERFACE	3
 
+/* AIOC Murf/VK4BEM */
+#define AIOC_VENDOR_ID		0x1209
+#define AIOC_PRODUCT_ID  	0x7388
+
+
 #define HID_REPORT_GET		0x01
 #define HID_REPORT_SET		0x09
 
@@ -1118,7 +1123,9 @@ static struct usb_device *hid_device_init(char *desired_device)
         for (dev = usb_bus->devices;
              dev;
              dev = dev->next) {
-            if ((dev->descriptor.idVendor
+            if (dev->descriptor.idVendor == AIOC_VENDOR_ID && dev->descriptor.idProduct == AIOC_PRODUCT_ID)
+            /*
+			if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
 		(((dev->descriptor.idProduct & 0xfffc) == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108B_PRODUCT_ID) ||
@@ -1127,6 +1134,7 @@ static struct usb_device *hid_device_init(char *desired_device)
 		(dev->descriptor.idProduct == C119B_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
+		*/
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
 			for(i = 0; i < 32; i++)
@@ -1204,7 +1212,9 @@ static int hid_device_mklist(void)
         for (dev = usb_bus->devices;
              dev;
              dev = dev->next) {
-            if ((dev->descriptor.idVendor
+            if (dev->descriptor.idVendor == AIOC_VENDOR_ID && dev->descriptor.idProduct == AIOC_PRODUCT_ID)
+            /*
+			if ((dev->descriptor.idVendor
                   == C108_VENDOR_ID) &&
 		(((dev->descriptor.idProduct & 0xfffc) == C108_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C108B_PRODUCT_ID) ||
@@ -1213,6 +1223,7 @@ static int hid_device_mklist(void)
 		(dev->descriptor.idProduct == C119B_PRODUCT_ID) ||
 		((dev->descriptor.idProduct & 0xff00)  == N1KDO_PRODUCT_ID) ||
 		(dev->descriptor.idProduct == C119_PRODUCT_ID)))
+		*/
 		{
                         sprintf(devstr,"%s/%s", usb_bus->dirname,dev->filename);
 			for(i = 0;i < 32; i++)
